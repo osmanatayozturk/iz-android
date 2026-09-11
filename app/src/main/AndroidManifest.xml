@@ -15,6 +15,8 @@
     <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
     <uses-permission android:name="android.permission.health.READ_TOTAL_CALORIES_BURNED" />
     <uses-permission android:name="android.permission.health.READ_STEPS" />
+    <uses-permission android:name="android.permission.health.READ_EXERCISE" />
+    <uses-permission android:name="android.permission.health.READ_DISTANCE" />
     <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND" />
     <queries>
         <intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>
@@ -85,6 +87,7 @@
                 <data android:scheme="wear" android:host="*" android:path="/iz/v2/command" />
                 <data android:scheme="wear" android:host="*" android:path="/iz/v3/command" />
                 <data android:scheme="wear" android:host="*" android:path="/iz/v4/command" />
+                <data android:scheme="wear" android:host="*" android:path="/iz/v5/command" />
                 <data android:scheme="wear" android:host="*" android:path="/iz/v4/health" />
             </intent-filter>
         </service>

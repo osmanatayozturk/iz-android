@@ -39,9 +39,11 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         (application as IzApplication).healthManager.setForeground(true)
+        org.iz.navigation.health.DailyActivityManager.get(this).setForeground(true)
     }
     override fun onStop() {
         (application as IzApplication).healthManager.setForeground(false)
+        org.iz.navigation.health.DailyActivityManager.get(this).setForeground(false)
         super.onStop()
     }
     private fun receiveIntent(value: Intent?) {

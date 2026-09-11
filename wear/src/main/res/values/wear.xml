@@ -5,6 +5,7 @@
         <item>iz_watch_v2</item>
         <item>iz_watch_v3</item>
         <item>iz_watch_v4</item>
+        <item>iz_watch_v5</item>
     </string-array>
     <style name="WatchTheme" parent="android:style/Theme.DeviceDefault">
         <item name="android:windowLightStatusBar">false</item>

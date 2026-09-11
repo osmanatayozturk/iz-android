@@ -18,7 +18,7 @@ import kotlinx.coroutines.tasks.await
 import java.util.UUID
 
 internal data class WatchLiveHealthState(val armed: Boolean = false, val onBody: Boolean? = null,
-    val journeyId: String? = null, val capturing: Boolean = false, val latestHeartRate: Double? = null,
+    val phoneId: String? = null, val sessionId: String? = null, val journeyId: String? = null, val capturing: Boolean = false, val latestHeartRate: Double? = null,
     val latestHeartAt: Long? = null, val steps: Long? = null, val buffered: Int = 0,
     val status: String = "Otomatik saat ölçümü kapalı")
 
@@ -49,6 +49,7 @@ internal object WatchHealthRuntime {
         prefs(context).edit().putBoolean("armed", false).commit()
         context.stopService(Intent(context, WatchHealthService::class.java))
         mutableState.value = WatchLiveHealthState()
+        WatchSurfaceUpdates.request(context, forceTile = true)
     }
     fun rebindPhone(context: Context) {
         if (running) context.startService(Intent(context, WatchHealthService::class.java).setAction(WatchHealthService.ACTION_REBIND))
@@ -206,7 +207,7 @@ class WatchHealthService : Service() {
             val selected = if (boundPhone != null) nodes.firstOrNull { it.id == boundPhone }
                 else nodes.sortedWith(compareByDescending<Node> { it.isNearby }.thenBy { it.id }).firstOrNull()
             if (boundPhone == null && selected != null) prefs.edit().putString("phoneId", selected.id).commit()
-            if (phone != selected?.id) { phone = selected?.id; pendingHello = null; stateKey = null; lastStateTime = 0 }
+            if (phone != selected?.id) { detach(); phone = selected?.id; pendingHello = null; stateKey = null; lastStateTime = 0 }
             if (phone == null) { status("Güncel telefon bağlantısı bekleniyor"); return }
             hello(force = true); sendNext()
         } catch (_: Exception) { status("Telefon bağlantısı bekleniyor") }
@@ -256,7 +257,7 @@ class WatchHealthService : Service() {
                     prefs.edit().remove("sessionId").commit(); detach(); hello(force = true); return
                 }
                 val stored = old ?: WatchHealthOutbox.Session(sessionId, value.journeyId!!, value.createdAt!!, clock, WatchHealthRuntime.boot(this), 0).also(outbox::saveSession)
-                if (capture.sessionId != stored.id) { detach(); stepsTotal = null; WatchHealthRuntime.mutableState.value = WatchHealthRuntime.mutableState.value.copy(latestHeartRate = null, latestHeartAt = null, steps = null) }
+                if (capture.sessionId != stored.id) { detach(); stepsTotal = null; WatchHealthRuntime.mutableState.value = WatchHealthRuntime.mutableState.value.copy(phoneId = null, sessionId = null, latestHeartRate = null, latestHeartAt = null, steps = null) }
                 anchor = stored.anchor; prefs.edit().putString("sessionId", stored.id).commit()
                 capture.attach(stored.id, stored.journeyId, stored.createdAt, SystemClock.elapsedRealtime() + WatchHealthProtocol.LEASE_MILLIS, stored.sequence)
                 updateCollection(); startHeartbeat(); sendNext()
@@ -315,12 +316,17 @@ class WatchHealthService : Service() {
     }
     private fun updateState() {
         WatchHealthRuntime.mutableState.value = WatchHealthRuntime.mutableState.value.copy(armed = observing,
-            onBody = capture.worn, journeyId = capture.journeyId, capturing = collecting, steps = stepsTotal, buffered = outbox.count())
+            phoneId = phone, sessionId = capture.sessionId, onBody = capture.worn, journeyId = capture.journeyId, capturing = collecting, steps = stepsTotal, buffered = outbox.count(),
+            latestHeartRate = WatchHealthRuntime.mutableState.value.latestHeartRate.takeIf { collecting && capture.worn == true },
+            latestHeartAt = WatchHealthRuntime.mutableState.value.latestHeartAt.takeIf { collecting && capture.worn == true })
+        if (collecting) WatchSurfaceUpdates.request(this)
     }
     private fun clearSessionState() {
+        val hadHeart = WatchHealthRuntime.mutableState.value.latestHeartAt != null
         pendingHello = null; anchor = null; stepsTotal = null
         prefs.edit().remove("sessionId").commit()
-        WatchHealthRuntime.mutableState.value = WatchHealthRuntime.mutableState.value.copy(latestHeartRate = null, latestHeartAt = null, steps = null)
+        WatchHealthRuntime.mutableState.value = WatchHealthRuntime.mutableState.value.copy(phoneId = null, sessionId = null, latestHeartRate = null, latestHeartAt = null, steps = null)
+        if (hadHeart) WatchSurfaceUpdates.request(this, forceTile = true)
     }
     private fun detach() { capture.detach(); clearSessionState(); updateCollection() }
     private fun receiveSensor(kind: WatchHealthSensorController.Kind, generation: Long, event: SensorEvent) {
@@ -379,6 +385,7 @@ class WatchHealthService : Service() {
         WatchHealthRuntime.mutableState.value = if (prefs.getBoolean("armed", false)) WatchLiveHealthState(armed = true,
             status = if (wasRunning) "Ölçümü sürdürmek için saatte İz'i aç." else WatchHealthRuntime.mutableState.value.status)
             else WatchLiveHealthState()
+        WatchSurfaceUpdates.request(this, forceTile = true)
         super.onDestroy()
     }
     companion object { private const val CHANNEL = "watch_health"; private const val NOTIFICATION = 4100; private const val ACTION_DISARM = "org.iz.navigation.DISARM_HEALTH"

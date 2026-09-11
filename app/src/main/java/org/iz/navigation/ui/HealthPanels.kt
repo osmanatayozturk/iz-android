@@ -49,7 +49,7 @@ internal fun HealthSettingsPanel(onMessage: (String) -> Unit) {
     var clearing by remember { mutableStateOf(false) }
     val permissionLauncher = rememberLauncherForActivityResult(PermissionController.createRequestPermissionResultContract()) {
         scope.launch {
-            if (it.any { permission -> HealthMetric.entries.any { metric -> metric.readPermission() == permission } }) manager.connect()
+            if (it.any { permission -> permission in DailyActivityManager.requestedPermissions || HealthMetric.entries.any { metric -> metric.readPermission() == permission } }) manager.connect()
             else manager.refresh()
         }
     }
@@ -86,18 +86,23 @@ internal fun HealthSettingsPanel(onMessage: (String) -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Samsung Health", style = MaterialTheme.typography.titleLarge)
+            Text("Günlük saat özeti için Samsung Health toplam adımları ile yürüyüş ve koşu egzersizlerinin süre ve mesafesi okunur. Günlük adımlar Samsung Health telefon ve saat kaynaklarını kapsayabilir; İz kayıt toplamları ayrı gösterilir.")
             Text("Saat kaynaklı nabız, toplam kalori ve adımlar yolculuklarına eklenir. Samsung Health eşitlemesi gecikebilir.")
             Text(when {
                 status.sdkStatus == HealthConnectClient.SDK_UNAVAILABLE -> "Bu cihazda Health Connect kullanılamıyor."
                 status.sdkStatus == HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED -> "Health Connect kurulmalı veya güncellenmeli."
                 !status.enabled -> "Bağlantı kapalı"
-                status.grantedMetrics.isEmpty() -> "Sağlık okuma izni gerekli."
+                status.grantedMetrics.isEmpty() && status.dailyGrantedPermissions.isEmpty() -> "Sağlık okuma izni gerekli."
                 status.backgroundAllowed -> "Arka planda otomatik eşitleme açık"
                 else -> "Uygulama açıldığında eşitlenir"
             }, style = MaterialTheme.typography.titleSmall)
             if (status.enabled) HealthMetric.entries.forEach { metric ->
                 Text("${metric.healthLabel()}: ${if (metric in status.grantedMetrics) "okuma izni var" else "izin verilmedi"}",
                     style = MaterialTheme.typography.bodySmall)
+            }
+            if (status.enabled) {
+                Text("Günlük egzersiz: ${if (DailyActivityManager.exercisePermission in status.dailyGrantedPermissions) "okuma izni var" else "izin verilmedi"}", style = MaterialTheme.typography.bodySmall)
+                Text("Günlük mesafe: ${if (DailyActivityManager.distancePermission in status.dailyGrantedPermissions) "okuma izni var" else "izin verilmedi"}", style = MaterialTheme.typography.bodySmall)
             }
             status.lastSyncedAt?.let { Text("Son eşitleme: ${healthTime(it)}", style = MaterialTheme.typography.bodySmall) }
             if (status.enabled) Text("İz açıkken her 60 saniyede yeni veri kontrol edilir. Samsung Health'in saate ait verileri telefona aktarması gecikebilir.", style = MaterialTheme.typography.bodySmall)
@@ -114,7 +119,7 @@ internal fun HealthSettingsPanel(onMessage: (String) -> Unit) {
             if (status.syncing) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (status.sdkStatus == HealthConnectClient.SDK_AVAILABLE) {
                 Button(onClick = {
-                    try { permissionLauncher.launch(HealthMetric.entries.map { it.readPermission() }.toSet()) }
+                    try { permissionLauncher.launch(HealthMetric.entries.map { it.readPermission() }.toSet() + DailyActivityManager.requestedPermissions) }
                     catch (_: Exception) { onMessage("Sağlık izin ekranı açılamadı. Health Connect'i kontrol et.") }
                 }, enabled = !status.syncing) { Text(if (status.enabled) "Sağlık izinlerini düzenle" else "Samsung Health'i bağla") }
                 if (status.enabled && status.backgroundSupported && !status.backgroundAllowed) {
@@ -133,7 +138,7 @@ internal fun HealthSettingsPanel(onMessage: (String) -> Unit) {
                         .onFailure { onMessage("Health Connect mağaza sayfası açılamadı.") }
                 }) { Text("Health Connect'i kur / güncelle") }
             }
-            Text("Samsung Health → Ayarlar → Health Connect bölümünden veri paylaşımını aç. Telefon veya cihazı belirtilmeyen ölçümler alınmaz.",
+            Text("Samsung Health → Ayarlar → Health Connect bölümünden veri paylaşımını aç. Yolculuk sağlık ayrıntılarına yalnız saat kaynaklı ölçümler alınır; günlük Samsung Health toplamı ayrıdır.",
                 style = MaterialTheme.typography.bodySmall)
             TextButton(onClick = { context.startActivity(Intent(context, HealthPrivacyActivity::class.java)) }) { Text("Sağlık verileri ve gizlilik") }
             TextButton(onClick = { clearing = true }) { Text("Yerel sağlık verilerini temizle") }

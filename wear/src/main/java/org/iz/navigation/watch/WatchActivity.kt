@@ -22,6 +22,21 @@ import kotlinx.coroutines.launch
 
 class WatchActivity : ComponentActivity() {
     private val model: WatchViewModel by viewModels()
+    // Tile and complication taps can reuse a running activity; routing is owned by its lifecycle.
+    private var surface by mutableStateOf<WatchSurfaceRoute?>(null)
+    private fun route(value: String?): WatchSurfaceRoute? = value?.let {
+        runCatching { WatchSurfaceRoute.valueOf(it) }.getOrNull()
+    }
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        surface = route(intent.getStringExtra("surface"))
+        model.refresh()
+    }
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("watch_surface_route", surface?.name)
+        super.onSaveInstanceState(outState)
+    }
     override fun onResume() {
         super.onResume()
         WatchHealthRuntime.resume(this)
@@ -59,6 +74,8 @@ class WatchActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        surface = route(if (savedInstanceState?.containsKey("watch_surface_route") == true)
+            savedInstanceState.getString("watch_surface_route") else intent.getStringExtra("surface"))
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 while (isActive) {
@@ -69,12 +86,16 @@ class WatchActivity : ComponentActivity() {
         }
         setContent {
             val state by model.state.collectAsStateWithLifecycle()
+            val surfaceData by model.surfaceState.collectAsStateWithLifecycle()
+
             val health by WatchHealthRuntime.state.collectAsStateWithLifecycle()
             var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
             LaunchedEffect(Unit) {
                 while (true) { now = System.currentTimeMillis(); delay(1_000) }
             }
-            WatchScreen(state, now, model::start, model::stop, model::refresh, health,
+            if (surface != null) WatchSurfaceDetail(surfaceData, surface!!, now, { surface = null })
+            else WatchScreen(state, now, model::start, model::stop, model::refresh, health,
+                surfaceData = surfaceData, onSurface = { surface = it },
                 onArmHealth = ::requestHealth,
                 onDisarmHealth = { WatchHealthRuntime.disarm(this) },
                 onRebindHealth = { WatchHealthRuntime.rebindPhone(this) },

@@ -5,8 +5,148 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class WearProtocolTest {
-    @Test fun versionFourCanNegotiateWithoutChangingLegacyCommandPayloads() {
-        assertEquals(4, WearProtocol.CURRENT_VERSION)
+    @Test fun v5NavigationAndDailySummaryRoundTripWithTurkishUtf8() {
+        val navigation = WearNavigationSummary(
+            sessionId = "rota-1", guidance = true, fixAt = 60_000L, gpsStale = false,
+            loading = false, offRoute = false, arrived = false, simulation = false,
+            maneuverType = 7, instruction = "Sağa dön — Üsküdar", nextManeuverMeters = 42.5,
+            remainingMeters = 12_345.0, arrivalAt = 900_000L, destination = "Çengelköy",
+        )
+        val daily = WearDailySummary(
+            localDate = "1970-01-01", zoneId = "UTC", dayStartAt = 0L,
+            dayEndAt = 86_400_000L, checkedAt = 50_000L, healthCheckedAt = 49_000L,
+            vehicle = WearDailyJourneyTotal(12_000.0, 1_800_000L, 2),
+            recordedWalkingRunning = WearDailyJourneyTotal(3_500.0, 2_400_000L, 1),
+            cycling = WearDailyJourneyTotal(8_000.0, 1_500_000L, 1), samsungSteps = 9_876L,
+            samsungExerciseMeters = 4_321.5, samsungExerciseMillis = 3_600_000L,
+            stepsStatus = WearDailyHealthStatus.AVAILABLE,
+            exerciseStatus = WearDailyHealthStatus.PARTIAL,
+            distanceStatus = WearDailyHealthStatus.AVAILABLE,
+        )
+        val value = activeSnapshot().copy(navigation = navigation, daily = daily)
+
+        assertEquals(value, WearProtocol.decodeSnapshot(WearProtocol.encodeSnapshot(value, 5)))
+    }
+
+    @Test fun v5NavigationDoesNotRequireAJourneyRecordingIdentity() {
+        val navigation = WearNavigationSummary(
+            sessionId = "navigation-only", guidance = true, fixAt = 90_000L, gpsStale = false,
+            loading = false, offRoute = false, arrived = false, simulation = false,
+            maneuverType = 2, instruction = "Düz devam et", nextManeuverMeters = 120.0,
+            remainingMeters = 5_000.0, arrivalAt = 600_000L, destination = "Kadıköy",
+        )
+        val value = WearSnapshot(generatedAt = 100_000L, navigation = navigation)
+
+        assertEquals(value, WearProtocol.decodeSnapshot(WearProtocol.encodeSnapshot(value, 5)))
+    }
+
+    @Test fun v5DailyMissingZeroAndPartialHealthRemainDistinct() {
+        val base = WearDailySummary(
+            localDate = "1970-01-01", zoneId = "UTC", dayStartAt = 0L,
+            dayEndAt = 86_400_000L, checkedAt = 50_000L, healthCheckedAt = 49_000L,
+            vehicle = WearDailyJourneyTotal(), recordedWalkingRunning = WearDailyJourneyTotal(),
+            cycling = null, samsungSteps = null, samsungExerciseMeters = 0.0,
+            samsungExerciseMillis = null, stepsStatus = WearDailyHealthStatus.PERMISSION_REQUIRED,
+            exerciseStatus = WearDailyHealthStatus.PARTIAL,
+            distanceStatus = WearDailyHealthStatus.AVAILABLE,
+        )
+        val missing = WearSnapshot(50_000L, daily = base)
+        val actualZero = missing.copy(daily = base.copy(samsungSteps = 0L,
+            samsungExerciseMillis = 0L, stepsStatus = WearDailyHealthStatus.AVAILABLE,
+            exerciseStatus = WearDailyHealthStatus.AVAILABLE))
+
+        assertEquals(missing, WearProtocol.decodeSnapshot(WearProtocol.encodeSnapshot(missing, 5)))
+        assertEquals(actualZero, WearProtocol.decodeSnapshot(WearProtocol.encodeSnapshot(actualZero, 5)))
+        assertNotEquals(missing, actualZero)
+        val overlappingImports = actualZero.copy(daily = actualZero.daily!!.copy(
+            vehicle = WearDailyJourneyTotal(10_000.0, 100_000_000L, 2)))
+        assertEquals(overlappingImports,
+            WearProtocol.decodeSnapshot(WearProtocol.encodeSnapshot(overlappingImports, 5)))
+    }
+
+    @Test fun v5PathsCapabilitiesAndLegacySnapshotsRemainIndependent() {
+        val added = WearSnapshot(100_000L, navigation = WearNavigationSummary(
+            "nav", false, null, true, true, false, false, false, null, "", null, null, null, "Hedef"))
+        assertEquals("/iz/v5/command", WearProtocol.commandPath(5))
+        assertEquals("/iz/v5/result", WearProtocol.resultPath(5))
+        assertEquals("/iz/v5/state", WearProtocol.statePath(5))
+        assertEquals("iz_phone_v5", WearProtocol.phoneCapability(5))
+        assertEquals(5, WearProtocol.commandVersion("/iz/v5/command"))
+        assertEquals(5, WearProtocol.frameVersion(WearProtocol.encodeSnapshot(added, 5)))
+        for (version in 1..4) {
+            val decoded = WearProtocol.decodeSnapshot(WearProtocol.encodeSnapshot(added, version))!!
+            assertNull(decoded.navigation)
+            assertNull(decoded.daily)
+        }
+    }
+
+    @Test fun v5RejectsInvalidNavigationAndDailyBoundsBeforeEncoding() {
+        val nav = WearNavigationSummary(
+            "nav", true, 90_000L, false, false, false, false, false, 1,
+            "Sola dön", 25.0, 1_000.0, 200_000L, "Ev",
+        )
+        val total = WearDailyJourneyTotal(1_000.0, 10_000L, 1)
+        val daily = WearDailySummary(
+            "1970-01-01", "UTC", 0L, 86_400_000L, 90_000L, 80_000L,
+            total, total, null, 0L, 0.0, 0L, WearDailyHealthStatus.AVAILABLE,
+            WearDailyHealthStatus.AVAILABLE, WearDailyHealthStatus.AVAILABLE,
+        )
+        val invalidNavigation = listOf(
+            nav.copy(sessionId = ""), nav.copy(fixAt = -1L), nav.copy(fixAt = 105_001L),
+            nav.copy(maneuverType = -1), nav.copy(nextManeuverMeters = -1.0),
+            nav.copy(remainingMeters = Double.NaN), nav.copy(arrivalAt = -1L),
+            nav.copy(arrivalAt = nav.fixAt!! - 1L),
+            nav.copy(instruction = "x".repeat(2_049)), nav.copy(destination = "bad\u0000text"),
+        )
+        invalidNavigation.forEach { value -> assertThrows(IllegalArgumentException::class.java) {
+            WearProtocol.encodeSnapshot(WearSnapshot(100_000L, navigation = value), 5)
+        } }
+        val invalidDaily = listOf(
+            daily.copy(localDate = "2026-99-12"), daily.copy(zoneId = "Not/AZone"),
+            daily.copy(localDate = "1970-01-02"), daily.copy(dayStartAt = 1L),
+            daily.copy(dayEndAt = daily.dayEndAt + 1L),
+            daily.copy(dayStartAt = -1L), daily.copy(dayEndAt = daily.dayStartAt),
+            daily.copy(checkedAt = daily.dayStartAt - 1L), daily.copy(checkedAt = 105_001L),
+            daily.copy(checkedAt = daily.dayEndAt),
+            daily.copy(healthCheckedAt = daily.checkedAt + 1L),
+            daily.copy(vehicle = total.copy(distanceMeters = Double.POSITIVE_INFINITY)),
+            daily.copy(recordedWalkingRunning = total.copy(elapsedMillis = -1L)),
+            daily.copy(cycling = WearDailyJourneyTotal()),
+            daily.copy(samsungSteps = -1L), daily.copy(samsungExerciseMeters = -1.0),
+            daily.copy(samsungExerciseMillis = -1L), daily.copy(samsungExerciseMillis = 86_400_001L),
+            daily.copy(samsungSteps = null, stepsStatus = WearDailyHealthStatus.AVAILABLE),
+            daily.copy(samsungSteps = 1L, stepsStatus = WearDailyHealthStatus.UNAVAILABLE),
+            daily.copy(samsungExerciseMillis = null, exerciseStatus = WearDailyHealthStatus.AVAILABLE),
+            daily.copy(samsungExerciseMillis = 1L, exerciseStatus = WearDailyHealthStatus.PERMISSION_REQUIRED),
+            daily.copy(samsungExerciseMeters = null, distanceStatus = WearDailyHealthStatus.AVAILABLE),
+            daily.copy(samsungExerciseMeters = 1.0, distanceStatus = WearDailyHealthStatus.UNAVAILABLE),
+        )
+        invalidDaily.forEach { value -> assertThrows(IllegalArgumentException::class.java) {
+            WearProtocol.encodeSnapshot(WearSnapshot(100_000L, daily = value), 5)
+        } }
+    }
+
+    @Test fun malformedV5EnumsUtf8TruncationAndTrailingDataAreRejected() {
+        val daily = WearDailySummary(
+            "1970-01-01", "UTC", 0L, 86_400_000L, 90_000L, null,
+            WearDailyJourneyTotal(), WearDailyJourneyTotal(), null, null, null, null,
+            WearDailyHealthStatus.UNAVAILABLE, WearDailyHealthStatus.PERMISSION_REQUIRED,
+            WearDailyHealthStatus.PARTIAL,
+        )
+        val navigation = WearNavigationSummary(
+            "nav", false, null, true, true, false, false, false, null, "Bekleniyor", null, null, null, "Hedef",
+        )
+        val frame = WearProtocol.encodeSnapshot(WearSnapshot(100_000L, navigation = navigation, daily = daily), 5)
+        assertNull(WearProtocol.decodeSnapshot(frame.copyOf().also { it[it.lastIndex] = 127 }))
+        val destination = "Hedef".toByteArray(Charsets.UTF_8)
+        val destinationOffset = frame.indexOfBytes(destination)
+        assertTrue(destinationOffset >= 0)
+        assertNull(WearProtocol.decodeSnapshot(frame.copyOf().also { it[destinationOffset] = 0xff.toByte() }))
+        rejectIncomplete(frame, WearProtocol::decodeSnapshot)
+    }
+
+    @Test fun versionFiveCanNegotiateWithoutChangingLegacyCommandPayloads() {
+        assertEquals(5, WearProtocol.CURRENT_VERSION)
         val command = WearCommand("request", WearAction.REFRESH, 1000L)
         assertEquals(command, WearProtocol.decodeCommand(WearProtocol.encodeCommand(command, 4)))
         assertEquals(command, WearProtocol.decodeCommand(WearProtocol.encodeCommand(command, 1)))
@@ -342,4 +482,7 @@ class WearProtocolTest {
     }
 
     private fun hex(value: String): ByteArray = value.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+
+    private fun ByteArray.indexOfBytes(needle: ByteArray): Int =
+        indices.firstOrNull { start -> start + needle.size <= size && needle.indices.all { this[start + it] == needle[it] } } ?: -1
 }

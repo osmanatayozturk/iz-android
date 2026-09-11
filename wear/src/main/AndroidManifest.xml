@@ -18,6 +18,26 @@
         android:supportsRtl="true"
         android:theme="@style/WatchTheme">
         <meta-data android:name="com.google.android.wearable.standalone" android:value="false" />
+        <service android:name=".WatchTileService" android:exported="true" android:label="İz · yol ve gün"
+            android:icon="@drawable/ic_watch" android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER">
+            <intent-filter><action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER" /></intent-filter>
+            <meta-data android:name="androidx.wear.tiles.PREVIEW" android:resource="@drawable/tile_preview" />
+        </service>
+        <service android:name=".WatchComplicationService" android:exported="true" android:label="İz · durum"
+            android:icon="@drawable/ic_watch" android:permission="com.google.android.wearable.permission.BIND_COMPLICATION_PROVIDER">
+            <intent-filter><action android:name="android.support.wearable.complications.ACTION_COMPLICATION_UPDATE_REQUEST" /></intent-filter>
+            <meta-data android:name="android.support.wearable.complications.SUPPORTED_TYPES" android:value="SHORT_TEXT,LONG_TEXT,ICON" />
+            <meta-data android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS" android:value="300" />
+        </service>
+        <service android:name=".WatchSurfaceListener" android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.DATA_CHANGED" />
+                <data android:scheme="wear" android:host="*" android:pathPrefix="/iz/" />
+            </intent-filter>
+            <intent-filter><action android:name="com.google.android.gms.wearable.CAPABILITY_CHANGED" />
+                <data android:scheme="wear" android:host="*" />
+            </intent-filter>
+        </service>
         <service android:name=".WatchHealthService" android:exported="false"
             android:foregroundServiceType="health" android:stopWithTask="false" />
         <receiver android:name=".WatchHealthRecovery" android:exported="false">

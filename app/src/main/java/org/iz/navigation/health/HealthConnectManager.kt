@@ -19,6 +19,7 @@ data class HealthConnectionState(
     val sdkStatus: Int = HealthConnectClient.SDK_UNAVAILABLE,
     val enabled: Boolean = false,
     val grantedMetrics: Set<HealthMetric> = emptySet(),
+    val dailyGrantedPermissions: Set<String> = emptySet(),
     val backgroundSupported: Boolean = false,
     val backgroundAllowed: Boolean = false,
     val syncing: Boolean = false,
@@ -71,7 +72,10 @@ class HealthConnectManager(context: Context, private val repository: DiaryReposi
             }
         }
     }
-    fun requestSync() { requests.trySend(Unit) }
+    fun requestSync() {
+        requests.trySend(Unit)
+        scope.launch { DailyActivityManager.get(context).refresh() }
+    }
 
     suspend fun connect() {
         mutex.withLock {
@@ -91,6 +95,8 @@ class HealthConnectManager(context: Context, private val repository: DiaryReposi
         generation++
         prefs.edit().putBoolean("enabled", false).commit()
         WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
+        WorkManager.getInstance(context).cancelUniqueWork(DailyActivityManager.WORK_NAME)
+        DailyActivityManager.get(context).clear()
         mutex.withLock { refresh() }
     }
 
@@ -105,6 +111,7 @@ class HealthConnectManager(context: Context, private val repository: DiaryReposi
     }
 
     suspend fun clearLocalData() {
+        DailyActivityManager.get(context).clear()
         // Invalidates an in-flight read before waiting for its transaction boundary.
         generation++
         mutex.withLock {
@@ -131,6 +138,7 @@ class HealthConnectManager(context: Context, private val repository: DiaryReposi
                 HealthConnectFeatures.FEATURE_STATUS_AVAILABLE
             mutableState.update { old -> old.copy(
                 sdkStatus = sdk, enabled = prefs.getBoolean("enabled", false), grantedMetrics = metrics,
+                dailyGrantedPermissions = granted.intersect(DailyActivityManager.requestedPermissions),
                 backgroundSupported = supported,
                 backgroundAllowed = supported && BACKGROUND_HEALTH_PERMISSION in granted,
                 lastSyncedAt = prefs.getLong("lastSync", 0).takeIf { it > 0 }, error = null,

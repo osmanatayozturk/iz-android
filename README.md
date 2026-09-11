@@ -1,14 +1,14 @@
-# İz 0.8.1 — navigasyon ve yolculuk günlüğü
+# İz 0.8.2 - navigasyon ve yolculuk günlüğü
 
 Araba, motosiklet, bisiklet, yürüyüş, koşu ve yolcu için haritayla açılan Kotlin / Jetpack Compose uygulaması. Üstte **Nereye?**, yanda konum ve katmanlar, altta **Kaydet / Grup / Menü** bulunur. Yol tarifi günlük kaydı olmadan da çalışır; yeni başlangıçta **Yolculuğu kaydet** seçimi açıktır. Yolculuklar, ziyaretler, özel notlar ve fotoğraflar telefonda saklanır. Geçmiş, istatistikler, yerler, ısı haritası, OSM Topluluğu ve ayarlara Menüden ulaşılır.
 
-Bu depo İz'in kaynak kodunu yayımlar. Güncel sürümler telefon için **0.8.1 (code 13)**, Wear OS için **0.5.2 (code 9)**'dur. Hazır APK veya mağaza sürümü yayımlanmaz. [Kullanım kılavuzu](docs/IZ_080_KULLANIM.md) · [Grup sunucusu kurulumu](docs/GROUP_SETUP.md).
+Bu depo İz'in kaynak kodunu yayımlar. Güncel sürümler telefon için **0.8.2 (code 14)**, Wear OS için **0.6.0 (code 10)**'dur. Hazır APK veya mağaza sürümü yayımlanmaz. [Kullanım kılavuzu](docs/IZ_080_KULLANIM.md) · [Grup sunucusu kurulumu](docs/GROUP_SETUP.md) · [Saat kartı ve kadran alanı](docs/WATCH_SURFACES.md).
 
 Supabase grup sunucusu ve TomTom trafik bağlantısı varsayılan kaynak yapılandırmasında etkin değildir. Bunlar sonradan yapılandırılabilir; temel harita, Valhalla tabanlı rota, Open-Meteo hava durumu, navigasyon ve yerel günlük kişisel anahtar olmadan çalışır. Grup arka ucu için [kurulum belgesine](docs/GROUP_SETUP.md) bakın.
 
 [Yol tarifi ve trafik](docs/YOL_TARIFI_VE_TRAFIK.md): mevcut konumdan planlama, sesli yönlendirme ve isteğe bağlı TomTom trafik tahmini.
 
-[OSM Topluluğu](docs/OSM_TOPLULUGU.md) mesajlar, kişiler, hesap ve OSM sitesindeki takip işlemlerini kapsar. [Android Auto](docs/ANDROID_AUTO.md) hedefsiz sürüş kaydı ve navigasyon sunar. Wear OS 0.5.2, kayıt ve navigasyon durumunu telefondan alır; sağlık ölçümü yalnız uygun bir kayıt sırasında çalışır. [Saat desteği ve kimlik geçişi](docs/WATCH_SUPPORT.md) · [Saat sağlık ölçümü](docs/WATCH_HEALTH_LIVE.md).
+[OSM Topluluğu](docs/OSM_TOPLULUGU.md) mesajlar, kişiler, hesap ve OSM sitesindeki takip işlemlerini kapsar. [Android Auto](docs/ANDROID_AUTO.md) hedefsiz sürüş kaydı ve navigasyon sunar. Wear OS 0.6.0, kayıt ve navigasyon durumunu telefondan alır; kart ve kadran alanında günlük Samsung Health adımlarını ve ayrı İz kayıtlarını gösterir. Sağlık sensörleri yalnız uygun bir kayıt sırasında çalışır. [Saat desteği ve kimlik geçişi](docs/WATCH_SUPPORT.md) · [Saat sağlık ölçümü](docs/WATCH_HEALTH_LIVE.md) · [Kart ve kadran](docs/WATCH_SURFACES.md).
 
 Altı yolculuk türünde rota havası, kalkış karşılaştırması ve türe özel canlı uyarılar için [hava durumu kullanımına](docs/weather/USAGE.md) bakın.
 

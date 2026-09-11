@@ -9,6 +9,8 @@ import java.nio.ByteBuffer
 import java.nio.CharBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
+import java.time.LocalDate
+import java.time.ZoneId
 
 // Enum positions are part of wire version 1. Do not reorder them without a version change.
 enum class WearMode { CAR, MOTORCYCLE, BICYCLE, WALK, PASSENGER, RUN }
@@ -16,6 +18,7 @@ enum class WearAction { START, STOP, REFRESH }
 enum class WearResultCode { STARTED, STOPPED, REFRESHED, NEEDS_PHONE, REJECTED, ERROR }
 enum class WearWeatherStatus { LOADING, READY, ERROR }
 enum class WearWeatherThreshold { BELOW_THRESHOLD, EXCEEDED }
+enum class WearDailyHealthStatus { AVAILABLE, UNAVAILABLE, PERMISSION_REQUIRED, PARTIAL }
 
 data class WearRouteWeather(
     val status: WearWeatherStatus,
@@ -27,6 +30,47 @@ data class WearRouteWeather(
     val threshold: WearWeatherThreshold = WearWeatherThreshold.BELOW_THRESHOLD,
     val headline: String = "",
     val detail: String = "",
+)
+
+data class WearNavigationSummary(
+    val sessionId: String,
+    val guidance: Boolean,
+    val fixAt: Long?,
+    val gpsStale: Boolean,
+    val loading: Boolean,
+    val offRoute: Boolean,
+    val arrived: Boolean,
+    val simulation: Boolean,
+    val maneuverType: Int?,
+    val instruction: String,
+    val nextManeuverMeters: Double?,
+    val remainingMeters: Double?,
+    val arrivalAt: Long?,
+    val destination: String,
+)
+
+data class WearDailyJourneyTotal(
+    val distanceMeters: Double = 0.0,
+    val elapsedMillis: Long = 0,
+    val journeyCount: Int = 0,
+)
+
+data class WearDailySummary(
+    val localDate: String,
+    val zoneId: String,
+    val dayStartAt: Long,
+    val dayEndAt: Long,
+    val checkedAt: Long,
+    val healthCheckedAt: Long?,
+    val vehicle: WearDailyJourneyTotal,
+    val recordedWalkingRunning: WearDailyJourneyTotal,
+    val cycling: WearDailyJourneyTotal?,
+    val samsungSteps: Long?,
+    val samsungExerciseMeters: Double?,
+    val samsungExerciseMillis: Long?,
+    val stepsStatus: WearDailyHealthStatus,
+    val exerciseStatus: WearDailyHealthStatus,
+    val distanceStatus: WearDailyHealthStatus,
 )
 
 data class WearCommand(
@@ -62,6 +106,8 @@ data class WearSnapshot(
     val health: WearHealthSummary? = null,
     val weather: WearRouteWeather? = null,
     val candidateProgressMeters: Double? = null,
+    val navigation: WearNavigationSummary? = null,
+    val daily: WearDailySummary? = null,
 )
 
 /** Samsung Health WATCH measurements only. Null means missing, and times are measurement times. */
@@ -112,7 +158,12 @@ object WearProtocol {
     const val V4_STATE_PATH = "/iz/v4/state"
     const val V4_PHONE_CAPABILITY = "iz_phone_v4"
     const val V4_WATCH_CAPABILITY = "iz_watch_v4"
-    const val CURRENT_VERSION = 4
+    const val V5_COMMAND_PATH = "/iz/v5/command"
+    const val V5_RESULT_PATH = "/iz/v5/result"
+    const val V5_STATE_PATH = "/iz/v5/state"
+    const val V5_PHONE_CAPABILITY = "iz_phone_v5"
+    const val V5_WATCH_CAPABILITY = "iz_watch_v5"
+    const val CURRENT_VERSION = 5
     const val COMMAND_TTL_MS = 120_000L
     const val STATE_TTL_MS = 30_000L
 
@@ -129,19 +180,19 @@ object WearProtocol {
     private const val MAX_CLOCK_SKEW_MS = 5_000L
 
     fun commandPath(version: Int): String = when (version) {
-        1 -> COMMAND_PATH; 2 -> V2_COMMAND_PATH; 3 -> V3_COMMAND_PATH; 4 -> V4_COMMAND_PATH; else -> error("Unsupported version")
+        1 -> COMMAND_PATH; 2 -> V2_COMMAND_PATH; 3 -> V3_COMMAND_PATH; 4 -> V4_COMMAND_PATH; 5 -> V5_COMMAND_PATH; else -> error("Unsupported version")
     }
     fun resultPath(version: Int): String = when (version) {
-        1 -> RESULT_PATH; 2 -> V2_RESULT_PATH; 3 -> V3_RESULT_PATH; 4 -> V4_RESULT_PATH; else -> error("Unsupported version")
+        1 -> RESULT_PATH; 2 -> V2_RESULT_PATH; 3 -> V3_RESULT_PATH; 4 -> V4_RESULT_PATH; 5 -> V5_RESULT_PATH; else -> error("Unsupported version")
     }
     fun statePath(version: Int): String = when (version) {
-        1 -> STATE_PATH; 2 -> V2_STATE_PATH; 3 -> V3_STATE_PATH; 4 -> V4_STATE_PATH; else -> error("Unsupported version")
+        1 -> STATE_PATH; 2 -> V2_STATE_PATH; 3 -> V3_STATE_PATH; 4 -> V4_STATE_PATH; 5 -> V5_STATE_PATH; else -> error("Unsupported version")
     }
     fun phoneCapability(version: Int): String = when (version) {
-        1 -> PHONE_CAPABILITY; 2 -> V2_PHONE_CAPABILITY; 3 -> V3_PHONE_CAPABILITY; 4 -> V4_PHONE_CAPABILITY; else -> error("Unsupported version")
+        1 -> PHONE_CAPABILITY; 2 -> V2_PHONE_CAPABILITY; 3 -> V3_PHONE_CAPABILITY; 4 -> V4_PHONE_CAPABILITY; 5 -> V5_PHONE_CAPABILITY; else -> error("Unsupported version")
     }
     fun commandVersion(path: String): Int? = when (path) {
-        COMMAND_PATH -> 1; V2_COMMAND_PATH -> 2; V3_COMMAND_PATH -> 3; V4_COMMAND_PATH -> 4; else -> null
+        COMMAND_PATH -> 1; V2_COMMAND_PATH -> 2; V3_COMMAND_PATH -> 3; V4_COMMAND_PATH -> 4; V5_COMMAND_PATH -> 5; else -> null
     }
     fun frameVersion(bytes: ByteArray): Int? {
         if (bytes.size !in HEADER_BYTES..MAX_PAYLOAD_BYTES || ByteBuffer.wrap(bytes).int != MAGIC) return null
@@ -211,6 +262,10 @@ object WearProtocol {
             }
             if (version >= 3) writeOptional(value.weather) { writeWeather(it) }
             if (version >= 4) writeOptional(value.candidateProgressMeters) { writeDouble(it) }
+            if (version >= 5) {
+                writeOptional(value.navigation) { writeNavigation(it) }
+                writeOptional(value.daily) { writeDaily(it) }
+            }
         }
     }
 
@@ -233,6 +288,8 @@ object WearProtocol {
             health = if (version >= 2) readOptional { readHealth() } else null,
             weather = if (version >= 3) readOptional { readWeather() } else null,
             candidateProgressMeters = if (version >= 4) readOptional { readDouble() } else null,
+            navigation = if (version >= 5) readOptional { readNavigation() } else null,
+            daily = if (version >= 5) readOptional { readDaily() } else null,
         ).also(::validate)
     }
 
@@ -279,6 +336,8 @@ object WearProtocol {
         require(value.averagePaceSecondsPerKm == null || nonNegativeFinite(value.averagePaceSecondsPerKm)) { "Invalid pace" }
         value.health?.let(::validate)
         value.weather?.let { validate(it, value.generatedAt) }
+        value.navigation?.let { validate(it, value.generatedAt) }
+        value.daily?.let { validate(it, value.generatedAt) }
         if (value.journeyId == null) {
             require(value.mode == null && value.startedAt == null && !value.temporary && value.deadlineAt == null &&
                 !value.recording && value.distanceMeters == 0.0 && value.elapsedMillis == 0L &&
@@ -373,6 +432,95 @@ object WearProtocol {
         measurementStartAt = readOptional { readLong() }, measurementEndAt = readOptional { readLong() },
         lastCheckedAt = readOptional { readLong() }, partial = readFlag(),
     )
+
+    private fun DataOutputStream.writeNavigation(value: WearNavigationSummary) {
+        writeText(value.sessionId, MAX_ID_BYTES); writeBoolean(value.guidance)
+        writeOptional(value.fixAt) { writeLong(it) }; writeBoolean(value.gpsStale); writeBoolean(value.loading)
+        writeBoolean(value.offRoute); writeBoolean(value.arrived); writeBoolean(value.simulation)
+        writeOptional(value.maneuverType) { writeInt(it) }; writeText(value.instruction, MAX_MESSAGE_BYTES)
+        writeOptional(value.nextManeuverMeters) { writeDouble(it) }; writeOptional(value.remainingMeters) { writeDouble(it) }
+        writeOptional(value.arrivalAt) { writeLong(it) }; writeText(value.destination, MAX_MESSAGE_BYTES)
+    }
+
+    private fun DataInputStream.readNavigation() = WearNavigationSummary(
+        readText(MAX_ID_BYTES), readFlag(), readOptional { readLong() }, readFlag(), readFlag(), readFlag(),
+        readFlag(), readFlag(), readOptional { readInt() }, readText(MAX_MESSAGE_BYTES),
+        readOptional { readDouble() }, readOptional { readDouble() }, readOptional { readLong() }, readText(MAX_MESSAGE_BYTES),
+    )
+
+    private fun DataOutputStream.writeJourneyTotal(value: WearDailyJourneyTotal) {
+        writeDouble(value.distanceMeters); writeLong(value.elapsedMillis); writeInt(value.journeyCount)
+    }
+
+    private fun DataInputStream.readJourneyTotal() = WearDailyJourneyTotal(readDouble(), readLong(), readInt())
+
+    private fun DataOutputStream.writeDaily(value: WearDailySummary) {
+        writeText(value.localDate, MAX_ID_BYTES); writeText(value.zoneId, MAX_ID_BYTES)
+        writeLong(value.dayStartAt); writeLong(value.dayEndAt); writeLong(value.checkedAt)
+        writeOptional(value.healthCheckedAt) { writeLong(it) }; writeJourneyTotal(value.vehicle)
+        writeJourneyTotal(value.recordedWalkingRunning); writeOptional(value.cycling) { writeJourneyTotal(it) }
+        writeOptional(value.samsungSteps) { writeLong(it) }; writeOptional(value.samsungExerciseMeters) { writeDouble(it) }
+        writeOptional(value.samsungExerciseMillis) { writeLong(it) }; writeByte(value.stepsStatus.ordinal)
+        writeByte(value.exerciseStatus.ordinal); writeByte(value.distanceStatus.ordinal)
+    }
+
+    private fun DataInputStream.readDaily() = WearDailySummary(
+        readText(MAX_ID_BYTES), readText(MAX_ID_BYTES), readLong(), readLong(), readLong(), readOptional { readLong() },
+        readJourneyTotal(), readJourneyTotal(), readOptional { readJourneyTotal() }, readOptional { readLong() },
+        readOptional { readDouble() }, readOptional { readLong() }, readEnum(WearDailyHealthStatus.entries),
+        readEnum(WearDailyHealthStatus.entries), readEnum(WearDailyHealthStatus.entries),
+    )
+
+    private fun validate(value: WearNavigationSummary, generatedAt: Long) {
+        validateId(value.sessionId)
+        require(value.fixAt == null || value.fixAt >= 0)
+        require(value.fixAt == null || value.fixAt <= generatedAt || value.fixAt - generatedAt <= MAX_CLOCK_SKEW_MS)
+        require(value.maneuverType == null || value.maneuverType >= 0)
+        require(value.nextManeuverMeters == null || nonNegativeFinite(value.nextManeuverMeters))
+        require(value.remainingMeters == null || nonNegativeFinite(value.remainingMeters))
+        require(value.arrivalAt == null || value.arrivalAt >= 0)
+        require(value.fixAt == null || value.arrivalAt == null || value.arrivalAt >= value.fixAt)
+        validateWireText(value.instruction, MAX_MESSAGE_BYTES)
+        validateWireText(value.destination, MAX_MESSAGE_BYTES)
+    }
+
+    private fun validate(value: WearDailyJourneyTotal) {
+        require(nonNegativeFinite(value.distanceMeters) && value.elapsedMillis >= 0 && value.journeyCount >= 0)
+        require(value.journeyCount > 0 || value.distanceMeters == 0.0 && value.elapsedMillis == 0L)
+    }
+
+    private fun validate(value: WearDailySummary, generatedAt: Long) {
+        val dayBounds = runCatching {
+            val date = LocalDate.parse(value.localDate)
+            val zone = ZoneId.of(value.zoneId)
+            date.atStartOfDay(zone).toInstant().toEpochMilli() to
+                date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        }.getOrNull()
+        require(dayBounds != null && value.dayStartAt == dayBounds.first && value.dayEndAt == dayBounds.second)
+        require(value.checkedAt in value.dayStartAt until value.dayEndAt &&
+            (value.checkedAt <= generatedAt || value.checkedAt - generatedAt <= MAX_CLOCK_SKEW_MS))
+        require(value.healthCheckedAt == null || value.healthCheckedAt in value.dayStartAt..value.checkedAt)
+        validate(value.vehicle); validate(value.recordedWalkingRunning); value.cycling?.let(::validate)
+        require(value.cycling == null || value.cycling.journeyCount > 0)
+        require(value.samsungSteps == null || value.samsungSteps >= 0)
+        require(value.samsungExerciseMeters == null || nonNegativeFinite(value.samsungExerciseMeters))
+        require(value.samsungExerciseMillis == null || value.samsungExerciseMillis in 0..(value.dayEndAt - value.dayStartAt))
+        validateMetric(value.samsungSteps, value.stepsStatus)
+        validateMetric(value.samsungExerciseMillis, value.exerciseStatus)
+        validateMetric(value.samsungExerciseMeters, value.distanceStatus)
+    }
+
+    private fun validateMetric(value: Any?, status: WearDailyHealthStatus) {
+        require(when (status) {
+            WearDailyHealthStatus.AVAILABLE -> value != null
+            WearDailyHealthStatus.UNAVAILABLE, WearDailyHealthStatus.PERMISSION_REQUIRED -> value == null
+            WearDailyHealthStatus.PARTIAL -> true
+        })
+    }
+
+    private fun validateWireText(value: String, maximum: Int) {
+        require('\u0000' !in value && value.length <= maximum && utf8(value).size <= maximum)
+    }
 
     private fun validateId(value: String) {
         require(value.isNotEmpty() && value.length <= MAX_ID_BYTES &&

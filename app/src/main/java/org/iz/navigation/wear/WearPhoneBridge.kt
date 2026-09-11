@@ -21,6 +21,8 @@ import com.google.android.gms.wearable.PutDataMapRequest
 import com.google.android.gms.wearable.Wearable
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
@@ -48,12 +50,18 @@ internal class WearPhoneBridge(private val context: Context) {
         })
         scope.launch {
             var wasRecording = false
+            var wasGuiding = false
             while (isActive) {
                 val recording = TrackingService.isRunning
-                if (recording || wasRecording || resumed > 0) publish()
+                val guidance = (application as org.iz.navigation.IzApplication).navigation.state.value.let { it.guidance || it.loading }
+                if (WearNavigationFactory.shouldPublish(recording, guidance, wasRecording, wasGuiding, resumed)) publish()
                 wasRecording = recording
+                wasGuiding = guidance
                 delay(5_000)
             }
+        }
+        scope.launch {
+            org.iz.navigation.health.DailyActivityManager.get(context).currentDataFlow.filterNotNull().collect { publish() }
         }
     }
 
@@ -61,6 +69,9 @@ internal class WearPhoneBridge(private val context: Context) {
         val protocolVersion = WearProtocol.frameVersion(bytes) ?: return
         val command = WearProtocol.decodeCommand(bytes) ?: return
         if (source.isBlank() || source.length > 256) return
+        if (command.action == WearAction.REFRESH && WearProtocol.isFreshCommand(command, System.currentTimeMillis())) {
+            scope.launch { runCatching { org.iz.navigation.health.DailyActivityManager.get(context).refresh() } }
+        }
         val result = try { handle(source, command, protocolVersion = protocolVersion) } catch (_: Exception) {
             WearResult(command.id, WearResultCode.ERROR, "İstek işlenemedi. Telefonda İz’i kontrol et.")
         }
@@ -169,8 +180,16 @@ internal class WearPhoneBridge(private val context: Context) {
         val weather = current?.let { journey ->
             (context.applicationContext as org.iz.navigation.IzApplication).weatherManager.wearWeather(journey.id)
         }
-        return WearSnapshotFactory.create(current, points, System.currentTimeMillis(),
-            TrackingService.runningJourneyId.takeIf { TrackingService.isRunning }, health, weather)
+        val now = System.currentTimeMillis()
+        val app = context.applicationContext as org.iz.navigation.IzApplication
+        // A slow daily cache/provider permission check must not suppress current navigation.
+        val daily = try { withTimeoutOrNull(1_000) {
+            org.iz.navigation.health.DailyActivityManager.get(context).snapshot(now)
+        } } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { null }
+        return WearSnapshotFactory.create(current, points, now,
+            TrackingService.runningJourneyId.takeIf { TrackingService.isRunning }, health, weather).copy(
+                navigation = WearNavigationFactory.create(app.navigation.state.value, now), daily = daily)
     }
 
     suspend fun publish() {

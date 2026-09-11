@@ -14,6 +14,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.rotary.onRotaryScrollEvent
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
@@ -47,7 +48,11 @@ internal fun WatchScreen(
     onDisarmHealth: () -> Unit = {},
     onHealthSettings: () -> Unit = {},
     onRebindHealth: () -> Unit = {},
+    surfaceData: WatchSurfaceData? = null,
+    onSurface: (WatchSurfaceRoute) -> Unit = {},
 ) {
+    val context = LocalContext.current
+    val currentHeart = safeLiveHeart(context, WatchSurfaceData(state.phoneId, state.phoneVersion, state.snapshot, state.phoneId != null), now)
     val list = rememberScalingLazyListState()
     val focusRequester = remember { FocusRequester() }
     val scope = rememberCoroutineScope()
@@ -95,6 +100,14 @@ internal fun WatchScreen(
                         state.phoneName?.let { Text(it, fontSize = 10.sp, color = Quiet, maxLines = 2, textAlign = TextAlign.Center) }
                     }
                 }
+                surfaceData?.let { data ->
+                    val frame = WatchSurfacePolicy.frame(data.snapshot, data.connected, now)
+                    item { Chip(onClick = { onSurface(frame.route) }, label = { Text(frame.title) },
+                        secondaryLabel = { Text(frame.lines.firstOrNull().orEmpty(), maxLines = 2) },
+                        modifier = Modifier.fillMaxWidth().testTag("open-surface")) }
+                    if (frame.route != WatchSurfaceRoute.DAILY) item { Chip(onClick = { onSurface(WatchSurfaceRoute.DAILY) },
+                        label = { Text("Bugünün özeti") }, modifier = Modifier.fillMaxWidth()) }
+                }
                 if (!fresh) item {
                     Note(if (state.phoneId == null) "İz açık olan eşleşmiş telefonunu yaklaştır. Kayıt telefon üzerinden yapılır."
                         else if (snapshot == null) "Başlatmadan önce telefonun güncel durumu bekleniyor."
@@ -127,7 +140,7 @@ internal fun WatchScreen(
                         Metric("Mesafe", String.format(Locale.forLanguageTag("tr"), "%.2f km", snapshot.distanceMeters / 1000.0), large = true)
                     }
                     item {
-                        val elapsed = snapshot.elapsedMillis + if (snapshot.recording)
+                        val elapsed = snapshot.elapsedMillis + if (snapshot.recording && fresh)
                             (now - snapshot.generatedAt).coerceIn(0, WearProtocol.STATE_TTL_MS) else 0
                         Metric("Süre", duration(elapsed))
                     }
@@ -164,7 +177,7 @@ internal fun WatchScreen(
                             enabled = activeId?.let { state.canStop(it, now) } == true,
                             colors = ChipDefaults.primaryChipColors(), modifier = Modifier.fillMaxWidth().testTag("stop"))
                     }
-                    if (state.phoneVersion >= 2) {
+                    if (state.phoneVersion >= 2 && !snapshot.temporary) {
                         val health = snapshot.health
                         item { Text("Samsung Health · Saat", textAlign = TextAlign.Center, fontWeight = FontWeight.Bold) }
                         if (health == null) item { Note("Bu yolculuk için saat sağlık verisi henüz yok. Telefonda bağlantıyı kontrol et.") }
@@ -178,7 +191,7 @@ internal fun WatchScreen(
                             item { Metric("Ortalama nabız", bpm(health.heartRateMeanBpm)) }
                             item { Note("En düşük ${bpm(health.heartRateMinBpm)}\nEn yüksek ${bpm(health.heartRateMaxBpm)}") }
                             item { Metric("Saatte ölçülen adımlar", health.watchSteps?.let { String.format(Locale.forLanguageTag("tr"), "%,d", it) } ?: "Ölçüm yok") }
-                            item { Metric("Toplam enerji", health.totalCaloriesKcal?.let { String.format(Locale.forLanguageTag("tr"), "%.0f kcal", it) } ?: "Ölçüm yok") }
+                            item { Metric("Toplam enerji · gecikmeli", health.totalCaloriesKcal?.let { String.format(Locale.forLanguageTag("tr"), "%.0f kcal", it) } ?: "Ölçüm yok") }
                             item { Note("Toplam enerji, dinlenme enerjisini de içerir.") }
                             item { Note("Ölçüm aralığı\n${measurementTime(health.measurementStartAt)}\n${measurementTime(health.measurementEndAt)}") }
                             item { Note("Adım kapsamı: ${duration(health.stepCoverageMillis)}\nEnerji kapsamı: ${duration(health.calorieCoverageMillis)}") }
@@ -210,12 +223,12 @@ internal fun WatchScreen(
                 item { Note(liveHealth.status, highlighted = liveHealth.capturing) }
                 if (liveHealth.armed) {
                     item { Note("Nabız ve adım yalnızca kesinleşen yolculuklarda ölçülür. Kayıt dışında bilek sensörü de kapalıdır. Sessiz bildirim, sonraki kayda hazır olduğunu gösterir.") }
-                    if (liveHealth.latestHeartAt != null) item {
-                        Metric(if (now - liveHealth.latestHeartAt in 0..30_000 && liveHealth.capturing) "Canlı nabız" else "Son nabız · eski ölçüm",
-                            bpm(liveHealth.latestHeartRate))
+                    if (liveHealth.latestHeartAt != null && snapshot?.recording == true && !snapshot.temporary && liveHealth.journeyId == snapshot.journeyId) item {
+                        Metric(if (currentHeart != null) "Canlı nabız" else "Son nabız · eski ölçüm",
+                            bpm(currentHeart))
                         Note(measurementTime(liveHealth.latestHeartAt))
                     }
-                    liveHealth.steps?.let { item { Metric("İz saatte ölçülen adımlar", "$it") } }
+                    liveHealth.steps?.takeIf { snapshot?.recording == true && !snapshot.temporary && liveHealth.journeyId == snapshot.journeyId && liveHealth.phoneId == state.phoneId }?.let { item { Metric("İz saatte ölçülen adımlar", "$it") } }
                     if (liveHealth.buffered > 0) item { Note("Telefona aktarılmayı bekleyen ${liveHealth.buffered} ölçüm") }
                     item { Chip(onClick = onDisarmHealth, label = { Text("Otomatik ölçümü kapat") },
                         colors = ChipDefaults.secondaryChipColors(), modifier = Modifier.fillMaxWidth().testTag("disarm-health")) }

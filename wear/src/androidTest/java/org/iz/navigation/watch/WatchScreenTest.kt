@@ -240,7 +240,7 @@ class WatchScreenTest {
             health = WearHealthSummary(latestHeartRateBpm = 128.0, latestHeartRateAt = now - 120_000,
                 heartRateSampleCount = 1, watchSteps = 1_150, lastCheckedAt = now - 10_000, partial = true)))
         compose.setContent { Box(Modifier.size(192.dp)) { WatchScreen(state, now, {}, {}, {}) } }
-        for (label in listOf("10:00 dk/km", "Telefonda ölçülen adımlar", "Saatte ölçülen adımlar", "Toplam enerji",
+        for (label in listOf("10:00 dk/km", "Telefonda ölçülen adımlar", "Saatte ölçülen adımlar", "Toplam enerji · gecikmeli",
             "Kısmi sağlık verisi. Eksik ölçümler sıfır sayılmaz.")) {
             watchList().performScrollToNode(hasText(label))
             compose.onNodeWithText(label).assertIsDisplayed()

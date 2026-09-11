@@ -18,6 +18,8 @@ internal class WatchViewModel(application: Application) : AndroidViewModel(appli
     private val capabilityClient = Wearable.getCapabilityClient(application)
     private val mutableState = MutableStateFlow(WatchUiState())
     val state = mutableState.asStateFlow()
+    private val mutableSurfaceState = MutableStateFlow(WatchSurfaceData())
+    val surfaceState = mutableSurfaceState.asStateFlow()
     private var visible = false
 
     /** Called only while the activity is STARTED; cancellation removes every Data Layer listener. */
@@ -44,6 +46,7 @@ internal class WatchViewModel(application: Application) : AndroidViewModel(appli
             capabilityClient.addListener(capabilityListener, WearProtocol.V2_PHONE_CAPABILITY).await()
             capabilityClient.addListener(capabilityListener, WearProtocol.V3_PHONE_CAPABILITY).await()
             capabilityClient.addListener(capabilityListener, WearProtocol.V4_PHONE_CAPABILITY).await()
+            capabilityClient.addListener(capabilityListener, WearProtocol.V5_PHONE_CAPABILITY).await()
             launch {
                 while (isActive) {
                     refreshNow()
@@ -67,6 +70,7 @@ internal class WatchViewModel(application: Application) : AndroidViewModel(appli
                 runCatching { capabilityClient.removeListener(capabilityListener, WearProtocol.V2_PHONE_CAPABILITY).await() }
                 runCatching { capabilityClient.removeListener(capabilityListener, WearProtocol.V3_PHONE_CAPABILITY).await() }
                 runCatching { capabilityClient.removeListener(capabilityListener, WearProtocol.V4_PHONE_CAPABILITY).await() }
+                runCatching { capabilityClient.removeListener(capabilityListener, WearProtocol.V5_PHONE_CAPABILITY).await() }
             }
         }
     }
@@ -102,6 +106,7 @@ internal class WatchViewModel(application: Application) : AndroidViewModel(appli
     }
 
     private suspend fun refreshNow() {
+        mutableSurfaceState.value = WatchSurfaceReader.read(getApplication())
         try {
             val capabilities = capabilityClient.getAllCapabilities(CapabilityClient.FILTER_REACHABLE).await()
             choosePhone(capabilities)
@@ -124,20 +129,22 @@ internal class WatchViewModel(application: Application) : AndroidViewModel(appli
     }
 
     private fun choosePhone(capabilities: Map<String, CapabilityInfo>) {
+        val v5 = capabilities[WearProtocol.V5_PHONE_CAPABILITY]?.nodes.orEmpty()
         val v4 = capabilities[WearProtocol.V4_PHONE_CAPABILITY]?.nodes.orEmpty()
         val v3 = capabilities[WearProtocol.V3_PHONE_CAPABILITY]?.nodes.orEmpty()
         val v2 = capabilities[WearProtocol.V2_PHONE_CAPABILITY]?.nodes.orEmpty()
-        val nodes = (capabilities[WearProtocol.PHONE_CAPABILITY]?.nodes.orEmpty() + v2 + v3 + v4).distinctBy { it.id }
+        val nodes = (capabilities[WearProtocol.PHONE_CAPABILITY]?.nodes.orEmpty() + v2 + v3 + v4 + v5).distinctBy { it.id }
         fun version(id: String?): Int = when {
+            v5.any { it.id == id } -> 5
             v4.any { it.id == id } -> 4
             v3.any { it.id == id } -> 3
             v2.any { it.id == id } -> 2
             else -> 1
         }
-        val currentId = mutableState.value.phoneId
-        val node = nodes.firstOrNull { it.id == currentId }
-            ?: nodes.sortedWith(compareByDescending<Node> { it.isNearby }
-                .thenByDescending { candidate -> version(candidate.id) }.thenBy { it.id }).firstOrNull()
+        val reader = mutableSurfaceState.value
+        // Cached source truth and command destination move together, including after process recreation.
+        val selectedId = reader.commandPhone(nodes.map { it.id }.toSet())
+        val node = nodes.firstOrNull { it.id == selectedId }
         mutableState.update { it.phone(node?.id, node?.displayName, version(node?.id)) }
     }
 
