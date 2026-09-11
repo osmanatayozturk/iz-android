@@ -1,6 +1,6 @@
 # OpenStreetMap uygulama mimarisi
 
-İz 0.8.0 çevrimiçi harita, yer arama, yakındaki nesneleri bulma ve kullanıcı onaylı OSM Notes katkıları için OpenStreetMap ekosistemini kullanır. Google Maps/Places ve yorum ya da puan gönderme akışları uygulamada yoktur. Google Play konum ve hareket servisleri ile Wear OS Data Layer bağımlılıkları devam eder.
+İz 0.8.1 çevrimiçi harita, yer arama, yakındaki nesneleri bulma ve kullanıcı onaylı OSM Notes katkıları için OpenStreetMap ekosistemini kullanır. Google Maps/Places ve yorum ya da puan gönderme akışları uygulamada yoktur. Google Play konum ve hareket servisleri ile Wear OS Data Layer bağımlılıkları devam eder.
 
 ## Servisler
 

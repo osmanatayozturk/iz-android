@@ -1,4 +1,4 @@
-# İz 0.8.0 kullanım
+# İz 0.8.1 kullanım
 
 İz haritayla açılır. Üstte **Nereye?**, yanda **Konumum** ve **Katmanlar**, altta **Kaydet / Grup / Menü** bulunur. Hava durumu küçük bir kısayoldur. Eski yolculuk çizgileri ana haritada görünmez; Menü → Yolculuklar veya Isı haritasından incelenir.
 
@@ -29,4 +29,4 @@ Canlı koordinatlar geçmiş olarak saklanmaz veya yeniden gönderim kuyruğuna 
 
 ## Mevcut veriler
 
-Menüden Yolculuklar, İstatistikler, Yerler, Isı haritası, OSM Topluluğu, OSM katkıları ve Ayarlar açılır. Günlük veritabanı ve yedek biçimi değişmez. Telefon sürümü 0.8.0 / code 12; saat sürümü 0.5.1 / code 8 ile aynı iletişim biçimi korunur.
+Menüden Yolculuklar, İstatistikler, Yerler, Isı haritası, OSM Topluluğu, OSM katkıları ve Ayarlar açılır. Günlük veritabanı ve yedek biçimi değişmez. Telefon sürümü 0.8.1 / code 13; saat sürümü 0.5.2 / code 9 ile aynı iletişim biçimi korunur.

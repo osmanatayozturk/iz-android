@@ -1,4 +1,4 @@
-# İz 0.8.0 — OSM Topluluğu
+# İz 0.8.1 — OSM Topluluğu
 
 **Menü → OSM Topluluğu** veya Ayarlar'daki aynı adlı kısayol bölümü açar. Topluluk bölümünün içinde **Mesajlar**, **Kişiler** ve **Hesabım** bulunur.
 
@@ -17,8 +17,8 @@ Mesajlar düz metin gösterilir. İçerikteki HTML veya JavaScript çalıştır�
 
 OSM hesap bağlantısı isteğe bağlıdır. Public istemci kimliği tanımlanmadan harita, arama, yerel günlük ve katkı taslakları kullanılabilir; hesap girişi, not yayımlama ve özel mesaj işlemleri devre dışı kalır.
 
-1. [OSM uygulamalarınız](https://www.openstreetmap.org/oauth2/applications) sayfasında mevcut **İz** kaydını açın veya bu uygulama için yeni bir public istemci oluşturun.
-2. Mevcut izinleri koruyarak `consume_messages` ve `send_messages` izinlerini ekleyin. `read_prefs`, `write_notes` ve daha önce eklenen `write_api` korunur. Dönüş adresi `com.atay.iz:/oauth2redirect`, istemci türü public olarak kalır; istemci sırrı kullanılmaz.
+1. Yeni uygulama kimliğiyle ilk hesap girişinden önce [OSM uygulamalarınız](https://www.openstreetmap.org/oauth2/applications) sayfasında bu uygulama için public bir istemci oluşturun. Eski ve yeni kurulum bir süre birlikte kullanılacaksa her biri için ayrı public istemci önerilir.
+2. `read_prefs`, `write_notes`, `write_api`, `consume_messages` ve `send_messages` izinlerini verin. Dönüş adresi `org.iz.navigation:/oauth2redirect`, istemci türü public olmalıdır; istemci sırrı kullanılmaz.
 3. Telefonda **OSM Topluluğu → Hesabım → Mesaj izinlerini ver** akışını tamamlayın. Hesap girişi ve OAuth erişim onayı hesap sahibi tarafından yapılır.
 
 İzin yükseltmesini iptal etmek çalışan eski hesabı bozmaz. Mevcut katkı izinleri sonraki normal girişlerde veya yeni izin yükseltmelerinde kaybedilmez.
@@ -33,7 +33,7 @@ Mesaj okuma izni, Android bildirim izni ve bölümdeki bildirim tercihi birlikte
 
 Özel mesaj verileri günlük veritabanından ayrı Room deposunda, uygulamanın yedek dışı dizininde saklanır. Anahtarlar hesap kimliğini içerir. Günlük ZIP/GPX dışa aktarımları mesajları veya taslakları içermez. Hesap değişimi ve çıkış, gecikmiş ağ yanıtlarının yeni hesaba yazmasını engeller.
 
-Telefon sürümü **0.8.0 / code 12**'dir. Günlük şeması **5**, ZIP formatı **5** ve telefon-saat protokolü korunur. **Wear OS 0.5.1 / code 8** kullanılmaya devam eder.
+Telefon sürümü **0.8.1 / code 13**'tür. Günlük şeması **5**, ZIP veri biçimi **5** ve telefon-saat protokolü korunur. **Wear OS 0.5.2 / code 9** kullanılır.
 
 ## Teknik kaynaklar
 

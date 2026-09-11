@@ -1,6 +1,6 @@
 # Yolculuk havası uygulama mimarisi
 
-İz 0.8.0, araba, motosiklet, bisiklet, yürüyüş, koşu ve yolcu türlerinde aynı rota havası altyapısını kullanır. Özellik telefon uygulamasındadır; Wear OS uygulaması telefondan gelen özet durumu gösterir. Hava planı günlük Room 5 şemasına veya ZIP yedek 5 biçimine eklenmez.
+İz 0.8.1, araba, motosiklet, bisiklet, yürüyüş, koşu ve yolcu türlerinde aynı rota havası altyapısını kullanır. Özellik telefon uygulamasındadır; Wear OS uygulaması telefondan gelen özet durumu gösterir. Hava planı günlük Room 5 şemasına veya ZIP yedek 5 biçimine eklenmez.
 
 Telefon akışı: **Yolculuk havası** ekranında mevcut konum, harita, kayıtlı yer veya gönderilmiş OSM aramasıyla başlangıç ve hedef seçilir; en fazla üç ara durak eklenir. Seçilen kalkış ve sonraki üç saatteki yarım saatlik seçenekler aynı rota üzerinde karşılaştırılır. Harita örnek noktalarının tahmini varış anındaki hava değerlerini gösterir. **Şimdi başlat**, başlangıcı güncel konumla yeniden hesaplar ve aynı türdeki açık kayda bağlanır ya da yeni kayıt başlatır.
 

@@ -1,8 +1,8 @@
-# İz Watch 0.5.1 - Watch8 Classic sağlık verileri
+# İz Watch 0.5.2 - Watch8 Classic sağlık verileri
 
 ## Kullanım
 
-Telefon İz 0.8.0 / code 12 ve saat İz Watch 0.5.1 / code 8 birlikte kullanılır. Saatte İz içindeki **Otomatik ölçümü aç** seçeneği ilk kez etkinleştirilir. Sensör, fiziksel aktivite ve ayrı ekranda **her zaman / arka plan sensörü** izinleri gerekir. Bildirim izni de açılmalıdır. Saatte sessiz bir hazır olma bildirimi görünür; bu bildirim sürekli ölçüm yapıldığı anlamına gelmez. Bildirimdeki **Kapat** veya uygulamadaki **Otomatik ölçümü kapat** seçeneği otomatik ölçümü durdurur.
+Telefon İz 0.8.1 / code 13 ve saat İz Watch 0.5.2 / code 9 birlikte kullanılır. Saatte İz içindeki **Otomatik ölçümü aç** seçeneği ilk kez etkinleştirilir. Sensör, fiziksel aktivite ve ayrı ekranda **her zaman / arka plan sensörü** izinleri gerekir. Bildirim izni de açılmalıdır. Saatte sessiz bir hazır olma bildirimi görünür; bu bildirim sürekli ölçüm yapıldığı anlamına gelmez. Bildirimdeki **Kapat** veya uygulamadaki **Otomatik ölçümü kapat** seçeneği otomatik ölçümü durdurur.
 
 Bu tercih açıkken kayıt yoksa İz'in nabız, adım ve bilekte olma sensörlerinin tümü kapalıdır; **Kayıt yok · Sensörler kapalı** gösterilir. Sessiz bildirim ve telefon bağlantısını bekleyen servis sonraki yolculuk için hazır kalır. Elle başlatılan veya otomatik olarak kesinleşen kayıt için önce **Bilekte olma doğrulanıyor** gösterilir; yeni bir bilekte olma bilgisi alındığında nabız ve adım ölçümü açılır ve **Yolculuk ölçülüyor** gösterilir. Araba, motosiklet, bisiklet, yürüyüş, koşu ve yolcu aynı koşulları kullanır. Geçici otomatik başlangıç adayında ölçüm başlamaz.
 

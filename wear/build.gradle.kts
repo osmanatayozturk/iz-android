@@ -5,14 +5,14 @@ plugins {
 }
 
 android {
-    namespace = "com.atay.iz.watch"
+    namespace = "org.iz.navigation.watch"
     compileSdk = 35
     defaultConfig {
-        applicationId = "com.atay.iz"
+        applicationId = "org.iz.navigation"
         minSdk = 30
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.5.1"
+        versionCode = 9
+        versionName = "0.5.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true }

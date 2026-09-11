@@ -26,7 +26,7 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
-        <activity android:name=".WatchActivity" android:exported="true" android:taskAffinity="com.atay.iz.watch">
+        <activity android:name=".WatchActivity" android:exported="true" android:taskAffinity="org.iz.navigation.watch">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

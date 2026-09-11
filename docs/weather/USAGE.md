@@ -1,4 +1,4 @@
-# İz 0.8.0 · Yolculuk havası
+# İz 0.8.1 · Yolculuk havası
 
 Harita ekranındaki **Yolculuk havası** düğmesi rota planını ve rota üzerindeki tahmini hava koşullarını açar. Araba, motosiklet, bisiklet, yürüyüş, koşu ve yolcu için kullanılabilir. Açık bir yolculuk varsa ekran ilk açılışta onun türünü seçer; başka bir türün planını da hazırlayabilirsin.
 

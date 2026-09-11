@@ -30,18 +30,18 @@ if (groupSupabaseKey.isNotBlank()) {
 }
 fun groupBuildString(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r") + "\""
 android {
-    namespace = "com.atay.iz"
+    namespace = "org.iz.navigation"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.atay.iz"
+        applicationId = "org.iz.navigation"
         minSdk = 29
         targetSdk = 35
-        versionCode = 12
-        versionName = "0.8.0"
+        versionCode = 13
+        versionName = "0.8.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "GROUP_SUPABASE_URL", groupBuildString(groupSupabaseUrl))
         buildConfigField("String", "GROUP_SUPABASE_KEY", groupBuildString(groupSupabaseKey))
-        manifestPlaceholders["appAuthRedirectScheme"] = "com.atay.iz"
+        manifestPlaceholders["appAuthRedirectScheme"] = "org.iz.navigation"
         buildConfigField("String", "OSM_CLIENT_ID", "\"${osmClientId.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
     }
     buildFeatures { compose = true; buildConfig = true }

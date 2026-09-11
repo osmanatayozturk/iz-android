@@ -1,6 +1,6 @@
 # Yol tarifi ve trafik
 
-İz 0.8.0, ana haritada **Nereye?** ile yol tarifi sunar. Yeni planın başlangıcı mevcut konumdur; başlangıcı ve varışı yer araması, kayıtlı yer veya harita ile değiştirebilirsin. Haritada A başlangıcı, B varışı gösterir. Önizleme yolculuk kaydı başlatmaz.
+İz 0.8.1, ana haritada **Nereye?** ile yol tarifi sunar. Yeni planın başlangıcı mevcut konumdur; başlangıcı ve varışı yer araması, kayıtlı yer veya harita ile değiştirebilirsin. Haritada A başlangıcı, B varışı gösterir. Önizleme yolculuk kaydı başlatmaz.
 
 **Rotayı başlat**, güncel konumla rotayı hesaplar ve sesli yönlendirmeyi yolculuk kaydıyla birlikte başlatır. Özel başlangıç 100 metreden uzaktaysa önce oraya gidilir; ardından seçilen durak sırası izlenir. Aynı türde açık kayıt varsa kullanılır. Sayfayı kapatmak veya yönlendirmeyi durdurmak kaydı bitirmez; bunun için **Yolculuğu bitir** kullanılır.
 
@@ -29,6 +29,6 @@ Trafik açıkken hesaplama için başlangıç, varış, ara durak koordinatları
 
 ## Uyumluluk
 
-Telefon sürümü 0.8.0 / code 12'dir. OSM Topluluğu, Android Auto, günlük veritabanı ve yedek biçimi korunur. Saat 0.5.1 / code 8 ile aynı iletişim biçimi kullanılır.
+Telefon sürümü 0.8.1 / code 13'tür. OSM Topluluğu, Android Auto, günlük veritabanı ve yedek biçimi korunur. Saat 0.5.2 / code 9 ile aynı iletişim biçimi kullanılır.
 
 Gerçek trafik verisine erişim kişisel anahtarın, kotanın ve kapsamanın durumuna bağlıdır. Sahte sunucu testleri gerçek yoldaki trafik tahmininin doğruluğunu kanıtlamaz; canlı trafik fiziksel yolculukta ayrıca doğrulanmalıdır.

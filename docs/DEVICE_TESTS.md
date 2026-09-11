@@ -1,6 +1,6 @@
 # Gerçek cihaz kabul kontrolleri
 
-Bu liste İz 0.8.0 telefon ve 0.5.1 Wear OS kaynaklarından üretilen yerel geliştirme paketlerinin saha doğrulaması içindir. Maddelerin varlığı testlerin geçtiği anlamına gelmez; sonuçları test tarihi, cihaz modeli ve Android/Wear OS sürümüyle ayrı bir yerel kayıtta tutun. Seri numarası, kablosuz hata ayıklama adresi, hesap bilgisi veya özel konum yayımlamayın.
+Bu liste İz 0.8.1 telefon ve 0.5.2 Wear OS kaynaklarından üretilen yerel geliştirme paketlerinin saha doğrulaması içindir. Maddelerin varlığı testlerin geçtiği anlamına gelmez; sonuçları test tarihi, cihaz modeli ve Android/Wear OS sürümüyle ayrı bir yerel kayıtta tutun. Seri numarası, kablosuz hata ayıklama adresi, hesap bilgisi veya özel konum yayımlamayın.
 
 ## Kurulum ve izinler
 
@@ -46,6 +46,8 @@ Bu liste İz 0.8.0 telefon ve 0.5.1 Wear OS kaynaklarından üretilen yerel geli
 
 - Onaylanmış yolculuk, iki ziyaret, özel not, fotoğraf, OSM yer eşlemesi ve katkı durumlarıyla sürüm 5 ZIP alınır; geri yüklenince içerik karşılaştırılır.
 - Sürüm 1–4 yedekleri veri kaybı olmadan okunur; eski Google yer kimliği, puan ve yorum taslaklarından OSM bildirimi oluşturulmaz. Yedekte OAuth oturumu veya erişim belirteci bulunmaz.
+- Önceki uygulama kimliğindeki açık kayıt bitirilip saat kuyruğu sıfırlandıktan sonra alınan ZIP, yeni `org.iz.navigation` kurulumuna aktarılır; rotalar, fotoğraflar ve seçilmiş sağlık verileri karşılaştırılır. Eski uygulama doğrulama bitene kadar kaldırılmaz.
+- Kimlik bilgileri, ayarlar, grup oturumu, OSM Topluluğu taslak/önbelleği ve gönderilmemiş saat kuyruğunun taşınmadığı; izinlerin, OSM bağlantısının ve ayarların yeniden kurulması gerektiği doğrulanır.
 - Gönderiliyor durumunda yedeklenen katkı geri yüklenince belirsiz duruma geçer; kendiliğinden yeniden gönderilmez.
 - Bozuk ZIP, bilinmeyen sürüm, eksik fotoğraf, path traversal ve aşırı büyük girişler mevcut veriyi değiştirmeden reddedilir.
 - Başarılı geri yüklemede eski konum servisi durur; doğrulama veya veritabanı değiştirme hatasında mevcut yolculuk korunur. Yedekten gelen kayıt kendiliğinden takip başlatmaz.

@@ -1,4 +1,4 @@
-# İz 0.8.0 group setup
+# İz 0.8.1 group setup
 
 Groups require a dedicated Supabase project. Local maps, navigation and diary recording remain usable when configuration is empty. Only public project URL and publishable/legacy anon key enter the APK; never use a service-role or secret key in Android.
 
@@ -36,7 +36,7 @@ The package pins PGlite for reproducible SQL tests. The suite runs validation, c
 
 Set `GROUP_SUPABASE_URL` and `GROUP_SUPABASE_KEY` in the terminal and run `node supabase/tests/live-smoke.mjs` for a real provider test. It creates three synthetic anonymous devices and an ephemeral group, verifies a real two-client private WebSocket relay, rejects a stranger and direct client broadcast, removes the recipient while retaining its original socket, and confirms no later coordinates are delivered. It ends the test group in `finally`; anonymous cleanup removes the accounts later. Synthetic `(0,0)` coordinates are used, never a real person's location. Do not run against an unrelated existing application project.
 
-Android group unit tests can be run from the repository root with `./gradlew :app:testDebugUnitTest --tests 'com.atay.iz.group.*'`. Device navigation/group sharing, process death, actual background GPS and two physical device UX need real hardware; a successful backend test does not claim a road test.
+Android group unit tests can be run from the repository root with `./gradlew :app:testDebugUnitTest --tests 'org.iz.navigation.group.*'`. Device navigation/group sharing, process death, actual background GPS and two physical device UX need real hardware; a successful backend test does not claim a road test.
 
 ## Official references
 
@@ -44,4 +44,3 @@ Android group unit tests can be run from the repository root with `./gradlew :ap
 - [Realtime authorization](https://supabase.com/docs/guides/realtime/authorization)
 - [Realtime protocol and private join](https://supabase.com/docs/guides/realtime/protocol)
 - [Server REST broadcasts](https://supabase.com/docs/guides/realtime/broadcast)
-

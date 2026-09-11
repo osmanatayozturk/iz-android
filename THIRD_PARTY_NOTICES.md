@@ -1,6 +1,6 @@
 # Third-party notices
 
-Iz original source code is Copyright (C) 2026 OsmanAtay and is licensed
+İz original source code is Copyright (C) 2026 İz contributors and is licensed
 under GNU GPL version 3 only (SPDX: GPL-3.0-only). See [LICENSE](LICENSE).
 The license does not replace third-party copyrights, licenses, or service terms.
 
@@ -36,7 +36,7 @@ Relevant upstream notices and terms:
 - [Google Android SDK terms](https://developer.android.com/studio/terms)
 - [PGlite source and licenses](https://github.com/electric-sql/pglite)
 
-This first publication distributes Iz's source code, not an APK or SDK binaries.
+This first publication distributes İz's source code, not an APK or SDK binaries.
 The current build uses proprietary Google Play Services clients for location,
 activity recognition, and phone/watch communication. Before distributing a
 linked APK, review whether a narrow GPLv3 section 7 linking permission is needed,
@@ -47,7 +47,7 @@ linking exception. See the [GNU FAQ](https://www.gnu.org/licenses/gpl-faq.en.htm
 
 OpenStreetMap data is provided by OpenStreetMap contributors under ODbL 1.0.
 The application's visible attribution must be retained. ODbL covers map data;
-it does not replace the license of Iz's original source.
+it does not replace the license of İz's original source.
 
 - [OpenStreetMap copyright and attribution](https://www.openstreetmap.org/copyright)
 - [OSM tile usage policy](https://operations.osmfoundation.org/policies/tiles/)

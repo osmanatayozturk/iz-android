@@ -1,6 +1,6 @@
 # Koşu ve sağlık verisi mimarisi
 
-İz 0.8.0'da koşu ayrı bir yolculuk türüdür. Otomatik koşu adayı, diğer otomatik kayıtlar gibi ilk 15 dakika içinde 500 metre ölçülünce kalıcılaşır. Ortalama tempo, duraklamalar dâhil toplam süreyi ölçülmüş GPS mesafesine böler. Yürüyüş ve koşu telefonun adım sensörü desteğini paylaşır; aynı yolculuğun bu iki tür arasında düzeltilmesi adımları korur.
+İz 0.8.1'de koşu ayrı bir yolculuk türüdür. Otomatik koşu adayı, diğer otomatik kayıtlar gibi ilk 15 dakika içinde 500 metre ölçülünce kalıcılaşır. Ortalama tempo, duraklamalar dâhil toplam süreyi ölçülmüş GPS mesafesine böler. Yürüyüş ve koşu telefonun adım sensörü desteğini paylaşır; aynı yolculuğun bu iki tür arasında düzeltilmesi adımları korur.
 
 ## Telefon ve Health Connect
 
@@ -10,7 +10,7 @@ Bağlantı kullanıcı tarafından açılır. Arka plan okuma desteği ve izni v
 
 ## Wear OS doğrudan ölçümü
 
-Wear OS 0.5.1, kullanıcı **Otomatik ölçümü aç** tercihini etkinleştirdiğinde yalnız telefonda onaylanmış bir yolculuk sırasında ölçüm yapar. Bilekte olma doğrulandıktan sonra nabız ve adım sensörleri açılır; saat çıkarılınca veya kayıt bitince kapatılır. Saat tek başına egzersiz oturumu başlatmaz ve bağımsız GPS rotası kaydetmez.
+Wear OS 0.5.2, kullanıcı **Otomatik ölçümü aç** tercihini etkinleştirdiğinde yalnız telefonda onaylanmış bir yolculuk sırasında ölçüm yapar. Bilekte olma doğrulandıktan sonra nabız ve adım sensörleri açılır; saat çıkarılınca veya kayıt bitince kapatılır. Saat tek başına egzersiz oturumu başlatmaz ve bağımsız GPS rotası kaydetmez.
 
 Ölçümler önce saatin yerel kuyruğuna yazılır. Telefon veritabanına kabul ettiğini bildirmeden kuyruktan silinmez. Oturum ve sıra kimlikleri tekrarları ayıklar; bitmiş veya başka bir telefona ait oturumlara sonradan veri eklenmez. Telefon-saat aktarımı yalnız ölçüm ve gerekli yolculuk kimliklerini taşır; rota, fotoğraf ve özel günlük metni taşımaz.
 

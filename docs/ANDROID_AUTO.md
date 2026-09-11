@@ -1,6 +1,6 @@
 # İz Android Auto
 
-İz 0.8.0, telefondaki günlüğe bağlı bir Android Auto araç arayüzü içerir. Hedef seçmek zorunlu değildir. Araç ekranı aktif yolculuğun konumunu, kaydedilmiş izini ve istatistiklerini gösterir. Kayıt yoksa **Sürüşe başla** ile araba, motosiklet veya yolcu kaydı açılabilir. Bağlanmak tek başına kayıt başlatmaz.
+İz 0.8.1, telefondaki günlüğe bağlı bir Android Auto araç arayüzü içerir. Hedef seçmek zorunlu değildir. Araç ekranı aktif yolculuğun konumunu, kaydedilmiş izini ve istatistiklerini gösterir. Kayıt yoksa **Sürüşe başla** ile araba, motosiklet veya yolcu kaydı açılabilir. Bağlanmak tek başına kayıt başlatmaz.
 
 ## Kullanım
 

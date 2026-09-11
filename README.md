@@ -1,14 +1,14 @@
-# İz 0.8.0 — navigasyon ve yolculuk günlüğü
+# İz 0.8.1 — navigasyon ve yolculuk günlüğü
 
 Araba, motosiklet, bisiklet, yürüyüş, koşu ve yolcu için haritayla açılan Kotlin / Jetpack Compose uygulaması. Üstte **Nereye?**, yanda konum ve katmanlar, altta **Kaydet / Grup / Menü** bulunur. Yol tarifi günlük kaydı olmadan da çalışır; yeni başlangıçta **Yolculuğu kaydet** seçimi açıktır. Yolculuklar, ziyaretler, özel notlar ve fotoğraflar telefonda saklanır. Geçmiş, istatistikler, yerler, ısı haritası, OSM Topluluğu ve ayarlara Menüden ulaşılır.
 
-Bu depo İz'in kaynak kodunu yayımlar. Güncel sürümler telefon için **0.8.0 (code 12)**, Wear OS için **0.5.1 (code 8)**'dir. Hazır APK veya mağaza sürümü yayımlanmaz. [Kullanım kılavuzu](docs/IZ_080_KULLANIM.md) · [Grup sunucusu kurulumu](docs/GROUP_SETUP.md).
+Bu depo İz'in kaynak kodunu yayımlar. Güncel sürümler telefon için **0.8.1 (code 13)**, Wear OS için **0.5.2 (code 9)**'dur. Hazır APK veya mağaza sürümü yayımlanmaz. [Kullanım kılavuzu](docs/IZ_080_KULLANIM.md) · [Grup sunucusu kurulumu](docs/GROUP_SETUP.md).
 
 Supabase grup sunucusu ve TomTom trafik bağlantısı varsayılan kaynak yapılandırmasında etkin değildir. Bunlar sonradan yapılandırılabilir; temel harita, Valhalla tabanlı rota, Open-Meteo hava durumu, navigasyon ve yerel günlük kişisel anahtar olmadan çalışır. Grup arka ucu için [kurulum belgesine](docs/GROUP_SETUP.md) bakın.
 
 [Yol tarifi ve trafik](docs/YOL_TARIFI_VE_TRAFIK.md): mevcut konumdan planlama, sesli yönlendirme ve isteğe bağlı TomTom trafik tahmini.
 
-[OSM Topluluğu](docs/OSM_TOPLULUGU.md) mesajlar, kişiler, hesap ve OSM sitesindeki takip işlemlerini kapsar. [Android Auto](docs/ANDROID_AUTO.md) hedefsiz sürüş kaydı ve navigasyon sunar. Wear OS 0.5.1, kayıt ve navigasyon durumunu telefondan alır; sağlık ölçümü yalnız uygun bir kayıt sırasında çalışır. [Saat desteği](docs/WATCH_SUPPORT.md) · [Saat sağlık ölçümü](docs/WATCH_HEALTH_LIVE.md).
+[OSM Topluluğu](docs/OSM_TOPLULUGU.md) mesajlar, kişiler, hesap ve OSM sitesindeki takip işlemlerini kapsar. [Android Auto](docs/ANDROID_AUTO.md) hedefsiz sürüş kaydı ve navigasyon sunar. Wear OS 0.5.2, kayıt ve navigasyon durumunu telefondan alır; sağlık ölçümü yalnız uygun bir kayıt sırasında çalışır. [Saat desteği ve kimlik geçişi](docs/WATCH_SUPPORT.md) · [Saat sağlık ölçümü](docs/WATCH_HEALTH_LIVE.md).
 
 Altı yolculuk türünde rota havası, kalkış karşılaştırması ve türe özel canlı uyarılar için [hava durumu kullanımına](docs/weather/USAGE.md) bakın.
 
@@ -31,6 +31,8 @@ Altı yolculuk türünde rota havası, kalkış karşılaştırması ve türe ö
 ./gradlew :app:lintDebug :wear:lintDebug
 ```
 
+Telefon ve saat APK'ları `org.iz.navigation` uygulama kimliğini kullanır. Telefon namespace'i `org.iz.navigation`, saat namespace'i `org.iz.navigation.watch`, ortak protokol namespace'i `org.iz.navigation.wearprotocol`'dür. Önceki uygulama kimliğinden geçiş, Android tarafından yerinde güncelleme sayılmaz; veriyi ZIP ile taşıma adımları [saat desteği belgesinde](docs/WATCH_SUPPORT.md#önceki-uygulama-kimliğinden-geçiş) açıklanır.
+
 OSM hesap girişi, not katkısı ve topluluk özellikleri için public bir `OSM_CLIENT_ID` isteğe bağlıdır. Değer ortam değişkeninden, yerel yapılandırmadan veya uygulamadaki **Ayarlar → OSM uygulama kimliği** alanından verilebilir. İstemci sırrı kullanılmaz. Kimlik olmadan harita, yer arama, günlük, yerel katkı taslakları ve GPX özellikleri çalışır.
 
 ## OpenStreetMap ve katkı
@@ -47,7 +49,7 @@ Bu sürüm kişisel kullanım içindir. Uygulamayı çok kullanıcıya dağıtma
 
 ### OSM hesap bağlantısı kurulumu
 
-1. Mevcut İz kaydınız varsa [OSM uygulamalarınız](https://www.openstreetmap.org/oauth2/applications) üzerinden güncelleyin; yoksa bu uygulama için public istemci oluşturun: ad `İz`, dönüş adresi `com.atay.iz:/oauth2redirect`, izinler `read_prefs`, `write_notes`, `write_api`, `consume_messages`, `send_messages`; **Confidential** kapalı. [Topluluk izinlerini etkinleştirme](docs/OSM_TOPLULUGU.md#osm-uygulamasını-hazırlama).
+1. Yeni kimlikle ilk hesap girişinden önce [OSM uygulamalarınız](https://www.openstreetmap.org/oauth2/applications) üzerinden public bir istemci kaydedin: ad `İz`, dönüş adresi `org.iz.navigation:/oauth2redirect`, izinler `read_prefs`, `write_notes`, `write_api`, `consume_messages`, `send_messages`; **Confidential** kapalı. Eski ve yeni kurulum bir süre birlikte kullanılacaksa her biri için ayrı public istemci önerilir. [Topluluk izinlerini etkinleştirme](docs/OSM_TOPLULUGU.md#osm-uygulamasını-hazırlama).
 2. Gerçek Client ID değerini yukarıdaki ayara girin. İstemci sırrı kullanılmaz; OSM hesap şifresi uygulamada istenmez.
 3. Ayarlar → OSM hesabını bağla, sistem tarayıcısında giriş/onay ve uygulamaya dönüş akışını açar. PKCE S256 ve state kontrolü uygulanır. Oturum Android Keystore ile şifrelenip yedek dışı dizinde saklanır.
 
@@ -71,7 +73,7 @@ Koşu telefon/saat menülerinde ve ısı haritasında ayrı bir moddur. Otomatik
 
 Yalnız Samsung Health kaynaklı, cihazı saat olarak belirtilmiş ölçümler alınır. Saat metadata'sı bilekte kalma süresini kanıtlamaz. İlk erişilebilen 30 gündeki ve yeni onaylanmış yolculuklar eşleştirilir. Ölçümler gecikebilir; Samsung Health tüm yolculuklar için kalori üretmeyebilir. Toplam kalori aktif kalori değildir; aralıklar oranlanmaz, boşluklar doldurulmaz. Telefon/saat adımları ayrı gösterilir. İz egzersiz başlatmaz veya sağlık kayıtlarına yazmaz.
 
-Yedek sürümü 5, sürüm 1–4'ü okur. Sağlık ölçümlerini yedeğe eklemek her dışa aktarımda varsayılan kapalıdır; eşitleme işaretçileri ve izinler yedeklenmez. Sağlık verileri OSM, GPX ve fotoğraf paylaşımına eklenmez. Yeni saat eski telefonla çalışırken koşu başlatma kapalıdır; yeni telefon eski saate koşuyu genel yolculuk olarak gösterir ve durdurmayı korur.
+Yedek sürümü 5, sürüm 1–4'ü okur. Sağlık ölçümlerini yedeğe eklemek her dışa aktarımda varsayılan kapalıdır; eşitleme işaretçileri ve izinler yedeklenmez. Sağlık verileri OSM, GPX ve fotoğraf paylaşımına eklenmez. Aynı uygulama kimliğini kullanan önceki telefon/saat protokol sürümleriyle uyumluluk korunur; eski ve yeni uygulama kimliğine sahip karma telefon-saat çiftleri iletişim kurmaz.
 
 ## Veri ve yedek
 
@@ -104,7 +106,7 @@ Ana harita güncel konumu, planlama sırasında önizlenen güzergâhı ve aktif
 
 Yolculuk ayrıntısında mesafe, toplam süre, ortalama hız, en yüksek ölçülen aralık hızı, hareketli ortalama hız, hareket süresi, ölçülen duraklama ve GPS ölçüm süresi bulunur. GPS boşlukları duraklama sayılmaz. Ortalama hız mesafeyi toplam süreye böler; eksik GPS varsa eksik mesafe tamamlanmış gibi gösterilmez.
 
-Yürüyüş adımları telefonun donanım sayacından (yoksa adım algılama sensöründen) alınır. Fiziksel aktivite izni veya sensör yoksa adım sayısı tahmin edilmez. İlk sayaç ölçümü başlangıç referansıdır; kayıt öncesindeki adımlar ve gözlenmeyen aralıklar eklenmez. Eski kayıtlara geriye dönük adım hesaplanmaz. 0.8.0 günlük veritabanını ve yedek biçimini değiştirmez: Room sürüm 5, yedek sürüm 5; yedek sürümleri 1–4 okunabilir. Geri yüklenen yarım kalmış OSM gönderimleri kontrol bekleyen duruma dönüşür; otomatik yayımlanmaz.
+Yürüyüş adımları telefonun donanım sayacından (yoksa adım algılama sensöründen) alınır. Fiziksel aktivite izni veya sensör yoksa adım sayısı tahmin edilmez. İlk sayaç ölçümü başlangıç referansıdır; kayıt öncesindeki adımlar ve gözlenmeyen aralıklar eklenmez. Eski kayıtlara geriye dönük adım hesaplanmaz. 0.8.1 günlük veritabanını ve yedek veri biçimini değiştirmez: Room sürüm 5, yedek sürüm 5; yedek sürümleri 1–4 okunabilir. Geri yüklenen yarım kalmış OSM gönderimleri kontrol bekleyen duruma dönüşür; otomatik yayımlanmaz.
 
 Tamamlanmış kalıcı yolculukların ayrıntısından **GPX rotasını dışa aktar** seçilir. Önizlemede başlangıç/bitiş kısaltılır ve Android dosya seçicisiyle GPX 1.1 kaydedilir. GPS boşlukları ayrı rota bölümleridir; özel başlık/not/fotoğraflar eklenmez ve dosya otomatik OSM’ye yüklenmez.
 
@@ -114,11 +116,11 @@ Menü → Isı haritasında Tümü ve ulaşım türleri ayrı seçilir. Yalnızc
 
 Telefona bağlı Wear OS sürümü `wear/` modülündedir. Altı ulaşım türü, başlatma/bitiş kontrolleri, canlı telefon ölçümleri ve otomatik adayın 500 metre / 15 dakika ilerlemesi saatten izlenebilir. Android arka plan başlangıcını engellediğinde telefon bildirimi veya telefon uygulamasındaki onay ekranı kullanılır.
 
-Telefon ve saat uygulamaları aynı uygulama kimliği ve aynı imzayla ayrı cihazlara kurulmalıdır. Bağımsız saat GPS'i ve saat sensöründen adım kaydı bu sürümde yoktur. Ayrıntılar: [Wear OS desteği](docs/WATCH_SUPPORT.md).
+Telefon ve saat uygulamaları aynı `org.iz.navigation` uygulama kimliği ve aynı imzayla ayrı cihazlara kurulmalıdır. Bağımsız saat GPS'i ve saat sensöründen adım kaydı bu sürümde yoktur. Ayrıntılar: [Wear OS desteği](docs/WATCH_SUPPORT.md).
 
 ## Lisans ve üçüncü taraflar
 
-Copyright © 2026 OsmanAtay. Bu depodaki özgün kaynak kod [GNU General Public License v3.0 only](LICENSE) (`GPL-3.0-only`) koşullarıyla yayımlanır. Depodaki üçüncü taraf bileşenler kendi lisansları altında kalır; GPL bildirimi onların lisanslarının veya gerekli kaynak gösterimlerinin yerini almaz. Ayrıntılar [üçüncü taraf bildirimlerinde](THIRD_PARTY_NOTICES.md) bulunur.
+Copyright © 2026 İz projesine katkıda bulunanlar. Bu depodaki özgün kaynak kod [GNU General Public License v3.0 only](LICENSE) (`GPL-3.0-only`) koşullarıyla yayımlanır. Depodaki üçüncü taraf bileşenler kendi lisansları altında kalır; GPL bildirimi onların lisanslarının veya gerekli kaynak gösterimlerinin yerini almaz. Ayrıntılar [üçüncü taraf bildirimlerinde](THIRD_PARTY_NOTICES.md) bulunur.
 
 Harita ve yol verisi © OpenStreetMap katkıcılarıdır; uygulama içindeki ve belgelerdeki OpenStreetMap kaynak gösterimleri korunmalıdır. MapLibre, AndroidX, AppAuth, OkHttp, Health Connect istemcisi ve diğer bağımlılıkların lisans koşulları ayrıca geçerlidir.
 

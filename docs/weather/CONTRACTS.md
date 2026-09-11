@@ -1,6 +1,6 @@
 # Yolculuk havası kod sözleşmeleri
 
-Bu belge `com.atay.iz.weather` paketindeki temel veri ve servis sınırlarını açıklar. Kaynak kod değiştiğinde imzalarla birlikte güncellenmelidir.
+Bu belge `org.iz.navigation.weather` paketindeki temel veri ve servis sınırlarını açıklar. Kaynak kod değiştiğinde imzalarla birlikte güncellenmelidir.
 
 ```kotlin
 data class WeatherCoordinate(val latitude: Double, val longitude: Double)
@@ -32,7 +32,7 @@ data class PlannedRoute(
  val durationSeconds: Double,
  val createdAt: Long,
  val stopElapsedSeconds: List<Double> = emptyList(),
- val transport: com.atay.iz.data.Transport = com.atay.iz.data.Transport.MOTORCYCLE,
+ val transport: org.iz.navigation.data.Transport = org.iz.navigation.data.Transport.MOTORCYCLE,
  val travelSpeedKmh: Double? = null,
  val maneuvers: List<RouteManeuver> = emptyList(),
  val provider: RouteProvider = RouteProvider.VALHALLA,
@@ -50,7 +50,7 @@ interface RoutePlanner {
  suspend fun plan(
   stops: List<RouteStop>,
   departureAt: Long,
-  transport: com.atay.iz.data.Transport = com.atay.iz.data.Transport.MOTORCYCLE,
+  transport: org.iz.navigation.data.Transport = org.iz.navigation.data.Transport.MOTORCYCLE,
   travelSpeedKmh: Double? = null,
  ): PlannedRoute
 }
@@ -78,13 +78,13 @@ data class RideWeatherSettings(
  val travelSpeedKmh: Double? = null,
 )
 class WeatherSettingsStore(context: android.content.Context) {
- fun read(transport: com.atay.iz.data.Transport = com.atay.iz.data.Transport.MOTORCYCLE): RideWeatherSettings
- fun save(value: RideWeatherSettings, transport: com.atay.iz.data.Transport = com.atay.iz.data.Transport.MOTORCYCLE)
+ fun read(transport: org.iz.navigation.data.Transport = org.iz.navigation.data.Transport.MOTORCYCLE): RideWeatherSettings
+ fun save(value: RideWeatherSettings, transport: org.iz.navigation.data.Transport = org.iz.navigation.data.Transport.MOTORCYCLE)
 }
 data class SavedWeatherPlan(
  val stops: List<RouteStop>,
  val departureAt: Long,
- val transport: com.atay.iz.data.Transport = com.atay.iz.data.Transport.MOTORCYCLE,
+ val transport: org.iz.navigation.data.Transport = org.iz.navigation.data.Transport.MOTORCYCLE,
 )
 class WeatherPlanStore(context: android.content.Context) { fun read(): SavedWeatherPlan?; fun save(value: SavedWeatherPlan) }
 enum class RideWeatherStatus { OFF, LOADING, READY, ERROR }
@@ -110,14 +110,14 @@ class RideWeatherManager(context: android.content.Context) {
  fun refresh(): kotlinx.coroutines.Job // throttled manual refresh, no GPS re-registration
  fun onAcceptedLocation(journeyId: String, coordinate: WeatherCoordinate, recordedAt: Long, accuracyMeters: Float)
  fun onTrackingStopped(journeyId: String?)
- fun wearWeather(journeyId: String): com.atay.iz.wearprotocol.WearRouteWeather?
+ fun wearWeather(journeyId: String): org.iz.navigation.wearprotocol.WearRouteWeather?
 }
 ```
 Uygulama tek bir `RideWeatherManager` örneği kullanır. Arayüz bağımsız bir yönetici oluşturmaz; güncel ayarları depodan okur. `stop()` yalnız hava takibini kapatır ve günlük kaydını bitirmez. Ağdan dönen geç yanıtlar oturum nesliyle denetlenir ve yeni bir oturumun durumunu değiştiremez.
 
 ## Wear OS sözleşmesi
 
-Saat veri türleri `com.atay.iz.wearprotocol` paketindedir:
+Saat veri türleri `org.iz.navigation.wearprotocol` paketindedir:
 ```kotlin
 enum class WearWeatherStatus { LOADING, READY, ERROR }
 enum class WearWeatherThreshold { BELOW_THRESHOLD, EXCEEDED }
