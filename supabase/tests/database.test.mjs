@@ -1,0 +1,62 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { PGlite } from '@electric-sql/pglite';
+const db = new PGlite();
+const uuid=(i)=>`00000000-0000-4000-8000-${String(i).padStart(12,'0')}`;
+async function command(user,action,args={}) { return (await db.query('select public.iz_group_command($1,$2,$3) as result',[uuid(user),action,JSON.stringify(args)])).rows[0].result; }
+async function scalar(sql,args=[]) { return (await db.query(sql,args)).rows[0].result; }
+await db.exec(`create role anon; create role authenticated; create role service_role bypassrls;
+create schema auth; create table auth.users(id uuid primary key,is_anonymous boolean default true,created_at timestamptz default now(),last_sign_in_at timestamptz default now());
+create function auth.uid() returns uuid language sql as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
+create schema realtime; create table realtime.messages(extension text); alter table realtime.messages enable row level security;
+create function realtime.topic() returns text language sql as $$ select current_setting('realtime.topic',true) $$;
+grant usage on schema public,auth,realtime to anon,authenticated,service_role; grant select,insert on realtime.messages to authenticated;`);
+const migration = await readFile(new URL('../migrations/202609110001_groups.sql',import.meta.url),'utf8');
+await db.exec(migration.split('-- Enable pg_cron')[0]);
+for(let i=1;i<=15;i++) await db.query('insert into auth.users(id) values($1)',[uuid(i)]);
+const stops=[{label:'Destination',latitude:41,longitude:29}];
+test('real SQL enforces approvals, consent leases, capacity, role boundaries, revocation and expiry', async()=>{
+  const created=await command(1,'create',{name:'Host',stops}); const group=created.group.id; const code=created.group.invite_code;
+  assert.equal(created.group.consent,false); assert.equal(created.group.members.length,1);
+  const joined=await command(2,'join',{name:'Peer',code}); assert.equal(joined.group.self_status,'pending'); assert.deepEqual(joined.group.stops,[]);
+  await assert.rejects(()=>command(2,'consent',{group_id:group,enabled:true}),/approval_required/);
+  await assert.rejects(()=>command(2,'approve',{group_id:group,user_id:uuid(2)}),/host_required/);
+  await command(1,'approve',{group_id:group,user_id:uuid(2)});
+  await assert.rejects(()=>scalar('select iz_group_publish($1,$2,10) as result',[uuid(2),group]),/consent_required/);
+  await command(1,'consent',{group_id:group,enabled:true}); const sharing=await command(2,'consent',{group_id:group,enabled:true});
+  const recipients=await scalar('select iz_group_publish($1,$2,10) as result',[uuid(1),group]); assert.equal(recipients.length,1);
+  await assert.rejects(()=>scalar('select iz_group_publish($1,$2,10) as result',[uuid(1),group]),/rate_limited/);
+  assert.equal(await scalar('select iz_group_can_receive($1,$2,$3,$4) as result',[uuid(1),group,uuid(2),sharing.group.inbox]),true);
+  await db.query("select set_config('request.jwt.claim.sub',$1,false)",[uuid(2)]);
+  await db.query("select set_config('realtime.topic',$1,false)",['iz:inbox:'+sharing.group.inbox]);
+  await db.exec('set role authenticated');
+  assert.equal(await scalar("select iz_own_inbox(realtime.topic()) as result"),true);
+  await assert.rejects(()=>db.exec('select * from iz_groups'),/permission denied/);
+  await assert.rejects(()=>db.exec("insert into realtime.messages(extension) values('broadcast')"),/row-level security/);
+  await assert.rejects(()=>db.query('select iz_group_command($1,$2,$3)',[uuid(1),'end',JSON.stringify({group_id:group})]),/permission denied/);
+  await db.exec('reset role');
+  await command(1,'remove',{group_id:group,user_id:uuid(2)});
+  assert.equal(await scalar('select iz_group_can_receive($1,$2,$3,$4) as result',[uuid(1),group,uuid(2),sharing.group.inbox]),false);
+  await assert.rejects(()=>command(2,'join',{name:'Peer',code}),/removed/);
+  for(let i=3;i<=11;i++) await command(i,'join',{name:'Peer '+i,code});
+  await assert.rejects(()=>command(12,'join',{name:'Too many',code}),/group_full/);
+  await db.query("update iz_groups set invite_expires_at=now()-interval '1 second' where id=$1",[group]);
+  await assert.rejects(()=>command(13,'join',{name:'Late',code}),/invalid_invite/);
+  await db.query("update iz_group_members set consent_until=now()-interval '1 second' where group_id=$1 and user_id=$2",[group,uuid(1)]);
+  await assert.rejects(()=>scalar('select iz_group_publish($1,$2,10) as result',[uuid(1),group]),/consent_required/);
+  await db.query("update iz_groups set expires_at=now()-interval '1 second' where id=$1",[group]);
+  assert.equal((await command(1,'status',{group_id:group})).group,null);
+  await db.exec('select iz_group_cleanup()');
+  assert.equal(await scalar('select count(*)::int as result from iz_groups'),0);
+});
+test('invalid invite attempts consume independently committed rate limit', async()=>{
+  for(let i=0;i<40;i++) assert.equal(await scalar('select iz_group_rate_limit($1) as result',[uuid(14)]),true);
+  assert.equal(await scalar('select iz_group_rate_limit($1) as result',[uuid(14)]),false);
+});
+test('cleanup retains recently used anonymous identity even when its initial sign-in is old', async()=>{
+  await db.query("update auth.users set created_at=now()-interval '8 days',last_sign_in_at=now()-interval '8 days' where id=$1",[uuid(15)]);
+  await scalar('select iz_group_rate_limit($1) as result',[uuid(15)]);
+  await db.exec('select iz_group_cleanup()');
+  assert.equal(await scalar('select count(*)::int as result from auth.users where id=$1',[uuid(15)]),1);
+});

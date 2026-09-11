@@ -1,0 +1,47 @@
+# Local tooling, IDE state and generated outputs
+.gradle/
+.kotlin/
+**/build/
+.idea/
+.tools/
+.weather-work/
+.superpowers/
+.worktrees/
+node_modules/
+
+# Private configuration and signing material
+local.properties
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+*.hprof
+*.log
+*.apk
+*.aab
+*.apks
+
+# Publish only reviewed current documentation. Historical reports and
+# raw device logs/screenshots/backups remain local.
+/docs/*
+!/docs/IZ_080_KULLANIM.md
+!/docs/GROUP_SETUP.md
+!/docs/YOL_TARIFI_VE_TRAFIK.md
+!/docs/OSM_TOPLULUGU.md
+!/docs/ANDROID_AUTO.md
+!/docs/WATCH_SUPPORT.md
+!/docs/WATCH_HEALTH_LIVE.md
+!/docs/DEVICE_TESTS.md
+!/docs/OSM_IMPLEMENTATION.md
+!/docs/HEALTH_RUNNING_IMPLEMENTATION.md
+!/docs/weather/
+/docs/weather/*
+!/docs/weather/USAGE.md
+!/docs/weather/IMPLEMENTATION.md
+!/docs/weather/CONTRACTS.md

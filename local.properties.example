@@ -1,0 +1,14 @@
+# Copy to local.properties and replace only sdk.dir for a basic build.
+# Android Studio can also create local.properties for your installed SDK.
+sdk.dir=/path/to/Android/Sdk
+
+# Optional public OSM OAuth client ID (PKCE; no client secret).
+# OSM_CLIENT_ID=
+
+# Optional group backend. Use ONLY a public publishable or anon client key.
+# Never put a service_role/admin/secret key in this file or the Android app.
+# GROUP_SUPABASE_URL=
+# GROUP_SUPABASE_KEY=
+
+# Environment variables with these names override the optional values above.
+# TomTom traffic credentials are entered on-device, not in build configuration.

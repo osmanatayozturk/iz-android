@@ -1,0 +1,9 @@
+<resources>
+    <style name="Theme.Iz" parent="Theme.Material3.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:colorAccent">#28735C</item>
+        <item name="android:windowBackground">#F7F7F2</item>
+    </style>
+</resources>

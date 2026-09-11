@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="android_wear_capabilities" translatable="false">
+        <item>iz_phone_v1</item>
+        <item>iz_phone_v2</item>
+        <item>iz_phone_v3</item>
+        <item>iz_phone_v4</item>
+    </string-array>
+</resources>
