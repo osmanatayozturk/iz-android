@@ -1,8 +1,10 @@
-# İz 0.9.0 - navigasyon ve yolculuk günlüğü
+# İz 0.9.1 - navigasyon ve yolculuk günlüğü
 
 Araba, motosiklet, bisiklet, yürüyüş, koşu ve yolcu için haritayla açılan Kotlin / Jetpack Compose uygulaması. Üstte **Nereye?**, yanda konum ve katmanlar, altta **Kaydet / Grup / Menü** bulunur. Yol tarifi günlük kaydı olmadan da çalışır; yeni başlangıçta **Yolculuğu kaydet** seçimi açıktır. Yolculuklar, ziyaretler, özel notlar ve fotoğraflar telefonda saklanır. Geçmiş, istatistikler, yerler, ısı haritası, OSM Topluluğu ve ayarlara Menüden ulaşılır.
 
-Bu depo İz'in kaynak kodunu yayımlar. Güncel sürümler telefon için **0.9.0 (code 15)**, Wear OS için **0.6.0 (code 10)**'dur. Hazır APK veya mağaza sürümü yayımlanmaz. [0.9.0 yenilikleri ve kullanım](docs/IZ_090_YENILIKLER.md) · [Kullanım kılavuzu](docs/IZ_080_KULLANIM.md) · [Grup sunucusu kurulumu](docs/GROUP_SETUP.md) · [Saat kartı ve kadran alanı](docs/WATCH_SURFACES.md).
+Bu depo İz'in kaynak kodunu yayımlar. Güncel sürümler telefon için **0.9.1 (code 16)**, Wear OS için **0.6.0 (code 10)**'dur. Hazır APK veya mağaza sürümü yayımlanmaz. [0.9 yenilikleri ve kullanım](docs/IZ_090_YENILIKLER.md) · [Kullanım kılavuzu](docs/IZ_080_KULLANIM.md) · [Grup sunucusu kurulumu](docs/GROUP_SETUP.md) · [Saat kartı ve kadran alanı](docs/WATCH_SURFACES.md).
+
+0.9.1'de ısı haritası, geniş renk lekeleri yerine ince GPS izlerini gösterir. Renkler aynı yaklaşık 30 metrelik bölgeden geçen farklı yolculukların sayısını belirtir: **1 mavi, 2–3 turkuaz, 4–7 sarı, 8+ kırmızı**. Aynı yolculukta beklemek veya geri dönmek sayıyı artırmaz. Ulaşım filtreleri renklerin anlamını değiştirmez; açıklama tam ekranda da görünür. Birbirine yakın paralel yollar aynı bölgenin sayısını paylaşabilir. Yolculuk ayrıntılarındaki hız renklendirmesi ayrı kalır; kayıt ve yedek biçimi değişmez.
 
 Supabase grup sunucusu ve TomTom trafik bağlantısı varsayılan kaynak yapılandırmasında etkin değildir. Bunlar sonradan yapılandırılabilir; temel harita, Valhalla tabanlı rota, Open-Meteo hava durumu, navigasyon ve yerel günlük kişisel anahtar olmadan çalışır. Grup arka ucu için [kurulum belgesine](docs/GROUP_SETUP.md) bakın.
 
