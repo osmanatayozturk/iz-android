@@ -82,39 +82,45 @@ class OsmPlaces(context: Context) {
             val lon = String.format(Locale.US, "%.4f", longitude)
             val key = "nearby:$endpoint:$lat:$lon"
             cached(key, 600_000, ::parseOverpassPlaces)?.let { return@withLock it }
-            val now = System.currentTimeMillis()
-            var budget = OsmReadBudget.fromJson(preferences.getString("overpass_budget", null))
-            if (!budget.canRequest(now)) {
-                throw OsmServiceException(if (now < budget.cooldownUntil) "Harita servisi beklememizi istiyor. Biraz sonra yeniden dokun." else "Bugünkü yakın yer arama sınırına ulaşıldı. Kayıtlı yerlerini kullanabilir veya uzun basarak yer ekleyebilirsin.")
-            }
-            val maxResponseBytes = minOf(512_000, 9_000_000 - budget.currentBytes(now))
-            budget = budget.startRequest(now, reservedBytes = maxResponseBytes)
-            check(preferences.edit().putString("overpass_budget", budget.toJson()).commit()) { "Harita sorgu sınırı kaydedilemedi." }
             val query = "[out:json][timeout:15][maxsize:16777216];nwr(around:100,$lat,$lon)[~\"^(amenity|shop|tourism|leisure|office|craft|historic)$\"~\".\"];out center tags qt;"
-            val request = readRequest(endpoint).post(FormBody.Builder().add("data", query).build()).build()
-            var downloaded = 0L
-            try {
-                client.newCall(request).execute().use { response ->
-                    val coolingDown = response.code == 429 || response.code == 406
-                    if (coolingDown) {
-                        budget = budget.withCooldown(System.currentTimeMillis(), retryAfterMillis(response) / 1_000)
-                        check(preferences.edit().putString("overpass_budget", budget.toJson()).commit()) { "Harita bekleme süresi kaydedilemedi." }
-                    }
-                    val json = readLimited(response, maxResponseBytes) { downloaded += it }
-                    if (coolingDown) throw OsmServiceException("Harita servisi beklememizi istiyor. Biraz sonra yeniden dokun.")
-                    if (!response.isSuccessful) throw OsmServiceException("Yakındaki yerler şu an alınamıyor (${response.code}).")
-                    val result = parseOverpassPlaces(json)
-                    storeCache(key, json)
-                    result
-                }
-            } finally {
-                // A killed process retains the reservation; completed attempts release only unused bytes.
-                budget = budget.finishResponse(maxResponseBytes, downloaded)
-                preferences.edit().putString("overpass_budget", budget.toJson()).commit()
-            }
+            val json = performOverpass(query)
+            val result = parseOverpassPlaces(json)
+            storeCache(key, json)
+            result
         }
     }
 
+    /** Roads and POIs use the same process lock, persisted query count and byte reservation. */
+    internal suspend fun roadNetwork(query: String): String = withContext(Dispatchers.IO) {
+        overpassLock.withLock { performOverpass(query) }
+    }
+
+    private fun performOverpass(query: String): String {
+        val now = System.currentTimeMillis()
+        var budget = OsmReadBudget.fromJson(preferences.getString("overpass_budget", null))
+        if (!budget.canRequest(now)) throw OsmServiceException("Harita sorgu sınırı veya servis bekleme süresi dolmadı.")
+        val maxResponseBytes = minOf(512_000, 9_000_000 - budget.currentBytes(now))
+        budget = budget.startRequest(now, reservedBytes = maxResponseBytes)
+        check(preferences.edit().putString("overpass_budget", budget.toJson()).commit()) { "Harita sorgu sınırı kaydedilemedi." }
+        val request = readRequest(settings.read().overpass).post(FormBody.Builder().add("data", query).build()).build()
+        var downloaded = 0L
+        try {
+            return client.newCall(request).execute().use { response ->
+                val coolingDown = response.code == 429 || response.code == 406
+                if (coolingDown) {
+                    budget = budget.withCooldown(System.currentTimeMillis(), retryAfterMillis(response) / 1_000)
+                    check(preferences.edit().putString("overpass_budget", budget.toJson()).commit()) { "Harita bekleme süresi kaydedilemedi." }
+                }
+                val json = readLimited(response, maxResponseBytes) { downloaded += it }
+                if (coolingDown) throw OsmServiceException("Harita servisi beklememizi istiyor.")
+                if (!response.isSuccessful) throw OsmServiceException("Harita verisi alınamadı (${response.code}).")
+                json
+            }
+        } finally {
+            budget = budget.finishResponse(maxResponseBytes, downloaded)
+            preferences.edit().putString("overpass_budget", budget.toJson()).commit()
+        }
+    }
     private fun cached(key: String, maxAge: Long, parse: (String) -> List<SelectedOsmPlace>): List<SelectedOsmPlace>? =
         readValidCachedPlaces(File(cacheDirectory, cacheKey(key)), System.currentTimeMillis(), maxAge, parse)
 

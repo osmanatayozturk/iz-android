@@ -5,6 +5,7 @@ import org.iz.navigation.navigation.prepareRouteStartStops
 import org.iz.navigation.weather.PlannedRoute
 import org.iz.navigation.weather.RouteStop
 import org.iz.navigation.weather.WeatherCoordinate
+import org.iz.navigation.weather.StopOrderProposal
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -27,8 +28,10 @@ internal data class PhoneDirectionsState(
     val message: String? = null,
     val startedCount: Long = 0,
     val recordJourney: Boolean = true,
+    val ordering: Boolean = false,
+    val orderProposal: StopOrderProposal? = null,
 ) {
-    val busy get() = previewing || starting
+    val busy get() = previewing || starting || ordering
     val stops get() = listOfNotNull(origin) + via + listOfNotNull(destination)
     val canPreview get() = destination != null && (origin != null || originCurrent) && !busy
 }
@@ -40,6 +43,9 @@ internal class PhoneDirectionsCoordinator(
     private val plan: suspend (List<RouteStop>, Transport) -> PlannedRoute,
     private val activate: suspend (PlannedRoute) -> Unit,
     private val activateWithRecording: suspend (PlannedRoute, Boolean) -> Unit = { route, _ -> activate(route) },
+    private val suggestOrder: suspend (List<RouteStop>, Long, Transport) -> StopOrderProposal? = { _, _, _ -> null },
+    private val credentialRevision: () -> String = { "" },
+    private val clock: () -> Long = System::currentTimeMillis,
 ) {
     private val mutableState = MutableStateFlow(PhoneDirectionsState())
     val state = mutableState.asStateFlow()
@@ -160,6 +166,40 @@ internal class PhoneDirectionsCoordinator(
         mutableState.update { it.copy(recordJourney = enabled) }
     }
 
+    fun suggestStopOrder(): Job? {
+        val before = state.value
+        if (before.busy || before.stops.size !in 4..5 || before.origin == null || before.destination == null ||
+            before.transport !in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE)) return null
+        val token = ++revision
+        mutableState.update { it.copy(ordering = true, orderProposal = null, message = null) }
+        return scope.launch(start = CoroutineStart.LAZY) {
+            try {
+                val proposal = suggestOrder(before.stops, clock(), before.transport)
+                if (token != revision) return@launch
+                mutableState.update { it.copy(orderProposal = proposal,
+                    message = if (proposal == null) "Daha hızlı bir durak sırası bulunamadı." else null) }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) { if (token == revision) reportError(error) }
+            finally { if (token == revision) mutableState.update { it.copy(ordering = false) } }
+        }.also { previewJob = it; it.start() }
+    }
+
+    fun acceptStopOrder() {
+        val before = state.value
+        val proposal = before.orderProposal ?: return
+        if (before.busy) return
+        if (proposal.originalStops != before.stops || proposal.credentialRevision != credentialRevision() ||
+            clock() - proposal.createdAt !in 0L..120_000L) {
+            mutableState.update { it.copy(orderProposal = null, message = "Öneri güncel değil. Yeniden hesapla.") }
+            return
+        }
+        invalidatePreview()
+        mutableState.update { it.copy(via = proposal.orderedStops.drop(1).dropLast(1),
+            message = "Durak sırası uygulandı. Rotayı önizleyebilirsin.") }
+    }
+
+    fun dismissStopOrder() { mutableState.update { it.copy(orderProposal = null) } }
+
     fun addVia(stop: RouteStop) {
         if (starting || state.value.via.size >= 3) return
         invalidatePreview()
@@ -179,7 +219,7 @@ internal class PhoneDirectionsCoordinator(
         revision++
         previewJob?.cancel()
         previewJob = null
-        mutableState.update { it.copy(preview = null, previewing = false) }
+        mutableState.update { it.copy(preview = null, previewing = false, ordering = false, orderProposal = null) }
     }
     private fun reportError(error: Exception) = reportMessage(error.message ?: "İşlem tamamlanamadı.")
     private fun currentStop(coordinate: WeatherCoordinate) = RouteStop("Mevcut konum", coordinate)
@@ -191,5 +231,4 @@ internal fun finishNavigationWork(directions: PhoneDirectionsCoordinator, work: 
     directions.showLiveRoute()
     work.mutate(finish)
 }
-
 

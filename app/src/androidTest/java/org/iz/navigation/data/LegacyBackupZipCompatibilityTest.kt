@@ -55,7 +55,7 @@ class LegacyBackupZipCompatibilityTest {
                 assertEquals(setOf("manifest.json", imported.photos.single().relativePath), entries)
                 val json = JSONObject(zip.getInputStream(zip.getEntry("manifest.json")).bufferedReader().use { it.readText() })
                 assertEquals("org.iz.navigation.backup", json.getString("format"))
-                assertEquals(5, json.getInt("version"))
+                assertEquals(6, json.getInt("version"))
                 for (key in listOf("healthSamples", "watchHealthSessions", "watchHealthSamples")) {
                     assertEquals(key, if (includeHealth) 1 else 0, json.getJSONArray(key).length())
                 }

@@ -85,6 +85,7 @@ object DiaryRules {
             "Adım sayısı yalnızca yürüyüş ve koşu için sıfır veya pozitif olabilir."
         }
         ids(snapshot.points.map { it.id })
+        PlaceOrderRules.validate(snapshot.places)
         val places = ids(snapshot.places.map { it.id })
         val visits = ids(snapshot.visits.map { it.id })
         val photos = ids(snapshot.photos.map { it.id })

@@ -15,7 +15,7 @@ class BackupV3Test {
         val review = ShareDraft(id = "review", visitId = visit.id, text = "Saved old review", rating = 4)
         val original = DiarySnapshot(places = listOf(legacy, osm), visits = listOf(visit), drafts = listOf(review), contributions = listOf(contribution))
         val json = BackupJson.encode(original)
-        assertEquals(5, json.getInt("version"))
+        assertEquals(6, json.getInt("version"))
         assertEquals(original, BackupJson.decode(JSONObject(json.toString())))
     }
 

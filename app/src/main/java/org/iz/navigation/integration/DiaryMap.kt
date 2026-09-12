@@ -92,7 +92,8 @@ private fun DiaryMapContent(
     val service = remember(context) { OsmPlaces(context) }
     val tileUrl = OsmServiceSettings(context).read().tileUrl
     val styleJson = remember(tileUrl) { mapStyle(tileUrl, listOf("routes", "places", "current", "osm-pois"), diaryLayers) }
-    val routes = remember(points) { splitRouteSegments(points) }
+    val recorded = rememberRecordedTrail(points)
+    val routes = recorded.trail.paths
     val pins = remember(places) { places.filter { validCoordinate(it.latitude, it.longitude) } }
     val coordinates = remember(routes, pins) { routes.flatten() + pins.map { GeoCoordinate(it.latitude!!, it.longitude!!) } }
     val dataset = remember(points, pins) { points.map { it.journeyId }.distinct().joinToString() + ":" + pins.joinToString { it.id } }
@@ -119,15 +120,15 @@ private fun DiaryMapContent(
         }
     }
     // Reframe on a different set of journeys/places, not on every recorded location update.
-    LaunchedEffect(map, dataset, coordinates.isEmpty()) {
-        if (!focusCurrentLocation) map?.let { frameCoordinates(it, coordinates, 80, 15.0) }
+    LaunchedEffect(map, dataset, recorded.journeyIds, coordinates.isEmpty()) {
+        // Pins are ready synchronously; wait for this journey's asynchronous trail before fitting
+        // them together. Later fixes in the same journey must not reset the user's camera.
+        val trailReady = points.isEmpty() || recorded.journeyIds.isNotEmpty()
+        if (!focusCurrentLocation && trailReady) map?.let { frameCoordinates(it, coordinates, 80, 15.0) }
     }
-    LaunchedEffect(map, routes, pins, overlayPlaces, location.coordinate, latestRoutePoint, followRecordedLocation) {
+    LaunchedEffect(map, recorded.json) { map?.updateGeoJson("routes", recorded.json) }
+    LaunchedEffect(map, pins, overlayPlaces, location.coordinate, latestRoutePoint, followRecordedLocation) {
         map?.let { current ->
-            current.updateGeoJson("routes", featureCollection(routes.filter { it.size > 1 }.map { line ->
-                JSONObject().put("type", "Feature").put("properties", JSONObject()).put("geometry", JSONObject()
-                    .put("type", "LineString").put("coordinates", JSONArray(line.map { listOf(it.longitude, it.latitude) })))
-            }))
             current.updateGeoJson("places", featureCollection(pins.map { place ->
                 pointFeature(place.latitude!!, place.longitude!!, JSONObject().put("placeId", place.id))
             }))
@@ -180,6 +181,7 @@ private fun DiaryMapContent(
                 true
             },
         )
+        RecordedSpeedLegend(recorded.trail, Modifier.align(Alignment.BottomStart).padding(start = 10.dp, bottom = 24.dp))
         if (loading) Surface(Modifier.align(Alignment.TopStart).padding(start = 12.dp, top = 64.dp), shape = MaterialTheme.shapes.small) {
             CircularProgressIndicator(Modifier.padding(10.dp).size(22.dp), strokeWidth = 2.dp)
         }
@@ -208,7 +210,7 @@ private fun DiaryMapContent(
 }
 
 private const val diaryLayers = """
- {"id":"journey-lines","type":"line","source":"routes","layout":{"line-cap":"round","line-join":"round"},"paint":{"line-color":"#2A6657","line-width":4}},
+ {"id":"journey-lines","type":"line","source":"routes","layout":{"line-cap":"round","line-join":"round"},"paint":{"line-color":["to-color",["get","color"]],"line-width":4}},
  {"id":"osm-poi-pins","type":"circle","source":"osm-pois","paint":{"circle-color":"#3989C9","circle-radius":7,"circle-stroke-color":"#FFFFFF","circle-stroke-width":2}},
  {"id":"private-place-pins","type":"circle","source":"places","paint":{"circle-color":"#2A6657","circle-radius":9,"circle-stroke-color":"#FFFFFF","circle-stroke-width":2}},
  {"id":"current-location","type":"circle","source":"current","paint":{"circle-color":"#1976D2","circle-radius":6,"circle-stroke-color":"#FFFFFF","circle-stroke-width":2}}
@@ -255,24 +257,5 @@ private fun rememberOpeningLocation(enabled: Boolean): OpeningLocation {
 }
 
 internal fun splitRouteSegments(points: List<TrackPoint>): List<List<GeoCoordinate>> {
-    val segments = mutableListOf<List<GeoCoordinate>>()
-    points.groupBy { it.journeyId }.values.forEach { journeyPoints ->
-        var current = mutableListOf<GeoCoordinate>()
-        var previous: TrackPoint? = null
-        fun finish() {
-            if (current.isNotEmpty()) segments += current.toList()
-            current = mutableListOf()
-            previous = null
-        }
-        journeyPoints.sortedBy { it.recordedAt }.forEach { point ->
-            if (!DiaryRules.isUsablePoint(point)) finish()
-            else {
-                if (point.breakBefore || previous?.let { !DiaryRules.connects(it, point) } == true) finish()
-                current += GeoCoordinate(point.latitude, point.longitude)
-                previous = point
-            }
-        }
-        finish()
-    }
-    return segments
+    return recordedPointPaths(points).map { path -> path.map { GeoCoordinate(it.latitude, it.longitude) } }
 }

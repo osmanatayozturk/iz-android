@@ -19,6 +19,8 @@ data class RouteVertex(val coordinate: WeatherCoordinate, val elapsedSeconds: Do
 
 enum class RouteProvider { VALHALLA, TOMTOM }
 
+data class RouteSpeedLimitSection(val beginShapeIndex: Int, val endShapeIndex: Int, val maxKmh: Double)
+
 data class RouteTrafficInfo(
     val fetchedAt: Long,
     val delaySeconds: Double,
@@ -45,6 +47,8 @@ data class PlannedRoute(
     val provider: RouteProvider = RouteProvider.VALHALLA,
     val traffic: RouteTrafficInfo? = null,
     val trafficUnavailableReason: String? = null,
+    val speedLimits: List<RouteSpeedLimitSection> = emptyList(),
+    val effectiveDepartureAt: Long? = null,
 ) {
     init {
         routeTravelSpeedKmh(transport, travelSpeedKmh)

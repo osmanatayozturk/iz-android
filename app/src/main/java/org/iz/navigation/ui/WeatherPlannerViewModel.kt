@@ -15,6 +15,11 @@ import org.iz.navigation.weather.RoutePlanner
 import org.iz.navigation.weather.RouteStop
 import org.iz.navigation.weather.SavedWeatherPlan
 import org.iz.navigation.weather.ValhallaRoutePlanner
+import org.iz.navigation.weather.VerifiedTomTomRoutePlanner
+import org.iz.navigation.weather.TrafficSettingsStore
+import org.iz.navigation.weather.RouteProvider
+import org.iz.navigation.weather.StopOrderProposal
+import org.iz.navigation.weather.ConfiguredStopOrderPlanner
 import org.iz.navigation.weather.WeatherAssessment
 import org.iz.navigation.weather.WeatherCoordinate
 import org.iz.navigation.weather.WeatherEngine
@@ -47,9 +52,16 @@ internal data class WeatherPlannerState(
     val error: String? = null,
     val activeJourneyId: String? = null,
     val originUsesCurrentLocation: Boolean = false,
+    val requestedDepartureAt: Long? = null,
+    val effectiveDepartureAt: Long? = null,
+    val selectedWeather: WeatherAssessment? = null,
+    val verifiedDepartures: Set<Long> = emptySet(),
+    val trafficFreeDeparture: Long? = null,
+    val ordering: Boolean = false,
+    val orderProposal: StopOrderProposal? = null,
 ) {
     val selectedAssessment: WeatherAssessment?
-        get() = comparisons.firstOrNull { it.departureAt == selectedDepartureAt }
+        get() = selectedWeather ?: comparisons.firstOrNull { it.departureAt == selectedDepartureAt }
     val canStart: Boolean
         get() = route?.transport == transport && route.vertices.size >= 2 && route.durationSeconds > 0 && !starting
 }
@@ -65,6 +77,17 @@ internal data class WeatherPlannerServices(
         { route, departure, forecasts, thresholds -> WeatherEngine.compare(route, departure, forecasts, thresholds) },
     val clock: () -> Long = System::currentTimeMillis,
     val startRoutePlanner: (RideWeatherSettings) -> RoutePlanner = routePlanner,
+    val verificationPlanner: (RideWeatherSettings) -> RoutePlanner = startRoutePlanner,
+    val trafficFreePlanner: (RideWeatherSettings) -> RoutePlanner = routePlanner,
+    val credentialRevision: () -> String = { "" },
+    val suggestOrder: suspend (List<RouteStop>, Long, Transport) -> StopOrderProposal? = { _, _, _ -> null },
+)
+
+internal data class WeatherDepartureBundle(
+    val route: PlannedRoute,
+    val forecasts: List<LocationForecast>,
+    val assessment: WeatherAssessment,
+    val calculatedAt: Long,
 )
 
 internal fun recommendedAssessment(values: List<WeatherAssessment>): WeatherAssessment? =
@@ -89,6 +112,29 @@ internal class WeatherPlannerCoordinator(
     )
     val state: StateFlow<WeatherPlannerState> = mutableState.asStateFlow()
     private var generation = 0L
+    private var selectionJob: Job? = null
+    private val candidates = mutableMapOf<Long, WeatherDepartureBundle>()
+    private var baseComparisons = emptyList<WeatherAssessment>()
+    private var credentialsRevision = services.credentialRevision()
+
+    private fun invalidateCandidates() {
+        selectionJob?.cancel()
+        selectionJob = null
+        candidates.clear()
+        baseComparisons = emptyList()
+        mutableState.value = mutableState.value.copy(requestedDepartureAt = null, effectiveDepartureAt = null,
+            selectedWeather = null, verifiedDepartures = emptySet(), trafficFreeDeparture = null,
+            ordering = false, orderProposal = null)
+        credentialsRevision = services.credentialRevision()
+    }
+
+    fun refreshCredentials() {
+        if (credentialsRevision == services.credentialRevision()) return
+        generation++
+        invalidateCandidates()
+        mutableState.value = mutableState.value.copy(route = null, forecasts = emptyList(), comparisons = emptyList(),
+            selectedDepartureAt = null, busy = false, error = null)
+    }
 
     fun setTransport(transport: Transport) {
         require(transport != Transport.UNKNOWN) { "Bir yolculuk türü seç." }
@@ -107,6 +153,7 @@ internal class WeatherPlannerCoordinator(
             error = null,
             activeJourneyId = null,
         )
+        invalidateCandidates()
     }
 
     fun setStops(stops: List<RouteStop>) {
@@ -126,6 +173,7 @@ internal class WeatherPlannerCoordinator(
             originUsesCurrentLocation = mutableState.value.originUsesCurrentLocation &&
                 stops.firstOrNull() == mutableState.value.stops.firstOrNull(),
         )
+        invalidateCandidates()
     }
 
     fun setCurrentOrigin(coordinate: WeatherCoordinate) {
@@ -166,6 +214,7 @@ internal class WeatherPlannerCoordinator(
             busy = false,
             error = null,
         )
+        invalidateCandidates()
     }
 
     fun departNow() {
@@ -181,12 +230,109 @@ internal class WeatherPlannerCoordinator(
             busy = false,
             error = null,
         )
+        invalidateCandidates()
     }
 
     fun selectDeparture(value: Long) {
-        if (mutableState.value.starting) return
-        if (mutableState.value.comparisons.any { it.departureAt == value }) {
-            mutableState.value = mutableState.value.copy(selectedDepartureAt = value)
+        verifyDeparture(value, trafficFree = false)
+    }
+
+    fun continueTrafficFree() {
+        mutableState.value.trafficFreeDeparture?.let { verifyDeparture(it, trafficFree = true) }
+    }
+
+    fun suggestStopOrder(): Job? {
+        refreshCredentials()
+        val snapshot = mutableState.value
+        if (snapshot.starting || snapshot.busy || snapshot.ordering || snapshot.stops.size !in 4..5 ||
+            snapshot.transport !in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE)) return null
+        val token = ++generation
+        val revision = services.credentialRevision()
+        mutableState.value = snapshot.copy(ordering = true, orderProposal = null, error = null)
+        return scope.launch {
+            try {
+                val proposal = services.suggestOrder(snapshot.stops,
+                    snapshot.selectedDepartureAt ?: if (snapshot.departureIsNow) services.clock() else snapshot.departureAt,
+                    snapshot.transport)
+                if (token == generation && revision == services.credentialRevision()) mutableState.value = mutableState.value.copy(
+                    orderProposal = proposal, error = if (proposal == null) "Daha hızlı bir durak sırası bulunamadı." else null)
+            } catch (cancelled: CancellationException) { refreshCredentials(); throw cancelled }
+            catch (error: Exception) { if (token == generation) mutableState.value = mutableState.value.copy(error = error.message) }
+            finally { if (token == generation) mutableState.value = mutableState.value.copy(ordering = false) }
+        }.also { selectionJob = it }
+    }
+
+    fun acceptStopOrder() {
+        refreshCredentials()
+        val snapshot = mutableState.value
+        val proposal = snapshot.orderProposal ?: return
+        if (snapshot.starting || snapshot.busy || snapshot.ordering) return
+        if (proposal.originalStops != snapshot.stops || proposal.credentialRevision != services.credentialRevision() ||
+            services.clock() - proposal.createdAt !in 0L..120_000L) {
+            mutableState.value = snapshot.copy(orderProposal = null, error = "Öneri güncel değil. Yeniden hesapla.")
+            return
+        }
+        setStops(proposal.orderedStops)
+        mutableState.value = mutableState.value.copy(error = "Durak sırası uygulandı. Kalkış seçeneklerini yeniden hesapla.")
+    }
+
+    fun dismissStopOrder() { mutableState.value = mutableState.value.copy(orderProposal = null) }
+
+    private fun commitDeparture(requestedAt: Long, bundle: WeatherDepartureBundle) {
+        candidates[requestedAt] = bundle
+        val comparisons = baseComparisons.map { approximate ->
+            candidates[approximate.departureAt]?.assessment?.copy(departureAt = approximate.departureAt) ?: approximate
+        }
+        mutableState.value = mutableState.value.copy(route = bundle.route, forecasts = bundle.forecasts,
+            selectedDepartureAt = requestedAt, effectiveDepartureAt = bundle.assessment.departureAt,
+            selectedWeather = bundle.assessment, comparisons = comparisons, requestedDepartureAt = null,
+            verifiedDepartures = candidates.filterValues { it.route.provider == RouteProvider.TOMTOM }.keys.toSet(),
+            trafficFreeDeparture = null, busy = false, error = null, orderProposal = null, ordering = false)
+    }
+
+    private fun verifyDeparture(value: Long, trafficFree: Boolean) {
+        refreshCredentials()
+        val snapshot = mutableState.value
+        if (snapshot.starting || snapshot.comparisons.none { it.departureAt == value }) return
+        selectionJob?.cancel()
+        val token = ++generation
+        val now = services.clock()
+        val cached = candidates[value]?.takeIf { now - it.calculatedAt in 0L..120_000L }
+        if (!trafficFree && cached != null) { commitDeparture(value, cached); return }
+        if (value < now) {
+            mutableState.value = snapshot.copy(error = "Bu kalkış saati geçti. Şimdi seçip yeniden hesapla.",
+                requestedDepartureAt = null, busy = false, ordering = false, orderProposal = null, trafficFreeDeparture = null)
+            return
+        }
+        val revision = services.credentialRevision()
+        mutableState.value = snapshot.copy(requestedDepartureAt = value, busy = true, error = null, trafficFreeDeparture = null,
+            orderProposal = null, ordering = false)
+        selectionJob = scope.launch {
+            try {
+                val motorized = snapshot.transport in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE)
+                val planner = if (trafficFree || !motorized) services.trafficFreePlanner(snapshot.settings)
+                    else services.verificationPlanner(snapshot.settings)
+                val route = planner.plan(snapshot.stops, value, snapshot.transport, snapshot.settings.travelSpeedKmh)
+                val calculatedAt = services.clock()
+                check(route.transport == snapshot.transport && (trafficFree || !motorized || route.provider == RouteProvider.TOMTOM))
+                val departure = route.effectiveDepartureAt ?: value
+                val coordinates = WeatherEngine.sampleVertices(route).map { it.coordinate }
+                val forecasts = services.weatherProvider(snapshot.settings).hourly(coordinates,
+                    (departure - 3_600_000L).coerceAtLeast(0L), departure + (route.durationSeconds * 1000).toLong() + 3_600_000L)
+                val assessment = WeatherEngine.assess(route, departure, forecasts, snapshot.settings.thresholds)
+                if (token != generation) return@launch
+                if (revision != services.credentialRevision()) { refreshCredentials(); return@launch }
+                commitDeparture(value, WeatherDepartureBundle(route, forecasts, assessment, calculatedAt))
+            } catch (cancelled: CancellationException) { refreshCredentials(); throw cancelled }
+            catch (_: Exception) {
+                if (revision != services.credentialRevision()) { refreshCredentials(); return@launch }
+                if (token == generation) mutableState.value = mutableState.value.copy(busy = false, requestedDepartureAt = null,
+                    trafficFreeDeparture = if (!trafficFree) value else null,
+                    error = "Seçilen saatin rota ve hava verisi alınamadı. Önceki seçim korunuyor.")
+            } finally {
+                if (token == generation && mutableState.value.requestedDepartureAt != null)
+                    mutableState.value = mutableState.value.copy(busy = false, requestedDepartureAt = null)
+            }
         }
     }
 
@@ -204,6 +350,7 @@ internal class WeatherPlannerCoordinator(
             busy = false,
             error = null,
         )
+        invalidateCandidates()
         true
     } catch (error: Exception) {
         mutableState.value = mutableState.value.copy(error = error.message ?: "Hava ayarları kaydedilemedi.")
@@ -223,6 +370,9 @@ internal class WeatherPlannerCoordinator(
     }
 
     fun calculate(): Job? {
+        refreshCredentials()
+        if (mutableState.value.starting) return null
+        invalidateCandidates()
         val snapshot = mutableState.value
         if (snapshot.starting) return null
         val now = services.clock()
@@ -242,19 +392,26 @@ internal class WeatherPlannerCoordinator(
                     mutableState.value = mutableState.value.copy(route = route, forecasts = emptyList(), comparisons = emptyList(), selectedDepartureAt = null)
                 }
                 if (token != generation) return@launch
+                if (credentialsRevision != services.credentialRevision()) { refreshCredentials(); return@launch }
                 services.savePlan(SavedWeatherPlan(snapshot.stops, departureAt, snapshot.transport))
-                val recommendation = recommendedAssessment(result.comparisons)
+                baseComparisons = result.comparisons
+                val first = result.comparisons.first()
+                candidates[first.departureAt] = WeatherDepartureBundle(result.route, result.forecasts, first, result.calculatedAt)
                 mutableState.value = mutableState.value.copy(
                     route = result.route,
                     forecasts = result.forecasts,
                     comparisons = result.comparisons,
-                    selectedDepartureAt = recommendation?.departureAt ?: result.comparisons.firstOrNull()?.departureAt,
+                    selectedDepartureAt = first.departureAt,
+                    effectiveDepartureAt = first.departureAt,
+                    selectedWeather = first,
+                    verifiedDepartures = if (result.route.provider == RouteProvider.TOMTOM) setOf(first.departureAt) else emptySet(),
                     busy = false,
                     error = if (result.comparisons.none { it.complete }) {
                         "Rotanın bazı bölümlerinde hava verisi eksik. Yolculuğu başlatabilirsin."
                     } else null,
                 )
             } catch (cancelled: CancellationException) {
+                refreshCredentials()
                 throw cancelled
             } catch (error: Exception) {
                 if (token == generation) mutableState.value = mutableState.value.copy(
@@ -266,6 +423,7 @@ internal class WeatherPlannerCoordinator(
     }
 
     fun startFromCurrentLocation(coordinate: WeatherCoordinate): Job? {
+        refreshCredentials()
         val snapshot = mutableState.value
         if (!snapshot.canStart || snapshot.stops.size !in 2..5) {
             mutableState.value = snapshot.copy(error = "Önce geçerli bir rota hesapla.")
@@ -276,8 +434,10 @@ internal class WeatherPlannerCoordinator(
             if (snapshot.originUsesCurrentLocation) it[0] = RouteStop("Mevcut konum", coordinate)
         }
         val freshStops = prepareRouteStartStops(userStops, coordinate)
+        invalidateCandidates()
         val token = ++generation
-        mutableState.value = snapshot.copy(starting = true, busy = false, error = null, activeJourneyId = null)
+        mutableState.value = snapshot.copy(starting = true, busy = false, error = null, activeJourneyId = null,
+            ordering = false, orderProposal = null, requestedDepartureAt = null, trafficFreeDeparture = null)
         return scope.launch {
             try {
                 val route = services.startRoutePlanner(snapshot.settings).plan(
@@ -299,6 +459,10 @@ internal class WeatherPlannerCoordinator(
                     forecasts = emptyList(),
                     comparisons = emptyList(),
                     selectedDepartureAt = now,
+                    effectiveDepartureAt = route.effectiveDepartureAt ?: now,
+                    selectedWeather = null,
+                    requestedDepartureAt = null,
+                    verifiedDepartures = emptySet(),
                     starting = false,
                     busy = false,
                     activeJourneyId = journeyId,
@@ -329,24 +493,27 @@ internal class WeatherPlannerCoordinator(
         onRoute: (PlannedRoute) -> Unit = {},
     ): LoadedWeatherPlan {
         val route = services.routePlanner(settings).plan(stops, departureAt, transport, settings.travelSpeedKmh)
+        val calculatedAt = services.clock()
         check(route.transport == transport) { "Rota seçili yolculuk türüyle eşleşmedi." }
         onRoute(route)
         val coordinates = WeatherEngine.sampleVertices(route).map { it.coordinate }
-        val until = departureAt + (route.durationSeconds * 1_000.0).toLong() + 4L * 60L * 60L * 1_000L
+        val effectiveDeparture = route.effectiveDepartureAt ?: departureAt
+        val until = effectiveDeparture + (route.durationSeconds * 1_000.0).toLong() + 4L * 60L * 60L * 1_000L
         val forecasts = services.weatherProvider(settings).hourly(
             coordinates,
-            (departureAt - 60L * 60L * 1_000L).coerceAtLeast(0L),
+            (effectiveDeparture - 60L * 60L * 1_000L).coerceAtLeast(0L),
             until,
         )
-        val comparisons = services.compare(route, departureAt, forecasts, settings.thresholds)
+        val comparisons = services.compare(route, effectiveDeparture, forecasts, settings.thresholds)
         check(comparisons.size == 7) { "Yedi kalkış seçeneği hesaplanamadı." }
-        return LoadedWeatherPlan(route, forecasts, comparisons)
+        return LoadedWeatherPlan(route, forecasts, comparisons, calculatedAt)
     }
 
     private data class LoadedWeatherPlan(
         val route: PlannedRoute,
         val forecasts: List<LocationForecast>,
         val comparisons: List<WeatherAssessment>,
+        val calculatedAt: Long,
     )
 }
 
@@ -365,13 +532,17 @@ internal class WeatherPlannerViewModel(application: Application) : AndroidViewMo
         scope = viewModelScope,
         initialPlan = planStore.read(),
         services = WeatherPlannerServices(
-            routePlanner = { settings -> ValhallaRoutePlanner(application, settings.routeEndpoint) },
+            routePlanner = { ConfiguredRoutePlanner(application) },
             weatherProvider = { settings -> OpenMeteoWeatherProvider(application, settings.weatherEndpoint) },
             readSettings = settingsStore::read,
             saveSettings = settingsStore::save,
             savePlan = planStore::save,
             activate = manager::activateGuidance,
             startRoutePlanner = { ConfiguredRoutePlanner(application) },
+            verificationPlanner = { VerifiedTomTomRoutePlanner(application) },
+            trafficFreePlanner = { settings -> ValhallaRoutePlanner(application, settings.routeEndpoint) },
+            credentialRevision = { TrafficSettingsStore(application).read().revision },
+            suggestOrder = ConfiguredStopOrderPlanner(application)::propose,
         ),
     )
     val state: StateFlow<WeatherPlannerState> = coordinator.state
@@ -386,6 +557,11 @@ internal class WeatherPlannerViewModel(application: Application) : AndroidViewMo
     fun setDeparture(value: Long) = coordinator.setDeparture(value)
     fun departNow() = coordinator.departNow()
     fun selectDeparture(value: Long) = coordinator.selectDeparture(value)
+    fun continueTrafficFree() = coordinator.continueTrafficFree()
+    fun refreshCredentials() = coordinator.refreshCredentials()
+    fun suggestStopOrder() = coordinator.suggestStopOrder()
+    fun acceptStopOrder() = coordinator.acceptStopOrder()
+    fun dismissStopOrder() = coordinator.dismissStopOrder()
     fun calculate() = coordinator.calculate()
     fun startFromCurrentLocation(value: WeatherCoordinate) = coordinator.startFromCurrentLocation(value)
     fun saveSettings(value: RideWeatherSettings) = coordinator.saveSettings(value).also { saved -> if (saved) manager.preferencesChanged() }

@@ -108,7 +108,7 @@ private fun WeatherRouteMapContent(
         mapStyle(tileUrl, listOf(ROUTE_SOURCE, STOP_SOURCE, SAMPLE_SOURCE, RECORDED_SOURCE, FIX_SOURCE), """
             {"id":"weather-route-casing","type":"line","source":"$ROUTE_SOURCE","paint":{"line-color":"#FFFFFF","line-width":9,"line-opacity":0.9}},
             {"id":"weather-route-layer","type":"line","source":"$ROUTE_SOURCE","paint":{"line-color":"#28604D","line-width":5,"line-opacity":0.95}},
-            {"id":"directions-recorded-layer","type":"line","source":"$RECORDED_SOURCE","layout":{"line-cap":"round","line-join":"round"},"paint":{"line-color":"#CE6A23","line-width":4,"line-opacity":0.95}},
+            {"id":"directions-recorded-layer","type":"line","source":"$RECORDED_SOURCE","layout":{"line-cap":"round","line-join":"round"},"paint":{"line-color":["to-color",["get","color"]],"line-width":4,"line-opacity":0.95}},
             {"id":"$SAMPLE_LAYER","type":"circle","source":"$SAMPLE_SOURCE","paint":{"circle-color":["case",["get","complete"],["case",["get","hazard"],"#AD5D3E","#28604D"],"#6E7C73"],"circle-stroke-color":"#F7F7F2","circle-stroke-width":2,"circle-radius":8}},
             {"id":"weather-stops-layer","type":"circle","source":"$STOP_SOURCE","paint":{"circle-color":"#FFFFFF","circle-stroke-color":"#66746D","circle-stroke-width":1,"circle-radius":4}},
             {"id":"directions-fix-halo","type":"circle","source":"$FIX_SOURCE","paint":{"circle-color":"#1976D2","circle-opacity":0.15,"circle-radius":15}},
@@ -139,9 +139,10 @@ private fun WeatherRouteMapContent(
         route?.vertices.orEmpty().map { GeoCoordinate(it.coordinate.latitude, it.coordinate.longitude) } +
             stops.map { GeoCoordinate(it.coordinate.latitude, it.coordinate.longitude) }
     }
+    val recorded = rememberRecordedTrail(recordedPoints)
     val fix = liveCoordinate?.let { GeoCoordinate(it.latitude, it.longitude) }
     val coordinates = if (routeCoordinates.isNotEmpty()) routeCoordinates else
-        splitRouteSegments(recordedPoints).flatten() + listOfNotNull(fix)
+        recorded.trail.paths.flatten() + listOfNotNull(fix)
     // A live session supplies stable identity: rerouting moves its origin but must keep user pan.
     // Explicit previews use route id so newly requested geometry is framed again.
     val dataset = routeMapCameraIdentity(cameraIdentity ?: route?.id, stops)
@@ -152,10 +153,12 @@ private fun WeatherRouteMapContent(
         target.updateGeoJson(ROUTE_SOURCE, routeGeoJson(route.takeIf { showRoute }))
         target.updateGeoJson(STOP_SOURCE, routeStopsGeoJson(stops, singleStopLabel))
         target.updateGeoJson(SAMPLE_SOURCE, sampleGeoJson(assessment?.samples.orEmpty()))
-        target.updateGeoJson(RECORDED_SOURCE, recordedRouteGeoJson(recordedPoints.takeIf { showTrail }.orEmpty()))
         target.updateGeoJson(FIX_SOURCE, featureCollection(listOfNotNull(fix?.let {
             pointFeature(it.latitude, it.longitude, JSONObject().put("stale", gpsStale))
         })))
+    }
+    val updateTrail by rememberUpdatedState<(MapLibreMap) -> Unit> { target ->
+        target.updateGeoJson(RECORDED_SOURCE, if (showTrail) recorded.json else "{\"type\":\"FeatureCollection\",\"features\":[]}")
     }
     val frameRoute by rememberUpdatedState<(MapLibreMap) -> Unit> { target ->
         frameCoordinates(target, coordinates, cameraPadding, 15.0)
@@ -175,6 +178,7 @@ private fun WeatherRouteMapContent(
             onReady = { ready ->
                 map = ready
                 update(ready)
+                updateTrail(ready)
                 projectStops(ready)
             },
             onClick = { target, coordinate ->
@@ -246,11 +250,10 @@ private fun WeatherRouteMapContent(
                     }, modifier = Modifier.testTag("directions-recenter")) { Text(if (following) "Konum izleniyor" else "Konumum") }
                 }
             }
-            if (recordedPoints.isNotEmpty() || fix != null) Surface(shape = MaterialTheme.shapes.small,
-                color = MaterialTheme.colorScheme.surface.copy(alpha = .94f)) {
-                Text("Yeşil: rota · Turuncu: kayıt · Mavi: konum", Modifier.padding(7.dp), style = MaterialTheme.typography.labelSmall)
-            }
+            if (showTrail) RecordedSpeedLegend(recorded.trail)
         }
+        if (navigationLayout && showTrail) RecordedSpeedLegend(recorded.trail,
+            Modifier.align(Alignment.BottomStart).padding(start = 12.dp, bottom = attributionBottomInset + 28.dp))
     }
     DisposableEffect(map, stops, members) {
         val target = map
@@ -274,7 +277,8 @@ private fun WeatherRouteMapContent(
         target?.addOnCameraMoveStartedListener(listener)
         onDispose { target?.removeOnCameraMoveStartedListener(listener) }
     }
-    LaunchedEffect(route, stops, assessment, recordedPoints, liveCoordinate, gpsStale, singleStopLabel, showRoute, showTrail, map) { map?.let { update(it) } }
+    LaunchedEffect(map, recorded.json, showTrail) { map?.let { updateTrail(it) } }
+    LaunchedEffect(route, stops, assessment, liveCoordinate, gpsStale, singleStopLabel, showRoute, map) { map?.let { update(it) } }
     LaunchedEffect(map, dataset, routeCoordinates, coordinates.isNotEmpty(), cameraPadding) {
         map?.let { target ->
             if (cameraPolicy.shouldFrame(dataset, coordinates.isNotEmpty(), cameraPadding)) {
@@ -328,13 +332,7 @@ internal fun routeStopsGeoJson(stops: List<RouteStop>, singleStopLabel: String =
         JSONObject().put("marker", routeStopMarkerLabel(index, stops.size, singleStopLabel))) },
 )
 
-internal fun recordedRouteGeoJson(points: List<TrackPoint>): String = featureCollection(
-    splitRouteSegments(points).filter { it.size >= 2 }.map { line ->
-        JSONObject().put("type", "Feature").put("properties", JSONObject())
-            .put("geometry", JSONObject().put("type", "LineString")
-                .put("coordinates", JSONArray(line.map { listOf(it.longitude, it.latitude) })))
-    },
-)
+internal fun recordedRouteGeoJson(points: List<TrackPoint>): String = recordedSpeedTrail(points).geoJson()
 
 internal fun routeGeoJson(route: PlannedRoute?): String {
     val coordinates = JSONArray()
@@ -348,7 +346,4 @@ internal fun sampleGeoJson(samples: List<RouteWeatherSample>): String = featureC
     samples.mapIndexed { index, sample -> pointFeature(sample.coordinate.latitude, sample.coordinate.longitude,
         JSONObject().put("sampleIndex", index).put("complete", sample.complete).put("hazard", sample.hazards.isNotEmpty())) },
 )
-
-
-
 

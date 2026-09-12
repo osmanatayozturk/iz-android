@@ -47,7 +47,7 @@ class TomTomRoutePlanner internal constructor(
         callTimeout(30, TimeUnit.SECONDS)
     }.build())
 
-    constructor(apiKey: String, ensureAuthorized: () -> Unit = {}) : this(apiKey, ENDPOINT, defaultWeatherHttpClient(), System::currentTimeMillis, sharedGate, ensureAuthorized)
+    constructor(apiKey: String, ensureAuthorized: () -> Unit = {}) : this(apiKey, ENDPOINT, defaultWeatherHttpClient(), System::currentTimeMillis, sharedTrafficRequestGate, ensureAuthorized)
 
     override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport, travelSpeedKmh: Double?): PlannedRoute = withContext(Dispatchers.IO) {
         require(stops.size in 2..6)
@@ -60,10 +60,13 @@ class TomTomRoutePlanner internal constructor(
         require(apiKey.isNotBlank() && apiKey.length <= 256)
         try {
             gate.request(clock, ensureAuthorized) {
+                val requestDeparture = if (departureAt <= clock()) clock() else departureAt
+                val leaveNow = departureAt <= clock()
                 val locations = stops.joinToString(":") { "${it.coordinate.latitude},${it.coordinate.longitude}" }
                 val url = endpoint.newBuilder().addPathSegment(locations).addPathSegment("json")
                     .addQueryParameter("key", apiKey)
                     .addQueryParameter("traffic", "true")
+                    .addQueryParameter("sectionType", "speedLimit")
                     .addQueryParameter("travelMode", mode)
                     .addQueryParameter("routeType", "fastest")
                     .addQueryParameter("routeRepresentation", "polyline")
@@ -73,7 +76,7 @@ class TomTomRoutePlanner internal constructor(
                     .addQueryParameter("maxAlternatives", "0")
                     .addQueryParameter("instructionsType", "text")
                     .addQueryParameter("language", "tr-TR")
-                    .addQueryParameter("departAt", if (departureAt <= clock() + 60_000L) "now" else Instant.ofEpochMilli(departureAt).toString())
+                    .addQueryParameter("departAt", if (leaveNow) "now" else Instant.ofEpochMilli(departureAt).toString())
                     .build()
                 val request = weatherRequest(url.toString()).header("Cache-Control", "no-store").build()
                 // A key may have been removed while this request waited for the shared gate.
@@ -86,7 +89,7 @@ class TomTomRoutePlanner internal constructor(
                 }
                 if (!response.successful) throw RouteServiceException("TomTom trafik servisi kullanılamıyor; trafiksiz rota kullanılacak.")
                 coroutineContext.ensureActive()
-                parseTomTomRoute(response.body, stops, transport, clock())
+                parseTomTomRoute(response.body, stops, transport, clock(), requestDeparture)
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -102,9 +105,10 @@ class TomTomRoutePlanner internal constructor(
     private companion object {
         const val ENDPOINT = "https://api.tomtom.com/routing/1/calculateRoute/"
         const val MAX_RESPONSE_BYTES = 2_000_000
-        val sharedGate = TrafficRequestGate()
     }
 }
+
+internal val sharedTrafficRequestGate = TrafficRequestGate()
 
 /** Process-wide pacing and Retry-After; no coordinates, keys or routes are persisted. */
 internal class TrafficRequestGate {
@@ -135,7 +139,7 @@ private data class TrafficTimeAnchor(val offset: Double, val seconds: Double)
 private data class TrafficInstruction(val json: JSONObject, val offset: Double, val routeOffset: Double, val seconds: Double, val coordinate: WeatherCoordinate)
 private data class TimedTrafficPoint(val point: TrafficShapePoint, val seconds: Double)
 
-private fun parseTomTomRoute(json: String, stops: List<RouteStop>, transport: Transport, now: Long): PlannedRoute {
+private fun parseTomTomRoute(json: String, stops: List<RouteStop>, transport: Transport, now: Long, requestDeparture: Long): PlannedRoute {
     val routes = JSONObject(json).getJSONArray("routes")
     require(routes.length() in 1..6)
     val route = routes.getJSONObject(0)
@@ -264,9 +268,29 @@ private fun parseTomTomRoute(json: String, stops: List<RouteStop>, transport: Tr
             roundaboutExit = value.optInt("roundaboutExitNumber").takeIf { it in 1..100 },
         )
     }
+    // Section indices refer to the provider's original joined shape, before inserted guidance points.
+    // Discard malformed optional metadata without losing otherwise valid navigation geometry.
+    val sections = route.optJSONArray("sections")
+    val speedLimits = (0 until minOf(sections?.length() ?: 0, 10_000)).mapNotNull { index ->
+        runCatching {
+            val section = sections!!.getJSONObject(index)
+            if (section.optString("sectionType") != "SPEED_LIMIT") return@runCatching null
+            val start = section.getInt("startPointIndex")
+            val end = section.getInt("endPointIndex")
+            val speed = section.getDouble("maxSpeedLimitInKmh")
+            if (section.getDouble("startPointIndex") != start.toDouble() || section.getDouble("endPointIndex") != end.toDouble()) return@runCatching null
+            if (start !in geometry.indices || end !in geometry.indices || start >= end || !speed.isFinite() || speed <= 0.0) return@runCatching null
+            val mappedStart = timedShape.indexOfFirst { it.point == geometry[start] }
+            val mappedEnd = timedShape.indexOfFirst { it.point == geometry[end] }
+            if (mappedStart < 0 || mappedEnd <= mappedStart) null else RouteSpeedLimitSection(mappedStart, mappedEnd, speed)
+        }.getOrNull()
+    }
+    val effectiveDeparture = runCatching { Instant.parse(summary.getString("departureTime")).toEpochMilli() }
+        .getOrNull()?.takeIf { it >= 0L } ?: requestDeparture
     return PlannedRoute(UUID.randomUUID().toString(), stops, vertices, distance, duration, now, stopTimes, transport,
         maneuvers = maneuvers, provider = RouteProvider.TOMTOM,
-        traffic = RouteTrafficInfo(now, delay, noTraffic, experimental = transport == Transport.MOTORCYCLE))
+        traffic = RouteTrafficInfo(now, delay, noTraffic, experimental = transport == Transport.MOTORCYCLE),
+        speedLimits = speedLimits, effectiveDepartureAt = effectiveDeparture)
 }
 
 private fun JSONObject.coordinate() = WeatherCoordinate(getDouble("latitude"), getDouble("longitude"))

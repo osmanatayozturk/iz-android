@@ -41,4 +41,5 @@ data class NavigationState(
     val sessionTransport: org.iz.navigation.data.Transport? = null,
     val sharingLocation: Boolean = false,
     val locationActive: Boolean = false,
+    val roadSpeed: org.iz.navigation.speed.RoadSpeedState = org.iz.navigation.speed.RoadSpeedState(),
 )

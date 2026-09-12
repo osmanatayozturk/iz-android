@@ -31,6 +31,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.iz.navigation.ui.IzTheme
 import org.iz.navigation.data.TrackPoint
+import org.iz.navigation.data.Place
 import org.iz.navigation.weather.PlannedRoute
 import org.iz.navigation.weather.RouteStop
 import org.iz.navigation.weather.RouteVertex
@@ -54,6 +55,35 @@ import kotlin.math.roundToInt
 @RunWith(AndroidJUnit4::class)
 class DirectionsMarkerRenderTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test fun historyFramesEntireAsyncTrailAlongsideItsVisitPin() {
+        val start = WeatherCoordinate(41.0, 29.0)
+        val end = WeatherCoordinate(41.0, 29.04)
+        val points = listOf(
+            TrackPoint(journeyId = "history", latitude = start.latitude, longitude = start.longitude,
+                recordedAt = 0, accuracy = 5f, speed = 0f),
+            TrackPoint(journeyId = "history", latitude = end.latitude, longitude = end.longitude,
+                recordedAt = 120_000, accuracy = 5f, speed = 20f))
+        var activity: Activity? = null
+        compose.setContent {
+            val context = LocalContext.current
+            SideEffect { activity = context.activity() }
+            IzTheme { DiaryMap(points, listOf(Place(id = "visit", name = "Başlangıç",
+                latitude = start.latitude, longitude = start.longitude)), Modifier.fillMaxSize(), expandable = false) }
+        }
+        val (view, map) = readyMap { activity }
+        waitForSourceAt(map, "routes", end)
+        compose.waitUntil(5_000) {
+            var fits = false
+            compose.runOnIdle {
+                fits = listOf(start, end).all {
+                    val p = map.projection.toScreenLocation(LatLng(it.latitude, it.longitude))
+                    p.x >= 10 && p.y >= 10 && p.x <= view.width - 10 && p.y <= view.height - 10
+                }
+            }
+            fits
+        }
+    }
 
     @Test fun editedEndpointsMoveBadgesWithinTheSameMountedMap() {
         val original = listOf(RouteStop("A", WeatherCoordinate(39.9208, 32.8541)),
@@ -353,5 +383,4 @@ class DirectionsMarkerRenderTest {
         return count
     }
 }
-
 

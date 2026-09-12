@@ -9,6 +9,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -29,7 +30,10 @@ fun TrafficSettingsDialog(onDismiss: () -> Unit) {
     var current by remember { mutableStateOf(TrafficSettings()) }
     var enabled by remember { mutableStateOf(false) }
     var acknowledged by remember { mutableStateOf(false) }
-    // Never rememberSaveable: the key must not enter saved-instance state or backups.
+    var verified by remember { mutableStateOf(false) }
+    var matrix by remember { mutableStateOf(false) }
+    var speed by remember { mutableStateOf(false) }
+    // The key must never enter saved instance state or backups.
     var key by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -37,60 +41,89 @@ fun TrafficSettingsDialog(onDismiss: () -> Unit) {
         current = withContext(Dispatchers.IO) { store.read() }
         enabled = current.enabled
         acknowledged = current.freePlanAcknowledged
+        verified = current.freeAccountVerified
+        matrix = current.matrixEnabled
+        speed = current.speedFallbackEnabled
         busy = false
     }
     AlertDialog(
         onDismissRequest = { if (!busy) { key = ""; onDismiss() } },
         properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
-        title = { Text("Trafik ayarları") },
+        title = { Text("Trafik ve hız sınırı") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("TomTom ile otomobil ve yolcu rotalarında trafik hesaba katılır. Motosiklet yönlendirmesi beta; bazı bölgelerde kısıtlama bilgisi eksik olabilir.")
-                Text("Yürüyüş, koşu, bisiklet ve yedi hareket saati karşılaştırması Valhalla ile trafiksiz hesaplanır.")
-                Text("Trafik açıkken başlangıç, varış ve ara rota noktaları TomTom’a gönderilir.")
+                Text("TomTom otomobil ve yolcu rotalarında trafiği hesaba katar. Motosiklet yönlendirmesi beta; bölgesel kısıtlama bilgisi eksik olabilir.")
+                Text("Hareket saati seçenekleri bir temel rotadan yaklaşık hesaplanır. Seçtiğin saatin rotası ayrıca doğrulanır. Yürüyüş, koşu ve bisiklet Valhalla kullanır.")
                 TextButton(onClick = { uriHandler.openUri("https://docs.tomtom.com/pricing") }) { Text("Ücretsiz plan ve güncel sınırlar") }
-                TextButton(onClick = { uriHandler.openUri("https://my.tomtom.com/") }) { Text("TomTom hesabı ve anahtarlar") }
+                TextButton(onClick = { uriHandler.openUri("https://my.tomtom.com/") }) { Text("TomTom hesabı ve API erişimi") }
                 TextButton(onClick = { uriHandler.openUri("https://docs.tomtom.com/legal/terms-and-conditions") }) { Text("TomTom kullanım koşulları") }
                 OutlinedTextField(
-                    value = key, onValueChange = { key = it.take(256) }, enabled = !busy,
+                    value = key, onValueChange = {
+                        key = it.take(256)
+                        if (it.isNotBlank()) { verified = false; matrix = false; speed = false }
+                    }, enabled = !busy,
                     label = { Text(if (current.hasKey) "Yeni kişisel anahtar (isteğe bağlı)" else "Kişisel TomTom API anahtarı") },
-                    supportingText = { Text(if (current.hasKey) "Anahtar güvenli biçimde kayıtlı. Boş bırakırsan korunur." else "Anahtar bu cihazda şifrelenir ve yedeklemeye katılmaz.") },
+                    supportingText = { Text(if (current.hasKey) "Kayıtlı anahtar korunur; yeniden girmen gerekmez." else "Anahtar cihazda şifrelenir ve yedeklenmez.") },
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
                     singleLine = true, modifier = Modifier.fillMaxWidth(),
                 )
                 Row(Modifier.fillMaxWidth()) {
-                    Checkbox(acknowledged, { acknowledged = it }, enabled = !busy)
-                    Text("TomTom hesabımda ücretsiz planı ve kullanım sınırlarını kontrol ettim; ücretli kullanımı etkinleştirmedim. Yalnızca ücretsiz kullanım istiyorum.", Modifier.weight(1f))
+                    Checkbox(acknowledged, {
+                        acknowledged = it
+                        if (!it) { enabled = false; verified = false; matrix = false; speed = false }
+                    }, enabled = !busy)
+                    Text("Hesabımda ücretsiz planı ve sınırları kontrol ettim; ücretli kullanımı etkinleştirmedim. Yalnızca ücretsiz kullanım istiyorum.", Modifier.weight(1f))
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Trafiği kullan", Modifier.weight(1f))
-                    Switch(enabled, { enabled = it }, enabled = !busy)
+                    Switch(enabled, { enabled = it }, enabled = !busy && acknowledged)
                 }
-                Text("İz hesap veya ödeme ayarlarını değiştirmez. Anahtar yoksa, kota dolarsa ya da servis yanıt vermezse nedenini gösterip trafiksiz rotaya döner.")
+                Text("Yeni özellikler için hesap doğrulaması", style = MaterialTheme.typography.titleSmall)
+                Row(Modifier.fillMaxWidth()) {
+                    Checkbox(verified, {
+                        verified = it
+                        if (!it) { matrix = false; speed = false }
+                    }, enabled = !busy && acknowledged && (key.isNotBlank() || current.hasKey),
+                        modifier = Modifier.testTag("traffic-free-capabilities-verified"))
+                    Text("Etkinleştireceğim API'lerin hesabımın ücretsiz kotasında olduğunu, ücretli bakiye veya otomatik yükleme bulunmadığını doğruladım.", Modifier.weight(1f))
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Durak sırası önerisi · Matrix", Modifier.weight(1f))
+                    Switch(matrix, { matrix = it }, enabled = !busy && verified,
+                        modifier = Modifier.testTag("traffic-matrix-enabled"))
+                }
+                Text("Öneri düğmesine bastığında duraklar TomTom'a gönderilir. Motosiklet sıralaması otomobil yaklaşımıyla bulunur; sonuç motosiklet rotasıyla karşılaştırılır.")
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("OSM eksikse TomTom hız sınırı", Modifier.weight(1f))
+                    Switch(speed, { speed = it }, enabled = !busy && verified,
+                        modifier = Modifier.testTag("traffic-speed-fallback-enabled"))
+                }
+                Text("Otomobil ve motosiklette önce OSM kullanılır. Yol güvenle eşleşir ama etiket yoksa konum ve yön TomTom'a gönderilebilir. Serbest sürüş sonucu genel yol sınırı olarak gösterilir. Belirsiz veya koşullu sınırlar boş kalır.")
+                Text("İz hesap ve ödeme ayarlarını değiştirmez. Kotalar hesap genelindedir; cihazdaki sorgu sınırlaması ücret garantisi değildir. Servis sınırında ek istekler durur ve bulunamayan hız sınırı — görünür.")
                 if (current.hasKey) TextButton(enabled = !busy, onClick = {
                     busy = true
                     scope.launch {
                         try {
                             withContext(Dispatchers.IO) { store.clear() }
-                            key = ""; enabled = false; acknowledged = false
-                            current = TrafficSettings()
-                            error = null
+                            key = ""; enabled = false; acknowledged = false; verified = false; matrix = false; speed = false
+                            current = TrafficSettings(); error = null
                         } catch (_: Exception) { error = "Anahtar silinemedi." }
                         finally { busy = false }
                     }
-                }) { Text("Anahtarı sil ve trafiği kapat") }
+                }) { Text("Anahtarı sil ve TomTom'u kapat") }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
         },
         confirmButton = {
-            TextButton(enabled = !busy && (!enabled || acknowledged && (key.isNotBlank() || current.hasKey)), onClick = {
+            TextButton(enabled = !busy && (!(enabled || matrix || speed) || acknowledged && (key.isNotBlank() || current.hasKey)), onClick = {
                 busy = true
                 scope.launch {
                     try {
-                        withContext(Dispatchers.IO) { store.save(key.takeIf { it.isNotBlank() }, enabled, acknowledged) }
-                        key = ""
-                        onDismiss()
+                        withContext(Dispatchers.IO) {
+                            store.save(key.takeIf { it.isNotBlank() }, enabled, acknowledged, verified, matrix, speed)
+                        }
+                        key = ""; onDismiss()
                     } catch (_: Exception) { error = "Ayarlar kaydedilemedi. Anahtarı ve ücretsiz kullanım onayını kontrol et." }
                     finally { busy = false }
                 }

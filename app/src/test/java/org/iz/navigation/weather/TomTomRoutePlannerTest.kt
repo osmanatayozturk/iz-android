@@ -11,6 +11,35 @@ import org.junit.Test
 import java.util.concurrent.TimeUnit
 
 class TomTomRoutePlannerTest {
+    @Test fun legalSpeedSectionsFollowInsertedShapePointsAndResponseDeparture() = runBlocking {
+        MockWebServer().use { server ->
+            val json = JSONObject(tomTomFixture())
+            val response = json.getJSONArray("routes").getJSONObject(0)
+            response.getJSONObject("summary").put("departureTime", "2026-09-12T12:00:00+03:00")
+            response.getJSONObject("guidance").getJSONArray("instructions").getJSONObject(1)
+                .put("routeOffsetInMeters", 166.5).put("pointIndex", 1)
+                .put("point", JSONObject().put("latitude", 0).put("longitude", .0015))
+            response.put("sections", org.json.JSONArray("""[
+                {"sectionType":"SPEED_LIMIT","startPointIndex":2,"endPointIndex":4,"maxSpeedLimitInKmh":90},
+                {"sectionType":"SPEED_LIMIT","startPointIndex":99,"endPointIndex":100,"maxSpeedLimitInKmh":50},
+                {"sectionType":"SPEED_LIMIT","startPointIndex":0,"endPointIndex":4,"maxSpeedLimitInKmh":0}]
+            """))
+            server.enqueue(MockResponse().setBody(json.toString()))
+            val route = planner(server).plan(trafficStops(), 1L, Transport.MOTORCYCLE)
+            assertEquals(listOf(RouteSpeedLimitSection(3, 5, 90.0)), route.speedLimits)
+            assertEquals(.002, route.vertices[route.speedLimits.single().beginShapeIndex].coordinate.longitude, 0.0)
+            assertEquals(java.time.Instant.parse("2026-09-12T09:00:00Z").toEpochMilli(), route.effectiveDepartureAt)
+        }
+    }
+
+    @Test fun missingOptionalSpeedMetadataKeepsRouteAndActualRequestDeparture() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setBody(tomTomFixture()))
+            val route = planner(server).plan(trafficStops(), 1L, Transport.CAR)
+            assertTrue(route.speedLimits.isEmpty())
+            assertEquals(500_000L, route.effectiveDepartureAt)
+        }
+    }
     @Test fun geometryInstructionOffsetsAndTrafficShareTheSameRoute() = runBlocking {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setBody(tomTomFixture()))
@@ -33,6 +62,7 @@ class TomTomRoutePlannerTest {
             assertEquals("text", url.queryParameter("instructionsType"))
             assertEquals("polyline", url.queryParameter("routeRepresentation"))
             assertEquals("car", url.queryParameter("travelMode"))
+            assertEquals("speedLimit", url.queryParameter("sectionType"))
         }
     }
 

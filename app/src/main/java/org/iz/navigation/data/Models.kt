@@ -55,6 +55,7 @@ data class Place(
     val osmType: OsmType? = null,
     val osmId: Long? = null,
     @ColumnInfo(defaultValue = "'LEGACY'") val source: PlaceSource = PlaceSource.LEGACY,
+    @ColumnInfo(defaultValue = "0") val sortOrder: Long = 0,
 )
 
 @Entity(tableName = "visits", foreignKeys = [

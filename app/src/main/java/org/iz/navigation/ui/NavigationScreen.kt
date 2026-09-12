@@ -82,7 +82,9 @@ internal class PhoneNavigationViewModel(application: Application) : AndroidViewM
         locate = { navigation.currentLocation().coordinate },
         plan = navigation::previewRoute,
         activate = { navigation.startGuidance(it) },
-        activateWithRecording = { route, record -> navigation.startGuidance(route, record) })
+        activateWithRecording = { route, record -> navigation.startGuidance(route, record) },
+        suggestOrder = ConfiguredStopOrderPlanner(application)::propose,
+        credentialRevision = { TrafficSettingsStore(application).read().revision })
     val ui = directions.state
     val permissionGate = DirectionsPermissionGate()
     val places = repository.places.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -264,6 +266,8 @@ internal fun NavigationScreen(
         permissions = { permissions.launch(permissionNames()) },
         showMap = false, recordJourney = vm.directions::setRecordJourney, stopRecording = vm::stopRecording,
         addVia = { addingVia = true; pickerOrigin = false; showSource = true }, removeVia = vm.directions::removeVia,
+        suggestStopOrder = { vm.directions.suggestStopOrder() }, acceptStopOrder = vm.directions::acceptStopOrder,
+        dismissStopOrder = vm.directions::dismissStopOrder,
         onPrepareGroup = { ui.preview?.let { app.groups.prepareRoute(it.stops, it.transport); onGroup() } },
     )
     }
@@ -312,7 +316,6 @@ internal fun NavigationScreen(
     }
     if (showTrafficSettings) TrafficSettingsDialog(onDismiss = { showTrafficSettings = false; vm.directions.showLiveRoute() })
 }
-
 
 
 

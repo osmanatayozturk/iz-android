@@ -103,6 +103,7 @@ private fun WeatherPlannerScreenContent(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by vm.state.collectAsStateWithLifecycle()
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) { vm.refreshCredentials() }
     val live by vm.liveState.collectAsStateWithLifecycle()
     val repository = remember(context) { DiaryRepository(context) }
     val places by repository.places.collectAsStateWithLifecycle(initialValue = emptyList())
@@ -116,6 +117,7 @@ private fun WeatherPlannerScreenContent(
     var showMapPicker by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var selectedSample by remember { mutableStateOf<org.iz.navigation.weather.RouteWeatherSample?>(null) }
+    LaunchedEffect(state.route?.id, state.effectiveDepartureAt) { selectedSample = null }
     var localError by remember { mutableStateOf<String?>(null) }
     var pendingLocationAction by remember { mutableStateOf<WeatherLocationAction?>(null) }
     var locationRequestVersion by remember { mutableIntStateOf(0) }
@@ -285,6 +287,10 @@ private fun WeatherPlannerScreenContent(
             departNow = vm::departNow,
             calculate = { vm.calculate() },
             selectDeparture = vm::selectDeparture,
+            continueTrafficFree = vm::continueTrafficFree,
+            suggestStopOrder = { vm.suggestStopOrder() },
+            acceptStopOrder = vm::acceptStopOrder,
+            dismissStopOrder = vm::dismissStopOrder,
             start = { requestLocation(WeatherLocationAction.START) },
             openSettings = { showSettings = true },
             refreshLive = { vm.refreshWeather() },
@@ -312,7 +318,7 @@ private fun WeatherPlannerScreenContent(
                 onSampleClick = { selectedSample = it },
                 overlay = {
                     state.route?.let { planned ->
-                        WeatherRouteTimingOverlay(planned, state.selectedDepartureAt ?: state.departureAt,
+                        WeatherRouteTimingOverlay(planned, state.effectiveDepartureAt ?: state.selectedDepartureAt ?: state.departureAt,
                             null,
                             Modifier.align(Alignment.TopStart).padding(top = 12.dp, start = 12.dp, end = 64.dp).widthIn(max = 360.dp))
                     }
@@ -403,7 +409,6 @@ internal fun WeatherStopSourceDialog(
     onMap: () -> Unit,
 ) {
     val located = places.filter { it.latitude != null && it.longitude != null }
-        .sortedBy { it.name.lowercase() }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Rota noktası seç") },

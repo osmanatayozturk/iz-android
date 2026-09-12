@@ -11,12 +11,26 @@ import com.google.android.gms.tasks.CancellationTokenSource
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.sync.withLock
+import org.iz.navigation.speed.*
 
 internal class AndroidNavigationRuntime(private val context: Context) : NavigationRuntime {
     private val repository = DiaryRepository(context)
     private val tracker = TrackingController(context)
     private val notifications = NavigationNotifications(context)
     private var demand: String? = null
+    private val trafficSettings = TrafficSettingsStore(context)
+    private val roadSpeeds = RoadSpeedMonitor(OsmRoadRepository(context)::nearby,
+        trafficSettings::credentials, TomTomReverseSpeedClient(trafficSettings::credentials))
+    private var speedSettingsGeneration = TrafficSettingsStore.changeGeneration
+    override val roadSpeedMonitoring = true
+    override fun roadSpeedState(state: NavigationState, now: Long): RoadSpeedState {
+        if (speedSettingsGeneration != TrafficSettingsStore.changeGeneration) {
+            speedSettingsGeneration = TrafficSettingsStore.changeGeneration
+            roadSpeeds.invalidateCredentials()
+        }
+        return roadSpeeds.observe(state, now)
+    }
+    override suspend fun refreshRoadSpeed() { roadSpeeds.refresh() }
     override val journeys = repository.journeys
     override suspend fun activeJourney() = repository.activeJourney()
     override suspend fun start(transport: Transport, stillCurrent: () -> Boolean) = tracker.startManual(transport, stillCurrent)

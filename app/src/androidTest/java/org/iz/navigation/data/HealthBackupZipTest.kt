@@ -45,7 +45,7 @@ class HealthBackupZipTest {
                     val manifest = zip.getEntry("manifest.json")
                     assertNotNull(manifest)
                     val json = JSONObject(zip.getInputStream(manifest).bufferedReader().use { it.readText() })
-                    assertEquals(5, json.getInt("version"))
+                    assertEquals(6, json.getInt("version"))
                     assertEquals(if (includeHealth) 1 else 0, json.getJSONArray("healthSamples").length())
                 }
 

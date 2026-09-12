@@ -58,4 +58,33 @@ class TrafficSettingsStoreTest {
         assertFalse(store.read().enabled)
         assertNull(store.credentials().apiKey)
     }
+
+    @Test fun newCapabilitiesDefaultOffAndRetainExistingEncryptedKeyWhenEnabled() {
+        store.save("fictional-personal-key", true, true)
+        assertFalse(store.read().matrixEnabled)
+        assertFalse(store.read().speedFallbackEnabled)
+        assertFalse(store.read().freeAccountVerified)
+        val oldRevision = store.read().revision
+        store.saveCapabilities(true, true, true)
+        assertEquals("fictional-personal-key", store.credentials().apiKey)
+        assertTrue(store.read().enabled)
+        assertTrue(store.read().matrixEnabled)
+        assertTrue(store.read().speedFallbackEnabled)
+        assertNotEquals(oldRevision, store.read().revision)
+        store.save(enabled = false, freePlanAcknowledged = true)
+        assertTrue(store.read().matrixEnabled)
+        assertTrue(store.read().speedFallbackEnabled)
+        store.save("different-fictional-key", enabled = false, freePlanAcknowledged = true)
+        assertFalse(store.read().freeAccountVerified)
+        assertFalse(store.read().matrixEnabled)
+        assertFalse(store.read().speedFallbackEnabled)
+    }
+
+    @Test fun advancedServicesCannotBypassFreeAccountVerification() {
+        store.save("fictional-personal-key", true, true)
+        assertThrows(IllegalArgumentException::class.java) { store.saveCapabilities(false, true, false) }
+        assertThrows(IllegalArgumentException::class.java) { store.saveCapabilities(false, false, true) }
+        assertEquals("fictional-personal-key", store.credentials().apiKey)
+        assertFalse(store.read().matrixEnabled)
+    }
 }

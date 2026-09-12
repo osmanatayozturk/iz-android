@@ -14,6 +14,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.iz.navigation.data.GeoCoordinate
@@ -21,6 +24,7 @@ import org.iz.navigation.data.TrackPoint
 import org.iz.navigation.integration.RouteMapMember
 import org.iz.navigation.integration.WeatherRouteMap
 import org.iz.navigation.navigation.NavigationState
+import org.iz.navigation.speed.roadSpeedPresentation
 import kotlin.math.roundToInt
 
 /** Only the visible cards accept gestures. The map has no scroll or sheet parent. */
@@ -48,8 +52,14 @@ internal fun NavigationHomeContent(
     val route = presentation.route
     val current = presentation.coordinate
     val density = LocalDensity.current
+    val textMeasurer = rememberTextMeasurer()
     var searchHeight by remember { mutableStateOf(80.dp) }
     BoxWithConstraints(Modifier.fillMaxSize().testTag("navigation-home")) {
+        val compact = maxHeight < 640.dp
+        val attributionWidth = with(density) {
+            textMeasurer.measure("© OpenStreetMap contributors", style = MaterialTheme.typography.labelSmall).size.width.toDp()
+        } + 20.dp
+        val compactWeatherWidth = (maxWidth - 24.dp - attributionWidth - 8.dp).coerceAtLeast(48.dp)
         WeatherRouteMap(route = route, assessment = null, modifier = Modifier.fillMaxSize().testTag("navigation-home-map"),
             expandable = false, stops = presentation.stops, liveCoordinate = current,
             recordedPoints = presentation.trail, gpsStale = live && nav.gpsStale,
@@ -82,6 +92,9 @@ internal fun NavigationHomeContent(
                             Icon(if (nav.muted) Icons.Outlined.VolumeOff else Icons.Outlined.VolumeUp,
                                 if (nav.muted) "Sesi aç" else "Sesi kapat")
                         }
+                        if (compact) TextButton(onFinish,
+                            modifier = Modifier.height(40.dp).testTag("home-finish-session").semantics { contentDescription = "Yolculuğu bitir" },
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) { Text("Bitir") }
                     }
                     if (nav.guidance) {
                         nav.progress?.nextManeuverDistanceMeters?.let { meters ->
@@ -96,7 +109,14 @@ internal fun NavigationHomeContent(
                         style = MaterialTheme.typography.bodySmall)
                     if (!nav.locationActive && !nav.simulation) Text("Konum bağlantısı kuruluyor", style = MaterialTheme.typography.bodySmall)
                     nav.message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-                    TextButton(onFinish, modifier = Modifier.align(Alignment.End).testTag("home-finish-session")) { Text("Yolculuğu bitir") }
+                    if (!compact) TextButton(onFinish, modifier = Modifier.align(Alignment.End).testTag("home-finish-session")) { Text("Yolculuğu bitir") }
+                }
+            }
+            if (!showPlanner && nav.roadSpeed.visible) {
+                val speed = roadSpeedPresentation(nav.roadSpeed)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.testTag("road-speed-panel")) {
+                    SpeedReadout("Hızım", speed.ownText, "GPS", Modifier.width(100.dp))
+                    SpeedReadout("Hız sınırı", speed.limitText, speed.sourceText, Modifier.widthIn(min = 128.dp, max = 200.dp))
                 }
             }
             if (!showPlanner && !live && current == null) AssistChip(onClick = onLocate,
@@ -106,9 +126,10 @@ internal fun NavigationHomeContent(
             if (!showPlanner && ui.message != null) Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surface) {
                 Text(ui.message, Modifier.padding(10.dp), style = MaterialTheme.typography.bodySmall)
             }
-            if (!showPlanner) AssistChip(onClick = onWeather, label = { Text(weatherLabel) },
+            if (!showPlanner) AssistChip(onClick = onWeather, label = { Text(weatherLabel, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 leadingIcon = { Icon(Icons.Outlined.Cloud, null, Modifier.size(18.dp)) },
-                modifier = Modifier.testTag("home-weather"),
+                modifier = (if (compact && live) Modifier.align(Alignment.End).widthIn(max = compactWeatherWidth) else Modifier)
+                    .testTag("home-weather"),
                 colors = AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.surface))
         }
         if (showPlanner) Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(.64f).padding(bottom = 88.dp),
@@ -132,6 +153,17 @@ internal fun NavigationHomeContent(
     }
 }
 
-
-
+@Composable
+private fun SpeedReadout(label: String, value: String, source: String, modifier: Modifier) {
+    Surface(modifier, shape = RoundedCornerShape(16.dp), shadowElevation = 2.dp, color = MaterialTheme.colorScheme.surface) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Text(label, style = MaterialTheme.typography.labelMedium)
+            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(value, style = MaterialTheme.typography.headlineSmall)
+                Text("km/sa", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(bottom = 4.dp))
+            }
+            Text(source, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
 

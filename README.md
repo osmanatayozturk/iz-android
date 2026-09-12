@@ -1,8 +1,8 @@
-# İz 0.8.2 - navigasyon ve yolculuk günlüğü
+# İz 0.9.0 - navigasyon ve yolculuk günlüğü
 
 Araba, motosiklet, bisiklet, yürüyüş, koşu ve yolcu için haritayla açılan Kotlin / Jetpack Compose uygulaması. Üstte **Nereye?**, yanda konum ve katmanlar, altta **Kaydet / Grup / Menü** bulunur. Yol tarifi günlük kaydı olmadan da çalışır; yeni başlangıçta **Yolculuğu kaydet** seçimi açıktır. Yolculuklar, ziyaretler, özel notlar ve fotoğraflar telefonda saklanır. Geçmiş, istatistikler, yerler, ısı haritası, OSM Topluluğu ve ayarlara Menüden ulaşılır.
 
-Bu depo İz'in kaynak kodunu yayımlar. Güncel sürümler telefon için **0.8.2 (code 14)**, Wear OS için **0.6.0 (code 10)**'dur. Hazır APK veya mağaza sürümü yayımlanmaz. [Kullanım kılavuzu](docs/IZ_080_KULLANIM.md) · [Grup sunucusu kurulumu](docs/GROUP_SETUP.md) · [Saat kartı ve kadran alanı](docs/WATCH_SURFACES.md).
+Bu depo İz'in kaynak kodunu yayımlar. Güncel sürümler telefon için **0.9.0 (code 15)**, Wear OS için **0.6.0 (code 10)**'dur. Hazır APK veya mağaza sürümü yayımlanmaz. [0.9.0 yenilikleri ve kullanım](docs/IZ_090_YENILIKLER.md) · [Kullanım kılavuzu](docs/IZ_080_KULLANIM.md) · [Grup sunucusu kurulumu](docs/GROUP_SETUP.md) · [Saat kartı ve kadran alanı](docs/WATCH_SURFACES.md).
 
 Supabase grup sunucusu ve TomTom trafik bağlantısı varsayılan kaynak yapılandırmasında etkin değildir. Bunlar sonradan yapılandırılabilir; temel harita, Valhalla tabanlı rota, Open-Meteo hava durumu, navigasyon ve yerel günlük kişisel anahtar olmadan çalışır. Grup arka ucu için [kurulum belgesine](docs/GROUP_SETUP.md) bakın.
 
@@ -73,11 +73,11 @@ Koşu telefon/saat menülerinde ve ısı haritasında ayrı bir moddur. Otomatik
 
 Yalnız Samsung Health kaynaklı, cihazı saat olarak belirtilmiş ölçümler alınır. Saat metadata'sı bilekte kalma süresini kanıtlamaz. İlk erişilebilen 30 gündeki ve yeni onaylanmış yolculuklar eşleştirilir. Ölçümler gecikebilir; Samsung Health tüm yolculuklar için kalori üretmeyebilir. Toplam kalori aktif kalori değildir; aralıklar oranlanmaz, boşluklar doldurulmaz. Telefon/saat adımları ayrı gösterilir. İz egzersiz başlatmaz veya sağlık kayıtlarına yazmaz.
 
-Yedek sürümü 5, sürüm 1–4'ü okur. Sağlık ölçümlerini yedeğe eklemek her dışa aktarımda varsayılan kapalıdır; eşitleme işaretçileri ve izinler yedeklenmez. Sağlık verileri OSM, GPX ve fotoğraf paylaşımına eklenmez. Aynı uygulama kimliğini kullanan önceki telefon/saat protokol sürümleriyle uyumluluk korunur; eski ve yeni uygulama kimliğine sahip karma telefon-saat çiftleri iletişim kurmaz.
+Yedek sürümü 6, sürüm 1–5'i okur. Sağlık ölçümlerini yedeğe eklemek her dışa aktarımda varsayılan kapalıdır; eşitleme işaretçileri ve izinler yedeklenmez. Sağlık verileri OSM, GPX ve fotoğraf paylaşımına eklenmez. Aynı uygulama kimliğini kullanan önceki telefon/saat protokol sürümleriyle uyumluluk korunur; eski ve yeni uygulama kimliğine sahip karma telefon-saat çiftleri iletişim kurmaz.
 
 ## Veri ve yedek
 
-Room sürüm 5: yolculuklar, rota noktaları, yerler, ziyaretler, fotoğraf bilgileri ve OSM katkı taslakları. Eski Google kimlikleri/puanları/taslakları arşiv uyumluluğu için korunur; aktif paylaşım akışında kullanılmaz. Fotoğraf kopyaları uygulamanın özel `files/photos/` klasöründedir. Analitik veya otomatik günlük yüklemesi yoktur. İsteğe bağlı grup özelliği ayrı Supabase sunucusunu kullanır; günlük, sağlık ve fotoğraflar gruba yüklenmez. Sunucuda grup üyeliği, ortak duraklar ve izin/zaman bilgileri tutulur; canlı koordinatlar yalnız paylaşım açıkken aktarılır ve geçmiş olarak saklanmaz. Harita alanları ve arama metinleri seçilen OSM servislerine gönderilir. OSM hesabı yalnızca kullanıcı bağlantı kurduğunda kullanılır.
+Room sürüm 6: yolculuklar, rota noktaları, yerler, ziyaretler, fotoğraf bilgileri ve OSM katkı taslakları. Eski Google kimlikleri/puanları/taslakları arşiv uyumluluğu için korunur; aktif paylaşım akışında kullanılmaz. Fotoğraf kopyaları uygulamanın özel `files/photos/` klasöründedir. Analitik veya otomatik günlük yüklemesi yoktur. İsteğe bağlı grup özelliği ayrı Supabase sunucusunu kullanır; günlük, sağlık ve fotoğraflar gruba yüklenmez. Sunucuda grup üyeliği, ortak duraklar ve izin/zaman bilgileri tutulur; canlı koordinatlar yalnız paylaşım açıkken aktarılır ve geçmiş olarak saklanmaz. Harita alanları ve arama metinleri seçilen OSM servislerine gönderilir. OSM hesabı yalnızca kullanıcı bağlantı kurduğunda kullanılır.
 
 Android otomatik bulut yedeği ve cihaz transferi uygulama verileri için kapalıdır. Ayarlar'dan sürümlü ZIP dosyasına manuel yedek alınabilir. Yedek özel konumları ve fotoğrafları içerir; uygulamayı kaldırmadan önce güvenli bir yere kaydedin. Geçici rotalar yedeğe alınmaz. Geri yükleme dosyayı doğruladıktan sonra mevcut günlüğü değiştirir; açık yolculuklar bitmiş/kesilmiş olarak içeri alınır ve takip kendiliğinden başlatılmaz.
 
@@ -106,7 +106,7 @@ Ana harita güncel konumu, planlama sırasında önizlenen güzergâhı ve aktif
 
 Yolculuk ayrıntısında mesafe, toplam süre, ortalama hız, en yüksek ölçülen aralık hızı, hareketli ortalama hız, hareket süresi, ölçülen duraklama ve GPS ölçüm süresi bulunur. GPS boşlukları duraklama sayılmaz. Ortalama hız mesafeyi toplam süreye böler; eksik GPS varsa eksik mesafe tamamlanmış gibi gösterilmez.
 
-Yürüyüş adımları telefonun donanım sayacından (yoksa adım algılama sensöründen) alınır. Fiziksel aktivite izni veya sensör yoksa adım sayısı tahmin edilmez. İlk sayaç ölçümü başlangıç referansıdır; kayıt öncesindeki adımlar ve gözlenmeyen aralıklar eklenmez. Eski kayıtlara geriye dönük adım hesaplanmaz. 0.8.1 günlük veritabanını ve yedek veri biçimini değiştirmez: Room sürüm 5, yedek sürüm 5; yedek sürümleri 1–4 okunabilir. Geri yüklenen yarım kalmış OSM gönderimleri kontrol bekleyen duruma dönüşür; otomatik yayımlanmaz.
+Yürüyüş adımları telefonun donanım sayacından (yoksa adım algılama sensöründen) alınır. Fiziksel aktivite izni veya sensör yoksa adım sayısı tahmin edilmez. İlk sayaç ölçümü başlangıç referansıdır; kayıt öncesindeki adımlar ve gözlenmeyen aralıklar eklenmez. Eski kayıtlara geriye dönük adım hesaplanmaz. 0.9.0 kalıcı yer sırası için Room sürüm 6 ve yedek sürüm 6 kullanır; yedek sürümleri 1–5 okunabilir. Geri yüklenen yarım kalmış OSM gönderimleri kontrol bekleyen duruma dönüşür; otomatik yayımlanmaz.
 
 Tamamlanmış kalıcı yolculukların ayrıntısından **GPX rotasını dışa aktar** seçilir. Önizlemede başlangıç/bitiş kısaltılır ve Android dosya seçicisiyle GPX 1.1 kaydedilir. GPS boşlukları ayrı rota bölümleridir; özel başlık/not/fotoğraflar eklenmez ve dosya otomatik OSM’ye yüklenmez.
 

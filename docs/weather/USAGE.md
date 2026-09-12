@@ -1,10 +1,10 @@
-# İz 0.8.1 · Yolculuk havası
+# İz 0.9.0 · Yolculuk havası
 
 Harita ekranındaki **Yolculuk havası** düğmesi rota planını ve rota üzerindeki tahmini hava koşullarını açar. Araba, motosiklet, bisiklet, yürüyüş, koşu ve yolcu için kullanılabilir. Açık bir yolculuk varsa ekran ilk açılışta onun türünü seçer; başka bir türün planını da hazırlayabilirsin.
 
 1. **Yolculuk türü** bölümünden altı türden birini seç. Türü değiştirince başlangıç, hedef ve kalkış zamanı korunur; rota ve hava sonuçları yeniden hesaplanmalıdır.
 2. Başlangıç ve hedef seç. İstersen üç ara durak ekle; arama, kayıtlı yerler veya haritadan seçim kullanılabilir.
-3. Kalkış saatini seç ve rotanın havasını hesapla. Uygulama, seçtiğin saatle sonraki üç saatteki yarım saatlik seçenekleri aynı rota üzerinde karşılaştırır.
+3. Kalkış saatini seç ve rotanın havasını hesapla. Trafik açıksa uygun araç türlerinde TomTom kullanılır. Bir temel rotadan yedi yaklaşık hava seçeneği çıkarılır; dokunduğun başka kalkış için rota ve hava birlikte yeniden hesaplanır. Hava önerisi otomatik seçilmez. [Matrix durak sırası ve yeni planlama kuralları](../IZ_090_YENILIKLER.md).
 4. Haritadaki hava noktaları, o noktaya tahmini varış saatindeki tahmini gösterir. Yağış yüzdesi, rota örneklerindeki en yüksek olasılıktır. Haritaya dokunarak tam ekran açabilir, haritayı kapatmadan kaydırıp yakınlaştırabilirsin; nokta bilgileri ve seçimler açılır pencerelerde gösterilir.
 5. **[Seçilen tür] yolculuğunu şimdi başlat**, güncel konumunu alır ve şimdi başlayacağın yolculuk için rotayı yeniden hesaplar. Aynı türde mevcut ve onaylanmış bir kayda bağlanır; açık kayıt yoksa seçtiğin türde yeni kayıt başlatır. Başka türde açık bir kayıt varsa ona farklı türün planını bağlamaz.
 6. Canlı kartta yolculuk türü, kalan mesafe, varış saati ve hava durumu görünür. Hava takibini durdurmak, yolculuk günlüğünün GPS kaydını bitirmez. Başka tür için plan hazırlarken o türün rota önizlemesi gösterilir; açık yolculuğun canlı kartında kendi türü yazmaya devam eder.
@@ -47,9 +47,9 @@ Telefonla bağlantılı Wear OS kartı bütün desteklenen yolculuk türlerinde 
 
 ## Veri ve servisler
 
-Plan, türe özel tercihler ve hava önbelleği telefonda ayrı saklanır. Hesaplanan rota çizgisi günlüğe GPS noktası olarak yazılmaz. Günlüğün Room 5 ve yedek 5 biçimleri korunur; hava planı mevcut günlük yedeğine eklenmez.
+Plan, türe özel tercihler ve hava önbelleği telefonda ayrı saklanır. Hesaplanan rota çizgisi günlüğe GPS noktası olarak yazılmaz. Günlüğün Room 6 ve yedek 6 biçimleri kalıcı yer sırasını içerir; hava planı mevcut günlük yedeğine eklenmez.
 
-Rota hesaplanırken seçilen duraklar [Valhalla](https://valhalla.github.io/valhalla/api/route/api-reference/) servisine, hava alınırken örnek konumlar [Open-Meteo](https://open-meteo.com/en/docs) servisine gönderilir. Yol verisi © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright). Varsayılan servisler kişisel kullanım için seçilmiştir; ileri ayarlarda her türün HTTPS servis adresleri değiştirilebilir. [Open-Meteo kullanım koşulları](https://open-meteo.com/en/pricing) ticari kullanım için farklıdır.
+Rota hesaplanırken seçilen duraklar etkin sağlayıcıya (uygun araçlarda TomTom veya [Valhalla](https://valhalla.github.io/valhalla/api/route/api-reference/)), hava alınırken örnek konumlar [Open-Meteo](https://open-meteo.com/en/docs) servisine gönderilir. Yol verisi © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright). Varsayılan servisler kişisel kullanım için seçilmiştir; ileri ayarlarda her türün HTTPS servis adresleri değiştirilebilir. [Open-Meteo kullanım koşulları](https://open-meteo.com/en/pricing) ticari kullanım için farklıdır.
 
 Rota süreleri tahmindir. Yağış ve rüzgâr hamlesinin saatlik aralık anlamı korunur; eksik hava alanları sıfır kabul edilmez. Kalkış önerisi, verisi tam olan seçeneklerde eşik aşılan tahmini süreyi karşılaştırır.
 

@@ -56,6 +56,9 @@ internal fun PhoneDirectionsContent(
     addVia: () -> Unit = {},
     removeVia: (Int) -> Unit = {},
     onPrepareGroup: (() -> Unit)? = null,
+    suggestStopOrder: () -> Unit = {},
+    acceptStopOrder: () -> Unit = {},
+    dismissStopOrder: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
     val shownRoute = ui.preview ?: nav.route
@@ -178,6 +181,17 @@ internal fun PhoneDirectionsContent(
             }
             Text("Önizleme oturum başlatmaz. Başlat, seçtiğin kayıt tercihiyle sesli yönlendirmeyi açar.", style = MaterialTheme.typography.bodySmall)
         }
+        if (ui.origin != null && ui.destination != null && ui.stops.size in 4..5 && ui.transport in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE)) item {
+            OutlinedButton(suggestStopOrder, enabled = !ui.busy && !locked,
+                modifier = Modifier.testTag("directions-matrix-order")) {
+                Text(if (ui.ordering) "Durak sırası hesaplanıyor…" else "Daha hızlı durak sırası öner")
+            }
+            if (ui.transport == Transport.MOTORCYCLE) Text("Matrix sıra önerisi otomobil tahminidir; motosiklet rotasıyla doğrulanır.",
+                style = MaterialTheme.typography.bodySmall)
+        }
+        ui.orderProposal?.let { proposal -> item {
+            StopOrderProposalCard(proposal, !ui.busy && !locked, acceptStopOrder, dismissStopOrder)
+        } }
         shownRoute?.let { route -> item {
             Card(Modifier.fillMaxWidth().testTag("directions-route-summary")) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -274,8 +288,9 @@ internal fun RouteTimingText(route: PlannedRoute, nav: NavigationState?, preview
     }
     val seconds = nav?.progress?.remainingSeconds ?: route.durationSeconds
     val meters = nav?.progress?.remainingMeters ?: route.distanceMeters
+    val departure = if (preview) route.effectiveDepartureAt ?: route.createdAt else now
     val arrival = if (nav?.gpsStale == true) "—" else SimpleDateFormat("HH:mm", Locale.forLanguageTag("tr-TR"))
-        .format(Date(now + (seconds * 1000).toLong()))
+        .format(Date(departure + (seconds * 1000).toLong()))
     val minutes = ceil(seconds / 60).toInt().coerceAtLeast(0)
     Text("${if (preview) "Önizleme" else "Kalan"} · ${String.format(Locale.forLanguageTag("tr-TR"), "%.1f", meters / 1000)} km · $minutes dk",
         style = MaterialTheme.typography.titleSmall)
@@ -301,6 +316,3 @@ internal fun RouteTrafficText(route: PlannedRoute) {
         route.trafficUnavailableReason?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
     }
 }
-
-
-

@@ -37,7 +37,7 @@ internal interface DiaryDao {
     @Query("SELECT * FROM journeys ORDER BY startedAt DESC") fun journeys(): Flow<List<Journey>>
     @Query("SELECT * FROM track_points ORDER BY recordedAt") fun points(): Flow<List<TrackPoint>>
     @Query("SELECT * FROM track_points WHERE journeyId = :id ORDER BY recordedAt") fun observeJourneyPoints(id: String): Flow<List<TrackPoint>>
-    @Query("SELECT * FROM places ORDER BY name COLLATE NOCASE") fun places(): Flow<List<Place>>
+    @Query("SELECT * FROM places ORDER BY sortOrder, name COLLATE NOCASE, id") fun places(): Flow<List<Place>>
     @Query("SELECT * FROM visits ORDER BY visitedAt DESC") fun visits(): Flow<List<Visit>>
     @Query("SELECT * FROM photos ORDER BY takenAt DESC") fun photos(): Flow<List<Photo>>
     @Query("SELECT * FROM share_drafts") fun drafts(): Flow<List<ShareDraft>>
@@ -49,7 +49,9 @@ internal interface DiaryDao {
     @Query("SELECT * FROM journeys ORDER BY startedAt DESC") suspend fun allJourneys(): List<Journey>
     @Query("SELECT * FROM track_points ORDER BY recordedAt") suspend fun allPoints(): List<TrackPoint>
     @Query("SELECT * FROM track_points WHERE journeyId = :id ORDER BY recordedAt") suspend fun journeyPoints(id: String): List<TrackPoint>
-    @Query("SELECT * FROM places") suspend fun allPlaces(): List<Place>
+    @Query("SELECT * FROM places ORDER BY sortOrder, name COLLATE NOCASE, id") suspend fun allPlaces(): List<Place>
+    @Query("SELECT * FROM places WHERE id = :id") suspend fun place(id: String): Place?
+    @Query("UPDATE places SET sortOrder = :position WHERE id = :id") suspend fun setPlaceOrder(id: String, position: Long)
     @Query("SELECT * FROM visits") suspend fun allVisits(): List<Visit>
     @Query("SELECT * FROM photos") suspend fun allPhotos(): List<Photo>
     @Query("SELECT * FROM share_drafts") suspend fun allDrafts(): List<ShareDraft>
@@ -95,7 +97,7 @@ internal interface DiaryDao {
 
 @Database(entities = [Journey::class, TrackPoint::class, Place::class, Visit::class, Photo::class, ShareDraft::class, ContributionDraft::class,
     JourneyHealthSample::class, JourneyHealthSync::class, MapEditDraft::class,
-    WatchHealthSession::class, WatchHealthSample::class], version = 5, exportSchema = true)
+    WatchHealthSession::class, WatchHealthSample::class], version = 6, exportSchema = true)
 @TypeConverters(DiaryConverters::class)
 internal abstract class DiaryDatabase : RoomDatabase() {
     abstract fun diaryDao(): DiaryDao
@@ -103,6 +105,16 @@ internal abstract class DiaryDatabase : RoomDatabase() {
     abstract fun watchHealthDao(): WatchHealthDao
 
     companion object {
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE places ADD COLUMN sortOrder INTEGER NOT NULL DEFAULT 0")
+                val ids = mutableListOf<String>()
+                db.query("SELECT p.id FROM places p LEFT JOIN visits v ON v.placeId = p.id GROUP BY p.id ORDER BY COALESCE(MAX(v.visitedAt),0) DESC, p.name COLLATE NOCASE, p.id").use { cursor ->
+                    while (cursor.moveToNext()) ids += cursor.getString(0)
+                }
+                ids.forEachIndexed { index, id -> db.execSQL("UPDATE places SET sortOrder = ? WHERE id = ?", arrayOf(index.toLong(), id)) }
+            }
+        }
         val MIGRATION_4_5 = object : Migration(4, 5) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(CREATE_MAP_EDIT_DRAFTS_SQL)
@@ -165,7 +177,7 @@ internal abstract class DiaryDatabase : RoomDatabase() {
         @Volatile private var instance: DiaryDatabase? = null
         fun get(context: Context): DiaryDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, DiaryDatabase::class.java, "iz-diary.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .build().also { instance = it }
         }
     }

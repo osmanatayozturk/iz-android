@@ -9,7 +9,9 @@ import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.view.Gravity
 import android.view.Surface
+import android.view.View
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.car.app.CarContext
 import androidx.car.app.SurfaceCallback
@@ -18,6 +20,8 @@ import org.iz.navigation.data.TrackPoint
 import org.iz.navigation.integration.*
 import org.iz.navigation.navigation.NavigationState
 import org.iz.navigation.weather.PlannedRoute
+import org.iz.navigation.speed.roadSpeedPresentation
+import kotlinx.coroutines.*
 import org.json.JSONArray
 import org.json.JSONObject
 import org.maplibre.android.camera.CameraPosition
@@ -37,6 +41,10 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
     private var map: MapLibreMap? = null
     private var surface: Surface? = null
     private var attribution: TextView? = null
+    private var speedPanel: LinearLayout? = null
+    private var ownSpeedLabel: TextView? = null
+    private var speedLimitLabel: TextView? = null
+    private var trailLegend: TextView? = null
     private var width = 0
     private var height = 0
     private var stable = Rect()
@@ -44,6 +52,12 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
     private var generation = 0
     private var state = NavigationState()
     private var points = emptyList<TrackPoint>()
+    private val renderScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var trailJob: Job? = null
+    private var trailRevision = 0L
+    private var trailIdentity: String? = null
+    private var recorded = RecordedTrailRender()
+    private var paintedTrail: String? = null
     private var preview: PlannedRoute? = null
     private var following = true
     private var active = true
@@ -83,7 +97,29 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
                 setPadding(8, 3, 8, 3)
                 setTextColor(Color.BLACK)
                 setBackgroundColor(0xeefafafa.toInt())
+                addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
+                    if (bottom - top != oldBottom - oldTop) displayOutput { applyPadding() }
+                }
             }.also { frame.addView(it, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.RIGHT)) }
+            speedPanel = LinearLayout(p.context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                visibility = View.GONE
+                fun valueLabel(): TextView = TextView(p.context).apply {
+                    textSize = 17f
+                    setPadding(12, 8, 12, 8)
+                    setTextColor(Color.BLACK)
+                    setBackgroundColor(0xeefafafa.toInt())
+                }
+                ownSpeedLabel = valueLabel().also { addView(it) }
+                speedLimitLabel = valueLabel().also { addView(it, LinearLayout.LayoutParams(-2, -2).apply { marginStart = 8 }) }
+            }.also { frame.addView(it, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.LEFT)) }
+            trailLegend = TextView(p.context).apply {
+                textSize = 11f
+                setPadding(8, 3, 8, 3)
+                setTextColor(Color.BLACK)
+                setBackgroundColor(0xeefafafa.toInt())
+                visibility = View.GONE
+            }.also { frame.addView(it, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.LEFT)) }
             p.setContentView(frame)
             p.show()
             mapView.onStart()
@@ -132,7 +168,23 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
 
     fun update(value: NavigationState, trail: List<TrackPoint>) {
         state = value
-        points = trail
+        val identity = value.journey?.id.takeIf { value.recording }
+        val selected = if (identity == null) emptyList() else trail.filter { it.journeyId == identity }
+        if (identity != trailIdentity || selected != points) {
+            if (identity != trailIdentity || selected.isEmpty()) recorded = RecordedTrailRender()
+            trailIdentity = identity
+            points = selected
+            val revision = ++trailRevision
+            trailJob?.cancel()
+            if (selected.isNotEmpty()) trailJob = renderScope.launch {
+                val ready = withContext(Dispatchers.Default) {
+                    val coroutine = currentCoroutineContext()
+                    val result = recordedSpeedTrail(selected) { coroutine.ensureActive() }
+                    RecordedTrailRender(result, result.geoJson(), setOfNotNull(identity))
+                }
+                if (revision == trailRevision) { recorded = ready; displayOutput { render() } }
+            }
+        }
         displayOutput { render() }
     }
 
@@ -158,15 +210,19 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
         val json = JSONObject(mapStyle(OsmServiceSettings(context).read().tileUrl,
             listOf("car-route", "car-trail", "car-fix"), """
             {"id":"route","type":"line","source":"car-route","paint":{"line-color":"#3377ee","line-width":7}},
-            {"id":"trail","type":"line","source":"car-trail","paint":{"line-color":"#f29b28","line-width":5}},
+            {"id":"trail","type":"line","source":"car-trail","layout":{"line-cap":"round","line-join":"round"},"paint":{"line-color":["to-color",["get","color"]],"line-width":5}},
             {"id":"fix","type":"circle","source":"car-fix","paint":{"circle-color":"#00cbaa","circle-radius":9,"circle-stroke-color":"#ffffff","circle-stroke-width":3}}
             """))
         if (dark) json.getJSONArray("layers").getJSONObject(0).put("paint", JSONObject()
             .put("raster-brightness-max", 0.35).put("raster-saturation", -0.6))
         attribution?.setTextColor(if (dark) Color.WHITE else Color.BLACK)
         attribution?.setBackgroundColor(if (dark) 0xee20252c.toInt() else 0xeefafafa.toInt())
+        listOfNotNull(ownSpeedLabel, speedLimitLabel, trailLegend).forEach {
+            it.setTextColor(if (dark) Color.WHITE else Color.BLACK)
+            it.setBackgroundColor(if (dark) 0xee20252c.toInt() else 0xeefafafa.toInt())
+        }
         current.setStyle(Style.Builder().fromJson(json.toString())) {
-            if (token == generation) displayOutput { applyPadding(); render(); framePreview() }
+            if (token == generation) displayOutput { paintedTrail = null; applyPadding(); render(); framePreview() }
         }
     }
 
@@ -176,9 +232,28 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
         if (!visible.isEmpty) safe.intersect(visible)
         map?.setPadding(safe.left, safe.top, width - safe.right, height - safe.bottom)
         attribution?.let { label ->
+            label.maxWidth = (safe.width() - 16).coerceAtLeast(1)
             label.layoutParams = (label.layoutParams as FrameLayout.LayoutParams).apply {
                 rightMargin = this@CarMapSurface.width - safe.right + 8
                 bottomMargin = this@CarMapSurface.height - safe.bottom + 8
+            }
+        }
+        speedPanel?.let { panel ->
+            val available = (safe.width() - 32).coerceAtLeast(1)
+            ownSpeedLabel?.maxWidth = (available * .3).toInt().coerceAtLeast(1)
+            speedLimitLabel?.maxWidth = (available * .7).toInt().coerceAtLeast(1)
+            panel.layoutParams = (panel.layoutParams as FrameLayout.LayoutParams).apply {
+                leftMargin = safe.left + 12; topMargin = safe.top + 12
+            }
+        }
+        trailLegend?.let { label ->
+            val attributionHeight = attribution?.let {
+                it.height.coerceAtLeast(it.lineHeight + it.paddingTop + it.paddingBottom)
+            } ?: 0
+            label.maxWidth = (safe.width() * .65).toInt().coerceAtLeast(1)
+            label.layoutParams = (label.layoutParams as FrameLayout.LayoutParams).apply {
+                leftMargin = safe.left + 8
+                bottomMargin = this@CarMapSurface.height - safe.bottom + attributionHeight + 16
             }
         }
     }
@@ -195,12 +270,16 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
         current.updateGeoJson("car-route", featureCollection(route?.vertices?.takeIf { it.size > 1 }?.let {
             listOf(line(it.map { vertex -> vertex.coordinate.latitude to vertex.coordinate.longitude }))
         } ?: emptyList()))
-        current.updateGeoJson("car-trail", featureCollection(activeTrailSegments(state.journey?.id, points)
-            .filter { it.size > 1 }.map { segment ->
-                val stride = (segment.size / 10_000).coerceAtLeast(1)
-                val sampled = segment.filterIndexed { index, _ -> index % stride == 0 || index == segment.lastIndex }
-                line(sampled.map { it.latitude to it.longitude })
-            }))
+        if (paintedTrail !== recorded.json) {
+            current.updateGeoJson("car-trail", recorded.json)
+            paintedTrail = recorded.json
+        }
+        speedPanel?.visibility = if (state.roadSpeed.visible && preview == null) View.VISIBLE else View.GONE
+        val speed = roadSpeedPresentation(state.roadSpeed)
+        ownSpeedLabel?.text = "Hızım\n${speed.ownText} km/sa"
+        speedLimitLabel?.text = "Hız sınırı\n${speed.limitText} km/sa\n${speed.sourceText}"
+        trailLegend?.text = (if (recorded.trail.scales.isNotEmpty()) "Mavi → Kırmızı\n" else "") + speedScaleLabel(recorded.trail)
+        trailLegend?.visibility = if (recorded.trail.lines.isEmpty()) View.GONE else View.VISIBLE
         val fix = state.fix
         current.updateGeoJson("car-fix", featureCollection(if (fix != null) listOf(
             pointFeature(fix.coordinate.latitude, fix.coordinate.longitude)) else emptyList()))
@@ -231,7 +310,9 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
         display = null
         surface = null
         attribution = null
+        speedPanel = null; ownSpeedLabel = null; speedLimitLabel = null; trailLegend = null
+        paintedTrail = null
     }
 
-    fun close() { release(); context.unregisterComponentCallbacks(memoryCallbacks) }
+    fun close() { trailJob?.cancel(); renderScope.cancel(); release(); context.unregisterComponentCallbacks(memoryCallbacks) }
 }

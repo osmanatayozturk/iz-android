@@ -19,7 +19,7 @@ class BackupV5Test {
         assertTrue(excluded.watchHealthSamples.isEmpty())
         assertEquals(MapEditStatus.UNKNOWN, excluded.mapEdits.single().status)
         val json = BackupJson.encode(snapshot(), includeHealth = true)
-        assertEquals(5, json.getInt("version"))
+        assertEquals(6, json.getInt("version"))
         val restored = BackupJson.decode(json)
         assertEquals(listOf(session.copy(acceptsUploads = false)), restored.watchHealthSessions)
         assertEquals(listOf(sample), restored.watchHealthSamples)

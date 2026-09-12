@@ -19,6 +19,9 @@ data class TrafficSettings(
     val hasKey: Boolean = false,
     val freePlanAcknowledged: Boolean = false,
     val revision: String = "empty",
+    val freeAccountVerified: Boolean = false,
+    val matrixEnabled: Boolean = false,
+    val speedFallbackEnabled: Boolean = false,
 )
 
 /** Not a data class: generated toString/copy must never accidentally disclose an API key. */
@@ -27,6 +30,9 @@ internal class TrafficCredentials(
     val enabled: Boolean,
     val freePlanAcknowledged: Boolean,
     val revision: String,
+    val freeAccountVerified: Boolean = false,
+    val matrixEnabled: Boolean = false,
+    val speedFallbackEnabled: Boolean = false,
 ) {
     override fun toString() = "TrafficCredentials(redacted)"
 }
@@ -37,7 +43,8 @@ class TrafficSettingsStore(context: Context) {
     private val file = AtomicFile(File(directory, "settings.bin"))
 
     fun read(): TrafficSettings = credentials().let {
-        TrafficSettings(it.enabled, !it.apiKey.isNullOrBlank(), it.freePlanAcknowledged, it.revision)
+        TrafficSettings(it.enabled, !it.apiKey.isNullOrBlank(), it.freePlanAcknowledged, it.revision,
+            it.freeAccountVerified, it.matrixEnabled, it.speedFallbackEnabled)
     }
 
     internal fun credentials(): TrafficCredentials = synchronized(lock) {
@@ -55,8 +62,10 @@ class TrafficSettingsStore(context: Context) {
                 val apiKey = value.optString("key").takeIf(String::isNotBlank)
                 if (apiKey != null) validateKey(apiKey)
                 val acknowledged = value.getBoolean("freePlanAcknowledged")
+                val verified = value.optBoolean("freeAccountVerified") && apiKey != null && acknowledged
                 TrafficCredentials(apiKey, value.getBoolean("enabled") && apiKey != null && acknowledged,
-                    acknowledged, value.getString("revision"))
+                    acknowledged, value.getString("revision"), verified,
+                    verified && value.optBoolean("matrixEnabled"), verified && value.optBoolean("speedFallbackEnabled"))
             } finally { bytes.fill(0) }
         } catch (_: Exception) {
             // Fail closed after key invalidation or ciphertext tampering. No exception/key logging.
@@ -65,13 +74,21 @@ class TrafficSettingsStore(context: Context) {
     }
 
     /** Null retains the existing key; clear() explicitly removes credentials and authorization. */
-    fun save(apiKey: String? = null, enabled: Boolean, freePlanAcknowledged: Boolean) = synchronized(lock) {
-        val value = apiKey?.trim() ?: credentials().apiKey
+    fun save(apiKey: String? = null, enabled: Boolean, freePlanAcknowledged: Boolean,
+        freeAccountVerified: Boolean? = null, matrixEnabled: Boolean? = null, speedFallbackEnabled: Boolean? = null) = synchronized(lock) {
+        val previous = credentials()
+        val value = apiKey?.trim() ?: previous.apiKey
         if (value != null) validateKey(value)
         require(!enabled || !value.isNullOrBlank()) { "Trafik için kişisel TomTom anahtarını gir." }
         require(!enabled || freePlanAcknowledged) { "Yalnızca ücretsiz kullanım onayını işaretle." }
+        val sameKey = value == previous.apiKey
+        val verified = freePlanAcknowledged && value != null && (freeAccountVerified ?: (sameKey && previous.freeAccountVerified))
+        val matrix = matrixEnabled ?: (sameKey && previous.matrixEnabled && verified)
+        val speed = speedFallbackEnabled ?: (sameKey && previous.speedFallbackEnabled && verified)
+        require(!(matrix || speed) || verified) { "Ücretsiz hesap ve ilgili API erişimini doğrula." }
         val json = JSONObject().put("version", 1).put("key", value.orEmpty()).put("enabled", enabled)
             .put("freePlanAcknowledged", freePlanAcknowledged).put("revision", UUID.randomUUID().toString())
+            .put("freeAccountVerified", verified).put("matrixEnabled", matrix).put("speedFallbackEnabled", speed)
         try {
             check(directory.isDirectory || directory.mkdirs())
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
@@ -82,6 +99,7 @@ class TrafficSettingsStore(context: Context) {
             try {
                 stream.write(ciphertext)
                 file.finishWrite(stream)
+                changeGeneration++
             } catch (error: Exception) {
                 file.failWrite(stream)
                 throw error
@@ -91,7 +109,16 @@ class TrafficSettingsStore(context: Context) {
         }
     }
 
-    fun clear() = synchronized(lock) { file.delete() }
+    fun clear() = synchronized(lock) { file.delete(); changeGeneration++ }
+
+    /** Enables independently verified free services without exposing or replacing the stored key. */
+    fun saveCapabilities(freeAccountVerified: Boolean, matrixEnabled: Boolean, speedFallbackEnabled: Boolean) = synchronized(lock) {
+        val current = credentials()
+        save(enabled = current.enabled, freePlanAcknowledged = current.freePlanAcknowledged,
+            freeAccountVerified = freeAccountVerified, matrixEnabled = matrixEnabled, speedFallbackEnabled = speedFallbackEnabled)
+    }
+
+    internal fun matrixCredentials(): TrafficCredentials? = credentials().takeIf { it.matrixEnabled }
 
     private fun key(): SecretKey {
         val keystore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
@@ -104,6 +131,8 @@ class TrafficSettingsStore(context: Context) {
     }
 
     companion object {
+        @Volatile internal var changeGeneration: Long = 0
+            private set
         private const val ALIAS = "org.iz.navigation.traffic.personal.v1"
         private val lock = Any()
         private fun emptyCredentials(revision: String = "empty") = TrafficCredentials(null, false, false, revision)

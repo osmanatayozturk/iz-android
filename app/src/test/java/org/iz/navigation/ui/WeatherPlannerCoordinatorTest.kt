@@ -23,10 +23,274 @@ import kotlinx.coroutines.yield
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WeatherPlannerCoordinatorTest {
+    @Test fun baseAuthorizationCancellationDoesNotLeaveThePlannerBusy() = runBlocking {
+        var revision = "one"
+        val planner = object : RoutePlanner {
+            override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
+                travelSpeedKmh: Double?): PlannedRoute {
+                revision = "two"
+                throw CancellationException("Credentials changed")
+            }
+        }
+        val coordinator = WeatherPlannerCoordinator(this,
+            services(planner, { _, departure -> comparisons(departure, true, 0.0) }).copy(credentialRevision = { revision }),
+            SavedWeatherPlan(listOf(origin, destination), 50_000L))
+        coordinator.calculate()!!.join()
+        assertNull(coordinator.state.value.route)
+        assertFalse(coordinator.state.value.busy)
+    }
+
+    @Test fun matrixAuthorizationCancellationInvalidatesWeatherCandidates() = runBlocking {
+        var revision = "one"
+        val planner = object : RoutePlanner {
+            override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
+                travelSpeedKmh: Double?) = route("base", stops, departureAt, transport)
+        }
+        val coordinator = WeatherPlannerCoordinator(this,
+            services(planner, { _, departure -> comparisons(departure, true, 0.0) }).copy(credentialRevision = { revision },
+                suggestOrder = { _, _, _ -> revision = "two"; throw CancellationException("Credentials changed") }),
+            SavedWeatherPlan(listOf(origin, origin.copy(label = "via 1"), destination.copy(label = "via 2"), destination), 50_000L))
+        coordinator.calculate()!!.join()
+        coordinator.suggestStopOrder()!!.join()
+        assertNull(coordinator.state.value.route)
+        assertTrue(coordinator.state.value.comparisons.isEmpty())
+        assertFalse(coordinator.state.value.ordering)
+    }
+
+    @Test fun authorizationCancellationInvalidatesThePreviouslyCommittedBundle() = runBlocking {
+        var revision = "one"
+        var calls = 0
+        val planner = object : RoutePlanner {
+            override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
+                travelSpeedKmh: Double?): PlannedRoute {
+                if (++calls > 1) { revision = "two"; throw CancellationException("Credentials changed") }
+                return route("base", stops, departureAt, transport).copy(provider = org.iz.navigation.weather.RouteProvider.TOMTOM)
+            }
+        }
+        val coordinator = WeatherPlannerCoordinator(this,
+            services(planner, { _, departure -> comparisons(departure, true, 0.0) }).copy(credentialRevision = { revision }),
+            SavedWeatherPlan(listOf(origin, destination), 50_000L))
+        coordinator.calculate()!!.join()
+        coordinator.selectDeparture(1_850_000L)
+        yield()
+        assertNull(coordinator.state.value.route)
+        assertTrue(coordinator.state.value.comparisons.isEmpty())
+        assertTrue(coordinator.state.value.verifiedDepartures.isEmpty())
+        assertNull(coordinator.state.value.requestedDepartureAt)
+        assertFalse(coordinator.state.value.busy)
+    }
+
+    @Test fun expiredDepartureSelectionCancelsPendingOrderWithoutLeavingControlsBusy() = runBlocking {
+        var now = 10_000L
+        val waiting = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val planner = object : RoutePlanner {
+            override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
+                travelSpeedKmh: Double?) = route("base", stops, departureAt, transport)
+        }
+        val coordinator = WeatherPlannerCoordinator(this,
+            services(planner, { _, departure -> comparisons(departure, true, 0.0) }).copy(clock = { now },
+                suggestOrder = { _, _, _ -> waiting.complete(Unit); release.await(); null }),
+            SavedWeatherPlan(listOf(origin, origin.copy(label = "via 1"), destination.copy(label = "via 2"), destination), 50_000L))
+        coordinator.calculate()!!.join()
+        coordinator.suggestStopOrder()!!
+        waiting.await()
+        now = 1_900_000L
+        coordinator.selectDeparture(1_850_000L)
+        release.complete(Unit)
+        yield()
+        assertFalse(coordinator.state.value.ordering)
+        assertFalse(coordinator.state.value.busy)
+        assertNull(coordinator.state.value.requestedDepartureAt)
+        assertNotNull(coordinator.state.value.error)
+    }
+
+    @Test fun slowWeatherDoesNotExtendRouteCacheLifetime() = runBlocking {
+        var now = 10_000L
+        var calls = 0
+        val planner = object : RoutePlanner {
+            override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
+                travelSpeedKmh: Double?) = route("${++calls}", stops, departureAt, transport)
+                .copy(provider = org.iz.navigation.weather.RouteProvider.TOMTOM, effectiveDepartureAt = departureAt)
+        }
+        val coordinator = WeatherPlannerCoordinator(this,
+            services(planner, { _, departure -> comparisons(departure, true, 0.0) }).copy(clock = { now },
+                weatherProvider = { object : WeatherProvider {
+                    override suspend fun hourly(coordinates: List<WeatherCoordinate>, from: Long, until: Long): List<LocationForecast> {
+                        now += 121_000L
+                        return emptyList()
+                    }
+                } }), SavedWeatherPlan(listOf(origin, destination), 50_000L))
+        coordinator.calculate()!!.join()
+        coordinator.selectDeparture(50_000L)
+        yield()
+        assertEquals(1, calls)
+        assertNotNull(coordinator.state.value.error)
+        assertEquals(50_000L, coordinator.state.value.effectiveDepartureAt)
+    }
+
+    @Test fun credentialsChangedDuringSelectedForecastClearOldAndPendingCandidates() = runBlocking {
+        var revision = "one"
+        var forecasts = 0
+        val waiting = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val planner = object : RoutePlanner {
+            override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
+                travelSpeedKmh: Double?) = route("$departureAt", stops, departureAt, transport)
+                .copy(provider = org.iz.navigation.weather.RouteProvider.TOMTOM)
+        }
+        val coordinator = WeatherPlannerCoordinator(this,
+            services(planner, { _, departure -> comparisons(departure, true, 0.0) }).copy(credentialRevision = { revision },
+                weatherProvider = { object : WeatherProvider {
+                    override suspend fun hourly(coordinates: List<WeatherCoordinate>, from: Long, until: Long): List<LocationForecast> {
+                        if (++forecasts == 2) { waiting.complete(Unit); release.await() }
+                        return emptyList()
+                    }
+                } }), SavedWeatherPlan(listOf(origin, destination), 50_000L))
+        coordinator.calculate()!!.join()
+        coordinator.selectDeparture(1_850_000L)
+        waiting.await()
+        revision = "two"
+        release.complete(Unit)
+        yield()
+        assertNull(coordinator.state.value.route)
+        assertNull(coordinator.state.value.requestedDepartureAt)
+        assertTrue(coordinator.state.value.verifiedDepartures.isEmpty())
+        assertFalse(coordinator.state.value.busy)
+    }
+
+    @Test fun selectedWeatherWaitsForItsOwnForecastAndEditsDiscardPendingBundle() = runBlocking {
+        var plans = 0
+        var forecasts = 0
+        val waiting = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val planner = object : RoutePlanner {
+            override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
+                travelSpeedKmh: Double?) = route("route-${++plans}", stops, departureAt, transport)
+                .copy(provider = org.iz.navigation.weather.RouteProvider.TOMTOM, effectiveDepartureAt = departureAt)
+        }
+        val service = services(planner, { _, departure -> comparisons(departure, true, 1.0) }).copy(
+            weatherProvider = { object : WeatherProvider {
+                override suspend fun hourly(coordinates: List<WeatherCoordinate>, from: Long, until: Long): List<LocationForecast> {
+                    if (++forecasts == 2) { waiting.complete(Unit); release.await() }
+                    return emptyList()
+                }
+            } },
+        )
+        val coordinator = WeatherPlannerCoordinator(this, service, SavedWeatherPlan(listOf(origin, destination), 50_000L))
+        coordinator.calculate()!!.join()
+        coordinator.selectDeparture(1_850_000L)
+        waiting.await()
+        assertEquals("route-1", coordinator.state.value.route?.id)
+        assertEquals(50_000L, coordinator.state.value.selectedDepartureAt)
+        assertEquals(1_850_000L, coordinator.state.value.requestedDepartureAt)
+        coordinator.setStops(listOf(origin, destination.copy(label = "Changed")))
+        release.complete(Unit)
+        yield()
+        assertNull(coordinator.state.value.route)
+        assertNull(coordinator.state.value.requestedDepartureAt)
+        assertTrue(coordinator.state.value.verifiedDepartures.isEmpty())
+    }
+
+    @Test fun verifyingOneRowLeavesOtherApproximationsOnTheBaseRoute() = runBlocking {
+        val planner = object : RoutePlanner {
+            override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
+                travelSpeedKmh: Double?) = route("$departureAt", stops, departureAt, transport)
+                .copy(provider = org.iz.navigation.weather.RouteProvider.TOMTOM, effectiveDepartureAt = departureAt)
+        }
+        val coordinator = WeatherPlannerCoordinator(this, services(planner, { _, departure -> comparisons(departure, true, 100.0) }),
+            SavedWeatherPlan(listOf(origin, destination), 50_000L))
+        coordinator.calculate()!!.join()
+        val untouched = coordinator.state.value.comparisons[2]
+        coordinator.selectDeparture(1_850_000L)
+        yield()
+        assertEquals(untouched, coordinator.state.value.comparisons[2])
+        assertFalse(coordinator.state.value.selectedAssessment!!.complete)
+        assertTrue(1_850_000L in coordinator.state.value.verifiedDepartures)
+        assertEquals(1_850_000L, coordinator.state.value.selectedDepartureAt)
+    }
+
+    @Test fun credentialChangeInvalidatesEvenACachedVerifiedDeparture() = runBlocking {
+        var revision = "one"
+        var calls = 0
+        val planner = object : RoutePlanner {
+            override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
+                travelSpeedKmh: Double?) = route("${++calls}", stops, departureAt, transport)
+                .copy(provider = org.iz.navigation.weather.RouteProvider.TOMTOM)
+        }
+        val coordinator = WeatherPlannerCoordinator(this,
+            services(planner, { _, departure -> comparisons(departure, true, 0.0) }).copy(credentialRevision = { revision }),
+            SavedWeatherPlan(listOf(origin, destination), 50_000L))
+        coordinator.calculate()!!.join()
+        revision = "two"
+        coordinator.selectDeparture(50_000L)
+        yield()
+        assertNull(coordinator.state.value.route)
+        assertTrue(coordinator.state.value.verifiedDepartures.isEmpty())
+        assertEquals(1, calls)
+    }
+    @Test fun selectingAnotherDepartureReplansAndCommitsItsOwnGeometry() = runBlocking {
+        val calls = mutableListOf<Long>()
+        val planner = object : RoutePlanner {
+            override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
+                travelSpeedKmh: Double?): PlannedRoute {
+                calls += departureAt
+                return route("route-${calls.size}", stops, departureAt, transport)
+                    .copy(provider = org.iz.navigation.weather.RouteProvider.TOMTOM)
+            }
+        }
+        val coordinator = WeatherPlannerCoordinator(this, services(planner, { _, departure -> comparisons(departure, true, 0.0) }),
+            SavedWeatherPlan(listOf(origin, destination), 50_000L))
+        coordinator.calculate()!!.join()
+        coordinator.selectDeparture(1_850_000L)
+        yield()
+        assertEquals(listOf(50_000L, 1_850_000L), calls)
+        assertEquals("route-2", coordinator.state.value.route?.id)
+        assertEquals(1_850_000L, coordinator.state.value.selectedDepartureAt)
+        coordinator.selectDeparture(50_000L)
+        yield()
+        assertEquals("route-1", coordinator.state.value.route?.id)
+        assertEquals(2, calls.size)
+    }
+
+    @Test fun failedSelectedDeparturePreservesTheCommittedRouteAndTime() = runBlocking {
+        var count = 0
+        val planner = object : RoutePlanner {
+            override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
+                travelSpeedKmh: Double?): PlannedRoute {
+                if (++count > 1) error("Route unavailable")
+                return route("base", stops, departureAt, transport)
+                    .copy(provider = org.iz.navigation.weather.RouteProvider.TOMTOM)
+            }
+        }
+        val coordinator = WeatherPlannerCoordinator(this, services(planner, { _, departure -> comparisons(departure, true, 0.0) }),
+            SavedWeatherPlan(listOf(origin, destination), 50_000L))
+        coordinator.calculate()!!.join()
+        coordinator.selectDeparture(1_850_000L)
+        yield()
+        assertEquals("base", coordinator.state.value.route?.id)
+        assertEquals(50_000L, coordinator.state.value.selectedDepartureAt)
+        assertNotNull(coordinator.state.value.error)
+    }
+
+    @Test fun approximateRecommendationDoesNotSelectAnUncalculatedDeparture() = runBlocking {
+        val planner = object : RoutePlanner {
+            override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
+                travelSpeedKmh: Double?) = route("base", stops, departureAt, transport)
+        }
+        val coordinator = WeatherPlannerCoordinator(this, services(planner, { _, departure ->
+            comparisons(departure, true, 100.0).mapIndexed { index, item ->
+                item.copy(exceededSeconds = if (index == 3) 0.0 else 100.0)
+            }
+        }), SavedWeatherPlan(listOf(origin, destination), 50_000L))
+        coordinator.calculate()!!.join()
+        assertEquals(50_000L, coordinator.state.value.selectedDepartureAt)
+    }
     @Test fun cancelledConfiguredStartClearsStartingAndCanBeRetried() = runBlocking {
         var calls = 0
         val planner = object : RoutePlanner {

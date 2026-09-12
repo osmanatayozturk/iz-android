@@ -5,10 +5,10 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class BackupIdentityCompatibilityTest {
-    @Test fun exporterUsesNeutralMarkerWithoutChangingVersionFivePayload() {
+    @Test fun exporterUsesNeutralMarkerWithVersionSixPayload() {
         val encoded = BackupJson.encode(LegacyBackupFixture.expected(), includeHealth = true)
         assertEquals("org.iz.navigation.backup", encoded.getString("format"))
-        assertEquals(5, encoded.getInt("version"))
+        assertEquals(6, encoded.getInt("version"))
         assertEquals(LegacyBackupFixture.expected(), BackupJson.decode(JSONObject(encoded.toString())))
     }
 
@@ -50,7 +50,7 @@ class BackupIdentityCompatibilityTest {
 
     @Test fun neitherMarkerBypassesUnsupportedVersionValidation() {
         for (marker in listOf(LegacyBackupFixture.manifest().getString("format"), "org.iz.navigation.backup")) {
-            for (version in listOf(0, 6)) {
+            for (version in listOf(0, 7)) {
                 assertThrows(IllegalArgumentException::class.java) {
                     BackupJson.decode(LegacyBackupFixture.manifest().put("format", marker).put("version", version))
                 }

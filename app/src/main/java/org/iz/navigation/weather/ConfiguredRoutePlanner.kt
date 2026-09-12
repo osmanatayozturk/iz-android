@@ -70,3 +70,21 @@ class ConfiguredRoutePlanner internal constructor(
 
     private companion object { val TRAFFIC_MODES = setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE) }
 }
+
+/** Explicit verification never silently substitutes another provider. */
+internal class VerifiedTomTomRoutePlanner(private val credentials: () -> TrafficCredentials) : RoutePlanner {
+    constructor(context: Context) : this(TrafficSettingsStore(context.applicationContext)::credentials)
+
+    override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport, travelSpeedKmh: Double?): PlannedRoute {
+        val snapshot = credentials()
+        val authorize = {
+            val current = credentials()
+            if (current.revision != snapshot.revision) throw CancellationException("Trafik ayarları değişti.")
+            check(current.enabled && current.freePlanAcknowledged && !current.apiKey.isNullOrBlank()) {
+                "TomTom trafik hesabı etkin değil. Trafiksiz devam etmeyi seçebilirsin."
+            }
+        }
+        authorize()
+        return TomTomRoutePlanner(requireNotNull(snapshot.apiKey), authorize).plan(stops, departureAt, transport, travelSpeedKmh)
+    }
+}

@@ -148,7 +148,7 @@ class DiaryBackup(context: Context, private val repository: DiaryRepository) {
 }
 
 internal object BackupJson {
-    private const val VERSION = 5
+    private const val VERSION = 6
     private const val FORMAT = "org.iz.navigation.backup"
     // Read compatibility for user-created backups from the former application identity.
     private const val LEGACY_FORMAT = "com.atay.iz.backup"
@@ -165,7 +165,7 @@ internal object BackupJson {
         "points" to array(value.points) { json("id" to it.id, "journeyId" to it.journeyId, "latitude" to it.latitude, "longitude" to it.longitude,
             "recordedAt" to it.recordedAt, "accuracy" to it.accuracy, "speed" to it.speed, "altitude" to it.altitude, "breakBefore" to it.breakBefore) },
         "places" to array(value.places) { json("id" to it.id, "name" to it.name, "latitude" to it.latitude, "longitude" to it.longitude,
-            "googlePlaceId" to it.googlePlaceId, "osmType" to it.osmType?.name, "osmId" to it.osmId, "source" to it.source.name) },
+            "googlePlaceId" to it.googlePlaceId, "osmType" to it.osmType?.name, "osmId" to it.osmId, "source" to it.source.name, "sortOrder" to it.sortOrder) },
         "visits" to array(value.visits) { json("id" to it.id, "placeId" to it.placeId, "journeyId" to it.journeyId, "visitedAt" to it.visitedAt, "note" to it.note, "rating" to it.rating) },
         "photos" to array(value.photos) { json("id" to it.id, "relativePath" to it.relativePath, "journeyId" to it.journeyId, "visitId" to it.visitId,
             "takenAt" to it.takenAt, "latitude" to it.latitude, "longitude" to it.longitude, "caption" to it.caption) },
@@ -197,6 +197,7 @@ internal object BackupJson {
                 "metric" to it.metric.name, "startAt" to it.startAt, "endAt" to it.endAt, "value" to it.value)
         },
     ).also {
+        PlaceOrderRules.validate(value.places)
         validateMapSnapshot(value)
         value.mapEdits.forEach(::validateMapEdit)
         if (includeHealth) {
@@ -224,7 +225,8 @@ internal object BackupJson {
             places = records("places") { Place(it.getString("id"), it.getString("name"), it.nullDouble("latitude"), it.nullDouble("longitude"), it.nullString("googlePlaceId"),
                 if (version >= 3) it.nullString("osmType")?.let(OsmType::valueOf) else null,
                 if (version >= 3) it.strictNullLong("osmId") else null,
-                if (version >= 3) PlaceSource.valueOf(it.getString("source")) else PlaceSource.LEGACY) },
+                if (version >= 3) PlaceSource.valueOf(it.getString("source")) else PlaceSource.LEGACY,
+                if (version >= 6) it.strictLong("sortOrder") else 0L) },
             visits = records("visits") { Visit(it.getString("id"), it.getString("placeId"), it.nullString("journeyId"), it.getLong("visitedAt"), it.getString("note"), it.nullInt("rating")) },
             photos = records("photos") { Photo(it.getString("id"), it.getString("relativePath"), it.nullString("journeyId"), it.nullString("visitId"),
                 it.nullLong("takenAt"), it.nullDouble("latitude"), it.nullDouble("longitude"), it.getString("caption")) },
@@ -268,7 +270,9 @@ internal object BackupJson {
                 WatchHealthSample(it.strictString("sessionId"), it.strictLong("sequence"), it.strictString("journeyId"),
                     HealthMetric.valueOf(it.strictString("metric")), it.strictLong("startAt"), it.strictLong("endAt"), it.strictDouble("value"))
             },
-        ).also { DiaryRules.validate(it); validateMapSnapshot(it) }.let { snapshot ->
+        ).let { snapshot ->
+            if (version < 6) snapshot.copy(places = PlaceOrderRules.legacy(snapshot.places, snapshot.visits)) else snapshot
+        }.also { DiaryRules.validate(it); validateMapSnapshot(it) }.let { snapshot ->
             snapshot.copy(contributions = snapshot.contributions.map { if (it.status == ContributionStatus.SENDING) it.copy(status = ContributionStatus.UNKNOWN) else it },
                 mapEdits = snapshot.mapEdits.map { if (it.status == MapEditStatus.SENDING) it.copy(status = MapEditStatus.UNKNOWN) else it })
         }

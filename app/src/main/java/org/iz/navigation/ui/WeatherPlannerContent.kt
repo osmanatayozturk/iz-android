@@ -75,6 +75,10 @@ internal data class WeatherPlannerActions(
     val stopLive: () -> Unit,
     val selectTransport: (Transport) -> Unit = {},
     val openDirections: () -> Unit = {},
+    val continueTrafficFree: () -> Unit = {},
+    val suggestStopOrder: () -> Unit = {},
+    val acceptStopOrder: () -> Unit = {},
+    val dismissStopOrder: () -> Unit = {},
 )
 
 @Composable
@@ -214,7 +218,7 @@ internal fun WeatherPlannerContent(
         item {
             Button(
                 onClick = actions.calculate,
-                enabled = state.stops.size in 2..5 && !state.busy && !interactionLocked,
+                enabled = state.stops.size in 2..5 && !state.busy && !state.ordering && !interactionLocked,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("weather_calculate"),
             ) {
                 Icon(Icons.Outlined.Cloud, null)
@@ -222,6 +226,18 @@ internal fun WeatherPlannerContent(
                 Text(if (state.busy) "Rota ve tahmin hesaplanıyor…" else "7 kalkış seçeneğini karşılaştır")
             }
         }
+        if (state.stops.size in 4..5 && state.transport in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE)) item {
+            OutlinedButton(actions.suggestStopOrder, enabled = !state.busy && !state.ordering && !interactionLocked,
+                modifier = Modifier.testTag("weather-matrix-order")) {
+                Text(if (state.ordering) "Durak sırası hesaplanıyor…" else "Daha hızlı durak sırası öner")
+            }
+            if (state.transport == Transport.MOTORCYCLE) Text("Matrix sıra önerisi otomobil tahminidir; motosiklet rotasıyla doğrulanır.",
+                style = MaterialTheme.typography.bodySmall)
+        }
+        state.orderProposal?.let { proposal -> item {
+            StopOrderProposalCard(proposal, !state.busy && !state.ordering && !interactionLocked,
+                actions.acceptStopOrder, actions.dismissStopOrder)
+        } }
         if (displayRoute != null) {
             item {
                 Surface(shape = RoundedCornerShape(24.dp), color = Color.White) {
@@ -231,10 +247,11 @@ internal fun WeatherPlannerContent(
                             formatDistance(displayRoute.distanceMeters),
                             color = Muted,
                         )
-                        WeatherRouteTimingDetails(displayRoute, state.selectedDepartureAt ?: state.departureAt,
+                        WeatherRouteTimingDetails(displayRoute, state.effectiveDepartureAt ?: state.selectedDepartureAt ?: state.departureAt,
                             null)
+                        RouteTrafficText(displayRoute)
                         routeMap()
-                        Text("Kalkış karşılaştırmaları trafiksiz hesaplanır. Başlatırken güncel rota yeniden alınır.",
+                        Text("Yedi seçenek başlangıç rotasıyla yaklaşık karşılaştırılır. Başka bir saate dokununca o saatin rotası ve havası yeniden hesaplanır. Başlatırken güncel rota alınır.",
                             style = MaterialTheme.typography.bodySmall, color = Muted)
                         Text(
                             "Noktaya dokunarak tahmini varış anındaki hava değerlerini gör.",
@@ -249,7 +266,7 @@ internal fun WeatherPlannerContent(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Kalkış seçenekleri", style = MaterialTheme.typography.titleLarge)
-                    Text("Daha az süre boyunca kişisel eşiklerinin aşılması öneriyi belirler.", color = Muted)
+                    Text("Geçici öneri: kişisel eşiklerinin daha kısa süre aşılması. Yaklaşık seçeneklerin sonucu kesinleştirilince değişebilir.", color = Muted)
                     state.comparisons.forEachIndexed { index, assessment ->
                         DepartureAssessmentRow(
                             assessment = assessment,
@@ -259,11 +276,21 @@ internal fun WeatherPlannerContent(
                             onClick = { actions.selectDeparture(assessment.departureAt) },
                             modifier = Modifier.testTag("weather_candidate_$index"),
                         )
+                        Text(when {
+                            state.requestedDepartureAt == assessment.departureAt -> "Seçtiğim saati kesinleştir · Hesaplanıyor…"
+                            assessment.departureAt in state.verifiedDepartures -> "TomTom rotası hesaplandı" + if (!assessment.complete) " · Hava verisi eksik" else ""
+                            else -> "Yaklaşık · Bu saatin rotasını hesaplamak için seç"
+                        }, style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
             state.selectedAssessment?.let { selected ->
                 item { WeatherSummaryCard(selected) }
+            }
+        }
+        if (state.trafficFreeDeparture != null) item {
+            OutlinedButton(actions.continueTrafficFree, enabled = !state.busy && !interactionLocked) {
+                Text("Seçilen saatte trafiksiz devam et")
             }
         }
         item {
@@ -296,7 +323,7 @@ internal fun WeatherPlannerContent(
         }
         item {
             Text(
-                "Harita © OpenStreetMap katkıcıları · Kalkış karşılaştırması: Valhalla · Hava: Open-Meteo",
+                "Harita © OpenStreetMap katkıcıları · Rota sağlayıcısı rota kartında · Hava: Open-Meteo",
                 style = MaterialTheme.typography.bodySmall,
                 color = Muted,
             )

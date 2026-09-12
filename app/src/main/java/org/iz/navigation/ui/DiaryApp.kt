@@ -353,7 +353,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     onMenu = { menuOpen = true }, onGroup = { groupPage = true }, onWeather = { weatherPage = true },
                     onPin = { openAddPlace(location = it) })
                 tab == 1 -> JourneysScreen(state, now, onJourney = { selectedJourney = it.id }, onStart = { transportAction = TransportAction() }, onConfirm = { transportAction = TransportAction(it.id) }, onReject = { j -> deletion = Deletion("Bu geçici rota silinecek ve açıksa takip duracak.") { vm.tracker.reject(j.id) } })
-                tab == 2 -> PlacesScreen(state, onPlace = { selectedPlace = it.id }, onAdd = { openAddPlace() })
+                tab == 2 -> PlacesScreen(state, onPlace = { selectedPlace = it.id }, onAdd = { openAddPlace() }, onReorder = vm.repository::reorderPlaces)
                 tab == 3 -> HeatmapScreen(state)
                 tab == 5 -> DiaryStatisticsScreen(state, now, onJourney = { selectedJourney = it.id })
                 else -> SettingsScreen(settings, refresh, backupBusy,
@@ -653,27 +653,6 @@ private fun JourneysScreen(state: DiaryState, now: Long, onJourney: (Journey) ->
             }
         }
         item { OutlinedButton(onClick = onStart, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Add, null); Text("Yeni yolculuk") } }
-    }
-}
-
-@Composable
-private fun PlacesScreen(state: DiaryState, onPlace: (Place) -> Unit, onAdd: () -> Unit) {
-    var query by rememberSaveable { mutableStateOf("") }
-    val places = state.places.filter { it.name.contains(query, ignoreCase = true) }.sortedByDescending { p -> state.visits.filter { it.placeId == p.id }.maxOfOrNull { it.visitedAt } ?: 0 }
-    LazyColumn(contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        item { PageHeading("Biriktirdiğin yerler", "Bir kahve molası, bir manzara, bir anı.") }
-        item { OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), placeholder = { Text("Günlüğünde yer ara") }, leadingIcon = { Icon(Icons.Outlined.Search, null) }, singleLine = true, shape = RoundedCornerShape(18.dp)) }
-        if (places.isEmpty()) item { EmptyCard(Icons.Outlined.BookmarkBorder, "Burada senin yerlerin olacak", "Haritadan bir nokta seç veya bir yere kendi adını vererek ilk ziyaretini kaydet.") }
-        items(places, key = { it.id }) { place ->
-            val visits = state.visits.filter { it.placeId == place.id }
-            Surface(onClick = { onPlace(place) }, shape = RoundedCornerShape(22.dp), color = Color.White) {
-                Row(Modifier.fillMaxWidth().padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.Place, null, tint = Forest, modifier = Modifier.size(48.dp).background(Leaf, RoundedCornerShape(14.dp)).padding(12.dp)); Spacer(Modifier.width(14.dp))
-                    Column(Modifier.weight(1f)) { Text(place.name, style = MaterialTheme.typography.titleMedium); Text("${visits.size} ziyaret · ${if (place.osmId == null) "Kişisel yer" else "OSM ile eşleşti"}", style = MaterialTheme.typography.bodySmall, color = Muted) }; Icon(Icons.Outlined.ChevronRight, null)
-                }
-            }
-        }
-        item { Button(onClick = onAdd, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Add, null); Text("Bir yer kaydet") } }
     }
 }
 

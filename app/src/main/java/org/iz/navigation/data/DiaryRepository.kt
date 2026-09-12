@@ -208,13 +208,27 @@ class DiaryRepository(context: Context) {
         watchDao.pruneOutsideJourney(entity.id, entity.startedAt, entity.endedAt ?: System.currentTimeMillis())
     }
 
-    suspend fun savePlace(entity: Place) {
+    suspend fun savePlace(entity: Place) = db.withTransaction {
         require(entity.name.isNotBlank()) { "Yer adı gerekli." }
         requireValidCoordinates(entity.latitude, entity.longitude)
         requireValidOsmReference(entity.osmType, entity.osmId)
-        dao.save(entity)
+        val current = dao.place(entity.id)
+        val position = if (current != null) current.sortOrder else {
+            val places = dao.allPlaces()
+            val last = places.maxOfOrNull { it.sortOrder } ?: -1L
+            if (last < PlaceOrderRules.MAX_ORDER) last + 1 else {
+                places.forEachIndexed { index, place -> dao.setPlaceOrder(place.id, index.toLong()) }
+                places.size.toLong()
+            }
+        }
+        // A metadata editor may hold an older rank while a separate sort has already been saved.
+        dao.save(entity.copy(sortOrder = position))
     }
 
+    suspend fun reorderPlaces(originalOrder: List<String>, newOrder: List<String>) = db.withTransaction {
+        val reordered = PlaceOrderRules.reorder(dao.allPlaces(), originalOrder, newOrder)
+        reordered.forEach { dao.setPlaceOrder(it.id, it.sortOrder) }
+    }
     suspend fun saveVisit(entity: Visit) = db.withTransaction {
         require(entity.rating == null || entity.rating in 1..5)
         promote(entity.journeyId)
@@ -280,7 +294,7 @@ class DiaryRepository(context: Context) {
         if (expected.remoteNodeId == null && updated.remoteNodeId != null) {
             val place = expected.placeId?.let { id -> dao.allPlaces().firstOrNull { it.id == id } }
             if (place != null) dao.save(place.copy(osmType = OsmType.NODE, osmId = updated.remoteNodeId, source = PlaceSource.OSM))
-            else if (expected.placeId == null) dao.save(Place(name = updated.name.ifBlank { updated.preset.label },
+            else if (expected.placeId == null) savePlace(Place(name = updated.name.ifBlank { updated.preset.label },
                 latitude = updated.latitude, longitude = updated.longitude, osmType = OsmType.NODE,
                 osmId = updated.remoteNodeId, source = PlaceSource.OSM))
         }
@@ -374,6 +388,7 @@ class DiaryRepository(context: Context) {
         DiaryRules.validate(snapshot)
         validateMapSnapshot(snapshot)
         require(snapshot.journeys.none { it.status == JourneyStatus.TEMPORARY }) { "Geçici yolculuklar geri yüklenemez." }
+        val restoredPlaces = PlaceOrderRules.normalizeDuplicates(snapshot.places)
         val now = System.currentTimeMillis()
         val restoredJourneys = snapshot.journeys.map { DiaryRules.restored(it, now) }
         val restoredById = restoredJourneys.associateBy { it.id }
@@ -395,7 +410,7 @@ class DiaryRepository(context: Context) {
             watchDao.clearSamples(); watchDao.clearSessions(); mapDao.clear()
             dao.clearContributions(); dao.clearDrafts(); dao.clearPhotos(); dao.clearVisits(); dao.clearPoints(); dao.clearJourneys(); dao.clearPlaces()
             restoredJourneys.forEach { dao.save(it) }
-            snapshot.places.forEach { dao.save(it) }
+            restoredPlaces.forEach { dao.save(it) }
             snapshot.points.forEach { dao.save(it) }
             snapshot.visits.forEach { dao.save(it) }
             snapshot.photos.forEach { dao.save(it) }

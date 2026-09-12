@@ -1,6 +1,6 @@
 # Yol tarifi ve trafik
 
-İz 0.8.1, ana haritada **Nereye?** ile yol tarifi sunar. Yeni planın başlangıcı mevcut konumdur; başlangıcı ve varışı yer araması, kayıtlı yer veya harita ile değiştirebilirsin. Haritada A başlangıcı, B varışı gösterir. Önizleme yolculuk kaydı başlatmaz.
+İz 0.9.0, ana haritada **Nereye?** ile yol tarifi sunar. Yeni planın başlangıcı mevcut konumdur; başlangıcı ve varışı yer araması, kayıtlı yer veya harita ile değiştirebilirsin. Haritada A başlangıcı, B varışı gösterir. Önizleme yolculuk kaydı başlatmaz.
 
 **Rotayı başlat**, güncel konumla rotayı hesaplar ve sesli yönlendirmeyi yolculuk kaydıyla birlikte başlatır. Özel başlangıç 100 metreden uzaktaysa önce oraya gidilir; ardından seçilen durak sırası izlenir. Aynı türde açık kayıt varsa kullanılır. Sayfayı kapatmak veya yönlendirmeyi durdurmak kaydı bitirmez; bunun için **Yolculuğu bitir** kullanılır.
 
@@ -10,7 +10,7 @@ TomTom bağlantısı kaynak yayınında yapılandırılmamıştır ve temel kull
 
 1. [TomTom geliştirici hesabını](https://my.tomtom.com/) aç. Hesaba giriş ve kullanım koşullarını kabul etme işlemini kendin tamamla.
 2. [Güncel ücretsiz kotayı](https://docs.tomtom.com/pricing) ve hesap planını kontrol et. Bu sürüm yalnız ücretsiz kullanım için hazırlanmıştır; ücretli plan, ödeme yöntemi veya otomatik ödeme açma. Başka uygulamalarının aynı hesaptaki tüketimi de kotayı etkileyebilir.
-3. Routing API erişimi olan kişisel anahtar oluştur. Anahtarı sohbetlere, ekran görüntülerine veya kaynak koduna koyma.
+3. Routing API erişimi olan kişisel anahtar oluştur. Durak sırası için Matrix Routing v2 API, isteğe bağlı hız sınırı için Reverse Geocoding API yetkilerini ayrıca etkinleştir. Anahtarı sohbetlere, ekran görüntülerine veya kaynak koduna koyma.
 4. İz → **Yol tarifi → Trafik ayarları** ekranında anahtarı gir, ücretsiz planını kontrol ettiğini onayla ve trafiği aç.
 5. Araba veya motosiklet rotası hesapla. Başarılı yanıtta sağlayıcı, trafik dahil süre, gecikme ve güncelleme zamanı görünür. Trafik sonucu alınamadığında neden belirtilir ve Valhalla ile trafik hariç rota hesaplanır.
 
@@ -23,12 +23,12 @@ Trafik açıkken hesaplama için başlangıç, varış, ara durak koordinatları
 - Araba/yolcu: trafik açık ve bağlantı hazırsa TomTom otomobil rotası.
 - Motosiklet: TomTom'un beta motosiklet profili, deneysel olarak etiketlenir; otomobil profiline sessizce geçilmez.
 - Bisiklet/yürüyüş/koşu: Valhalla ve ilgili ulaşım türünün mevcut hız ayarları.
-- Hava ekranındaki yedi kalkış karşılaştırması: trafik hariç Valhalla rotası. Başlatmada trafikli rota alınırsa canlı hava örneklemesi yeni güzergâhı kullanır.
+- Hava ekranı: yapılandırılmış sağlayıcıdan bir temel rota ve yedi yaklaşık hava seçeneği. Açıkça seçilen kalkışın rotası, trafik süresi ve hava örnekleri birlikte yeniden hesaplanır. [Matrix, hız sınırı ve ayrıntılı davranış](IZ_090_YENILIKLER.md).
 
 Çizilen güzergâh, dönüşler ve süre aynı sağlayıcının aynı yanıtından alınır. Rota alınamadığında iki nokta arasına sahte düz yol çizilmez. Rutin trafik yenilemesi aktif yönlendirmede iki dakikadan sık yapılmaz; beş dakikadan eski trafik bilgisi güncel olarak gösterilmez. Yeni hedef ve rotadan sapma ayrı rota hesaplama işlemleridir. Ağ kesilmesi yüklenmiş rotayı veya GPS kaydını silmez; eski trafik verisi belirtilir.
 
 ## Uyumluluk
 
-Telefon sürümü 0.8.1 / code 13'tür. OSM Topluluğu, Android Auto, günlük veritabanı ve yedek biçimi korunur. Saat 0.5.2 / code 9 ile aynı iletişim biçimi kullanılır.
+Telefon sürümü 0.9.0 / code 15'tir. Günlük ve ZIP yedek sürümü 6, kalıcı yer sırası ekler; eski 1–5 yedekleri okunur. Saat 0.6.0 / code 10 ile v5 iletişimi korunur.
 
 Gerçek trafik verisine erişim kişisel anahtarın, kotanın ve kapsamanın durumuna bağlıdır. Sahte sunucu testleri gerçek yoldaki trafik tahmininin doğruluğunu kanıtlamaz; canlı trafik fiziksel yolculukta ayrıca doğrulanmalıdır.

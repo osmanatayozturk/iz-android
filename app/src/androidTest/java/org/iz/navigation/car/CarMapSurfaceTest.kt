@@ -26,6 +26,9 @@ import org.iz.navigation.weather.WeatherCoordinate
 import org.iz.navigation.weather.PlannedRoute
 import org.iz.navigation.weather.RouteStop
 import org.iz.navigation.weather.RouteVertex
+import org.iz.navigation.speed.RoadSpeedState
+import org.iz.navigation.speed.RoadSpeedLimit
+import org.iz.navigation.speed.RoadSpeedSource
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -47,6 +50,21 @@ class CarMapSurfaceTest {
         val captureFailure = AtomicReference<Throwable?>(null)
         val lastFrameCounts = AtomicReference("")
         var renderer: CarMapSurface? = null
+        fun assertLegendVisible(safe: Rect) {
+            instrumentation.runOnMainSync {
+                val field = CarMapSurface::class.java.getDeclaredField("trailLegend").apply { isAccessible = true }
+                val label = field.get(renderer) as TextView
+                val xy = IntArray(2).also { label.getLocationInWindow(it) }
+                val bounds = Rect(xy[0], xy[1], xy[0] + label.width, xy[1] + label.height)
+                assertTrue("Speed scale must remain inside host safe area: $bounds in $safe", label.isShown &&
+                    bounds.width() > 0 && bounds.height() > 0 && safe.contains(bounds))
+                val source = CarMapSurface::class.java.getDeclaredField("attribution").apply { isAccessible = true }.get(renderer) as TextView
+                val sourceXy = IntArray(2).also { source.getLocationInWindow(it) }
+                val sourceBounds = Rect(sourceXy[0], sourceXy[1], sourceXy[0] + source.width, sourceXy[1] + source.height)
+                assertTrue("Attribution must remain in safe area: $sourceBounds in $safe", safe.contains(sourceBounds))
+                assertTrue("Speed scale overlaps attribution: $bounds and $sourceBounds", !Rect.intersects(bounds, sourceBounds))
+            }
+        }
         fun viewDiagnostics(): String {
             var result = ""
             instrumentation.runOnMainSync {
@@ -68,7 +86,7 @@ class CarMapSurfaceTest {
             return result
         }
         try {
-            fun hostFrame(width: Int, height: Int): Pair<SurfaceContainer, CountDownLatch> {
+            fun hostFrame(width: Int, height: Int, dpi: Int = 160): Pair<SurfaceContainer, CountDownLatch> {
                 val reader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
                 readers.add(reader)
                 val marker = CountDownLatch(1)
@@ -89,7 +107,8 @@ class CarMapSurfaceTest {
                                 // Production marker fill #00cbaa; attribution/background cannot satisfy this.
                                 if (red < 35 && green in 175..225 && blue in 145..195) markerPixels++
                                 if (red in 35..75 && green in 95..145 && blue in 210..255) routePixels++
-                                if (red in 220..255 && green in 135..180 && blue in 15..65) trailPixels++
+                                // Warm end of the speed gradient (distinct from the planned blue route).
+                                if (red in 195..240 && green in 25..105 && blue in 20..65) trailPixels++
                                 if (x > image.width - 300 && y in image.height - 90 until image.height - 40) {
                                     val dayAttribution = red > 210 && green > 210 && blue > 210
                                     val nightAttribution = red in 23..38 && green in 27..43 && blue in 33..52 && blue > red + 3
@@ -98,7 +117,7 @@ class CarMapSurfaceTest {
                             }
                         }
                         lastFrameCounts.set("${image.width}: marker=$markerPixels route=$routePixels trail=$trailPixels attribution=$attributionPixels")
-                        if (markerPixels >= 8 && routePixels >= 20 && trailPixels >= 15 && attributionPixels >= 30 && marker.count > 0) {
+                        if (markerPixels >= 8 && routePixels >= 20 && trailPixels >= 5 && attributionPixels >= 30 && marker.count > 0) {
                             try {
                                 // Read each actual pixel: row padding and channel order must not leak into PNG.
                                 val pixels = IntArray(image.width * image.height)
@@ -121,7 +140,7 @@ class CarMapSurfaceTest {
                         }
                     }
                 }, handler)
-                return SurfaceContainer(reader.surface, width, height, 160) to marker
+                return SurfaceContainer(reader.surface, width, height, dpi) to marker
             }
             val (first, firstMarker) = hostFrame(640, 400)
             val now = System.currentTimeMillis()
@@ -135,13 +154,15 @@ class CarMapSurfaceTest {
                 listOf(RouteVertex(current, 0.0), RouteVertex(ahead, 20.0), RouteVertex(turn, 40.0),
                     RouteVertex(destination, 60.0)), 370.0, 60.0, now, transport = Transport.CAR)
             val trail = listOf(
-                TrackPoint(journeyId = journey.id, latitude = 40.999, longitude = 28.9985, recordedAt = now - 60_000, accuracy = 5f),
-                TrackPoint(journeyId = journey.id, latitude = 40.9998, longitude = 28.9994, recordedAt = now - 30_000, accuracy = 5f),
-                TrackPoint(journeyId = journey.id, latitude = current.latitude, longitude = current.longitude, recordedAt = now, accuracy = 5f))
+                TrackPoint(journeyId = journey.id, latitude = 40.999, longitude = 28.9985, recordedAt = now - 60_000, accuracy = 5f, speed = 0f),
+                TrackPoint(journeyId = journey.id, latitude = 40.9998, longitude = 28.9994, recordedAt = now - 30_000, accuracy = 5f, speed = 8f),
+                TrackPoint(journeyId = journey.id, latitude = 40.9998, longitude = current.longitude, recordedAt = now, accuracy = 5f, speed = 16f))
             instrumentation.runOnMainSync {
                 renderer = CarMapSurface(TestCarContext.createCarContext(app)).also {
                     it.update(NavigationState(journey = journey, recording = true, route = route,
-                        gpsStale = false, fix = NavigationFix(current, now, 5f)), trail)
+                        gpsStale = false, fix = NavigationFix(current, now, 5f),
+                        roadSpeed = RoadSpeedState(57.6, RoadSpeedLimit(90.0, RoadSpeedSource.TOMTOM_POSTED,
+                            true, now, current, Transport.CAR, "test-road"), true)), trail)
                     it.onSurfaceAvailable(first)
                     it.onStableAreaChanged(Rect(160, 0, 640, 360))
                     it.onVisibleAreaChanged(Rect(160, 0, 640, 400))
@@ -150,7 +171,11 @@ class CarMapSurfaceTest {
             val firstReady = firstMarker.await(20, TimeUnit.SECONDS)
             assertTrue("First surface layers/attribution incomplete: ${lastFrameCounts.get()}\n${if (!firstReady) viewDiagnostics() else ""}", firstReady)
             assertNull("First rendered PNG capture failed", captureFailure.get())
-            val (replacement, replacementMarker) = hostFrame(800, 480)
+            assertLegendVisible(Rect(160, 0, 640, 360))
+            assertTrue("Own speed and generic source must reach the host views", viewDiagnostics().let {
+                it.contains("Hızım") && it.contains("58 km/sa") && it.contains("Genel yol sınırı · TomTom")
+            })
+            val (replacement, replacementMarker) = hostFrame(800, 480, 320)
             instrumentation.runOnMainSync {
                 renderer!!.onSurfaceAvailable(replacement)
                 renderer!!.onSurfaceDestroyed(first) // Late destruction must not tear down replacement.
@@ -163,6 +188,7 @@ class CarMapSurfaceTest {
             val replacementReady = replacementMarker.await(20, TimeUnit.SECONDS)
             assertTrue("Replacement surface layers/attribution incomplete: ${lastFrameCounts.get()}\n${if (!replacementReady) viewDiagnostics() else ""}", replacementReady)
             assertNull("Replacement rendered PNG capture failed", captureFailure.get())
+            assertLegendVisible(Rect(200, 0, 800, 440))
         } finally {
             instrumentation.runOnMainSync { renderer?.close() }
             readers.forEach { it.setOnImageAvailableListener(null, null) }

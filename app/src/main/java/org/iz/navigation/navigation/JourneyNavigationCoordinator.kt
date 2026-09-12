@@ -9,6 +9,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import org.iz.navigation.speed.*
 
 /** Side effects are isolated so concurrent car/phone/watch commands can be tested without a host. */
 interface NavigationRuntime {
@@ -45,6 +46,11 @@ interface NavigationRuntime {
     suspend fun plan(stops: List<RouteStop>, transport: Transport): PlannedRoute
     suspend fun locate(): NavigationFix
     fun trafficRefreshEnabled(route: PlannedRoute): Boolean = route.provider == RouteProvider.TOMTOM
+    val roadSpeedMonitoring: Boolean get() = false
+    fun roadSpeedState(state: NavigationState, now: Long): RoadSpeedState = RoadSpeedState(
+        ownKmh = if (state.gpsStale) null else ownSpeedKmh(state.fix, now),
+        visible = state.sessionId != null && speedMode(state.sessionTransport))
+    suspend fun refreshRoadSpeed() {}
     fun render(state: NavigationState)
     fun speak(text: String)
     fun cancelSpeech()
@@ -72,6 +78,8 @@ class JourneyNavigationCoordinator(
     private val cues = NavigationCuePolicy()
     private var rerouteJob: Job? = null
     private var simulationJob: Job? = null
+    private var speedRefreshJob: Job? = null
+    private var lastSpeedRefresh = Long.MIN_VALUE
     private var simulationEnabled = false
     private var freeDrive = false
     private var stoppingRecordingId: String? = null
@@ -474,13 +482,26 @@ class JourneyNavigationCoordinator(
             loading = false, routeRevision = epoch, message = null))
     }
 
-    private fun publish(value: NavigationState) {
-        mutableState.value = value
+    private fun publish(value: NavigationState, refreshSpeed: Boolean = true) {
+        val rendered = value.copy(roadSpeed = runtime.roadSpeedState(value, clock()))
+        mutableState.value = rendered
         runtime.setHighFrequency(value.journey?.id.takeIf { value.guidance && value.recording && !value.simulation })
         runtime.setLocationSession(value.sessionId.takeIf { !value.simulation }, value.sessionTransport,
             value.guidance, value.sessionId != null && !value.recording && !value.simulation)
         // Display/notification failures cannot take down the recorder's process or state collector.
-        runCatching { runtime.render(value) }
+        runCatching { runtime.render(rendered) }
+        val eligible = value.sessionId != null && speedMode(value.sessionTransport) && !value.simulation && !value.gpsStale
+        if (!eligible) { speedRefreshJob?.cancel(); speedRefreshJob = null }
+        else if (refreshSpeed && runtime.roadSpeedMonitoring && speedRefreshJob?.isActive != true &&
+            (lastSpeedRefresh == Long.MIN_VALUE || clock() - lastSpeedRefresh >= 1_000)) {
+            lastSpeedRefresh = clock()
+            speedRefreshJob = scope.launch {
+                try { runtime.refreshRoadSpeed() }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { /* A speed provider cannot interrupt navigation. */ }
+                publish(mutableState.value, refreshSpeed = false)
+            }
+        }
     }
 
     fun enableSimulation() { simulationEnabled = true }
