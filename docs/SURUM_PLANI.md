@@ -32,6 +32,16 @@ Bu dosya her İz güncellemesiyle güncellenir ve kaynak koduyla birlikte GitHub
 
 **Yerel doğrulama:** 551 release birim testi geçti; release derlemesi başarılı, lint 0 hata / 90 uyarı ile tamamlandı. Minify edilmiş release APK, mevcut geliştirme sertifikasıyla imzalandı; hata ayıklama kapalıdır. Kişisel sağlayıcı değerleri ve veri dosyaları pakette bulunmadı. Emülatörde yerinde kurulum, ana harita, konuma dönme ve örnek Valhalla yürüyüş rotası (2,6 km / 34 dk) doğrulandı; APK kurulumundan sonraki çökme kaydı boş kaldı. İki görselde örnek konumlar ve görünür OpenStreetMap atfı kullanıldı. [GitHub sürümü ve indirme dosyaları](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.9.2).
 
+## 2026-09-13: Bağımsız güvenlik incelemesi ve yayın kuralı
+
+- **Amaç:** Her teslimi bağımsız güvenlik incelemesi, gerekli düzeltmeler ve incelenen commit/sürüm için onay sonucuna bağlamak. Ayrıntılar [güvenlik yayın kuralında](GUVENLIK_YAYIN_KURALI.md).
+- **Kapsam:** Proje talimatları, bu plan, değişiklik geçmişi ve yeni güvenlik yayın belgesi. Uygulama kodu, derleme ayarları ve mevcut APK/AAB değiştirilmez.
+- **Teslim:** Görev dalı ve PR kullanılır. İnceleme eksikse veya sonucu `BLOCKED` / `INCOMPLETE` ise `main` birleştirmesi, canlı yayın ve APK/AAB dağıtımı yapılmaz. Birleştirme için incelenmiş PR head/base SHA'ları ve `PASS` veya `PASS_WITH_ACCEPTED_RISK` sonucu gerekir. Merge sonrası SHA ve kaynak ağacı doğrulanıp bağımsız son sürüm kaydı tamamlanmadan uygulama dağıtılmaz.
+- **Kabul:** Belgeler arası kurallar ve `git diff --check` doğrulanır; gönderilecek son commit ayrıca bağımsız incelenir. Doğrulanmış açıklar kapanır veya kullanıcı sürüm, SHA ve bulgu bazında açık risk kabulü verir. Genel bir “yayınla” talimatı bu kabul yerine geçmez.
+- **Kurulum durumu:** **İz kod güvenlik incelemesi** adlı olay görevi PR açılışını ve yeni commitleri takip eder. Zamanlı görev yoktur. Zorunlu GitHub kontrolleri, dal koruması ve dağıtım kimlik bilgilerinin kısıtlanması henüz yapılandırılmadı; görev yorumu teknik yayın kilidi değildir.
+- **Sürüm etkisi:** Telefon 0.9.2 / code 17, saat 0.6.0 / code 10 ve ortak iletişim v5 korunur. Önceki sürümün test sonuçları, bu yeni güvenlik kuralından geçtiği anlamına gelmez.
+- **Onay sınırı:** 13 Eylül ilk mevcut uygulama incelemesi yayın onayı değildir. Bu belge değişikliğinin onayı uygulama kodunu veya onaysız geçmiş sürümleri kapsamaz; uygulama için ayrı güvenlik sonucu gerekir.
+
 ## Sonraki uygulama güncellemesinin numarası
 
 Sonraki özellik kapsamı henüz seçilmedi. Aşağıdaki numaralar değişiklik türüne göre alternatiflerdir; iki ayrı sürüm taahhüdü değildir.
@@ -51,7 +61,8 @@ Sonraki özellik kapsamı henüz seçilmedi. Aşağıdaki numaralar değişiklik
 1. Bu plandaki hedef sürüm ve amacı yeni kapsamla güncelle; kullanıcıya yansıyan değişiklikleri, veri/saat uyumluluğunu ve kabul kontrollerini yaz.
 2. Uygulamayı geliştir ve ilgili kontrolleri çalıştır. Sonuçları plana ve değişiklik geçmişine işle; belge değişikliğinde APK üretmek gerekmez.
 3. Gönderilecek commitleri incele; yalnız görevle ilgili kaynak ve gözden geçirilmiş belgeleri dahil et. Kişisel anahtarlar, imzalama malzemesi, yerel ayarlar, cihaz günlükleri/yedekleri ve kişisel APK'lar kaynak deposuna girmez.
-4. Kod, README, bu plan ve değişiklik geçmişini mevcut GitHub CLI/OAuth yetkisiyle `osmanatayozturk/iz-android` deposuna gönder. Kullanıcı farklı bir akış istemedikçe hedef `main` dalıdır.
-5. Uzak commit kimliğini ve GitHub'daki plan dosyasını kontrol et; teslimde ilgili bağlantıyı ver. Fiziksel cihaz kurulumu yapıldıysa ayrıca belirt.
+4. Değişikliği görev dalında hazırla; kaynak ve belgeleri mevcut GitHub CLI/OAuth yetkisiyle `osmanatayozturk/iz-android` deposunda bir PR üzerinden incelemeye sun. Doğrudan `main` gönderimi yapma. Public PR'a sır, kişisel veri veya açığın kötüye kullanılmasını sağlayacak ayrıntı koyma.
+5. Geliştirmeye katılmamış bağımsız bir inceleyici kullan. Bulguları düzelt ve son PR head/base SHA'larını yeniden incelet. [Güvenlik yayın kuralındaki](GUVENLIK_YAYIN_KURALI.md) onay ve risk kabulü koşulları sağlanmadan `main` birleştirmesi, canlı yayın veya APK/AAB dağıtımı yapma. Head/base veya kaynak girdisi değişirse yeniden inceleme yaptır; yeni birleşim içeriğine eski onayı taşıma.
+6. Birleştirme öncesi incelenen head/base/kapsamı, sonrasında oluşan SHA ve kaynak ağacını doğrula. İnceleyici son sürüm kaydını güncelledikten sonra dağıtım kaynağını bu kayıttaki tam SHA ile karşılaştır. GitHub'daki plan dosyasını doğrula ve teslimde bağlantıyı ver. Fiziksel cihaz kurulumu yapıldıysa ayrıca belirt.
 
-Bu talimatlar [AGENTS.md](../AGENTS.md) içinde de kayıtlıdır. Zamanlanmış bir görev kurulmaz; gönderim her geliştirme çalışmasının tamamlanma adımıdır.
+Bu talimatlar [AGENTS.md](../AGENTS.md) içinde de kayıtlıdır. Sürüm planının kendisi bir arka plan görevi oluşturmaz. Bu iş akışında zamanlı görev yoktur; ayrıca kurulmuş **İz kod güvenlik incelemesi** PR olaylarını takip eder. İnceleme tetiklenmesi veya yorum gelmesi güvenlik onayı ve teknik yayın engeli yerine geçmez.

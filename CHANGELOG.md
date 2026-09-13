@@ -2,6 +2,13 @@
 
 Telefon ve Wear OS sürümleri ayrı numaralandırılır. Plan ve teslim kuralları için [sürüm planına](docs/SURUM_PLANI.md) bakın. Buradaki tarihler değişikliklerin tamamlandığı tarihlerdir.
 
+## Teslim süreci — 2026-09-13
+
+- Doğrudan `main` gönderimi yerine görev dalı ve PR akışı tanımlandı. Bağımsız güvenlik incelemesi, bulgu düzeltmeleri ve PR head/base SHA'larına bağlı onay zorunlu oldu. Uygulama dağıtımı için birleşim sonrası SHA ve kaynak ağacı ayrıca doğrulanır, inceleyici son sürüm kaydını günceller.
+- İnceleme eksikse veya sonucu `BLOCKED` / `INCOMPLETE` ise main birleştirmesi, canlı yayın ve APK/AAB dağıtımı durur. Açık bulgu istisnası yalnız kullanıcının sürüm, SHA ve bulgu bazında açık risk kabulüyle mümkündür.
+- Public PR'da sır, kişisel veri ve kötüye kullanılabilir açık ayrıntılarının paylaşılmaması kaydedildi. Kurulu PR olay görevi ile henüz yapılandırılmamış teknik yayın kontrolleri [güvenlik yayın kuralında](docs/GUVENLIK_YAYIN_KURALI.md) ayrıldı.
+- Bu değişiklik yalnız belgelerdedir; telefon 0.9.2 / code 17, saat 0.6.0 / code 10, uygulama kodu ve paketler değişmez.
+
 ## Telefon 0.9.2 - 2026-09-13
 
 **GitHub önizleme dağıtımı:** Telefon APK'sı kişisel servis ayarları olmadan release olarak hazırlandı. README'ye kurulum bağlantısı, yapılandırma bilgisi ve örnek konumlarla alınmış iki gerçek ekran görüntüsü eklendi. İlgili lisanslar, bağımlılık kaynakları ve dosya özetleri sürüm dosyalarıyla sunulur. Bu dağıtım yeni uygulama özelliği veya sürüm numarası eklemez.
