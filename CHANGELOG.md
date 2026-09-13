@@ -1,5 +1,13 @@
 # Değişiklik geçmişi
 
+## Uzman görevleri ve teslim süreci — 2026-09-13
+
+- Koordinatör ürün kapsamı, öncelik, kullanıcı/dış iletişim ve son yayın onayını yönetir. Çekirdek ve Teknik Lider onaylı kapsamda doğrudan teknik iş atar, ortak dosyaları tahsis eder ve yerel entegrasyonu yürütür.
+- Servis Entegrasyoncusu, Sürüm Belgeleri, Derleme ve APK ile Cihaz Kurulumu görevleri tanımlandı. Bileşen geliştiricilerinin kod/yerel test, Test'in birleşmiş kabul ve izole test ortamı sorumlulukları; UI/UX Tasarım ve Fikir rolleri korundu.
+- Sürüm Belgeleri her teslim için koordinatörün somut hedef, commit, metin, dosya ve varsa APK SHA-256 onayından sonra GitHub push, etiket, Release ve onaylı herkese açık APK yüklemesini yürütür. Diğer dış iletişim ve Birikenler koordinatörde kalır.
+- Eklenti önerilerinin üst sınır olmadığı, yeni çıktıların D: üzerinde tutulması ve mevcut veri/emülatörlerin korunması belgelendi.
+- Bu değişiklik yalnız görev yönergeleri ve sürüm belgeleridir. Telefon **0.10.0 / code 18**, Wear OS **0.6.0 / code 10**, iletişim **v5** ve veri/yedek biçimleri değişmedi; yeni APK üretilmedi.
+
 ## Telefon 0.10.0 — 2026-09-13
 
 **versionCode: 18 · Uyumlu saat: 0.6.0 / code 10 · İletişim: v5**
@@ -17,6 +25,8 @@
 Telefon ve Wear OS sürümleri ayrı numaralandırılır. Plan ve teslim kuralları için [sürüm planına](docs/SURUM_PLANI.md) bakın. Buradaki tarihler değişikliklerin tamamlandığı tarihlerdir.
 
 ## Çalışma düzeni - 2026-09-13
+
+> Önceki düzenin kaydıdır. Teknik atama ve GitHub işlemlerinin güncel görev paylaşımı yukarıdaki uzman görevleri bölümündedir.
 
 - Dış agent/proje isteklerinin koordinatöre yönlendirilmesi; yanıt, iş dağıtımı, editör iletişimi ve GitHub yayınının tek sorumluda kalması kalıcı talimatlara eklendi.
 - Telefon, saat ve Android Auto görevlerine kural iletildi. Uygulama kodu, paketler ve sürüm numaraları değişmedi.

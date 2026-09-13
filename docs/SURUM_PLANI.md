@@ -1,6 +1,6 @@
 # İz sürüm değişikliği planı
 
-Bu dosya her İz güncellemesiyle güncellenir ve kaynak koduyla birlikte GitHub'a gönderilir. Tamamlanan değişiklikler ayrıca [değişiklik geçmişine](../CHANGELOG.md) yazılır.
+Bu dosyayı Sürüm Belgeleri her İz güncellemesinde günceller; GitHub teslimi aşağıdaki koordinatör onayı akışıyla yapılır. Tamamlanan değişiklikler ayrıca [değişiklik geçmişine](../CHANGELOG.md) yazılır.
 
 ## Güncel sürümler
 
@@ -9,6 +9,17 @@ Bu dosya her İz güncellemesiyle güncellenir ve kaynak koduyla birlikte GitHub
 | Telefon | 0.10.0 | 18 | GitHub önizleme sürümü |
 | Wear OS | 0.6.0 | 10 | Telefon 0.10.0 ile iletişim biçimi değişmedi |
 | Ortak iletişim | v5 | — | Eski v1–v4 desteği korunuyor |
+
+## 2026-09-13: Uzman agentlar, teknik liderlik ve onaylı GitHub teslimi
+
+- **Amaç:** Ürün ve yayın kararlarını koordinatörde tutarken teknik iş dağıtımını ve yerel entegrasyonu Çekirdek ve Teknik Lider'e vermek.
+- **Kapsam:** Çekirdek ve Teknik Lider, Servis Entegrasyoncusu, Sürüm Belgeleri, Derleme ve APK ile Cihaz Kurulumu sorumlulukları tanımlandı. Bileşen geliştiricileri kod ve yerel testleri, Test görevi birleşmiş adayın kabulünü ve izole test ortamlarını yürütür. UI/UX Tasarım ve Fikir rolleri korunur.
+- **Yayın:** Sürüm Belgeleri, her teslim için koordinatörün hedef depo/dal/etiket, kaynak commit, yayın metni, dosyalar ve varsa APK SHA-256 değerlerini kapsayan somut onayından sonra GitHub işlemlerini yürütür. Bu istisna diğer dış iletişim veya Birikenler yetkisini devretmez.
+- **Çalışma koşulları:** Tüm erişilebilir eklentiler görevin ihtiyacına göre kullanılabilir; öneriler üst sınır değildir. Yeni çalışma kopyaları ve çıktılar D: üzerinde tutulur; mevcut veri ve emülatörler korunur. Cihazı, paketi ve işlem sırasını koordinatörün onaylı kapsamı içinde yalnız teknik lider tahsis eder.
+- **Uyumluluk:** Yalnız belgeler ve görev düzeni değişir. Telefon **0.10.0 / code 18**, Wear OS **0.6.0 / code 10**, iletişim **v5** ve veri/yedek biçimleri korunur. Yeni platform veya servis özelliği eklenmez.
+- **Kabul:** Rol/yetki tutarlılığı, yalnız ilgili belge farkları, bağlantılar, biçim ve özel bilgi kontrolü yapılır. Uygulama testi/derlemesi, yeni APK, etiket/Release veya cihaz kurulumu bu teslimin kapsamında değildir. GitHub'a gönderim, hazırlanan belge commit'i için ayrıca koordinatör onayı gerektirir.
+
+Ayrıntılı görev ve teslim kuralları [AGENTS.md](../AGENTS.md) içindedir. Önceki iletişim düzeninin teknik atama ve GitHub uygulayıcısı hükümlerinin yerini bu düzen alır.
 
 ## Tamamlanan plan: telefon 0.9.1 → 0.9.2
 
@@ -34,6 +45,8 @@ Bu dosya her İz güncellemesiyle güncellenir ve kaynak koduyla birlikte GitHub
 
 ## 2026-09-13: Proje iletişiminin koordinatörde toplanması
 
+> Tarihçe: Bu bölüm önceki düzeni kaydeder. Güncel teknik atama ve onaylı GitHub uygulayıcısı kuralları yukarıdaki uzman görevleri bölümünde ve AGENTS.md içinde tanımlanmıştır.
+
 - **Amaç:** Dış agent ve projelerden gelen istekleri tek sorumluda toplamak; yanıt ve iş dağıtımını İz koordinatörünün yürütmesi.
 - **Kapsam:** Görev talimatları, iş devri ve dış yayın yetkisi netleştirilir. Telefon, saat ve Android Auto görevleri dış istekleri koordinatöre aktarır; kendi başlarına yanıt veya yayın yapmaz.
 - **Uyumluluk:** Yalnız çalışma düzeni ve belgeler değişir. Telefon 0.9.2 / code 17, saat 0.6.0 / code 10, veri/yedek ve iletişim biçimi korunur.
@@ -57,15 +70,16 @@ Yayımlanan telefon sürümü **0.10.0 / code 18**'dir. Saat uygulaması değiş
 
 ## Her güncellemede uygulanacak akış
 
-1. Bu plandaki hedef sürüm ve amacı yeni kapsamla güncelle; kullanıcıya yansıyan değişiklikleri, veri/saat uyumluluğunu ve kabul kontrollerini yaz.
-2. Uygulamayı geliştir ve ilgili kontrolleri çalıştır. Sonuçları plana ve değişiklik geçmişine işle; belge değişikliğinde APK üretmek gerekmez.
-3. Gönderilecek commitleri incele; yalnız görevle ilgili kaynak ve gözden geçirilmiş belgeleri dahil et. Kişisel anahtarlar, imzalama malzemesi, yerel ayarlar, cihaz günlükleri/yedekleri ve kişisel APK'lar kaynak deposuna girmez.
-4. Kod, README, bu plan ve değişiklik geçmişini mevcut GitHub CLI/OAuth yetkisiyle `osmanatayozturk/iz-android` deposuna gönder. Kullanıcı farklı bir akış istemedikçe hedef `main` dalıdır.
-5. Uzak commit kimliğini ve GitHub'daki plan dosyasını kontrol et; teslimde ilgili bağlantıyı ver. Fiziksel cihaz kurulumu yapıldıysa ayrıca belirt.
+1. Koordinatör ürün kapsamını, önceliği ve hedef sürümü belirler. Sürüm Belgeleri bu plana kullanıcıya yansıyan değişiklikleri, veri/saat uyumluluğunu ve kabul kontrollerini yazar.
+2. Teknik lider ortak dosyaları tahsis eder, uzmanlara teknik iş atar, incelemeyi ve yerel entegrasyonu yürütür. Kod içindeki sürüm alanlarını yalnız teknik lider veya açıkça tahsis ettiği görev değiştirir.
+3. Atanan geliştiriciler ilgili kontrolleri çalıştırır; Test birleşmiş adayın kabulünü raporlar. Derleme ve APK görevi, gerekiyorsa bu kaynak commit'inden kişisel ve herkese açık paketleri ayrı üretir, sürüm/imza/SHA-256 ve kaynak/lisans eşleşmesini doğrular. Yalnız belge değişikliğinde uygulama testi/derlemesi veya APK üretimi gerekmez.
+4. Sürüm Belgeleri planı, değişiklik geçmişini ve gerekli kullanım/README notlarını doğrulanmış sonuçlarla günceller. Yalnız ilgili dosyaları commit'e alır; özel ayarları, anahtarları, cihaz kanıtlarını ve kişisel paketleri yayımlanacak içeriğe eklemez.
+5. Her teslimde hedef depo/dal, varsa etiket/Release, kaynak commit, tam yayın metni, dosya listesi ve varsa her APK'nın SHA-256 değeri koordinatöre sunulur. Olmayan etiket, Release ve APK açıkça belirtilir. Sürüm Belgeleri GitHub'a yazmadan önce bu teslimin somut onayını alır; değişen commit, metin, hedef veya dosyalar yeniden onaylanır. Rutin işlem için kullanıcıdan tekrar onay istenmez.
+6. Onaylı GitHub işlemlerini yalnız Sürüm Belgeleri mevcut CLI/OAuth oturumuyla yürütür. Kullanıcı farklı bir akış istemedikçe önerilen hedef `osmanatayozturk/iz-android` deposunun `main` dalıdır. Uzak dal ilerlerse teknik liderle uzlaştırılır ve değişen aday yeniden onaylanır; force push yapılmaz. Herkese açık APKlar yalnız onaylı Release varlığına yüklenir; APK/AAB dosyaları kaynak deposuna eklenmez.
+7. Uzak commit, belgeler ve yayın metni doğrulanır. Varsa etiket/Release'in kaynak commit'i, indirilebilir dosyalar ve APK SHA-256 değerleri kontrol edilir. Cihaz Kurulumu görevinin kurulum sonuçları ile Test'in kabul sonuçları ayrıca raporlanır; her kontrolün gerçek durumu geçti, kaldı, engelli veya çalıştırılmadı olarak belirtilir.
 
-Bu talimatlar [AGENTS.md](../AGENTS.md) içinde de kayıtlıdır. Zamanlanmış bir görev kurulmaz; gönderim her geliştirme çalışmasının tamamlanma adımıdır.
+Bu akış [AGENTS.md](../AGENTS.md) içinde de kayıtlıdır. Diğer proje dışı iletişim ve Birikenler teslimi koordinatörde kalır. Zamanlanmış bir görev veya otomasyon kurulmaz.
+
 ## Tamamlanan plan: İz 0.10.0 / code 18
 
 Telefon için Rotalarım, rota tercihleri ve alternatifler, GPX çizgi takibi, gezi koleksiyonları ile fotoğraf ve GPX paylaşım gizliliği tamamlandı. Çevrimdışı harita ve yeni bir çevrimdışı rota motoru bu sürüme eklenmedi. Yerel veritabanı (Room) ve manuel yedek sürümü 7 oldu; eski 1-6 verileri okunur. Wear OS 0.6.0 / code 10 ve iletişim biçimi v5 korunur. [Sürüm notları, doğrulama sonuçları ve dosyalar](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.10.0).
-
-
