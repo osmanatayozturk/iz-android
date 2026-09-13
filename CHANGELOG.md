@@ -1,5 +1,13 @@
 # Değişiklik geçmişi
 
+## Yeni uygulama sürümlerinde güvenlik kabulü — 2026-09-14
+
+- Her yeni İz uygulama sürümünün kabulü, kullanıcı telefonu/saati güncellemesi ve GitHub kaynak/etiket/Release/APK yayını öncesinde, Güvenlik projesindeki Siber Güvenlik görevinden o aday için açık olumlu dönüş şartı eklendi. Talebi ve sonucu yalnız koordinatör yönetir.
+- Güvenlik kararı sabit kaynak commit'i, başlangıç/kapsam, uygulama/platform sürümleri, varsa her özel/herkese açık APK'nın SHA-256 değeri ve ilgili derleme/hizmet yapılandırmasıyla eşleştirilir. Kaynak, paket veya güvenlik kararının dayandığı ilgili derleme/hizmet yapılandırması değişirse yeniden olumlu teyit gerekir.
+- Olumsuz, eksik, engelli veya yanıtsız karar beklemede kalır; zaman aşımı onay sayılmaz. İşlevsel test, derleme ve teknik lider incelemesi güvenlik onayının; olumlu güvenlik sonucu da koordinatörün sürüm kabulü ve somut yayın/kurulum onayının yerine geçmez.
+- Yanıt beklenirken atanan geliştirme, paket hazırlama ve tahsisli izole testler sürebilir. Bulgular teknik liderin tahsisiyle düzeltilir ve yeni aday koordinatör üzerinden yeniden değerlendirilir. Karar ve kabul kanıtı yerelde tutulur; özel veriler paylaşılmaz ve sıfır risk garantisi verilmez.
+- Bu değişiklik yalnız belgelerdir; telefon **0.10.0 / code 18**, Wear OS **0.6.0 / code 10**, iletişim **v5** ve mevcut paketler korunur. Yeni uygulama sürümü, geriye dönük güvenlik incelemesi veya sürekli tarama başlatmaz.
+
 ## Uzman görevleri ve teslim süreci — 2026-09-13
 
 - Koordinatör ürün kapsamı, öncelik, kullanıcı/dış iletişim ve son yayın onayını yönetir. Çekirdek ve Teknik Lider onaylı kapsamda doğrudan teknik iş atar, ortak dosyaları tahsis eder ve yerel entegrasyonu yürütür.
