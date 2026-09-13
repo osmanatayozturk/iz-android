@@ -1,5 +1,7 @@
 # İz 0.9.2 - navigasyon ve yolculuk günlüğü
 
+[Değişiklik geçmişi](CHANGELOG.md) · [Sürüm değişikliği planı](docs/SURUM_PLANI.md)
+
 Araba, motosiklet, bisiklet, yürüyüş, koşu ve yolcu için haritayla açılan Kotlin / Jetpack Compose uygulaması. Üstte **Nereye?**, yanda konum ve katmanlar, altta **Kaydet / Grup / Menü** bulunur. Yol tarifi günlük kaydı olmadan da çalışır; yeni başlangıçta **Yolculuğu kaydet** seçimi açıktır. Yolculuklar, ziyaretler, özel notlar ve fotoğraflar telefonda saklanır. Geçmiş, istatistikler, yerler, ısı haritası, OSM Topluluğu ve ayarlara Menüden ulaşılır.
 
 Bu depo İz'in kaynak kodunu yayımlar. Güncel sürümler telefon için **0.9.2 (code 17)**, Wear OS için **0.6.0 (code 10)**'dur. Hazır APK veya mağaza sürümü yayımlanmaz. [0.9 yenilikleri ve kullanım](docs/IZ_090_YENILIKLER.md) · [Kullanım kılavuzu](docs/IZ_080_KULLANIM.md) · [Grup sunucusu kurulumu](docs/GROUP_SETUP.md) · [Saat kartı ve kadran alanı](docs/WATCH_SURFACES.md).
