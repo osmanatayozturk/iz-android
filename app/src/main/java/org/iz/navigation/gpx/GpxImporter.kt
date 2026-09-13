@@ -95,8 +95,12 @@ object GpxImporter {
             if (path.size >= 64) throw SAXException("Too deep")
             if (path.isEmpty()) {
                 val version = attributes.getValue("version")
-                if (localName != "gpx" || version !in setOf("1.0", "1.1") ||
-                    uri != "http://www.topografix.com/GPX/$version") throw SAXException("Not GPX")
+                val expectedNamespace = when (version) {
+                    "1.0" -> "http://www.topografix.com/GPX/1/0"
+                    "1.1" -> "http://www.topografix.com/GPX/1/1"
+                    else -> throw SAXException("Not GPX")
+                }
+                if (localName != "gpx" || uri != expectedNamespace) throw SAXException("Not GPX")
                 namespace = uri
             }
             path += if (uri == namespace) localName else "#extension"

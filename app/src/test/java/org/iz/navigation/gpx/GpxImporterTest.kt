@@ -7,7 +7,7 @@ import org.junit.Test
 class GpxImporterTest {
     private val segment = "<trkseg><trkpt lat=\"41\" lon=\"29\"/><trkpt lat=\"41.001\" lon=\"29.001\"/></trkseg>"
     private fun file(body: String, version: String = "1.1") =
-        "<gpx xmlns=\"http://www.topografix.com/GPX/$version\" version=\"$version\">$body</gpx>"
+        "<gpx xmlns=\"http://www.topografix.com/GPX/${if (version == "1.0") "1/0" else "1/1"}\" version=\"$version\">$body</gpx>"
     private fun read(xml: String) = GpxImporter.read(ByteArrayInputStream(xml.toByteArray()), "İçe alınan iz")
     private fun rejects(xml: String) { assertThrows(GpxImportException::class.java) { read(xml) } }
 

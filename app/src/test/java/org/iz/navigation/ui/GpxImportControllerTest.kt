@@ -9,6 +9,20 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class GpxImportControllerTest {
     private fun track(name: String) = ImportedTrack(name = name, segments = emptyList())
+    @Test fun standardGpx11ImportPublishesPreviewWithoutError() = runTest {
+        val controller = GpxImportController(backgroundScope)
+        val xml = """<gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1">
+            <trk><name>Standart örnek</name><trkseg>
+            <trkpt lat="41" lon="29"/><trkpt lat="41.001" lon="29.001"/>
+            </trkseg></trk></gpx>"""
+        controller.read { GpxImporter.read(xml.byteInputStream()) }
+        runCurrent()
+        assertFalse(controller.state.value.loading)
+        assertNull(controller.state.value.message)
+        val segment = requireNotNull(controller.state.value.track).segments.single()
+        assertEquals("Standart örnek", segment.trackName)
+        assertEquals(2, segment.points.size)
+    }
     @Test fun delayedOldImportCannotReplaceSavedTrackSelectedLater() = runTest {
         val controller = GpxImportController(backgroundScope)
         val release = CompletableDeferred<Unit>()

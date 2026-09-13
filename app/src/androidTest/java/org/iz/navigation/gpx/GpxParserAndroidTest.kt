@@ -10,8 +10,18 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class GpxParserAndroidTest {
     private val geometry = "<trk><name>İz yürüyüşü</name><trkseg><trkpt lat=\"41\" lon=\"29\"/><trkpt lat=\"41.001\" lon=\"29.001\"/></trkseg></trk>"
-    private fun gpx(body: String) = "<gpx xmlns=\"http://www.topografix.com/GPX/1.1\" version=\"1.1\">$body</gpx>"
+    private fun gpx(body: String) = "<gpx xmlns=\"http://www.topografix.com/GPX/1/1\" version=\"1.1\">$body</gpx>"
     private fun read(xml: String) = GpxImporter.read(ByteArrayInputStream(xml.toByteArray()))
+    @Test fun androidReadsStandardGpx10() {
+        val xml = "<gpx xmlns=\"http://www.topografix.com/GPX/1/0\" version=\"1.0\">$geometry</gpx>"
+        assertEquals(2, read(xml).segments.single().points.size)
+    }
+    @Test fun androidRejectsDottedAndMismatchedNamespaces() {
+        for ((version, namespace) in listOf("1.0" to "1.0", "1.1" to "1.1", "1.0" to "1/1", "1.1" to "1/0")) {
+            val xml = "<gpx xmlns=\"http://www.topografix.com/GPX/$namespace\" version=\"$version\">$geometry</gpx>"
+            assertThrows(GpxImportException::class.java) { read(xml) }
+        }
+    }
     @Test fun androidReadsIndependentSegmentsAndTurkishNames() {
         val track = read(gpx(geometry + geometry))
         assertEquals(2, track.segments.size)
