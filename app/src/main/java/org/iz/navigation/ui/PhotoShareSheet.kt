@@ -22,7 +22,7 @@ internal fun PhotoShareSheet(photos: List<Photo>, onDismiss: () -> Unit, onShare
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Fotoğraflarını paylaş", style = MaterialTheme.typography.headlineSmall)
-            Text("Paylaşacağın veya galeriye kaydedeceğin fotoğrafları seç.", color = Muted)
+            Text("Paylaşılan ve galeriye kaydedilen kopyalarda dosyaya ekli konum ve çekim bilgileri kaldırılır. Özgün fotoğraflar İz’de korunur. Büyük fotoğraflar küçültülebilir.", color = Muted)
             photos.forEach { photo -> Row(Modifier.fillMaxWidth().clickable { selected = if (photo.id in selected) selected - photo.id else selected + photo.id }) {
                 Checkbox(photo.id in selected, { checked -> selected = if (checked) selected + photo.id else selected - photo.id })
                 AsyncImage(File(context.filesDir, photo.relativePath), photo.caption.ifBlank { "Günlük fotoğrafı" }, Modifier.size(72.dp))

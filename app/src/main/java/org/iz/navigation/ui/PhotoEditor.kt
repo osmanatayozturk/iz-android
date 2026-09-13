@@ -27,6 +27,7 @@ fun PhotoEditor(photo: Photo, onDismiss: () -> Unit, onSave: (Photo) -> Unit) {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             AsyncImage(File(LocalContext.current.filesDir, photo.relativePath), "Fotoğraf önizlemesi", Modifier.fillMaxWidth().height(180.dp))
             Text("Eksik tarih veya konumu ekleyebilir ya da boş bırakabilirsin. Fotoğraf seçtiğin ziyaret veya yolculuğa bağlıdır.", style = MaterialTheme.typography.bodySmall)
+            Text("Bu alanlar İz’deki kaydı değiştirir; özgün fotoğraf korunur. Paylaşım ve galeri kopyalarından dosyaya ekli konum ve çekim bilgileri kaldırılır.", style = MaterialTheme.typography.bodySmall)
             OutlinedTextField(caption, { caption = it }, label = { Text("Açıklama") })
             OutlinedTextField(time, { time = it }, label = { Text("Çekim: yyyy-AA-gg SS:dd") }, supportingText = { Text("Telefonun saat dilimi · İsteğe bağlı") }, singleLine = true)
             OutlinedTextField(latitude, { latitude = it }, label = { Text("Enlem (isteğe bağlı)") }, singleLine = true)

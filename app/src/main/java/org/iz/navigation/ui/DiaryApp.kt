@@ -468,7 +468,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     }
     photosToShare?.let { photos -> PhotoShareSheet(photos, onDismiss = { photosToShare = null },
         onShare = { selected -> vm.execute { MediaShare.sharePhotos(context, selected) } },
-        onGallery = { selected -> vm.execute { val count = MediaShare.savePhotosToGallery(context, selected); vm.message("$count fotoğraf galeriye kaydedildi.") } }) }
+        onGallery = { selected -> vm.execute { val count = MediaShare.savePhotosToGallery(context, selected); vm.message("$count fotoğraf, dosyaya ekli konum ve çekim bilgileri kaldırılarak galeriye kaydedildi.") } }) }
     if (contributionPicker) {
         val source = contributionPlace?.takeIf { it.source == PlaceSource.OSM && it.osmType != null && it.osmId != null && it.latitude != null && it.longitude != null }
         ContributionLocationPicker(source?.let { SelectedOsmPlace(it.name, it.latitude!!, it.longitude!!, OsmRef(it.osmType!!, it.osmId!!)) }, contributionPlace?.id,
@@ -748,6 +748,5 @@ private fun PhotoGrid(photos: List<Photo>, onDelete: (Photo) -> Unit, onEdit: (P
 @Composable private fun ModeBadge(transport: Transport) { Icon(transport.icon(), null, tint = transport.accentColor(), modifier = Modifier.size(44.dp).background(transport.badgeColor(), RoundedCornerShape(14.dp)).padding(10.dp)) }
 @Composable private fun Notice(text: String) { Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(14.dp)) { Text(text, Modifier.padding(14.dp), style = MaterialTheme.typography.bodySmall) } }
 @Composable private fun EmptyCard(icon: ImageVector, title: String, body: String) { Surface(shape = RoundedCornerShape(24.dp), color = Color.White) { Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { Icon(icon, null, Modifier.size(42.dp), tint = Forest); Text(title, style = MaterialTheme.typography.titleLarge); Text(body, color = Muted) } } }
-
 
 
