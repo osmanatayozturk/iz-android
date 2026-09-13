@@ -1,12 +1,12 @@
-# İz 0.10 — Rotalarım, GPX takibi ve Geziler
+# İz 0.10.0 — Rotalarım, GPX takibi ve Geziler
 
-Durum: Bu sürüm geliştirme ve doğrulama aşamasındadır. Yayımlanan paket için GitHub Releases sayfasını kontrol edin.
+[İz 0.10.0 telefon APK'sını indirin](https://github.com/osmanatayozturk/iz-android/releases/download/v0.10.0/iz-0.10.0-android.apk). Paket Android 10 veya üzerini ve Google Play hizmetlerini gerektirir. [Sürüm notları ve doğrulama sonuçları](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.10.0).
 
 ## Rotalarım
 
 Menüden **Rotalarım** bölümünü açın. Yol tarifi ve Hava ekranlarında hazırladığınız planı bir ad vererek kaydedebilirsiniz. Başlangıç, varış, ara duraklar, ulaşım türü, kişisel hız ve yol tercihleri saklanır.
 
-Bir planı açtığınızda güncel rota yeniden hesaplanır. **Konumum** ile kaydettiğiniz başlangıç güncel konumunuzu kullanır; haritadan veya Yerler'den seçtiğiniz başlangıç aynı kalır. Planı açmak veya kaydetmek yolculuk kaydı başlatmaz.
+Bir planı açtığınızda güncel rota yeniden hesaplanır. **Konumum** ile kaydettiğiniz başlangıç güncel konumunuzu kullanır; haritadan veya Yerler'den seçtiğiniz başlangıç aynı kalır. Plan kendi ulaşım türü, kişisel hız ve yol tercihleriyle açılır; ulaşım türünün diğer rotalarda kullanılacak son ayarları değişmez. Planı açmak veya kaydetmek yolculuk kaydı başlatmaz.
 
 ## Yol tercihleri ve alternatifler
 
@@ -38,6 +38,6 @@ Geziden bir yolculuğu çıkarmak veya geziyi silmek günlükteki yolculuğu sil
 
 GPX dışa aktarımında tarih/saat seçeneği her açılışta kapalıdır. İsterseniz açabilirsiniz. Dosya koordinatları içerir; başlangıç ve bitişi kırpma seçeneği kullanılabilir. Paylaşılan fotoğraflardan gömülü konum ve diğer kaynak üstverileri temizlenir; özgün fotoğraflar korunur.
 
-Manuel yedek sürümü 7'dir; eski 1–6 yedekleri okunabilir. Kayıtlı planlar, GPX çizgileri ve Geziler yedeğe dahildir. Geçici takip oturumu yedeğe eklenmez ve geri yükleme kayıt başlatmaz. Sağlık verisinin yedeğe katılması mevcut ayrı seçime bağlıdır.
+Yerel veritabanı (Room) ve manuel yedek sürümü 7'dir; eski 1–6 verileri okunabilir. Kaydedilmiş planlar, GPX çizgileri ve Geziler yedeğe dahildir. Geçici takip oturumu yedeğe eklenmez ve geri yükleme kayıt başlatmaz. Sağlık verisinin yedeğe katılması mevcut ayrı seçime bağlıdır. Aynı uygulama kimliği ve imzayla güncelleme verileri yerinde korur; farklı imzalı APK için önce manuel yedek alın.
 
-Telefon hedefi **0.10.0 / code 18**; saat **0.6.0 / code 10**, ortak iletişim **v5** olarak korunur.
+Telefon sürümü **0.10.0 / code 18**; saat **0.6.0 / code 10**, ortak iletişim **v5** olarak korunur. Genel APK kişisel TomTom veya OSM uygulama kimliği içermez; bu sağlayıcılara bağlı özellikler için kendi ayarınızı girmeniz gerekir. Grup özelliği genel APK'da bir Supabase sunucusuna bağlı değildir.

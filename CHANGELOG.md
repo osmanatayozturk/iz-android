@@ -1,6 +1,6 @@
 # Değişiklik geçmişi
 
-## Telefon 0.10.0 — geliştirme ve doğrulama sürüyor
+## Telefon 0.10.0 — 2026-09-13
 
 **versionCode: 18 · Uyumlu saat: 0.6.0 / code 10 · İletişim: v5**
 
@@ -12,7 +12,7 @@
 - Room ve manuel yedek sürümü 7; eski 1–6 yedeklerinin okunması. Kayıtlı planlar, GPX izleri ve koleksiyonların yedeklenmesi.
 - GPX dışa aktarımında isteğe bağlı tarih/saat; paylaşılan fotoğraflarda üstveri temizliği ve özgün fotoğrafların korunması.
 
-Birleşik sürümün nihai test, APK ve GitHub teslimi henüz tamamlanmadı.
+**Önizleme dağıtımı:** [Telefon APK'sı](https://github.com/osmanatayozturk/iz-android/releases/download/v0.10.0/iz-0.10.0-android.apk) kişisel servis anahtarları ve kullanıcı verileri olmadan sunulur. TomTom trafik özellikleri ve OSM hesabıyla yapılan işlemler kullanıcının kendi sağlayıcı ayarını gerektirir; grup özelliği genel APK'da bir Supabase sunucusuna bağlı değildir. [Sürüm notları, doğrulama sonuçları ve dosyalar](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.10.0).
 
 Telefon ve Wear OS sürümleri ayrı numaralandırılır. Plan ve teslim kuralları için [sürüm planına](docs/SURUM_PLANI.md) bakın. Buradaki tarihler değişikliklerin tamamlandığı tarihlerdir.
 

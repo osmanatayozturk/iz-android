@@ -40,6 +40,7 @@ local.properties
 /docs/images/*
 !/docs/images/iz-home.png
 !/docs/images/iz-route-planner.png
+!/docs/images/iz-010-routes.png
 !/docs/OSM_TOPLULUGU.md
 !/docs/ANDROID_AUTO.md
 !/docs/WATCH_SUPPORT.md

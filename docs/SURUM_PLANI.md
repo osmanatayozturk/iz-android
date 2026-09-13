@@ -6,8 +6,8 @@ Bu dosya her İz güncellemesiyle güncellenir ve kaynak koduyla birlikte GitHub
 
 | Bileşen | versionName | versionCode | Durum |
 |---|---|---|---|
-| Telefon | 0.9.2 | 17 | Derlendi, test edildi ve telefona yerinde kuruldu |
-| Wear OS | 0.6.0 | 10 | Telefon 0.9.2 ile iletişim biçimi değişmedi |
+| Telefon | 0.10.0 | 18 | GitHub önizleme sürümü |
+| Wear OS | 0.6.0 | 10 | Telefon 0.10.0 ile iletişim biçimi değişmedi |
 | Ortak iletişim | v5 | — | Eski v1–v4 desteği korunuyor |
 
 ## Tamamlanan plan: telefon 0.9.1 → 0.9.2
@@ -43,13 +43,13 @@ Bu dosya her İz güncellemesiyle güncellenir ve kaynak koduyla birlikte GitHub
 
 ## Sonraki uygulama güncellemesinin numarası
 
-Onaylanan sonraki özellik sürümü telefon **0.10.0 / code 18**'dir. Saat uygulaması değişmediği için **0.6.0 / code 10** korunur. Aşağıdaki tablo ilerideki güncellemelerde kullanılan numaralandırma türlerini gösterir; ayrı sürüm taahhüdü değildir.
+Yayımlanan telefon sürümü **0.10.0 / code 18**'dir. Saat uygulaması değişmediği için **0.6.0 / code 10** korunur. Aşağıdaki tablo ilerideki güncellemelerde kullanılan numaralandırma türlerini gösterir; ayrı sürüm taahhüdü değildir.
 
 | Değişiklik | Telefon için sonraki sürüm | Saat de değişirse sonraki saat sürümü |
 |---|---|---|
-| Hata düzeltmesi veya mevcut ekranın küçük iyileştirmesi | 0.9.3 / code 18 | 0.6.1 / code 11 |
-| Yeni kullanıcı özelliği veya yeni modül | 0.10.0 / code 18 | 0.7.0 / code 11 |
-| Yalnız dokümantasyon veya teslim süreci | 0.9.2 / code 17 korunur | 0.6.0 / code 10 korunur |
+| Hata düzeltmesi veya mevcut ekranın küçük iyileştirmesi | 0.10.1 / code 19 | 0.6.1 / code 11 |
+| Yeni kullanıcı özelliği veya yeni modül | 0.11.0 / code 19 | 0.7.0 / code 11 |
+| Yalnız dokümantasyon veya teslim süreci | 0.10.0 / code 18 korunur | 0.6.0 / code 10 korunur |
 
 - Numara, çalışmaya başlarken gerçek kapsam ve depodaki en son sürüm esas alınarak kesinleştirilir. Yayımlanan/teslim edilen yeni APK için ilgili modülün `versionCode` değeri monoton artar; art arda test derlemeleri ayrı sürüm sayılmaz.
 - Telefon ve saat bağımsız numaralandırılır. Değişmeyen modülün sürümü artırılmaz. Değerlerin kaynağı `app/build.gradle.kts` ve `wear/build.gradle.kts` dosyalarıdır.
@@ -64,8 +64,8 @@ Onaylanan sonraki özellik sürümü telefon **0.10.0 / code 18**'dir. Saat uygu
 5. Uzak commit kimliğini ve GitHub'daki plan dosyasını kontrol et; teslimde ilgili bağlantıyı ver. Fiziksel cihaz kurulumu yapıldıysa ayrıca belirt.
 
 Bu talimatlar [AGENTS.md](../AGENTS.md) içinde de kayıtlıdır. Zamanlanmış bir görev kurulmaz; gönderim her geliştirme çalışmasının tamamlanma adımıdır.
-## Devam eden plan: İz 0.10.0 / code 18
+## Tamamlanan plan: İz 0.10.0 / code 18
 
-Telefon odaklı Rotalarım, rota tercihleri/alternatifler, GPX çizgi takibi ve gezi koleksiyonları; fotoğraf/GPX paylaşım gizliliği ve genel dayanıklılık. Yürüyüş/koşu/bisiklette Otoyola girme varsayılan açık. Çevrimdışı harita ve yeni offline rota hesaplama kapsam dışında. Room ve manuel yedek 7'ye göç eder; eski 1-6 yedekleri okunur. Wear 0.6.0/code10 ve v5 korunur. Test ve teslim henüz tamamlanmadı.
+Telefon için Rotalarım, rota tercihleri ve alternatifler, GPX çizgi takibi, gezi koleksiyonları ile fotoğraf ve GPX paylaşım gizliliği tamamlandı. Çevrimdışı harita ve yeni bir çevrimdışı rota motoru bu sürüme eklenmedi. Yerel veritabanı (Room) ve manuel yedek sürümü 7 oldu; eski 1-6 verileri okunur. Wear OS 0.6.0 / code 10 ve iletişim biçimi v5 korunur. [Sürüm notları, doğrulama sonuçları ve dosyalar](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.10.0).
 
 

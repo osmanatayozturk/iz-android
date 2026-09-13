@@ -1,22 +1,22 @@
-# İz 0.9.2 - navigasyon ve yolculuk günlüğü
+# İz 0.10.0 - navigasyon ve yolculuk günlüğü
 
-**Geliştirme dalı: 0.10.0 / code 18.** Rotalarım, Geziler ve GPX çizgi takibi bu dalda ekleniyor; aşağıdaki indirme bağlantısı doğrulanmış 0.9.2 paketine aittir. [0.10 kullanım rehberi](docs/IZ_010_KULLANIM.md).
+**Telefon sürümü: 0.10.0 / code 18.** Kaydedilen rotalar, GPX çizgi takibi ve Geziler bu sürümde kullanıma sunulur. [0.10 kullanım rehberi](docs/IZ_010_KULLANIM.md).
 
 [Değişiklik geçmişi](CHANGELOG.md) · [Sürüm değişikliği planı](docs/SURUM_PLANI.md)
 
 Araba, motosiklet, bisiklet, yürüyüş, koşu ve yolcu için haritayla açılan Kotlin / Jetpack Compose uygulaması. Üstte **Nereye?**, yanda konum ve katmanlar, altta **Kaydet / Grup / Menü** bulunur. Yol tarifi günlük kaydı olmadan da çalışır; yeni başlangıçta **Yolculuğu kaydet** seçimi açıktır. Yolculuklar, ziyaretler, özel notlar ve fotoğraflar telefonda saklanır. Geçmiş, istatistikler, yerler, ısı haritası, OSM Topluluğu ve ayarlara Menüden ulaşılır.
 
-Bu depo İz'in kaynak kodunu ve telefon için **0.9.2 (code 17)** önizleme APK'sını yayımlar. Wear OS kaynak sürümü **0.6.0 (code 10)**'dur; bu yayında saat APK'sı bulunmaz. Play Store yayını yapılmamıştır. [0.9 yenilikleri ve kullanım](docs/IZ_090_YENILIKLER.md) · [Kullanım kılavuzu](docs/IZ_080_KULLANIM.md) · [Grup sunucusu kurulumu](docs/GROUP_SETUP.md) · [Saat kartı ve kadran alanı](docs/WATCH_SURFACES.md).
+Bu depo İz'in kaynak kodunu ve telefon için **0.10.0 (code 18)** önizleme APK'sını yayımlar. Wear OS **0.6.0 (code 10)** ve telefon-saat iletişim biçimi **v5** olarak korunur; bu sürümde yeni saat APK'sı yoktur. Play Store yayını yapılmamıştır. [0.10 kullanım rehberi](docs/IZ_010_KULLANIM.md) · [0.9 yenilikleri ve kullanım](docs/IZ_090_YENILIKLER.md) · [Grup sunucusu kurulumu](docs/GROUP_SETUP.md) · [Saat kartı ve kadran alanı](docs/WATCH_SURFACES.md).
 
 ## İndir ve dene
 
-**[İz 0.9.2 telefon APK'sını indir](https://github.com/osmanatayozturk/iz-android/releases/download/v0.9.2/iz-phone-0.9.2.apk)** · [Sürüm notları ve dosyalar](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.9.2)
+**[İz 0.10.0 telefon APK'sını indir](https://github.com/osmanatayozturk/iz-android/releases/download/v0.10.0/iz-0.10.0-android.apk)** · [Sürüm notları, doğrulama sonuçları ve dosyalar](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.10.0)
 
 Android **10 veya üzeri** ve Google Play hizmetleri gerekir. APK'yı telefonda açın; Android isterse dosyayı açtığınız tarayıcı veya dosya yöneticisi için uygulama yükleme izni verin. Konum ve diğer izinler ilgili özellik kullanılırken açıklanır. Otomatik kayıt ilk kurulumda kapalıdır.
 
-Bu paket kişisel API anahtarı, hesap veya yolculuk verisi içermez. Temel harita, rota planlama, hava durumu ve yerel günlük kullanılabilir. TomTom için kendi anahtarınızı, OSM hesabı için kendi public istemci kimliğinizi ayarlayabilirsiniz. Supabase grup bağlantısı bu genel pakette yapılandırılmamıştır; kendi sunucunuzla derleme için [grup kurulumu](docs/GROUP_SETUP.md) belgesini kullanın.
+Genel APK kişisel servis anahtarları, hesaplar veya yolculuk verileri içermez. Temel harita, Valhalla ile rota planlama, Open-Meteo hava durumu, GPX özellikleri ve telefondaki günlük ek ayar olmadan kullanılabilir. TomTom trafik özellikleri için kendi anahtarınızı; OSM hesabına bağlanmak için kendi herkese açık OSM uygulama kimliğinizi girmeniz gerekir. Grup özelliği genel APK'da bir Supabase sunucusuna bağlı değildir; kendi sunucunuzla derleme için [grup kurulumu](docs/GROUP_SETUP.md) belgesini kullanın.
 
-Paket hata ayıklamaya kapalı bir release derlemesidir; mevcut geliştirme sertifikasıyla imzalanmış bir **önizleme** olarak sunulur. Aynı uygulama kimliği ve imzaya sahip önceki kurulumlar yerinde güncellenebilir. Farklı imzalı kurulumlarda Android güncellemeyi reddeder; uygulamayı kaldırmadan önce Ayarlar'dan özel günlüğünüzü yedekleyin. Sürüm ekindeki `SHA256SUMS.txt` dosyası indirilen paketin doğrulanması içindir.
+Paket hata ayıklamaya kapalıdır ve mevcut geliştirme sertifikasıyla imzalanmış bir **önizleme** olarak sunulur. Aynı uygulama kimliği ve imzaya sahip önceki kurulumlar yerinde güncellenebilir. Farklı imzalı kurulumlarda Android güncellemeyi reddeder; uygulamayı kaldırmadan önce Ayarlar'dan özel günlüğünüzü yedekleyin. Dosya özeti, paket içeriği ve doğrulama sonuçları [sürüm notlarında](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.10.0) yayımlanır.
 
 ## Uygulamadan görüntüler
 
@@ -25,6 +25,10 @@ Emülatörden alınan gerçek ekranlar; konumlar tanıtım için seçilmiş örn
 | Ana harita | Rota planlama |
 | --- | --- |
 | <img src="docs/images/iz-home.png" width="320" alt="İz logosu, Küçük yollar güzel anılar sözü ve örnek konumla ana harita" /> | <img src="docs/images/iz-route-planner.png" width="320" alt="Başlangıç ve varış seçimiyle İz rota planlama ekranı" /> |
+
+| Rotalarım ve GPX |
+| --- |
+| <img src="docs/images/iz-010-routes.png" width="320" alt="Rotalarım — örnek plan ve GPX izi (sentetik test verileri)" /> |
 
 0.9.2'de ana haritanın üstünde küçük İz logosu, uygulama adı ve “Küçük yollar, güzel anılar.” sözü yer alır. Bu başlık, rota planlayıcı veya yolculuk açıkken gizlenir. Harita düğmeleri ve görünür alan, başlığın ölçülen yüksekliğine uyum sağlar.
 
@@ -38,9 +42,9 @@ Supabase grup sunucusu ve TomTom trafik bağlantısı varsayılan kaynak yapıla
 
 Altı yolculuk türünde rota havası, kalkış karşılaştırması ve türe özel canlı uyarılar için [hava durumu kullanımına](docs/weather/USAGE.md) bakın.
 
-## 0.10 geliştirmesi
+## 0.10 yenilikleri
 
-- **Rotalarım:** İki ile beş duraklı planları adlandırın; ulaşım türü, kişisel hız ve yol tercihleri saklanır. Konumum başlangıcı yeniden açılışta güncellenir. Planı açmak kayıt başlatmaz.
+- **Rotalarım:** İki ile beş duraklı planları adlandırın; ulaşım türü, kişisel hız ve yol tercihleri saklanır. **Konumum** başlangıcı plan açıldığında güncellenir. Kaydedilmiş plan kendi ayarlarıyla açılır, ulaşım türünün diğer rotalarda kullanılacak son ayarlarını değiştirmez ve kayıt başlatmaz.
 - **Yol tercihleri:** Yürüyüş, koşu ve bisiklette **Otoyola girme** varsayılan açıktır. Son seçiminiz her ulaşım türü için ayrı saklanır; kaydedilen plan kendi tercihlerini korur. Bu üç türde otoyolsuzluğu doğrulanamayan rota kullanılmaz.
 - **Alternatifler:** Desteklenen planlarda en fazla iki ek güzergâh istenir. Hava karşılaştırması seçilen güzergâha bağlıdır; başlangıçta farklı bir yol sessizce seçilmez.
 - **GPX takibi:** GPX 1.0/1.1 izlerini bölüm, yön ve başlangıç seçerek takip edin veya Rotalarım'a kaydedin. GPX takibi günlük kaydından ayrıdır; dönüş talimatı, tahmini varış ve otomatik yeniden rota hesabı sunmaz.
@@ -110,11 +114,11 @@ Koşu telefon/saat menülerinde ve ısı haritasında ayrı bir moddur. Otomatik
 
 Yalnız Samsung Health kaynaklı, cihazı saat olarak belirtilmiş ölçümler alınır. Saat metadata'sı bilekte kalma süresini kanıtlamaz. İlk erişilebilen 30 gündeki ve yeni onaylanmış yolculuklar eşleştirilir. Ölçümler gecikebilir; Samsung Health tüm yolculuklar için kalori üretmeyebilir. Toplam kalori aktif kalori değildir; aralıklar oranlanmaz, boşluklar doldurulmaz. Telefon/saat adımları ayrı gösterilir. İz egzersiz başlatmaz veya sağlık kayıtlarına yazmaz.
 
-Yedek sürümü 6, sürüm 1–5'i okur. Sağlık ölçümlerini yedeğe eklemek her dışa aktarımda varsayılan kapalıdır; eşitleme işaretçileri ve izinler yedeklenmez. Sağlık verileri OSM, GPX ve fotoğraf paylaşımına eklenmez. Aynı uygulama kimliğini kullanan önceki telefon/saat protokol sürümleriyle uyumluluk korunur; eski ve yeni uygulama kimliğine sahip karma telefon-saat çiftleri iletişim kurmaz.
+Yedek sürümü 7, sürüm 1–6'yı okur. Sağlık ölçümlerini yedeğe eklemek her dışa aktarımda varsayılan kapalıdır; eşitleme işaretçileri ve izinler yedeklenmez. Sağlık verileri OSM, GPX ve fotoğraf paylaşımına eklenmez. Aynı uygulama kimliğini kullanan önceki telefon/saat protokol sürümleriyle uyumluluk korunur; eski ve yeni uygulama kimliğine sahip karma telefon-saat çiftleri iletişim kurmaz.
 
 ## Veri ve yedek
 
-Room sürüm 6: yolculuklar, rota noktaları, yerler, ziyaretler, fotoğraf bilgileri ve OSM katkı taslakları. Eski Google kimlikleri/puanları/taslakları arşiv uyumluluğu için korunur; aktif paylaşım akışında kullanılmaz. Fotoğraf kopyaları uygulamanın özel `files/photos/` klasöründedir. Analitik veya otomatik günlük yüklemesi yoktur. İsteğe bağlı grup özelliği ayrı Supabase sunucusunu kullanır; günlük, sağlık ve fotoğraflar gruba yüklenmez. Sunucuda grup üyeliği, ortak duraklar ve izin/zaman bilgileri tutulur; canlı koordinatlar yalnız paylaşım açıkken aktarılır ve geçmiş olarak saklanmaz. Harita alanları ve arama metinleri seçilen OSM servislerine gönderilir. OSM hesabı yalnızca kullanıcı bağlantı kurduğunda kullanılır.
+Yerel veritabanı (Room) sürüm 7: yolculuklar, rota noktaları, yerler, ziyaretler, fotoğraf bilgileri, OSM katkı taslakları, kaydedilmiş rota ve GPX izleri ile gezi koleksiyonları. Room 1-6 verileri güncelleme sırasında korunur. Eski Google kimlikleri/puanları/taslakları arşiv uyumluluğu için korunur; aktif paylaşım akışında kullanılmaz. Fotoğraf kopyaları uygulamanın özel `files/photos/` klasöründedir. Analitik veya otomatik günlük yüklemesi yoktur. İsteğe bağlı grup özelliği ayrı Supabase sunucusunu kullanır; günlük, sağlık ve fotoğraflar gruba yüklenmez. Sunucuda grup üyeliği, ortak duraklar ve izin/zaman bilgileri tutulur; canlı koordinatlar yalnız paylaşım açıkken aktarılır ve geçmiş olarak saklanmaz. Harita alanları ve arama metinleri seçilen OSM servislerine gönderilir. OSM hesabı yalnızca kullanıcı bağlantı kurduğunda kullanılır.
 
 Android otomatik bulut yedeği ve cihaz transferi uygulama verileri için kapalıdır. Ayarlar'dan sürümlü ZIP dosyasına manuel yedek alınabilir. Yedek özel konumları ve fotoğrafları içerir; uygulamayı kaldırmadan önce güvenli bir yere kaydedin. Geçici rotalar yedeğe alınmaz. Geri yükleme dosyayı doğruladıktan sonra mevcut günlüğü değiştirir; açık yolculuklar bitmiş/kesilmiş olarak içeri alınır ve takip kendiliğinden başlatılmaz.
 
@@ -161,4 +165,4 @@ Copyright © 2026 İz projesine katkıda bulunanlar. Bu depodaki özgün kaynak 
 
 Harita ve yol verisi © OpenStreetMap katkıcılarıdır; uygulama içindeki ve belgelerdeki OpenStreetMap kaynak gösterimleri korunmalıdır. MapLibre, AndroidX, AppAuth, OkHttp, Health Connect istemcisi ve diğer bağımlılıkların lisans koşulları ayrıca geçerlidir.
 
-Kaynak kod, Google Play Services konum ve Wearable Data Layer bağımlılıklarını kullanır. Google Play Services tescilli bir çalışma zamanı bileşenidir ve bu depoda GPL kapsamında yeniden lisanslanmaz. APK ile eşleşen İz kaynak kodu, üçüncü taraf lisansları ve bağımlılık kaynakları [aynı sürümün dosyaları](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.9.2) üzerinden sağlanır.
+Kaynak kod, Google Play Services konum ve Wearable Data Layer bağımlılıklarını kullanır. Google Play Services tescilli bir çalışma zamanı bileşenidir ve bu depoda GPL kapsamında yeniden lisanslanmaz. APK ile eşleşen İz kaynak kodu, üçüncü taraf lisansları ve bağımlılık kaynakları [aynı sürümün dosyaları](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.10.0) üzerinden sağlanır.
