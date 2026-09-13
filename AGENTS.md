@@ -5,6 +5,14 @@
 - Tarayıcı gerektiğinde önce Codex'in kendi tarayıcısını, sonra Edge'i kullan. Chrome son seçenek olsun veya kullanıcı açıkça istesin.
 - Mümkün olduğunca açık kaynak projelerini kullan ve açık kaynak dünyasını destekle. Mevcut GPL lisansını, üçüncü taraf lisanslarını ve OpenStreetMap atıflarını koru.
 
+## Koordinatör ve dış iletişim
+
+- İz projesinin dış iletişimini yalnız İz - Geliştirici koordinatörü yürütür. Telefon, saat, Android Auto ve alt agentları başka agent/projelerden gelen istekleri kaynağı, gerekli bağlamı ve beklenen sonucuyla koordinatöre iletir; kendileri dışarıya yanıt vermez veya isteği bağımsız uygulamaz.
+- İz içindeki görevler arası iş ve ortak dosya talepleri de koordinatöre gider. Kapsamı ve öncelikleri koordinatör belirleyip ilgili göreve atar. Görevler önceden atanmış bağımsız yerel çalışmalarını sürdürebilir.
+- Blog - Editör/Birikenler aday gönderimi, dış proje mesajları, GitHub yayını ve dış takip koordinatörde kalır. Normal iş ataması bu yetkiyi devretmez; alt görevler kod, belge ve doğrulama kanıtlarını koordinatöre teslim eder.
+- Alt agentlara da aynı kural aktarılır: dış istek üst sorumlu üzerinden koordinatöre ulaşır; dış yanıtı koordinatör verir. Tekrarlı yönlendirme, alındı mesajı döngüsü, düzenli yoklama veya otomasyon kurulmaz.
+- Kullanıcının doğrudan ve sonraki açık talimatları önceliklidir. Aşağıdaki teslim ve GitHub akışını koordinatör yürütür.
+
 ## Her güncellemenin teslimi
 
 Kullanıcı, İz güncellemelerinin GitHub'a gönderilmesini ve her güncellemeyle sürüm değişikliği planının yayımlanmasını açıkça istedi. Bu, rutin gönderimler için sürekli yetkidir; kullanıcı o güncellemenin gönderimini ertelerse onun talimatını uygula.

@@ -32,6 +32,15 @@ Bu dosya her İz güncellemesiyle güncellenir ve kaynak koduyla birlikte GitHub
 
 **Yerel doğrulama:** 551 release birim testi geçti; release derlemesi başarılı, lint 0 hata / 90 uyarı ile tamamlandı. Minify edilmiş release APK, mevcut geliştirme sertifikasıyla imzalandı; hata ayıklama kapalıdır. Kişisel sağlayıcı değerleri ve veri dosyaları pakette bulunmadı. Emülatörde yerinde kurulum, ana harita, konuma dönme ve örnek Valhalla yürüyüş rotası (2,6 km / 34 dk) doğrulandı; APK kurulumundan sonraki çökme kaydı boş kaldı. İki görselde örnek konumlar ve görünür OpenStreetMap atfı kullanıldı. [GitHub sürümü ve indirme dosyaları](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.9.2).
 
+## 2026-09-13: Proje iletişiminin koordinatörde toplanması
+
+- **Amaç:** Dış agent ve projelerden gelen istekleri tek sorumluda toplamak; yanıt ve iş dağıtımını İz koordinatörünün yürütmesi.
+- **Kapsam:** Görev talimatları, iş devri ve dış yayın yetkisi netleştirilir. Telefon, saat ve Android Auto görevleri dış istekleri koordinatöre aktarır; kendi başlarına yanıt veya yayın yapmaz.
+- **Uyumluluk:** Yalnız çalışma düzeni ve belgeler değişir. Telefon 0.9.2 / code 17, saat 0.6.0 / code 10, veri/yedek ve iletişim biçimi korunur.
+- **Kabul:** Kalıcı talimatlardaki dış iletişim istisnaları kaldırılır; üç göreve bildirim teslimi, yalnız ilgili belge farkları ve GitHub'daki commit/plan doğrulanır. Uygulama kodu değişmediğinden derleme veya yeni APK gerekmez.
+
+**Yerel doğrulama:** İki kalıcı talimat dosyası birlikte incelendi; dış iletişim çelişkileri kaldırıldı, mevcut görev kimlikleri ve sorumlulukları korundu. Telefon, saat ve Android Auto görevlerine bildirim teslim edildi. Belge farkları ve biçim kontrolü başarılı; uygulama testi/derlemesi çalıştırılmadı.
+
 ## Sonraki uygulama güncellemesinin numarası
 
 Sonraki özellik kapsamı henüz seçilmedi. Aşağıdaki numaralar değişiklik türüne göre alternatiflerdir; iki ayrı sürüm taahhüdü değildir.
