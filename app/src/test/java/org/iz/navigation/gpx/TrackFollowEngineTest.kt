@@ -78,6 +78,72 @@ class TrackFollowEngineTest {
         assertThrows(IllegalArgumentException::class.java) { selectedTrackPoints(track, TrackFollowSelection(startFraction = 1.0)) }
         assertThrows(IllegalArgumentException::class.java) { selectedTrackPoints(track, TrackFollowSelection(startFraction = Double.NaN)) }
     }
+    @Test fun shortLoopReconnectionAlsoRequiresAnExplicitSelection() {
+        for (accuracy in listOf(4f, 50f)) {
+            val engine = TrackFollowEngine(listOf(p(29.0), p(29.0004), p(29.0)))
+            engine.update(fix(29.0, 1000, accuracy = accuracy), 1000)
+            assertEquals(TrackFollowStatus.NEEDS_START_POINT,
+                engine.update(fix(29.0, 40000, accuracy = accuracy), 40000)!!.status)
+            val after = engine.update(fix(29.0002, 45000, accuracy = accuracy), 45000)!!
+            assertEquals(0.0, after.travelledMeters, .01)
+            assertEquals(TrackFollowStatus.NEEDS_START_POINT, after.status)
+        }
+    }
+    @Test fun veryShortClosedLoopCannotCompleteWhileStillAtItsStart() {
+        val engine = TrackFollowEngine(listOf(p(29.0), p(29.00003), p(29.0)))
+        repeat(4) { i ->
+            assertNotEquals(TrackFollowStatus.SEGMENT_COMPLETE,
+                engine.update(fix(29.0, 1000L + 1000L * i), 1000L + 1000L * i)!!.status)
+        }
+    }
+    @Test fun unambiguousStraightReconnectionWithinReachCanContinue() {
+        val engine = TrackFollowEngine(listOf(p(29.0), p(29.0001), p(29.0002), p(29.001)))
+        engine.update(fix(29.0, 1000), 1000)
+        val state = engine.update(fix(29.0002, 40000), 40000)!!
+        assertEquals(TrackFollowStatus.TRACKING, state.status)
+        assertTrue(state.travelledMeters > 15.0)
+    }
+    @Test fun reconnectingAtOneOrdinaryCornerDoesNotDemandAnotherStartSelection() {
+        val engine = TrackFollowEngine(listOf(p(29.0), p(29.0004), p(29.0004, 41.0004)))
+        engine.update(fix(29.0, 1000), 1000)
+        val state = engine.update(fix(29.0003762, 40000, lat = 41.000018), 40000)!!
+        assertEquals(TrackFollowStatus.TRACKING, state.status)
+        assertTrue(state.travelledMeters in 30.0..37.0)
+    }
+    @Test fun backtrackFollowedByStraightContinuationRequiresSelectionAndLatches() {
+        assertAmbiguousContinuationLatches(listOf(p(29.0), p(29.00012), p(29.0), p(29.00048)))
+    }
+    @Test fun perpendicularBacktrackCannotHideBehindTheForwardChord() {
+        assertAmbiguousContinuationLatches(listOf(p(29.0), p(29.0, 41.00009), p(29.0), p(29.00048)))
+    }
+    @Test fun duplicateCornerVerticesDoNotCreateAdditionalTurnsOnReconnect() {
+        val corner = p(29.0004)
+        val engine = TrackFollowEngine(listOf(p(29.0), corner, corner, p(29.0004, 41.0004)))
+        engine.update(fix(29.0, 1000), 1000)
+        val state = engine.update(fix(29.0003762, 40000, lat = 41.000018), 40000)!!
+        assertEquals(TrackFollowStatus.TRACKING, state.status)
+        assertTrue(state.travelledMeters in 30.0..37.0)
+    }
+    @Test fun localCornerAcrossTheDateLineCanReconnectWithoutAnotherSelection() {
+        val engine = TrackFollowEngine(listOf(p(179.9996), p(-180.0), p(-180.0, 41.0004)))
+        engine.update(fix(179.9996, 1000), 1000)
+        val state = engine.update(fix(179.9999762, 40000, lat = 41.000018), 40000)!!
+        assertEquals(TrackFollowStatus.TRACKING, state.status)
+        assertTrue(state.travelledMeters in 30.0..37.0)
+    }
+    private fun assertAmbiguousContinuationLatches(points: List<WeatherCoordinate>) {
+        val engine = TrackFollowEngine(points)
+        val before = engine.update(fix(29.0, 1000, accuracy = 50f), 1000)!!
+        val reconnected = engine.update(fix(29.00048, 40000, accuracy = 50f), 40000)!!
+        assertEquals(TrackFollowStatus.NEEDS_START_POINT, reconnected.status)
+        assertEquals(before.travelledMeters, reconnected.travelledMeters, .01)
+        // Better GPS after the gap must not silently replace the requested user selection.
+        for (time in listOf(45000L, 46000L, 47000L)) {
+            val after = engine.update(fix(29.00048, time, accuracy = 4f), time)!!
+            assertEquals(TrackFollowStatus.NEEDS_START_POINT, after.status)
+            assertEquals(before.travelledMeters, after.travelledMeters, .01)
+        }
+    }
     @Test fun datelineCrossingStaysOnShortSegment() {
         val engine = TrackFollowEngine(listOf(p(179.999), p(-179.999)))
         assertTrue(engine.initial.remainingMeters in 160.0..180.0)

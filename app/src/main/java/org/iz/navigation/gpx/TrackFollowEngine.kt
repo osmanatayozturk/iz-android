@@ -66,16 +66,29 @@ class TrackFollowEngine(points: List<WeatherCoordinate>) {
         val upper = minOf(travelled + forwardWindow, distances.last())
         val threshold = max(25.0, accuracy * 2)
         var lineDistance = Double.POSITIVE_INFINITY
-        var distantBranchOnReconnect = false
+        val reconnectCandidates = if (reconnecting) mutableListOf<Projection>() else null
         val nearby = mutableListOf<Projection>()
         for (i in 0 until points.lastIndex) {
             val projected = project(i, fix.coordinate)
             lineDistance = minOf(lineDistance, projected.distance)
             if (projected.along in lower..upper) nearby += projected
-            if (reconnecting && projected.distance <= accuracy + 10 && abs(projected.along - travelled) > 80.0)
-                distantBranchOnReconnect = true
+            if (projected.distance <= threshold + accuracy) reconnectCandidates?.add(projected)
         }
-        if (distantBranchOnReconnect) requiresSelection = true
+        reconnectCandidates?.filter { it.distance <= lineDistance + accuracy }?.let { plausible ->
+            if (plausible.size >= 2) {
+                val first = plausible.first(); val last = plausible.last()
+                val direct = WeatherEngine.distanceMeters(first.coordinate, last.coordinate)
+                val along = last.along - first.along
+                // One nearby corner may have two projections. A straight continuation
+                // can hide a prior backtrack in the overall path/chord ratio, so inspect
+                // the intervening geometry as well before treating it as one local pass.
+                val localCorner = along <= direct * 2.0 + 1.0 &&
+                    (first.edgeIndex + 1..last.edgeIndex).all { index ->
+                        WeatherEngine.distanceMeters(points[index], fix.coordinate) <= lineDistance + accuracy
+                    } && staysOnOneLocalPass(first, last, direct)
+                if (!localCorner && along - direct > 1.0) requiresSelection = true
+            }
+        }
         if (requiresSelection) return result(lineDistance, TrackFollowStatus.NEEDS_START_POINT)
         val closest = nearby.minOfOrNull { it.distance } ?: Double.POSITIVE_INFINITY
         // At indistinguishable crossings keep the earliest reachable branch in traversal order.
@@ -90,14 +103,53 @@ class TrackFollowEngine(points: List<WeatherCoordinate>) {
         }
         travelled = max(travelled, selected.along)
         lastMatchedTimestamp = fix.recordedAt
-        val nearEnd = distances.last() - travelled <= 10.0 && WeatherEngine.distanceMeters(fix.coordinate, points.last()) <= 15.0
+        val nearEnd = distances.last() - travelled <= minOf(10.0, distances.last() * 0.05) && WeatherEngine.distanceMeters(fix.coordinate, points.last()) <= 15.0
         endFixes = if (nearEnd) endFixes + 1 else 0
         return result(lineDistance, if (endFixes >= 3) TrackFollowStatus.SEGMENT_COMPLETE else TrackFollowStatus.TRACKING)
     }
 
     private fun result(distance: Double, status: TrackFollowStatus) = TrackFollowProgress(
         travelled, (distances.last() - travelled).coerceAtLeast(0.0), distance, status)
-    private data class Projection(val along: Double, val distance: Double)
+    private data class Projection(val along: Double, val distance: Double, val coordinate: WeatherCoordinate, val edgeIndex: Int)
+
+    /** Reject backward travel and accumulated half-turns, including backtracks perpendicular to the chord. */
+    private fun staysOnOneLocalPass(first: Projection, last: Projection, directMeters: Double): Boolean {
+        val origin = first.coordinate
+        val scale = cos(Math.toRadians((origin.latitude + last.coordinate.latitude) / 2)).coerceAtLeast(.000001)
+        fun x(point: WeatherCoordinate) = (((point.longitude - origin.longitude + 540) % 360) - 180) * scale
+        val chordX = x(last.coordinate)
+        val chordY = last.coordinate.latitude - origin.latitude
+        val chordSquared = chordX * chordX + chordY * chordY
+        if (chordSquared <= 1e-24 || directMeters <= 0.0) return false
+        var furthest = 0.0
+        var previousX = 0.0; var previousY = 0.0
+        var previousDx = 0.0; var previousDy = 0.0
+        var hasDirection = false
+        var totalTurn = 0.0
+        fun accept(point: WeatherCoordinate): Boolean {
+            val nextX = x(point); val nextY = point.latitude - origin.latitude
+            val chordProgress = (nextX * chordX + nextY * chordY) / chordSquared * directMeters
+            // A high-water mark also catches a return split into many sub-metre edges.
+            if (chordProgress + 1.0 < furthest) return false
+            furthest = max(furthest, chordProgress)
+            val dx = nextX - previousX; val dy = nextY - previousY
+            if (dx * dx + dy * dy > 1e-24) {
+                if (hasDirection) {
+                    totalTurn += abs(atan2(previousDx * dy - previousDy * dx, previousDx * dx + previousDy * dy))
+                    if (totalTurn >= PI - 1e-6) return false
+                }
+                previousDx = dx; previousDy = dy
+                hasDirection = true
+            }
+            previousX = nextX; previousY = nextY
+            return true
+        }
+        for (index in first.edgeIndex + 1..last.edgeIndex) {
+            if (!accept(points[index])) return false
+        }
+        return accept(last.coordinate)
+    }
+
     private fun project(index: Int, point: WeatherCoordinate): Projection {
         val a = points[index]
         val b = points[index + 1]
@@ -110,7 +162,7 @@ class TrackFollowEngine(points: List<WeatherCoordinate>) {
             .coerceIn(0.0, 1.0)
         val projected = WeatherCoordinate(a.latitude + dy * fraction, ((a.longitude + lonDelta(b.longitude) * fraction + 540) % 360) - 180)
         return Projection(distances[index] + (distances[index + 1] - distances[index]) * fraction,
-            WeatherEngine.distanceMeters(point, projected))
+            WeatherEngine.distanceMeters(point, projected), projected, index)
     }
 }
 
