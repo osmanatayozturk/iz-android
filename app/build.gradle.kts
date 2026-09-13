@@ -36,8 +36,8 @@ android {
         applicationId = "org.iz.navigation"
         minSdk = 29
         targetSdk = 35
-        versionCode = 16
-        versionName = "0.9.1"
+        versionCode = 17
+        versionName = "0.9.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "GROUP_SUPABASE_URL", groupBuildString(groupSupabaseUrl))
         buildConfigField("String", "GROUP_SUPABASE_KEY", groupBuildString(groupSupabaseKey))

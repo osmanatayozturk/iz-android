@@ -20,9 +20,12 @@ import org.iz.navigation.ui.NavigationHomeContent
 import org.iz.navigation.ui.PhoneDirectionsState
 import org.iz.navigation.navigation.NavigationState
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -55,6 +58,49 @@ import kotlin.math.roundToInt
 @RunWith(AndroidJUnit4::class)
 class DirectionsMarkerRenderTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test fun idleLargeFontLandscapeKeepsCurrentFixBelowBrandAndSearch() {
+        val origin = RouteStop("Konumum", WeatherCoordinate(39.92, 32.85))
+        var activity: Activity? = null
+        compose.setContent {
+            val context = LocalContext.current
+            SideEffect { activity = context.activity() }
+            CompositionLocalProvider(LocalDensity provides Density(1f, 1.5f)) {
+                IzTheme { Box(Modifier.requiredSize(640.dp, 320.dp)) {
+                    NavigationHomeContent(PhoneDirectionsState(origin = origin, originCurrent = true),
+                        NavigationState(), emptyList(), emptyList(), false, "Hava",
+                        {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
+                } }
+            }
+        }
+        val (_, map) = readyMap { activity }
+        waitForSourceAt(map, "directions-current-fix", origin.coordinate)
+        var observedViewport = ""
+        fun fixIsExposed(): Boolean {
+            val bounds = compose.onNodeWithTag("navigation-home-map").fetchSemanticsNode().boundsInRoot
+            val search = compose.onNodeWithTag("open-navigation").fetchSemanticsNode().boundsInRoot
+            val bottom = compose.onNodeWithTag("home-record").fetchSemanticsNode().boundsInRoot
+            var point = PointF()
+            compose.runOnIdle {
+                point = map.projection.toScreenLocation(LatLng(origin.coordinate.latitude, origin.coordinate.longitude))
+            }
+            val x = bounds.left + point.x
+            val y = bounds.top + point.y
+            observedViewport = "fix=($x,$y), searchBottom=${search.bottom}, actionsTop=${bottom.top}, map=$bounds"
+            return x > bounds.left + 12f && x < bounds.right - 12f &&
+                y > search.bottom + 12f && y < bottom.top - 12f
+        }
+        fun assertFixIsExposed() {
+            val result = runCatching { compose.waitUntil(10_000) { fixIsExposed() } }
+            if (result.isFailure) throw AssertionError("Current fix must clear header and actions: $observedViewport", result.exceptionOrNull())
+        }
+        assertFixIsExposed()
+        compose.runOnIdle {
+            map.moveCamera(org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(LatLng(40.1, 32.85), 14.0))
+        }
+        compose.onNodeWithTag("directions-recenter").performClick()
+        assertFixIsExposed()
+    }
 
     @Test fun historyFramesEntireAsyncTrailAlongsideItsVisitPin() {
         val start = WeatherCoordinate(41.0, 29.0)
@@ -383,4 +429,3 @@ class DirectionsMarkerRenderTest {
         return count
     }
 }
-

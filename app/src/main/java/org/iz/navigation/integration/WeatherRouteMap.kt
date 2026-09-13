@@ -40,6 +40,7 @@ import org.iz.navigation.weather.WeatherCoordinate
 import org.json.JSONArray
 import org.json.JSONObject
 import org.maplibre.android.camera.CameraUpdateFactory
+import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.maps.MapLibreMap
 import kotlin.math.roundToInt
 
@@ -72,12 +73,14 @@ fun WeatherRouteMap(
     onLocate: () -> Unit = {},
     attributionBottomInset: Dp = if (navigationLayout) 92.dp else 4.dp,
     cameraViewportInsets: PaddingValues = PaddingValues(72.dp),
+    navigationControlsTopInset: Dp = 96.dp,
+    navigationControlsHorizontal: Boolean = false,
     overlay: @Composable BoxScope.() -> Unit = {},
 ) {
     ExpandableMap(modifier = modifier, title = title, expandable = expandable) { mapModifier ->
         Box(mapModifier) {
             WeatherRouteMapContent(route, assessment, Modifier.fillMaxSize(), onSampleClick,
-                onMapLongClick, stops, liveCoordinate, recordedPoints, gpsStale, singleStopLabel, cameraIdentity, navigationLayout, members, onLocate, attributionBottomInset, cameraViewportInsets)
+                onMapLongClick, stops, liveCoordinate, recordedPoints, gpsStale, singleStopLabel, cameraIdentity, navigationLayout, members, onLocate, attributionBottomInset, cameraViewportInsets, navigationControlsTopInset, navigationControlsHorizontal)
             overlay()
         }
     }
@@ -101,6 +104,8 @@ private fun WeatherRouteMapContent(
     onLocate: () -> Unit,
     attributionBottomInset: Dp,
     cameraViewportInsets: PaddingValues,
+    navigationControlsTopInset: Dp,
+    navigationControlsHorizontal: Boolean,
 ) {
     val context = LocalContext.current
     val tileUrl = remember(context) { OsmServiceSettings(context).read().tileUrl }
@@ -161,7 +166,13 @@ private fun WeatherRouteMapContent(
         target.updateGeoJson(RECORDED_SOURCE, if (showTrail) recorded.json else "{\"type\":\"FeatureCollection\",\"features\":[]}")
     }
     val frameRoute by rememberUpdatedState<(MapLibreMap) -> Unit> { target ->
-        frameCoordinates(target, coordinates, cameraPadding, 15.0)
+        if (navigationLayout && coordinates.isNotEmpty() && coordinates.all { it == coordinates.first() }) {
+            focusRouteCoordinate(target, coordinates.first(), 15.0, cameraPadding)
+        } else {
+            // Current-fix following uses persistent camera padding; bounds fitting supplies its own.
+            if (navigationLayout) target.moveCamera(CameraUpdateFactory.paddingTo(0.0, 0.0, 0.0, 0.0))
+            frameCoordinates(target, coordinates, cameraPadding, 15.0)
+        }
     }
     val projectStops by rememberUpdatedState<(MapLibreMap) -> Unit> { target ->
         projectedMembers = members.map { member ->
@@ -213,13 +224,13 @@ private fun WeatherRouteMapContent(
                 }
             }
         }
-        if (navigationLayout) Column(Modifier.align(Alignment.TopEnd).padding(top = 96.dp, end = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (navigationLayout) {
+            val controls: @Composable () -> Unit = {
             Surface(shape = CircleShape, shadowElevation = 3.dp) {
                 IconButton(onClick = {
                     cameraPolicy.followCurrent(); following = true
                     if (fix == null) onLocate()
-                    else map?.moveCamera(CameraUpdateFactory.newLatLngZoom(fix.mapCoordinate(), 16.0))
+                    else map?.let { focusRouteCoordinate(it, fix, 16.0, cameraPadding) }
                 }, modifier = Modifier.size(48.dp).testTag("directions-recenter")) { Icon(Icons.Outlined.GpsFixed, "Konumum") }
             }
             Surface(shape = CircleShape, shadowElevation = 3.dp) {
@@ -236,6 +247,10 @@ private fun WeatherRouteMapContent(
                     DropdownMenuItem(text = { Text(if (showMembers) "✓ Grup üyeleri" else "Grup üyeleri") }, onClick = { showMembers = !showMembers })
                 }
             }
+            }
+            val controlsModifier = Modifier.align(Alignment.TopEnd).padding(top = navigationControlsTopInset, end = 12.dp)
+            if (navigationControlsHorizontal) Row(controlsModifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) { controls() }
+            else Column(controlsModifier, verticalArrangement = Arrangement.spacedBy(8.dp)) { controls() }
         } else Column(Modifier.align(Alignment.BottomStart).padding(start = 8.dp, bottom = 30.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surface.copy(alpha = .95f)) {
@@ -285,16 +300,24 @@ private fun WeatherRouteMapContent(
                 following = false
                 if (navigationLayout && cameraIdentity?.startsWith("session:") == true && fix != null) {
                     cameraPolicy.followCurrent(); following = true
-                    target.moveCamera(CameraUpdateFactory.newLatLngZoom(fix.mapCoordinate(), 16.0))
+                    focusRouteCoordinate(target, fix, 16.0, cameraPadding)
                 } else frameRoute(target)
             }
         }
     }
-    LaunchedEffect(map, liveCoordinate, following) {
+    LaunchedEffect(map, liveCoordinate, following, cameraPadding) {
         if (following && fix != null) map?.let { target ->
-            target.moveCamera(CameraUpdateFactory.newLatLngZoom(fix.mapCoordinate(), target.cameraPosition.zoom.coerceAtLeast(15.0)))
+            if (navigationLayout) focusRouteCoordinate(target, fix, target.cameraPosition.zoom.coerceAtLeast(15.0), cameraPadding)
+            else target.moveCamera(CameraUpdateFactory.newLatLngZoom(fix.mapCoordinate(), target.cameraPosition.zoom.coerceAtLeast(15.0)))
         }
     }
+}
+
+/** Keep the current point in the exposed viewport, including after an explicit recenter. */
+private fun focusRouteCoordinate(map: MapLibreMap, coordinate: GeoCoordinate, zoom: Double, padding: List<Int>) {
+    map.moveCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder(map.cameraPosition)
+        .target(coordinate.mapCoordinate()).zoom(zoom)
+        .padding(padding.map { it.toDouble() }.toDoubleArray()).build()))
 }
 
 /** Pan disables follow; data refresh never recenters an already framed endpoint pair. */
@@ -346,4 +369,3 @@ internal fun sampleGeoJson(samples: List<RouteWeatherSample>): String = featureC
     samples.mapIndexed { index, sample -> pointFeature(sample.coordinate.latitude, sample.coordinate.longitude,
         JSONObject().put("sampleIndex", index).put("complete", sample.complete).put("hazard", sample.hazards.isNotEmpty())) },
 )
-

@@ -3,6 +3,7 @@
 package org.iz.navigation.ui
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
@@ -10,15 +11,18 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import org.iz.navigation.R
 import org.iz.navigation.data.GeoCoordinate
 import org.iz.navigation.data.TrackPoint
 import org.iz.navigation.integration.RouteMapMember
@@ -53,9 +57,12 @@ internal fun NavigationHomeContent(
     val current = presentation.coordinate
     val density = LocalDensity.current
     val textMeasurer = rememberTextMeasurer()
-    var searchHeight by remember { mutableStateOf(80.dp) }
+    val showBrand = !live && !showPlanner
+    var headerHeight by remember(showBrand, density) { mutableStateOf(if (showBrand) 144.dp else 80.dp) }
     BoxWithConstraints(Modifier.fillMaxSize().testTag("navigation-home")) {
         val compact = maxHeight < 640.dp
+        val shortIdle = showBrand && maxHeight < 400.dp
+        val horizontalMapControls = showBrand && headerHeight + 24.dp + 104.dp > maxHeight - 92.dp
         val attributionWidth = with(density) {
             textMeasurer.measure("© OpenStreetMap contributors", style = MaterialTheme.typography.labelSmall).size.width.toDp()
         } + 20.dp
@@ -65,21 +72,27 @@ internal fun NavigationHomeContent(
             recordedPoints = presentation.trail, gpsStale = live && nav.gpsStale,
             cameraIdentity = presentation.cameraIdentity,
             navigationLayout = true, members = members, onLocate = onLocate, onMapLongClick = onPin,
+            navigationControlsTopInset = headerHeight + 24.dp,
+            navigationControlsHorizontal = horizontalMapControls,
             attributionBottomInset = if (showPlanner) maxHeight * .64f + 4.dp else 92.dp,
-            cameraViewportInsets = PaddingValues(start = 28.dp, top = searchHeight + 60.dp, end = 84.dp,
+            cameraViewportInsets = PaddingValues(start = 28.dp, top = headerHeight + 60.dp, end = 84.dp,
                 bottom = if (showPlanner) maxHeight * .64f + 24.dp else 112.dp))
         Column(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Surface(onClick = onSearch, modifier = Modifier.fillMaxWidth().onSizeChanged { searchHeight = with(density) { it.height.toDp() } }.testTag("open-navigation"),
-                shape = RoundedCornerShape(24.dp), shadowElevation = 4.dp, color = MaterialTheme.colorScheme.surface) {
-                Row(Modifier.padding(horizontal = 18.dp, vertical = 15.dp), verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Icon(Icons.Outlined.Search, null, tint = Forest)
-                    Column(Modifier.weight(1f)) {
-                        Text("Nereye?", style = MaterialTheme.typography.titleLarge)
-                        if (nav.guidance) Text(nav.route?.stops?.lastOrNull()?.label.orEmpty(),
-                            maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+            Column(Modifier.fillMaxWidth().onSizeChanged { headerHeight = with(density) { it.height.toDp() } },
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (showBrand) HomeBrand()
+                Surface(onClick = onSearch, modifier = Modifier.fillMaxWidth().testTag("open-navigation"),
+                    shape = RoundedCornerShape(24.dp), shadowElevation = 4.dp, color = MaterialTheme.colorScheme.surface) {
+                    Row(Modifier.padding(horizontal = 18.dp, vertical = 15.dp), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Icon(Icons.Outlined.Search, null, tint = Forest)
+                        Column(Modifier.weight(1f)) {
+                            Text("Nereye?", style = MaterialTheme.typography.titleLarge)
+                            if (nav.guidance) Text(nav.route?.stops?.lastOrNull()?.label.orEmpty(),
+                                maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Icon(Icons.Outlined.Route, "Yol tarifi", tint = Forest)
                     }
-                    Icon(Icons.Outlined.Route, "Yol tarifi", tint = Forest)
                 }
             }
             if (!showPlanner && live) Surface(shape = RoundedCornerShape(20.dp), shadowElevation = 2.dp,
@@ -119,18 +132,16 @@ internal fun NavigationHomeContent(
                     SpeedReadout("Hız sınırı", speed.limitText, speed.sourceText, Modifier.widthIn(min = 128.dp, max = 200.dp))
                 }
             }
-            if (!showPlanner && !live && current == null) AssistChip(onClick = onLocate,
-                label = { Text(if (ui.locating) "Konum alınıyor…" else "Konumumu göster") },
-                leadingIcon = { Icon(Icons.Outlined.GpsFixed, null, Modifier.size(18.dp)) },
-                colors = AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.surface))
+            if (shortIdle) Row(Modifier.fillMaxWidth().padding(end = if (horizontalMapControls) 116.dp else 60.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (current == null) HomeLocateChip(ui.locating, onLocate, Modifier.weight(1f, fill = false))
+                HomeWeatherChip(weatherLabel, onWeather, Modifier.weight(1f, fill = false))
+            } else if (!showPlanner && !live && current == null) HomeLocateChip(ui.locating, onLocate)
             if (!showPlanner && ui.message != null) Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surface) {
                 Text(ui.message, Modifier.padding(10.dp), style = MaterialTheme.typography.bodySmall)
             }
-            if (!showPlanner) AssistChip(onClick = onWeather, label = { Text(weatherLabel, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                leadingIcon = { Icon(Icons.Outlined.Cloud, null, Modifier.size(18.dp)) },
-                modifier = (if (compact && live) Modifier.align(Alignment.End).widthIn(max = compactWeatherWidth) else Modifier)
-                    .testTag("home-weather"),
-                colors = AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.surface))
+            if (!showPlanner && !shortIdle) HomeWeatherChip(weatherLabel, onWeather,
+                if (compact && live) Modifier.align(Alignment.End).widthIn(max = compactWeatherWidth) else Modifier)
         }
         if (showPlanner) Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(.64f).padding(bottom = 88.dp),
             shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp), shadowElevation = 8.dp,
@@ -154,6 +165,38 @@ internal fun NavigationHomeContent(
 }
 
 @Composable
+private fun HomeLocateChip(locating: Boolean, onLocate: () -> Unit, modifier: Modifier = Modifier) {
+    AssistChip(onClick = onLocate, modifier = modifier,
+        label = { Text(if (locating) "Konum alınıyor…" else "Konumumu göster", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        leadingIcon = { Icon(Icons.Outlined.GpsFixed, null, Modifier.size(18.dp)) },
+        colors = AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.surface))
+}
+
+@Composable
+private fun HomeWeatherChip(label: String, onWeather: () -> Unit, modifier: Modifier = Modifier) {
+    AssistChip(onClick = onWeather, modifier = modifier.testTag("home-weather"),
+        label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        leadingIcon = { Icon(Icons.Outlined.Cloud, null, Modifier.size(18.dp)) },
+        colors = AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.surface))
+}
+
+@Composable
+private fun HomeBrand() {
+    Surface(Modifier.fillMaxWidth().testTag("home-brand").semantics(mergeDescendants = true) {},
+        shape = RoundedCornerShape(24.dp), color = Paper, shadowElevation = 2.dp) {
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Image(painterResource(R.drawable.ic_launcher), contentDescription = null,
+                modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).testTag("home-brand-logo"))
+            Column(Modifier.weight(1f)) {
+                Text("İz", style = MaterialTheme.typography.headlineMedium, color = Forest)
+                Text("Küçük yollar, güzel anılar.", style = MaterialTheme.typography.bodySmall, color = Muted)
+            }
+        }
+    }
+}
+
+@Composable
 private fun SpeedReadout(label: String, value: String, source: String, modifier: Modifier) {
     Surface(modifier, shape = RoundedCornerShape(16.dp), shadowElevation = 2.dp, color = MaterialTheme.colorScheme.surface) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
@@ -166,4 +209,3 @@ private fun SpeedReadout(label: String, value: String, source: String, modifier:
         }
     }
 }
-
