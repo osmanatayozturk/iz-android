@@ -35,6 +35,10 @@ local.properties
 !/docs/YOL_TARIFI_VE_TRAFIK.md
 !/docs/IZ_090_YENILIKLER.md
 !/docs/SURUM_PLANI.md
+!/docs/images/
+/docs/images/*
+!/docs/images/iz-home.png
+!/docs/images/iz-route-planner.png
 !/docs/OSM_TOPLULUGU.md
 !/docs/ANDROID_AUTO.md
 !/docs/WATCH_SUPPORT.md

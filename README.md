@@ -4,7 +4,25 @@
 
 Araba, motosiklet, bisiklet, yürüyüş, koşu ve yolcu için haritayla açılan Kotlin / Jetpack Compose uygulaması. Üstte **Nereye?**, yanda konum ve katmanlar, altta **Kaydet / Grup / Menü** bulunur. Yol tarifi günlük kaydı olmadan da çalışır; yeni başlangıçta **Yolculuğu kaydet** seçimi açıktır. Yolculuklar, ziyaretler, özel notlar ve fotoğraflar telefonda saklanır. Geçmiş, istatistikler, yerler, ısı haritası, OSM Topluluğu ve ayarlara Menüden ulaşılır.
 
-Bu depo İz'in kaynak kodunu yayımlar. Güncel sürümler telefon için **0.9.2 (code 17)**, Wear OS için **0.6.0 (code 10)**'dur. Hazır APK veya mağaza sürümü yayımlanmaz. [0.9 yenilikleri ve kullanım](docs/IZ_090_YENILIKLER.md) · [Kullanım kılavuzu](docs/IZ_080_KULLANIM.md) · [Grup sunucusu kurulumu](docs/GROUP_SETUP.md) · [Saat kartı ve kadran alanı](docs/WATCH_SURFACES.md).
+Bu depo İz'in kaynak kodunu ve telefon için **0.9.2 (code 17)** önizleme APK'sını yayımlar. Wear OS kaynak sürümü **0.6.0 (code 10)**'dur; bu yayında saat APK'sı bulunmaz. Play Store yayını yapılmamıştır. [0.9 yenilikleri ve kullanım](docs/IZ_090_YENILIKLER.md) · [Kullanım kılavuzu](docs/IZ_080_KULLANIM.md) · [Grup sunucusu kurulumu](docs/GROUP_SETUP.md) · [Saat kartı ve kadran alanı](docs/WATCH_SURFACES.md).
+
+## İndir ve dene
+
+**[İz 0.9.2 telefon APK'sını indir](https://github.com/osmanatayozturk/iz-android/releases/download/v0.9.2/iz-phone-0.9.2.apk)** · [Sürüm notları ve dosyalar](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.9.2)
+
+Android **10 veya üzeri** ve Google Play hizmetleri gerekir. APK'yı telefonda açın; Android isterse dosyayı açtığınız tarayıcı veya dosya yöneticisi için uygulama yükleme izni verin. Konum ve diğer izinler ilgili özellik kullanılırken açıklanır. Otomatik kayıt ilk kurulumda kapalıdır.
+
+Bu paket kişisel API anahtarı, hesap veya yolculuk verisi içermez. Temel harita, rota planlama, hava durumu ve yerel günlük kullanılabilir. TomTom için kendi anahtarınızı, OSM hesabı için kendi public istemci kimliğinizi ayarlayabilirsiniz. Supabase grup bağlantısı bu genel pakette yapılandırılmamıştır; kendi sunucunuzla derleme için [grup kurulumu](docs/GROUP_SETUP.md) belgesini kullanın.
+
+Paket hata ayıklamaya kapalı bir release derlemesidir; mevcut geliştirme sertifikasıyla imzalanmış bir **önizleme** olarak sunulur. Aynı uygulama kimliği ve imzaya sahip önceki kurulumlar yerinde güncellenebilir. Farklı imzalı kurulumlarda Android güncellemeyi reddeder; uygulamayı kaldırmadan önce Ayarlar'dan özel günlüğünüzü yedekleyin. Sürüm ekindeki `SHA256SUMS.txt` dosyası indirilen paketin doğrulanması içindir.
+
+## Uygulamadan görüntüler
+
+Emülatörden alınan gerçek ekranlar; konumlar tanıtım için seçilmiş örneklerdir. Kişisel yolculuk, hesap veya sağlık verisi kullanılmamıştır.
+
+| Ana harita | Rota planlama |
+| --- | --- |
+| <img src="docs/images/iz-home.png" width="320" alt="İz logosu, Küçük yollar güzel anılar sözü ve örnek konumla ana harita" /> | <img src="docs/images/iz-route-planner.png" width="320" alt="Başlangıç ve varış seçimiyle İz rota planlama ekranı" /> |
 
 0.9.2'de ana haritanın üstünde küçük İz logosu, uygulama adı ve “Küçük yollar, güzel anılar.” sözü yer alır. Bu başlık, rota planlayıcı veya yolculuk açıkken gizlenir. Harita düğmeleri ve görünür alan, başlığın ölçülen yüksekliğine uyum sağlar.
 
@@ -36,6 +54,8 @@ Altı yolculuk türünde rota havası, kalkış karşılaştırması ve türe ö
 ./gradlew :app:testDebugUnitTest :wear:testDebugUnitTest :wear-protocol:test
 ./gradlew :app:lintDebug :wear:lintDebug
 ```
+
+Genel telefon paketinin derleme görevi `:app:assembleRelease` olur. Temiz çalışma kopyasında `local.properties` yalnız SDK yolunu içermeli; `OSM_CLIENT_ID`, `GROUP_SUPABASE_URL` ve `GROUP_SUPABASE_KEY` ortam/yerel değerleri boş olmalıdır. Çıktı minify edilmiş, hata ayıklamaya kapalı ve imzasızdır; Android Build Tools içindeki `zipalign` ve `apksigner` ile kendi özel sertifikanızla imzalayın. İmzalama anahtarınızı veya parolanızı depoya eklemeyin. Yayımlanan paketin derleme ve test bilgisi sürüm dosyalarındaki `PUBLIC_VERIFICATION.json` içinde bulunur.
 
 Telefon ve saat APK'ları `org.iz.navigation` uygulama kimliğini kullanır. Telefon namespace'i `org.iz.navigation`, saat namespace'i `org.iz.navigation.watch`, ortak protokol namespace'i `org.iz.navigation.wearprotocol`'dür. Önceki uygulama kimliğinden geçiş, Android tarafından yerinde güncelleme sayılmaz; veriyi ZIP ile taşıma adımları [saat desteği belgesinde](docs/WATCH_SUPPORT.md#önceki-uygulama-kimliğinden-geçiş) açıklanır.
 
@@ -126,8 +146,8 @@ Telefon ve saat uygulamaları aynı `org.iz.navigation` uygulama kimliği ve ayn
 
 ## Lisans ve üçüncü taraflar
 
-Copyright © 2026 İz projesine katkıda bulunanlar. Bu depodaki özgün kaynak kod [GNU General Public License v3.0 only](LICENSE) (`GPL-3.0-only`) koşullarıyla yayımlanır. Depodaki üçüncü taraf bileşenler kendi lisansları altında kalır; GPL bildirimi onların lisanslarının veya gerekli kaynak gösterimlerinin yerini almaz. Ayrıntılar [üçüncü taraf bildirimlerinde](THIRD_PARTY_NOTICES.md) bulunur.
+Copyright © 2026 İz projesine katkıda bulunanlar. Bu depodaki özgün kaynak kod [GNU General Public License v3.0 only](LICENSE) (`GPL-3.0-only`) koşullarıyla yayımlanır; Google Play Services istemcileriyle APK dağıtımı için dar kapsamlı [ek bağlama izni](ADDITIONAL_PERMISSION.md) bulunur. Depodaki üçüncü taraf bileşenler kendi lisansları altında kalır; GPL bildirimi onların lisanslarının veya gerekli kaynak gösterimlerinin yerini almaz. Ayrıntılar [üçüncü taraf bildirimlerinde](THIRD_PARTY_NOTICES.md) bulunur.
 
 Harita ve yol verisi © OpenStreetMap katkıcılarıdır; uygulama içindeki ve belgelerdeki OpenStreetMap kaynak gösterimleri korunmalıdır. MapLibre, AndroidX, AppAuth, OkHttp, Health Connect istemcisi ve diğer bağımlılıkların lisans koşulları ayrıca geçerlidir.
 
-Kaynak kod, Google Play Services konum ve Wearable Data Layer bağımlılıklarını kullanır. Google Play Services tescilli bir çalışma zamanı bileşenidir ve bu depoda GPL kapsamında yeniden lisanslanmaz. Bu yayın yalnız kaynak kodu kapsar; APK dağıtımı için bağımlılıkların, imzalamanın ve dağıtım kanalının lisans koşulları ayrıca değerlendirilmelidir.
+Kaynak kod, Google Play Services konum ve Wearable Data Layer bağımlılıklarını kullanır. Google Play Services tescilli bir çalışma zamanı bileşenidir ve bu depoda GPL kapsamında yeniden lisanslanmaz. APK ile eşleşen İz kaynak kodu, üçüncü taraf lisansları ve bağımlılık kaynakları [aynı sürümün dosyaları](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.9.2) üzerinden sağlanır.

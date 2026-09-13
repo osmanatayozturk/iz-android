@@ -36,12 +36,18 @@ Relevant upstream notices and terms:
 - [Google Android SDK terms](https://developer.android.com/studio/terms)
 - [PGlite source and licenses](https://github.com/electric-sql/pglite)
 
-This first publication distributes İz's source code, not an APK or SDK binaries.
-The current build uses proprietary Google Play Services clients for location,
-activity recognition, and phone/watch communication. Before distributing a
-linked APK, review whether a narrow GPLv3 section 7 linking permission is needed,
-or replace the affected dependencies. This repository grants no additional
-linking exception. See the [GNU FAQ](https://www.gnu.org/licenses/gpl-faq.en.html#GPLIncompatibleLibs).
+The phone preview APK is distributed through GitHub Releases together with
+license notices and version-specific dependency source materials. The original
+İz code remains GPL-3.0-only, with the narrow GPLv3 section 7 permission in
+[ADDITIONAL_PERMISSION.md](ADDITIONAL_PERMISSION.md) for the Google Play Services
+Location and Wearable clients and their required Google Play Services Base,
+Basement and Tasks dependencies. This permission does not relicense third-party
+code or the separate Google Play Services application.
+
+The release's license/source supplement contains the full third-party notices
+and source locations for the dependencies resolved by that build. İz's matching
+source is available from the same release tag. Build-tool dependencies are not
+bundled in the APK. See the [release files](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.9.2).
 
 ## Map data and online services
 
