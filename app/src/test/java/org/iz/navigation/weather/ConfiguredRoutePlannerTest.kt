@@ -99,7 +99,7 @@ class ConfiguredRoutePlannerTest {
     }
 
     private fun fakeRoutePlanner(before: () -> Unit = {}) = object : RoutePlanner {
-        override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport, travelSpeedKmh: Double?): PlannedRoute {
+        override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport, travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences): PlannedRoute {
             before()
             return PlannedRoute("fake", stops, listOf(RouteVertex(stops.first().coordinate, 0.0), RouteVertex(stops.last().coordinate, 100.0)), 444.0, 100.0, 1L, transport = transport, travelSpeedKmh = travelSpeedKmh)
         }

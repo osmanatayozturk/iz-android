@@ -206,8 +206,8 @@ class ValhallaRoutePlannerTest {
     )
 
     private fun successfulRoute() = MockResponse().setBody("""
-        {"trip":{"summary":{"length":0.222,"time":10},"legs":[{
-          "shape":"???o}@?o}@",
+        {"trip":{"summary":{"length":0.222,"time":10,"has_highway":false},"legs":[{
+          "summary":{"has_highway":false},"shape":"???o}@?o}@",
           "maneuvers":[{"time":10,"begin_shape_index":0,"end_shape_index":2}]
         }]}}
     """.trimIndent())

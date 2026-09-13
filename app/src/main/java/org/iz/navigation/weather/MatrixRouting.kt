@@ -25,6 +25,7 @@ internal data class StopOrderProposal(
     val approximateMotorcycle: Boolean,
     val createdAt: Long,
     val credentialRevision: String,
+    val preferences: RoutePreferences = originalRoute.preferences,
 ) {
     val savedSeconds: Double get() = originalRoute.durationSeconds - proposedRoute.durationSeconds
 }
@@ -71,8 +72,9 @@ internal class TomTomMatrixClient(
         callTimeout(30, TimeUnit.SECONDS)
     }.build())
 
-    suspend fun costs(stops: List<RouteStop>, departureAt: Long): Map<Pair<Int, Int>, Double> = withContext(Dispatchers.IO) {
+    suspend fun costs(stops: List<RouteStop>, departureAt: Long, preferences: RoutePreferences = RoutePreferences()): Map<Pair<Int, Int>, Double> = withContext(Dispatchers.IO) {
         require(stops.size in 4..5)
+        preferences.matrixUnavailableReason(Transport.CAR)?.let { throw RouteServiceException(it) }
         require(apiKey.isNotBlank() && apiKey.length <= 256)
         try {
             gate.request(clock, ensureAuthorized) {
@@ -83,7 +85,8 @@ internal class TomTomMatrixClient(
                 val body = JSONObject().put("origins", locations(stops.dropLast(1)))
                     .put("destinations", locations(stops.drop(1)))
                     .put("options", JSONObject().put("departAt", Instant.ofEpochMilli(departureAt).toString())
-                        .put("traffic", "live").put("routeType", "fastest").put("travelMode", "car"))
+                        .put("traffic", "live").put("routeType", "fastest").put("travelMode", "car")
+                        .apply { if (preferences.avoidTolls) put("avoid", JSONArray().put("tollRoads")) })
                 val url = endpoint.newBuilder().addQueryParameter("key", apiKey).build()
                 val request = weatherRequest(url.toString()).header("Cache-Control", "no-store")
                     .post(body.toString().toRequestBody("application/json; charset=utf-8".toMediaType())).build()
@@ -120,16 +123,20 @@ internal class TomTomMatrixClient(
 internal class ConfiguredStopOrderPlanner internal constructor(
     private val credentials: () -> TrafficCredentials,
     private val clock: () -> Long = System::currentTimeMillis,
-    private val matrix: suspend (String, () -> Unit, List<RouteStop>, Long) -> Map<Pair<Int, Int>, Double> = { key, authorize, stops, at ->
-        TomTomMatrixClient(key, ensureAuthorized = authorize).costs(stops, at)
+    private val matrix: suspend (String, () -> Unit, List<RouteStop>, Long, RoutePreferences) -> Map<Pair<Int, Int>, Double> = { key, authorize, stops, at, preferences ->
+        TomTomMatrixClient(key, ensureAuthorized = authorize).costs(stops, at, preferences)
     },
-    private val route: suspend (String, () -> Unit, List<RouteStop>, Long, Transport) -> PlannedRoute = { key, authorize, stops, at, mode ->
-        TomTomRoutePlanner(key, authorize).plan(stops, at, mode, null)
+    private val route: suspend (String, () -> Unit, List<RouteStop>, Long, Transport, RoutePreferences) -> PlannedRoute = { key, authorize, stops, at, mode, preferences ->
+        TomTomRoutePlanner(key, authorize).plan(stops, at, mode, null, preferences)
     },
 ) {
     constructor(context: Context) : this(TrafficSettingsStore(context.applicationContext)::credentials)
 
-    suspend fun propose(stops: List<RouteStop>, departureAt: Long, transport: Transport): StopOrderProposal? {
+    suspend fun propose(stops: List<RouteStop>, departureAt: Long, transport: Transport): StopOrderProposal? =
+        propose(stops, departureAt, transport, RoutePreferences.defaults(transport))
+
+    suspend fun propose(stops: List<RouteStop>, departureAt: Long, transport: Transport, preferences: RoutePreferences): StopOrderProposal? {
+        preferences.matrixUnavailableReason(transport)?.let { throw RouteServiceException(it) }
         require(stops.size in 4..5)
         require(transport in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE))
         val snapshot = credentials()
@@ -144,23 +151,23 @@ internal class ConfiguredStopOrderPlanner internal constructor(
         val key = requireNotNull(snapshot.apiKey)
         // All three calls use one explicit future instant; expose it in the proposal, not as a new user departure.
         val comparisonAt = ((maxOf(departureAt, clock() + 120_000L) + 999L) / 1000L) * 1000L
-        val costs = matrix(key, authorize, stops, comparisonAt)
+        val costs = matrix(key, authorize, stops, comparisonAt, preferences)
         val order = fastestStopOrder(stops.size, costs)
         if (order == stops.indices.toList()) return null
         val ordered = order.map(stops::get)
         authorize()
         check(clock() < comparisonAt) { "Karşılaştırma saati geçti. Yeniden dene." }
-        val originalRoute = route(key, authorize, stops, comparisonAt, transport)
+        val originalRoute = route(key, authorize, stops, comparisonAt, transport, preferences)
         authorize()
         check(clock() < comparisonAt) { "Karşılaştırma saati geçti. Yeniden dene." }
-        val proposedRoute = route(key, authorize, ordered, comparisonAt, transport)
+        val proposedRoute = route(key, authorize, ordered, comparisonAt, transport, preferences)
         authorize()
         check(listOf(originalRoute, proposedRoute).all {
-            it.provider == RouteProvider.TOMTOM && it.transport == transport &&
+            it.provider == RouteProvider.TOMTOM && it.transport == transport && it.preferences == preferences &&
                 (it.effectiveDepartureAt ?: comparisonAt) == comparisonAt
         }) { "Rotalar aynı karşılaştırma saatine ait değil." }
         if (proposedRoute.durationSeconds >= originalRoute.durationSeconds) return null
         return StopOrderProposal(stops.toList(), ordered, originalRoute, proposedRoute, comparisonAt,
-            transport == Transport.MOTORCYCLE, clock(), snapshot.revision)
+            transport == Transport.MOTORCYCLE, clock(), snapshot.revision, preferences)
     }
 }

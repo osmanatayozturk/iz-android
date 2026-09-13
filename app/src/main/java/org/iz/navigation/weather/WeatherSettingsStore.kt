@@ -12,10 +12,11 @@ data class RideWeatherSettings(
     val weatherEndpoint: String = DEFAULT_WEATHER_ENDPOINT,
     val alertsEnabled: Boolean = true,
     val travelSpeedKmh: Double? = null,
+    val preferences: RoutePreferences = RoutePreferences(),
 )
 
 fun defaultWeatherSettings(transport: Transport): RideWeatherSettings =
-    RideWeatherSettings(thresholds = defaultWeatherThresholds(transport), travelSpeedKmh = routeTravelSpeedKmh(transport, null))
+    RideWeatherSettings(thresholds = defaultWeatherThresholds(transport), travelSpeedKmh = routeTravelSpeedKmh(transport, null), preferences = RoutePreferences.defaults(transport))
 
 fun defaultWeatherThresholds(transport: Transport): WeatherThresholds = when (transport) {
     Transport.CAR, Transport.PASSENGER -> WeatherThresholds(70.0, 2.0, 50.0, 70.0, 0.0, 38.0)
@@ -88,7 +89,7 @@ internal object WeatherSettingsCodec {
 
     fun encode(value: RideWeatherSettings): String {
         validate(value)
-        return JSONObject().put("version", 2).put("voice", value.voiceEnabled)
+        return JSONObject().put("version", 3).put("voice", value.voiceEnabled).put("preferences", value.preferences.json())
             .put("alertsEnabled", value.alertsEnabled).put("travelSpeedKmh", value.travelSpeedKmh ?: JSONObject.NULL)
             .put("routeEndpoint", value.routeEndpoint).put("weatherEndpoint", value.weatherEndpoint)
             .put("probability", value.thresholds.precipitationProbabilityPercent)
@@ -101,7 +102,7 @@ internal object WeatherSettingsCodec {
         require(raw != null && raw.length <= 8192)
         val json = JSONObject(raw)
         val version = json.getInt("version")
-        require(version in 1..2)
+        require(version in 1..3)
         RideWeatherSettings(
             thresholds = WeatherThresholds(
                 json.getDouble("probability"), json.getDouble("precipitation"),
@@ -111,6 +112,7 @@ internal object WeatherSettingsCodec {
             routeEndpoint = json.getString("routeEndpoint"), weatherEndpoint = json.getString("weatherEndpoint"),
             alertsEnabled = if (version == 1) true else json.getBoolean("alertsEnabled"),
             travelSpeedKmh = if (version == 1 || json.isNull("travelSpeedKmh")) null else json.getDouble("travelSpeedKmh"),
+            preferences = routePreferences(json.optJSONObject("preferences"), defaults.preferences),
         ).also(::validate)
     }.getOrDefault(defaults)
 }

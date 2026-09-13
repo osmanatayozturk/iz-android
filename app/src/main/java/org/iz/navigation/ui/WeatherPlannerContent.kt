@@ -49,6 +49,9 @@ import org.iz.navigation.data.Transport
 import org.iz.navigation.weather.RideWeatherLiveState
 import org.iz.navigation.weather.RideWeatherStatus
 import org.iz.navigation.weather.RouteStop
+import org.iz.navigation.weather.RoutePreferences
+import org.iz.navigation.weather.matrixUnavailableReason
+import org.iz.navigation.weather.geometryKey
 import org.iz.navigation.weather.WeatherAssessment
 import org.iz.navigation.weather.WeatherHazard
 import java.text.SimpleDateFormat
@@ -79,6 +82,10 @@ internal data class WeatherPlannerActions(
     val suggestStopOrder: () -> Unit = {},
     val acceptStopOrder: () -> Unit = {},
     val dismissStopOrder: () -> Unit = {},
+    val setPreferences: (RoutePreferences) -> Unit = {},
+    val requestAlternatives: () -> Unit = {},
+    val selectAlternative: (String) -> Unit = {},
+    val saveRoute: () -> Unit = {},
 )
 
 @Composable
@@ -90,6 +97,7 @@ internal fun WeatherPlannerContent(
     routeMap: @Composable () -> Unit,
     notificationsEnabled: Boolean = true,
     locationBusy: Boolean = false,
+    canSaveRoute: Boolean = false,
 ) {
     val recommendation = recommendedAssessment(state.comparisons)
     val displayRoute = state.route
@@ -133,6 +141,26 @@ internal fun WeatherPlannerContent(
                     Spacer(Modifier.width(8.dp))
                     Text("${state.transport.label()} · Hava ayarları")
                 }
+            }
+        }
+        item {
+            val preferences = state.settings.preferences
+            val activeMode = state.transport in setOf(Transport.WALK, Transport.RUN, Transport.BICYCLE)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Rota tercihleri", style = MaterialTheme.typography.titleMedium)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(preferences.avoidHighways, { actions.setPreferences(preferences.copy(avoidHighways = !preferences.avoidHighways)) },
+                        enabled = !interactionLocked, label = { Text(if (activeMode) "Otoyola girme" else "Otoyoldan kaçın") },
+                        modifier = Modifier.testTag("route_avoid_highways"))
+                    if (!activeMode) FilterChip(preferences.avoidTolls, { actions.setPreferences(preferences.copy(avoidTolls = !preferences.avoidTolls)) },
+                        enabled = !interactionLocked, label = { Text("Ücretli yoldan kaçın") }, modifier = Modifier.testTag("route_avoid_tolls"))
+                    FilterChip(preferences.avoidFerries, { actions.setPreferences(preferences.copy(avoidFerries = !preferences.avoidFerries)) },
+                        enabled = !interactionLocked, label = { Text("Feribottan kaçın") }, modifier = Modifier.testTag("route_avoid_ferries"))
+                }
+                if (activeMode && preferences.avoidHighways) Text("Otoyolsuz rota servis haritasından doğrulanır; doğrulanamazsa başlatılmaz. Harita verileri eksik olabilir.", style = MaterialTheme.typography.bodySmall)
+                Text("Kaçınma tercihleri mümkün olduğunda uygulanır; kesin yol yasağı değildir.", style = MaterialTheme.typography.bodySmall)
+                if (canSaveRoute) OutlinedButton(actions.saveRoute, enabled = state.stops.size in 2..5 && !interactionLocked,
+                    modifier = Modifier.testTag("weather_save_route")) { Text("Rotayı kaydet") }
             }
         }
         if (!notificationsEnabled) {
@@ -227,10 +255,12 @@ internal fun WeatherPlannerContent(
             }
         }
         if (state.stops.size in 4..5 && state.transport in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE)) item {
-            OutlinedButton(actions.suggestStopOrder, enabled = !state.busy && !state.ordering && !interactionLocked,
+            val matrixReason = state.settings.preferences.matrixUnavailableReason(state.transport)
+            OutlinedButton(actions.suggestStopOrder, enabled = matrixReason == null && !state.busy && !state.ordering && !interactionLocked,
                 modifier = Modifier.testTag("weather-matrix-order")) {
                 Text(if (state.ordering) "Durak sırası hesaplanıyor…" else "Daha hızlı durak sırası öner")
             }
+            matrixReason?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             if (state.transport == Transport.MOTORCYCLE) Text("Matrix sıra önerisi otomobil tahminidir; motosiklet rotasıyla doğrulanır.",
                 style = MaterialTheme.typography.bodySmall)
         }
@@ -239,6 +269,20 @@ internal fun WeatherPlannerContent(
                 actions.acceptStopOrder, actions.dismissStopOrder)
         } }
         if (displayRoute != null) {
+            item {
+                OutlinedButton(actions.requestAlternatives, enabled = !state.busy && !state.loadingAlternatives && !interactionLocked,
+                    modifier = Modifier.testTag("weather_route_alternatives")) {
+                    Text(if (state.loadingAlternatives) "Alternatifler hesaplanıyor…" else "Alternatif rotalar")
+                }
+                state.alternativeMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                state.alternatives.forEachIndexed { index, route ->
+                    FilterChip(selected = displayRoute.geometryKey() == route.geometryKey(),
+                        onClick = { actions.selectAlternative(route.id) }, enabled = !state.loadingAlternatives && !interactionLocked,
+                        label = { Text("Rota ${index + 1} · ${formatDistance(route.distanceMeters)} · ${formatDuration(route.durationSeconds)}") },
+                        modifier = Modifier.testTag("weather_route_choice_$index"))
+                }
+                displayRoute.providerWarnings.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+            }
             item {
                 Surface(shape = RoundedCornerShape(24.dp), color = Color.White) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {

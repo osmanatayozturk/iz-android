@@ -11,6 +11,26 @@ import org.iz.navigation.data.Transport
 import java.util.concurrent.TimeUnit
 
 class MatrixRoutingTest {
+    @Test fun unsupportedAvoidanceIsRejectedBeforeCredentialsOrAnyRequest() = runBlocking {
+        var credentialReads = 0
+        val planner = ConfiguredStopOrderPlanner(credentials = { credentialReads++; error("Must not read") })
+        val stops = (0..3).map { RouteStop("$it", WeatherCoordinate(0.0, it * .001)) }
+        listOf(RoutePreferences(avoidHighways = true), RoutePreferences(avoidFerries = true)).forEach { preferences ->
+            assertThrows(RouteServiceException::class.java) { runBlocking { planner.propose(stops, 200_000L, Transport.MOTORCYCLE, preferences) } }
+        }
+        assertEquals(0, credentialReads)
+    }
+
+    @Test fun tollAvoidanceReachesMatrixPayload() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setBody("""{"data":[]}"""))
+            val stops = (0..3).map { RouteStop("$it", WeatherCoordinate(0.0, it * .001)) }
+            TomTomMatrixClient("fictional-key", server.url("/routing/matrix/2").toString(), OkHttpClient(), { 1_000L }, TrafficRequestGate())
+                .costs(stops, 200_000L, RoutePreferences(avoidTolls = true))
+            val options = JSONObject(server.takeRequest().body.readUtf8()).getJSONObject("options")
+            assertEquals("tollRoads", options.getJSONArray("avoid").getString(0))
+        }
+    }
     @Test fun motorcycleProposalUsesOneComparisonInstantAndFullMotorcycleRoutes() = runBlocking {
         val stops = (0..3).map { RouteStop("$it", WeatherCoordinate(0.0, it * .001)) }
         val calls = mutableListOf<Pair<Long, Transport>>()
@@ -18,17 +38,17 @@ class MatrixRoutingTest {
         val planner = ConfiguredStopOrderPlanner(
             credentials = { TrafficCredentials("fictional-key", false, true, "revision", freeAccountVerified = true, matrixEnabled = true) },
             clock = { 1_000L },
-            matrix = { _, authorize, _, at ->
+            matrix = { _, authorize, _, at, _ ->
                 authorize(); matrixAt = at
                 mapOf((0 to 1) to 10.0, (1 to 2) to 10.0, (2 to 3) to 10.0,
                     (0 to 2) to 1.0, (2 to 1) to 1.0, (1 to 3) to 1.0)
             },
-            route = { _, authorize, points, at, mode ->
+            route = { _, authorize, points, at, mode, preferences ->
                 authorize(); calls += at to mode
                 val duration = if (points[1] == stops[1]) 100.0 else 70.0
                 PlannedRoute("${calls.size}", points, listOf(RouteVertex(points.first().coordinate, 0.0),
                     RouteVertex(points.last().coordinate, duration)), 100.0, duration, 1_000L,
-                    transport = mode, provider = RouteProvider.TOMTOM, effectiveDepartureAt = at)
+                    transport = mode, preferences = preferences, provider = RouteProvider.TOMTOM, effectiveDepartureAt = at)
             },
         )
         val result = requireNotNull(planner.propose(stops, 1_000L, Transport.MOTORCYCLE))
@@ -43,7 +63,7 @@ class MatrixRoutingTest {
         var calls = 0
         val planner = ConfiguredStopOrderPlanner(
             credentials = { TrafficCredentials("fictional-key", true, true, "revision") },
-            matrix = { _, _, _, _ -> calls++; emptyMap() },
+            matrix = { _, _, _, _, _ -> calls++; emptyMap() },
         )
         val stops = (0..3).map { RouteStop("$it", WeatherCoordinate(0.0, it * .001)) }
         try { planner.propose(stops, 200_000L, Transport.CAR); fail("Expected missing entitlement") }

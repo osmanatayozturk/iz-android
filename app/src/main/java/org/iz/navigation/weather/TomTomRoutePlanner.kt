@@ -16,6 +16,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import org.json.JSONObject
+import org.json.JSONArray
 
 /**
  * Routing v1: geometry, guidance and live ETA all come from this one response. No disk cache.
@@ -49,7 +50,16 @@ class TomTomRoutePlanner internal constructor(
 
     constructor(apiKey: String, ensureAuthorized: () -> Unit = {}) : this(apiKey, ENDPOINT, defaultWeatherHttpClient(), System::currentTimeMillis, sharedTrafficRequestGate, ensureAuthorized)
 
-    override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport, travelSpeedKmh: Double?): PlannedRoute = withContext(Dispatchers.IO) {
+    override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
+        travelSpeedKmh: Double?, preferences: RoutePreferences): PlannedRoute =
+        request(stops, departureAt, transport, travelSpeedKmh, preferences, false).routes.first()
+
+    override suspend fun alternatives(stops: List<RouteStop>, departureAt: Long, transport: Transport,
+        travelSpeedKmh: Double?, preferences: RoutePreferences): RouteAlternatives =
+        request(stops, departureAt, transport, travelSpeedKmh, preferences, true)
+
+    private suspend fun request(stops: List<RouteStop>, departureAt: Long, transport: Transport,
+        travelSpeedKmh: Double?, preferences: RoutePreferences, alternatives: Boolean): RouteAlternatives = withContext(Dispatchers.IO) {
         require(stops.size in 2..6)
         routeTravelSpeedKmh(transport, travelSpeedKmh)
         val mode = when (transport) {
@@ -73,11 +83,15 @@ class TomTomRoutePlanner internal constructor(
                     .addQueryParameter("extendedRouteRepresentation", "travelTime")
                     .addQueryParameter("computeTravelTimeFor", "all")
                     .addQueryParameter("computeBestOrder", "false")
-                    .addQueryParameter("maxAlternatives", "0")
+                    .addQueryParameter("maxAlternatives", if (alternatives) "2" else "0")
                     .addQueryParameter("instructionsType", "text")
                     .addQueryParameter("language", "tr-TR")
                     .addQueryParameter("departAt", if (leaveNow) "now" else Instant.ofEpochMilli(departureAt).toString())
-                    .build()
+                    .apply {
+                        if (preferences.avoidHighways) addQueryParameter("avoid", "motorways")
+                        if (preferences.avoidTolls) addQueryParameter("avoid", "tollRoads")
+                        if (preferences.avoidFerries) addQueryParameter("avoid", "ferries")
+                    }.build()
                 val request = weatherRequest(url.toString()).header("Cache-Control", "no-store").build()
                 // A key may have been removed while this request waited for the shared gate.
                 // Keep this last authorization check adjacent to the cancellable HTTP enqueue.
@@ -89,7 +103,16 @@ class TomTomRoutePlanner internal constructor(
                 }
                 if (!response.successful) throw RouteServiceException("TomTom trafik servisi kullanılamıyor; trafiksiz rota kullanılacak.")
                 coroutineContext.ensureActive()
-                parseTomTomRoute(response.body, stops, transport, clock(), requestDeparture)
+                if (!alternatives) RouteAlternatives(listOf(parseTomTomRoute(response.body, stops, transport, clock(), requestDeparture).copy(preferences = preferences)))
+                else {
+                    val values = JSONObject(response.body).getJSONArray("routes")
+                    require(values.length() in 1..3)
+                    val routes = (0 until values.length()).mapNotNull { index -> runCatching {
+                        val single = JSONObject().put("routes", JSONArray().put(values.getJSONObject(index)))
+                        parseTomTomRoute(single.toString(), stops, transport, clock(), requestDeparture).copy(preferences = preferences)
+                    }.getOrNull() }
+                    uniqueAlternatives(routes, if (routes.size < values.length()) "Bazı alternatif yollar doğrulanamadı." else null)
+                }
             }
         } catch (cancelled: CancellationException) {
             throw cancelled

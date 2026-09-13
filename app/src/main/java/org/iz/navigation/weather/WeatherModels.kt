@@ -49,6 +49,10 @@ data class PlannedRoute(
     val trafficUnavailableReason: String? = null,
     val speedLimits: List<RouteSpeedLimitSection> = emptyList(),
     val effectiveDepartureAt: Long? = null,
+    val preferences: RoutePreferences = RoutePreferences.defaults(transport),
+    val hasHighway: Boolean? = null,
+    val providerWarnings: List<String> = emptyList(),
+    val selectionLocked: Boolean = false,
 ) {
     init {
         routeTravelSpeedKmh(transport, travelSpeedKmh)
@@ -150,7 +154,14 @@ interface RoutePlanner {
         departureAt: Long,
         transport: Transport = Transport.MOTORCYCLE,
         travelSpeedKmh: Double? = null,
+        preferences: RoutePreferences = RoutePreferences.defaults(transport),
     ): PlannedRoute
+
+    suspend fun alternatives(stops: List<RouteStop>, departureAt: Long,
+        transport: Transport = Transport.MOTORCYCLE, travelSpeedKmh: Double? = null,
+        preferences: RoutePreferences = RoutePreferences.defaults(transport)): RouteAlternatives =
+        RouteAlternatives(listOf(plan(stops, departureAt, transport, travelSpeedKmh, preferences)),
+            "Bu rota servisi alternatif yol sunmuyor.")
 }
 
 /** Valhalla uses pedestrian speed for both walking and running estimates. */

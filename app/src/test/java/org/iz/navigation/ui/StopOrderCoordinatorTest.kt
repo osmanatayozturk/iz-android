@@ -38,7 +38,7 @@ class StopOrderCoordinatorTest {
         val coordinator = WeatherPlannerCoordinator(this, WeatherPlannerServices(
             routePlanner = { object : RoutePlanner {
                 override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
-                    travelSpeedKmh: Double?): PlannedRoute { plans++; return route(stops, 100.0) }
+                    travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences): PlannedRoute { plans++; return route(stops, 100.0) }
             } },
             weatherProvider = { object : WeatherProvider {
                 override suspend fun hourly(coordinates: List<WeatherCoordinate>, from: Long, until: Long) = emptyList<LocationForecast>()

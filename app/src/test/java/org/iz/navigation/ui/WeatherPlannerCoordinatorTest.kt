@@ -32,7 +32,7 @@ class WeatherPlannerCoordinatorTest {
         var revision = "one"
         val planner = object : RoutePlanner {
             override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
-                travelSpeedKmh: Double?): PlannedRoute {
+                travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences): PlannedRoute {
                 revision = "two"
                 throw CancellationException("Credentials changed")
             }
@@ -49,7 +49,7 @@ class WeatherPlannerCoordinatorTest {
         var revision = "one"
         val planner = object : RoutePlanner {
             override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
-                travelSpeedKmh: Double?) = route("base", stops, departureAt, transport)
+                travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences) = route("base", stops, departureAt, transport)
         }
         val coordinator = WeatherPlannerCoordinator(this,
             services(planner, { _, departure -> comparisons(departure, true, 0.0) }).copy(credentialRevision = { revision },
@@ -67,7 +67,7 @@ class WeatherPlannerCoordinatorTest {
         var calls = 0
         val planner = object : RoutePlanner {
             override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
-                travelSpeedKmh: Double?): PlannedRoute {
+                travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences): PlannedRoute {
                 if (++calls > 1) { revision = "two"; throw CancellationException("Credentials changed") }
                 return route("base", stops, departureAt, transport).copy(provider = org.iz.navigation.weather.RouteProvider.TOMTOM)
             }
@@ -91,7 +91,7 @@ class WeatherPlannerCoordinatorTest {
         val release = CompletableDeferred<Unit>()
         val planner = object : RoutePlanner {
             override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
-                travelSpeedKmh: Double?) = route("base", stops, departureAt, transport)
+                travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences) = route("base", stops, departureAt, transport)
         }
         val coordinator = WeatherPlannerCoordinator(this,
             services(planner, { _, departure -> comparisons(departure, true, 0.0) }).copy(clock = { now },
@@ -115,7 +115,7 @@ class WeatherPlannerCoordinatorTest {
         var calls = 0
         val planner = object : RoutePlanner {
             override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
-                travelSpeedKmh: Double?) = route("${++calls}", stops, departureAt, transport)
+                travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences) = route("${++calls}", stops, departureAt, transport)
                 .copy(provider = org.iz.navigation.weather.RouteProvider.TOMTOM, effectiveDepartureAt = departureAt)
         }
         val coordinator = WeatherPlannerCoordinator(this,
@@ -141,7 +141,7 @@ class WeatherPlannerCoordinatorTest {
         val release = CompletableDeferred<Unit>()
         val planner = object : RoutePlanner {
             override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
-                travelSpeedKmh: Double?) = route("$departureAt", stops, departureAt, transport)
+                travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences) = route("$departureAt", stops, departureAt, transport)
                 .copy(provider = org.iz.navigation.weather.RouteProvider.TOMTOM)
         }
         val coordinator = WeatherPlannerCoordinator(this,
@@ -171,7 +171,7 @@ class WeatherPlannerCoordinatorTest {
         val release = CompletableDeferred<Unit>()
         val planner = object : RoutePlanner {
             override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
-                travelSpeedKmh: Double?) = route("route-${++plans}", stops, departureAt, transport)
+                travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences) = route("route-${++plans}", stops, departureAt, transport)
                 .copy(provider = org.iz.navigation.weather.RouteProvider.TOMTOM, effectiveDepartureAt = departureAt)
         }
         val service = services(planner, { _, departure -> comparisons(departure, true, 1.0) }).copy(
@@ -200,7 +200,7 @@ class WeatherPlannerCoordinatorTest {
     @Test fun verifyingOneRowLeavesOtherApproximationsOnTheBaseRoute() = runBlocking {
         val planner = object : RoutePlanner {
             override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
-                travelSpeedKmh: Double?) = route("$departureAt", stops, departureAt, transport)
+                travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences) = route("$departureAt", stops, departureAt, transport)
                 .copy(provider = org.iz.navigation.weather.RouteProvider.TOMTOM, effectiveDepartureAt = departureAt)
         }
         val coordinator = WeatherPlannerCoordinator(this, services(planner, { _, departure -> comparisons(departure, true, 100.0) }),
@@ -220,7 +220,7 @@ class WeatherPlannerCoordinatorTest {
         var calls = 0
         val planner = object : RoutePlanner {
             override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
-                travelSpeedKmh: Double?) = route("${++calls}", stops, departureAt, transport)
+                travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences) = route("${++calls}", stops, departureAt, transport)
                 .copy(provider = org.iz.navigation.weather.RouteProvider.TOMTOM)
         }
         val coordinator = WeatherPlannerCoordinator(this,
@@ -238,7 +238,7 @@ class WeatherPlannerCoordinatorTest {
         val calls = mutableListOf<Long>()
         val planner = object : RoutePlanner {
             override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
-                travelSpeedKmh: Double?): PlannedRoute {
+                travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences): PlannedRoute {
                 calls += departureAt
                 return route("route-${calls.size}", stops, departureAt, transport)
                     .copy(provider = org.iz.navigation.weather.RouteProvider.TOMTOM)
@@ -262,7 +262,7 @@ class WeatherPlannerCoordinatorTest {
         var count = 0
         val planner = object : RoutePlanner {
             override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
-                travelSpeedKmh: Double?): PlannedRoute {
+                travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences): PlannedRoute {
                 if (++count > 1) error("Route unavailable")
                 return route("base", stops, departureAt, transport)
                     .copy(provider = org.iz.navigation.weather.RouteProvider.TOMTOM)
@@ -281,7 +281,7 @@ class WeatherPlannerCoordinatorTest {
     @Test fun approximateRecommendationDoesNotSelectAnUncalculatedDeparture() = runBlocking {
         val planner = object : RoutePlanner {
             override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
-                travelSpeedKmh: Double?) = route("base", stops, departureAt, transport)
+                travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences) = route("base", stops, departureAt, transport)
         }
         val coordinator = WeatherPlannerCoordinator(this, services(planner, { _, departure ->
             comparisons(departure, true, 100.0).mapIndexed { index, item ->
@@ -295,7 +295,7 @@ class WeatherPlannerCoordinatorTest {
         var calls = 0
         val planner = object : RoutePlanner {
             override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
-                travelSpeedKmh: Double?): PlannedRoute {
+                travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences): PlannedRoute {
                 calls++
                 if (calls == 2) throw CancellationException("Traffic settings changed")
                 return route("route-$calls", stops, departureAt, transport)
@@ -318,7 +318,7 @@ class WeatherPlannerCoordinatorTest {
         var activations = 0
         val planner = object : RoutePlanner {
             override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
-                travelSpeedKmh: Double?) = route("route", stops, departureAt, transport)
+                travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences) = route("route", stops, departureAt, transport)
         }
         val coordinator = WeatherPlannerCoordinator(this,
             services(planner, { _, departure -> comparisons(departure, true, 0.0) },
@@ -339,14 +339,14 @@ class WeatherPlannerCoordinatorTest {
         var activated: PlannedRoute? = null
         val comparisonPlanner = object : RoutePlanner {
             override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
-                travelSpeedKmh: Double?): PlannedRoute {
+                travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences): PlannedRoute {
                 comparisonCalls++
                 return route("comparison", stops, departureAt, transport)
             }
         }
         val startPlanner = object : RoutePlanner {
             override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
-                travelSpeedKmh: Double?): PlannedRoute {
+                travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences): PlannedRoute {
                 startCalls++
                 return route("configured-live", stops, departureAt, transport)
             }
@@ -372,12 +372,12 @@ class WeatherPlannerCoordinatorTest {
         var activated: PlannedRoute? = null
         val planner = object : RoutePlanner {
             override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
-                travelSpeedKmh: Double?) = route("route", stops, departureAt, transport)
+                travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences) = route("route", stops, departureAt, transport)
         }
         val coordinator = WeatherPlannerCoordinator(this,
             services(planner, { _, departure -> comparisons(departure, true, 0.0) },
                 activate = { route, _ -> activated = route; "journey" }).copy(savePlan = { saved += it }),
-            SavedWeatherPlan(listOf(origin.copy(label = "Mevcut konum"), destination), 60_000L))
+            SavedWeatherPlan(listOf(origin.copy(label = "Mevcut konum"), destination), 60_000L, originUsesCurrentLocation = true))
         coordinator.calculate()!!.join()
         val current = WeatherCoordinate(41.1, 29.1)
         coordinator.startFromCurrentLocation(current)!!.join()
@@ -393,7 +393,7 @@ class WeatherPlannerCoordinatorTest {
         var activated: PlannedRoute? = null
         val planner = object : RoutePlanner {
             override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
-                travelSpeedKmh: Double?) = route("route", stops, departureAt, transport)
+                travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences) = route("route", stops, departureAt, transport)
         }
         val coordinator = WeatherPlannerCoordinator(this,
             services(planner, { _, departure -> comparisons(departure, true, 0.0) },
@@ -413,7 +413,7 @@ class WeatherPlannerCoordinatorTest {
         var routeCalls = 0
         val planner = object : RoutePlanner {
             override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
-                travelSpeedKmh: Double?): PlannedRoute {
+                travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences): PlannedRoute {
                 routeCalls++
                 if (routeCalls == 2) error("Start route unavailable")
                 return route("route-$routeCalls", stops, departureAt, transport)
@@ -449,7 +449,7 @@ class WeatherPlannerCoordinatorTest {
         var weatherCalls = 0
         val planner = object : RoutePlanner {
             override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
-                travelSpeedKmh: Double?) = route("fresh", stops, departureAt, transport)
+                travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences) = route("fresh", stops, departureAt, transport)
         }
         val service = services(planner, { _, departure -> comparisons(departure, true, 0.0) },
             activate = { route, forecasts ->
@@ -484,7 +484,7 @@ class WeatherPlannerCoordinatorTest {
         val stops = listOf(RouteStop("A", WeatherCoordinate(41.0, 29.0)), RouteStop("B", WeatherCoordinate(41.1, 29.1)))
         val planned = route("early-route", stops, 50_000L)
         val planner = object : RoutePlanner {
-            override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport, travelSpeedKmh: Double?) = planned
+            override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport, travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences) = planned
         }
         val service = services(planner, { _, departure -> comparisons(departure, true, 0.0) }).copy(
             weatherProvider = { object : WeatherProvider {
@@ -514,7 +514,7 @@ class WeatherPlannerCoordinatorTest {
         val firstGate = CompletableDeferred<Unit>()
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val planner = object : RoutePlanner {
-            override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport, travelSpeedKmh: Double?): PlannedRoute {
+            override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport, travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences): PlannedRoute {
                 if (departureAt == 1_000L) firstGate.await()
                 return route(departureAt.toString(), stops, departureAt, transport)
             }
@@ -551,7 +551,7 @@ class WeatherPlannerCoordinatorTest {
         val plannerCalls = mutableListOf<Pair<List<RouteStop>, Long>>()
         var activatedRoute: PlannedRoute? = null
         val planner = object : RoutePlanner {
-            override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport, travelSpeedKmh: Double?): PlannedRoute {
+            override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport, travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences): PlannedRoute {
                 plannerCalls += stops to departureAt
                 return route("route-${plannerCalls.size}", stops, departureAt, transport)
             }
@@ -589,7 +589,7 @@ class WeatherPlannerCoordinatorTest {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         var calls = 0
         val planner = object : RoutePlanner {
-            override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport, travelSpeedKmh: Double?): PlannedRoute {
+            override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport, travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences): PlannedRoute {
                 calls++
                 if (calls == 2) startGate.await()
                 return route("route-$calls", stops, departureAt, transport)
@@ -630,7 +630,7 @@ class WeatherPlannerCoordinatorTest {
         val requests = mutableListOf<Pair<Transport, Double?>>()
         val savedPlans = mutableListOf<SavedWeatherPlan>()
         val planner = object : RoutePlanner {
-            override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport, travelSpeedKmh: Double?): PlannedRoute {
+            override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport, travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences): PlannedRoute {
                 requests += transport to travelSpeedKmh
                 return route("route", stops, departureAt, transport)
             }
@@ -668,7 +668,7 @@ class WeatherPlannerCoordinatorTest {
         val gate = CompletableDeferred<Unit>()
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val planner = object : RoutePlanner {
-            override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport, travelSpeedKmh: Double?): PlannedRoute {
+            override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport, travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences): PlannedRoute {
                 if (transport == Transport.MOTORCYCLE) gate.await()
                 return route(transport.name, stops, departureAt, transport)
             }
@@ -695,7 +695,7 @@ class WeatherPlannerCoordinatorTest {
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
             var activated: Transport? = null
             val planner = object : RoutePlanner {
-                override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport, travelSpeedKmh: Double?): PlannedRoute =
+                override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport, travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences): PlannedRoute =
                     route("route", stops, departureAt, transport)
             }
             val coordinator = WeatherPlannerCoordinator(
@@ -716,7 +716,7 @@ class WeatherPlannerCoordinatorTest {
     fun providerReturningDifferentTransportCannotEnableStart() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val planner = object : RoutePlanner {
-            override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport, travelSpeedKmh: Double?): PlannedRoute =
+            override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport, travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences): PlannedRoute =
                 route("wrong-mode", stops, departureAt, Transport.MOTORCYCLE)
         }
         val coordinator = WeatherPlannerCoordinator(
@@ -778,6 +778,7 @@ class WeatherPlannerCoordinatorTest {
         durationSeconds = 3_600.0,
         createdAt = createdAt,
         transport = transport,
+        hasHighway = false,
     )
 
     private fun assessment(departure: Long, complete: Boolean, exceeded: Double) = WeatherAssessment(

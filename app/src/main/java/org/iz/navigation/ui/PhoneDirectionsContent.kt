@@ -23,6 +23,9 @@ import org.iz.navigation.navigation.NavigationState
 import org.iz.navigation.weather.PlannedRoute
 import org.iz.navigation.weather.RouteProvider
 import org.iz.navigation.weather.RouteStop
+import org.iz.navigation.weather.RoutePreferences
+import org.iz.navigation.weather.geometryKey
+import org.iz.navigation.weather.matrixUnavailableReason
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -59,6 +62,10 @@ internal fun PhoneDirectionsContent(
     suggestStopOrder: () -> Unit = {},
     acceptStopOrder: () -> Unit = {},
     dismissStopOrder: () -> Unit = {},
+    setPreferences: (RoutePreferences) -> Unit = {},
+    requestAlternatives: () -> Unit = {},
+    selectAlternative: (String) -> Unit = {},
+    saveRoute: (() -> Unit)? = null,
 ) {
     val listState = rememberLazyListState()
     val shownRoute = ui.preview ?: nav.route
@@ -162,6 +169,31 @@ internal fun PhoneDirectionsContent(
             if (!ui.originCurrent) Text("Başlatınca önce A noktasına, ardından planlanan duraklara gidilir.", style = MaterialTheme.typography.bodySmall)
         }
         item {
+            val activeMode = ui.transport in setOf(Transport.WALK, Transport.RUN, Transport.BICYCLE)
+            Text("Rota tercihleri", style = MaterialTheme.typography.titleMedium)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(ui.preferences.avoidHighways, { setPreferences(ui.preferences.copy(avoidHighways = !ui.preferences.avoidHighways)) },
+                    enabled = !locked, label = { Text(if (activeMode) "Otoyola girme" else "Otoyoldan kaçın") }, modifier = Modifier.testTag("directions-avoid-highways"))
+                if (!activeMode) FilterChip(ui.preferences.avoidTolls, { setPreferences(ui.preferences.copy(avoidTolls = !ui.preferences.avoidTolls)) },
+                    enabled = !locked, label = { Text("Ücretli yoldan kaçın") }, modifier = Modifier.testTag("directions-avoid-tolls"))
+                FilterChip(ui.preferences.avoidFerries, { setPreferences(ui.preferences.copy(avoidFerries = !ui.preferences.avoidFerries)) },
+                    enabled = !locked, label = { Text("Feribottan kaçın") }, modifier = Modifier.testTag("directions-avoid-ferries"))
+            }
+            if (activeMode && ui.preferences.avoidHighways) Text("Otoyolsuz rota servis haritasından doğrulanır; doğrulanamazsa başlatılmaz. Harita verileri eksik olabilir.", style = MaterialTheme.typography.bodySmall)
+            Text("Kaçınma tercihleri mümkün olduğunda uygulanır; kesin yol yasağı değildir.", style = MaterialTheme.typography.bodySmall)
+            saveRoute?.let { OutlinedButton(it, enabled = ui.stops.size in 2..5 && !locked, modifier = Modifier.testTag("directions-save-route")) { Text("Rotayı kaydet") } }
+        }
+        if (ui.preview != null) item {
+            OutlinedButton(requestAlternatives, enabled = !ui.busy && !locked, modifier = Modifier.testTag("directions-alternatives")) { Text("Alternatif rotalar") }
+            ui.alternativeMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            ui.alternatives.forEachIndexed { index, route ->
+                FilterChip(ui.preview.geometryKey() == route.geometryKey(), { selectAlternative(route.id) }, enabled = !ui.busy && !locked,
+                    label = { Text("Rota ${index + 1} · ${formatDistance(route.distanceMeters)} · ${formatDuration(route.durationSeconds)}") },
+                    modifier = Modifier.testTag("directions-route-choice-$index"))
+            }
+            ui.preview.providerWarnings.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+        }
+        item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(checked = ui.recordJourney, onCheckedChange = recordJourney, enabled = !locked,
                     modifier = Modifier.testTag("record-navigation-choice"))
@@ -182,10 +214,12 @@ internal fun PhoneDirectionsContent(
             Text("Önizleme oturum başlatmaz. Başlat, seçtiğin kayıt tercihiyle sesli yönlendirmeyi açar.", style = MaterialTheme.typography.bodySmall)
         }
         if (ui.origin != null && ui.destination != null && ui.stops.size in 4..5 && ui.transport in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE)) item {
-            OutlinedButton(suggestStopOrder, enabled = !ui.busy && !locked,
+            val matrixReason = ui.preferences.matrixUnavailableReason(ui.transport)
+            OutlinedButton(suggestStopOrder, enabled = matrixReason == null && !ui.busy && !locked,
                 modifier = Modifier.testTag("directions-matrix-order")) {
                 Text(if (ui.ordering) "Durak sırası hesaplanıyor…" else "Daha hızlı durak sırası öner")
             }
+            matrixReason?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             if (ui.transport == Transport.MOTORCYCLE) Text("Matrix sıra önerisi otomobil tahminidir; motosiklet rotasıyla doğrulanır.",
                 style = MaterialTheme.typography.bodySmall)
         }

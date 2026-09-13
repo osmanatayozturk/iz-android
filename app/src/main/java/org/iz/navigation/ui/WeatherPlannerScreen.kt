@@ -62,6 +62,8 @@ import org.iz.navigation.data.Transport
 import org.iz.navigation.integration.FullscreenMapDialog
 import org.iz.navigation.integration.WeatherRouteMap
 import org.iz.navigation.weather.RideWeatherSettings
+import org.iz.navigation.weather.RoutePreferences
+import org.iz.navigation.weather.SavedWeatherPlan
 import org.iz.navigation.weather.defaultWeatherSettings
 import org.iz.navigation.weather.RouteStop
 import org.iz.navigation.weather.WeatherCoordinate
@@ -85,12 +87,16 @@ fun WeatherPlannerScreen(
     initialTransport: Transport? = null,
     onDirections: (List<RouteStop>, Transport) -> Unit = { _, _ -> },
     onNavigationStarted: () -> Unit = {},
+    initialPlan: SavedWeatherPlan? = null,
+    onSaveRoute: ((List<RouteStop>, Transport, RoutePreferences, Boolean, Double?) -> Unit)? = null,
+    onDirectionsWithPreferences: ((List<RouteStop>, Transport, RoutePreferences) -> Unit)? = null,
+    onDirectionsWithPlan: ((SavedWeatherPlan) -> Unit)? = null,
 ) {
     val vm: WeatherPlannerViewModel = viewModel()
-    LaunchedEffect(vm) {
-        initialTransport?.takeIf { it != Transport.UNKNOWN }?.let(vm::setTransport)
+    LaunchedEffect(vm, initialPlan) {
+        if (initialPlan == null) initialTransport?.takeIf { it != Transport.UNKNOWN }?.let(vm::setTransport)
     }
-    WeatherPlannerScreenContent(onClose, vm, onDirections, onNavigationStarted)
+    WeatherPlannerScreenContent(onClose, vm, onDirections, onNavigationStarted, onSaveRoute, onDirectionsWithPreferences, initialPlan, onDirectionsWithPlan)
 }
 
 @Composable
@@ -99,6 +105,10 @@ private fun WeatherPlannerScreenContent(
     vm: WeatherPlannerViewModel,
     onDirections: (List<RouteStop>, Transport) -> Unit,
     onNavigationStarted: () -> Unit,
+    onSaveRoute: ((List<RouteStop>, Transport, RoutePreferences, Boolean, Double?) -> Unit)?,
+    onDirectionsWithPreferences: ((List<RouteStop>, Transport, RoutePreferences) -> Unit)?,
+    initialPlan: SavedWeatherPlan?,
+    onDirectionsWithPlan: ((SavedWeatherPlan) -> Unit)?,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -122,6 +132,7 @@ private fun WeatherPlannerScreenContent(
     var pendingLocationAction by remember { mutableStateOf<WeatherLocationAction?>(null) }
     var locationRequestVersion by remember { mutableIntStateOf(0) }
     var locationBusy by remember { mutableStateOf(false) }
+    var calculateAfterOrigin by remember { mutableStateOf(false) }
     val navigationStarted by rememberUpdatedState(onNavigationStarted)
 
     LaunchedEffect(state.activeJourneyId) {
@@ -210,13 +221,25 @@ private fun WeatherPlannerScreenContent(
     }
 
 
-    LaunchedEffect(locationRequestVersion, state.transport) {
+    LaunchedEffect(initialPlan) {
+        if (initialPlan != null) {
+            vm.loadSavedPlan(initialPlan.stops, initialPlan.transport, initialPlan.preferences,
+                initialPlan.originUsesCurrentLocation, initialPlan.travelSpeedKmh)
+            if (initialPlan.originUsesCurrentLocation) {
+                calculateAfterOrigin = true
+                requestLocation(WeatherLocationAction.ORIGIN)
+            } else vm.calculate()
+        }
+    }
+
+    LaunchedEffect(locationRequestVersion) {
         val action = pendingLocationAction ?: return@LaunchedEffect
         pendingLocationAction = null
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) !=
             PackageManager.PERMISSION_GRANTED
         ) {
             localError = "Bu işlem için hassas konum izni gerekli."
+            calculateAfterOrigin = false
             locationBusy = false
             return@LaunchedEffect
         }
@@ -246,7 +269,10 @@ private fun WeatherPlannerScreenContent(
             } else {
                 val coordinate = WeatherCoordinate(location.latitude, location.longitude)
                 when (action) {
-                    WeatherLocationAction.ORIGIN -> vm.setCurrentOrigin(coordinate)
+                    WeatherLocationAction.ORIGIN -> {
+                        vm.setCurrentOrigin(coordinate)
+                        if (calculateAfterOrigin) vm.calculate()
+                    }
                     WeatherLocationAction.START -> vm.startFromCurrentLocation(coordinate)
                 }
             }
@@ -255,6 +281,7 @@ private fun WeatherPlannerScreenContent(
         } catch (error: Exception) {
             localError = error.message ?: "Konum alınamadı."
         } finally {
+            calculateAfterOrigin = false
             locationBusy = false
         }
     }
@@ -265,7 +292,13 @@ private fun WeatherPlannerScreenContent(
         places = places,
         notificationsEnabled = notificationsEnabled,
         locationBusy = locationBusy,
+        canSaveRoute = onSaveRoute != null,
         actions = WeatherPlannerActions(
+            setPreferences = { vm.setRoutePreferences(it) },
+            requestAlternatives = { vm.requestAlternatives() },
+            selectAlternative = { vm.selectAlternative(it) },
+            saveRoute = { onSaveRoute?.invoke(state.stops, state.transport, state.settings.preferences,
+                state.originUsesCurrentLocation, state.settings.travelSpeedKmh) },
             chooseStop = { target ->
                 if (target == WEATHER_TARGET_DESTINATION && state.stops.isEmpty()) {
                     localError = "Önce başlangıç noktasını seç."
@@ -297,7 +330,10 @@ private fun WeatherPlannerScreenContent(
             stopLive = vm::stopWeather,
             openDirections = {
                 if (!locationBusy && !state.starting && state.stops.size in 2..5) {
-                    onDirections(state.stops, state.transport)
+                    if (onDirectionsWithPlan != null) onDirectionsWithPlan(SavedWeatherPlan(state.stops, state.departureAt, state.transport,
+                        state.settings.preferences, state.originUsesCurrentLocation, state.settings.travelSpeedKmh))
+                    else if (onDirectionsWithPreferences != null) onDirectionsWithPreferences(state.stops, state.transport, state.settings.preferences)
+                    else onDirections(state.stops, state.transport)
                 }
             },
             selectTransport = { transport ->
@@ -479,6 +515,7 @@ internal fun WeatherSettingsDialog(
                     travelSpeedKmh = if (hasTravelSpeed) number(travelSpeed) else null,
                     routeEndpoint = routeEndpoint.trim(),
                     weatherEndpoint = weatherEndpoint.trim(),
+                    preferences = initial.preferences,
                 ),
             )
             if (saved) onDismiss() else error = "Değerleri ve servis adreslerini kontrol et."

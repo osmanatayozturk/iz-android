@@ -43,7 +43,7 @@ class WeatherStorageTest {
     @Test fun settingsRetainIndependentAlertSwitchAndCustomTravelSpeed() {
         val settings = RideWeatherSettings(voiceEnabled = true, alertsEnabled = false, travelSpeedKmh = 14.5)
         val encoded = WeatherSettingsCodec.encode(settings)
-        assertEquals(2, JSONObject(encoded).getInt("version"))
+        assertEquals(3, JSONObject(encoded).getInt("version"))
         assertEquals(settings, WeatherSettingsCodec.decode(encoded))
     }
 

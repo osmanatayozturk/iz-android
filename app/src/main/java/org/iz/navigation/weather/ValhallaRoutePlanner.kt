@@ -33,12 +33,22 @@ class ValhallaRoutePlanner(
         client = defaultWeatherHttpClient(),
     )
 
-    override suspend fun plan(
+    override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
+        travelSpeedKmh: Double?, preferences: RoutePreferences): PlannedRoute =
+        request(stops, departureAt, transport, travelSpeedKmh, preferences, false).routes.first()
+
+    override suspend fun alternatives(stops: List<RouteStop>, departureAt: Long, transport: Transport,
+        travelSpeedKmh: Double?, preferences: RoutePreferences): RouteAlternatives =
+        request(stops, departureAt, transport, travelSpeedKmh, preferences, true)
+
+    private suspend fun request(
         stops: List<RouteStop>,
         departureAt: Long,
         transport: Transport,
         travelSpeedKmh: Double?,
-    ): PlannedRoute = withContext(Dispatchers.IO) {
+        preferences: RoutePreferences,
+        alternatives: Boolean,
+    ): RouteAlternatives = withContext(Dispatchers.IO) {
         require(stops.size in 2..6) { "Rota 2 ile 6 durak içermelidir." }
         val effectiveSpeed = routeTravelSpeedKmh(transport, travelSpeedKmh)
         val costing = when (transport) {
@@ -48,7 +58,12 @@ class ValhallaRoutePlanner(
             Transport.WALK, Transport.RUN -> "pedestrian"
             Transport.UNKNOWN -> throw IllegalArgumentException("Rota için bir yolculuk türü seç.")
         }
+        val hardHighways = transport.requiresHighwayProof(preferences)
         val options = JSONObject().apply {
+            if (hardHighways) put("exclude_highways", true)
+            else if (preferences.avoidHighways) put("use_highways", 0)
+            if (preferences.avoidTolls && transport in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE)) put("use_tolls", 0)
+            if (preferences.avoidFerries) put("use_ferry", 0)
             when (transport) {
                 Transport.MOTORCYCLE -> put("use_trails", 0)
                 Transport.BICYCLE -> put("cycling_speed", effectiveSpeed)
@@ -58,13 +73,17 @@ class ValhallaRoutePlanner(
         }
         val bodyJson = JSONObject()
             .put("locations", JSONArray().apply {
-                stops.forEach { stop -> put(JSONObject().put("lat", stop.coordinate.latitude).put("lon", stop.coordinate.longitude)) }
+                stops.forEach { stop -> put(JSONObject().put("lat", stop.coordinate.latitude).put("lon", stop.coordinate.longitude).apply {
+                    if (hardHighways) put("search_filter", JSONObject().put("max_road_class", "trunk"))
+                }) }
             })
             .put("costing", costing)
             .put("costing_options", JSONObject().put(costing, options))
             .put("units", "kilometers")
             .put("language", "tr-TR")
             .put("directions_type", "instructions")
+        val requestAlternates = alternatives && stops.size == 2
+        if (requestAlternates) bodyJson.put("alternates", 2)
         val request = weatherRequest(endpoint.toHttpUrl().toString())
             .post(bodyJson.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
             .build()
@@ -76,7 +95,23 @@ class ValhallaRoutePlanner(
                     throw RouteServiceException("Rota servisi beklememizi istiyor. Biraz sonra yeniden deneyin.")
                 }
                 if (!response.successful) throw RouteServiceException("Rota servisi şu an kullanılamıyor (${response.code}).")
-                parseRoute(response.body, stops, clock(), bodyJson.toString(), transport, effectiveSpeed)
+                val root = JSONObject(response.body)
+                val raw = mutableListOf(root)
+                if (requestAlternates) root.optJSONArray("alternates")?.let { values ->
+                    require(values.length() <= 2) { "Çok fazla rota alternatifi." }
+                    for (index in 0 until values.length()) raw += values.getJSONObject(index)
+                }
+                if (!alternatives) RouteAlternatives(listOf(parseRoute(root.toString(), stops, clock(), bodyJson.toString(), transport, effectiveSpeed, preferences)))
+                else {
+                    val routes = raw.mapNotNull { value -> runCatching {
+                        parseRoute(value.toString(), stops, clock(), bodyJson.toString(), transport, effectiveSpeed, preferences)
+                    }.getOrNull() }
+                    uniqueAlternatives(routes, when {
+                        !requestAlternates -> "Valhalla ara duraklı rotalarda alternatif yol sunmuyor."
+                        routes.size < raw.size -> "Bazı rota alternatifleri doğrulanamadığı için gösterilmedi."
+                        else -> null
+                    })
+                }
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -101,8 +136,10 @@ class ValhallaRoutePlanner(
         requestJson: String,
         transport: Transport,
         travelSpeedKmh: Double?,
+        preferences: RoutePreferences,
     ): PlannedRoute {
-        val trip = JSONObject(json).getJSONObject("trip")
+        val root = JSONObject(json)
+        val trip = root.getJSONObject("trip")
         val legsJson = trip.getJSONArray("legs")
         require(legsJson.length() == stops.size - 1) { "Eksik rota ayağı." }
         val allVertices = mutableListOf<RouteVertex>()
@@ -134,12 +171,19 @@ class ValhallaRoutePlanner(
             legDistanceMeters += leg.optJSONObject("summary")?.optDouble("length", 0.0)?.times(1_000.0) ?: 0.0
         }
         val summary = trip.getJSONObject("summary")
+        val flags = listOf(summary.opt("has_highway")) + (0 until legsJson.length()).map {
+            legsJson.getJSONObject(it).optJSONObject("summary")?.opt("has_highway")
+        }
+        val hasHighway = when { flags.any { it == true } -> true; flags.all { it == false } -> false; else -> null }
+        val warnings = if ((root.optJSONArray("warnings")?.length() ?: 0) + (trip.optJSONArray("warnings")?.length() ?: 0) > 0)
+            listOf("Rota servisi bazı seçenekler için uyarı bildirdi. Otoyol durumu sonuçta ayrıca kontrol edildi.") else emptyList()
         val summaryDistance = summary.optDouble("length", Double.NaN).takeIf { it.isFinite() && it >= 0.0 }
         val distanceMeters = summaryDistance?.times(1_000.0) ?: legDistanceMeters
         require(distanceMeters.isFinite() && distanceMeters >= 0.0)
-        val digest = MessageDigest.getInstance("SHA-256").digest("${transport.name}:$requestJson:$createdAt".toByteArray())
+        val digest = MessageDigest.getInstance("SHA-256").digest("${transport.name}:$requestJson:$json:$createdAt".toByteArray())
         val id = digest.take(12).joinToString("") { "%02x".format(it) }
-        return PlannedRoute(id, stops, allVertices, distanceMeters, elapsedOffset, createdAt, stopTimes, transport, travelSpeedKmh, allManeuvers)
+        return PlannedRoute(id, stops, allVertices, distanceMeters, elapsedOffset, createdAt, stopTimes, transport, travelSpeedKmh, allManeuvers,
+            preferences = preferences, hasHighway = hasHighway, providerWarnings = warnings).requireUsablePreferences()
     }
 
     companion object {

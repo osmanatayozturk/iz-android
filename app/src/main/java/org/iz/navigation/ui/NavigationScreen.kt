@@ -78,12 +78,19 @@ internal class PhoneNavigationWork(
 internal class PhoneNavigationViewModel(application: Application) : AndroidViewModel(application) {
     val navigation = (application as IzApplication).navigation
     private val repository = DiaryRepository(application)
+    private val settingsStore = WeatherSettingsStore(application)
     val directions = PhoneDirectionsCoordinator(viewModelScope,
         locate = { navigation.currentLocation().coordinate },
         plan = navigation::previewRoute,
         activate = { navigation.startGuidance(it) },
         activateWithRecording = { route, record -> navigation.startGuidance(route, record) },
-        suggestOrder = ConfiguredStopOrderPlanner(application)::propose,
+        readSettings = settingsStore::read,
+        savePreferences = { mode, preferences -> settingsStore.save(settingsStore.read(mode).copy(preferences = preferences), mode) },
+        planWithPreferences = { stops, mode, speed, preferences ->
+            ConfiguredRoutePlanner(application).plan(stops, System.currentTimeMillis(), mode, speed, preferences) },
+        routeAlternatives = { stops, mode, speed, preferences ->
+            ConfiguredRoutePlanner(application).alternatives(stops, System.currentTimeMillis(), mode, speed, preferences) },
+        suggestOrderWithPreferences = ConfiguredStopOrderPlanner(application)::propose,
         credentialRevision = { TrafficSettingsStore(application).read().revision })
     val ui = directions.state
     val permissionGate = DirectionsPermissionGate()
@@ -99,10 +106,10 @@ internal class PhoneNavigationViewModel(application: Application) : AndroidViewM
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    fun enter(entryId: Long, initialStops: List<RouteStop>?, transport: Transport?) {
+    fun enter(entryId: Long, initialStops: List<RouteStop>?, transport: Transport?, initialPlan: SavedWeatherPlan? = null) {
         directions.enter(entryId, initialStops, transport ?: navigation.state.value.sessionTransport ?: navigation.state.value.journey?.transport,
-            locateOnOpen = !navigation.state.value.guidance)
-        if (navigation.state.value.sessionId == null && ui.value.originCurrent && !ui.value.locating) directions.useCurrentOrigin()
+            locateOnOpen = !navigation.state.value.guidance, initialPlan = initialPlan)
+        if (initialPlan == null && navigation.state.value.sessionId == null && ui.value.originCurrent && !ui.value.locating) directions.useCurrentOrigin()
     }
     fun target(value: NavigationTarget) {
         value.coordinate?.let { coordinate ->
@@ -151,9 +158,12 @@ internal fun NavigationScreen(
     onWeather: () -> Unit = {},
     onPin: (GeoCoordinate) -> Unit = {},
     vm: PhoneNavigationViewModel = viewModel(),
+    initialPlan: SavedWeatherPlan? = null,
+    onSaveRoute: ((List<RouteStop>, Transport, RoutePreferences, Boolean, Double?) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val ui by vm.ui.collectAsStateWithLifecycle()
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) { vm.directions.refreshCredentials() }
     val nav by vm.navigation.state.collectAsStateWithLifecycle()
     val points by vm.points.collectAsStateWithLifecycle()
     val places by vm.places.collectAsStateWithLifecycle()
@@ -171,6 +181,7 @@ internal fun NavigationScreen(
     var showPickerMap by remember(entryId) { mutableStateOf(false) }
     var showTrafficSettings by remember { mutableStateOf(false) }
     var incomingQuery by remember(entryId) { mutableStateOf("") }
+    var savedPlanPreviewRequested by remember(entryId, initialPlan) { mutableStateOf(false) }
     fun hasFineLocation() = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
     val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         val precise = hasFineLocation()
@@ -186,9 +197,10 @@ internal fun NavigationScreen(
         if (ui.transport.supportsSteps && ui.recordJourney) add(Manifest.permission.ACTIVITY_RECOGNITION)
     }.toTypedArray()
     fun requestAction(action: DirectionsAction) {
-        if (ui.starting || commandBusy) return
+        val actionState = vm.ui.value
+        if (actionState.starting || commandBusy) return
         val required = buildList {
-            if ((action != DirectionsAction.PREVIEW || ui.originCurrent) && !hasFineLocation()) {
+            if ((action != DirectionsAction.PREVIEW || actionState.originCurrent) && !hasFineLocation()) {
                 add(Manifest.permission.ACCESS_COARSE_LOCATION)
                 add(Manifest.permission.ACCESS_FINE_LOCATION)
             }
@@ -218,8 +230,12 @@ internal fun NavigationScreen(
     }
     val openedStartedCount = remember(entryId) { ui.startedCount }
     LaunchedEffect(ui.startedCount) { if (ui.startedCount > openedStartedCount) showPlanning = false }
-    LaunchedEffect(entryId, incomingTarget) {
-        vm.enter(entryId, initialStops, initialTransport)
+    LaunchedEffect(entryId, incomingTarget, initialPlan) {
+        vm.enter(entryId, initialStops, initialTransport, initialPlan)
+        if (initialPlan != null && !savedPlanPreviewRequested) {
+            savedPlanPreviewRequested = true
+            requestAction(DirectionsAction.PREVIEW)
+        }
         incomingTarget?.let { target ->
             vm.target(target)
             if (target.coordinate == null && target.query.isNotBlank()) {
@@ -268,6 +284,10 @@ internal fun NavigationScreen(
         addVia = { addingVia = true; pickerOrigin = false; showSource = true }, removeVia = vm.directions::removeVia,
         suggestStopOrder = { vm.directions.suggestStopOrder() }, acceptStopOrder = vm.directions::acceptStopOrder,
         dismissStopOrder = vm.directions::dismissStopOrder,
+        setPreferences = vm.directions::setPreferences,
+        requestAlternatives = { vm.directions.requestAlternatives() },
+        selectAlternative = vm.directions::selectAlternative,
+        saveRoute = onSaveRoute?.let { callback -> { callback(ui.stops, ui.transport, ui.preferences, ui.originCurrent, ui.travelSpeedKmh) } },
         onPrepareGroup = { ui.preview?.let { app.groups.prepareRoute(it.stops, it.transport); onGroup() } },
     )
     }
@@ -316,7 +336,4 @@ internal fun NavigationScreen(
     }
     if (showTrafficSettings) TrafficSettingsDialog(onDismiss = { showTrafficSettings = false; vm.directions.showLiveRoute() })
 }
-
-
-
 

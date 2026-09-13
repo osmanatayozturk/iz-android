@@ -29,7 +29,8 @@ class NavigationRouteCache(private val directory: File) {
                 output.toByteArray()
             }
             val json = JSONObject(bytes.toString(Charsets.UTF_8))
-            require(json.getInt("version") == 1)
+            require(json.getInt("version") in 1..2)
+            val transport = Transport.valueOf(json.optString("transport", Transport.MOTORCYCLE.name))
             val stops = json.getJSONArray("stops").bounded(6).map { item ->
                 RouteStop(item.getString("label"), item.coordinate())
             }
@@ -48,8 +49,11 @@ class NavigationRouteCache(private val directory: File) {
             }
             PlannedRoute(json.getString("id"), stops, vertices, json.getDouble("distance"), json.getDouble("duration"),
                 json.getLong("createdAt"), (0 until times.length()).map { times.getDouble(it) },
-                Transport.valueOf(json.optString("transport", Transport.MOTORCYCLE.name)),
-                if (json.isNull("speed")) null else json.getDouble("speed"), maneuvers).also(::validate)
+                transport, if (json.isNull("speed")) null else json.getDouble("speed"), maneuvers,
+                preferences = routePreferences(json.optJSONObject("preferences"), RoutePreferences.defaults(transport)),
+                hasHighway = json.opt("hasHighway") as? Boolean,
+                selectionLocked = json.optBoolean("selectionLocked", false),
+            ).requireUsablePreferences().also(::validate)
         }
     } catch (_: Exception) { null }
 
@@ -59,7 +63,9 @@ class NavigationRouteCache(private val directory: File) {
             return
         }
         validate(route)
-        val json = JSONObject().put("version", 1).put("id", route.id).put("distance", route.distanceMeters)
+        val json = JSONObject().put("version", 2).put("id", route.id).put("distance", route.distanceMeters)
+            .put("preferences", route.preferences.json()).put("hasHighway", route.hasHighway ?: JSONObject.NULL)
+            .put("selectionLocked", route.selectionLocked)
             .put("duration", route.durationSeconds).put("createdAt", route.createdAt).put("transport", route.transport.name)
             .put("speed", route.travelSpeedKmh ?: JSONObject.NULL)
             .put("stops", JSONArray().apply { route.stops.forEach { put(it.coordinate.json().put("label", it.label)) } })

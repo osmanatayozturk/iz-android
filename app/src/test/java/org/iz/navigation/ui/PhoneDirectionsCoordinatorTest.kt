@@ -184,7 +184,6 @@ class PhoneDirectionsCoordinatorTest {
         id = stops.last().label,
         stops = stops,
         vertices = listOf(RouteVertex(stops.first().coordinate, 0.0), RouteVertex(stops.last().coordinate, 600.0)),
-        distanceMeters = 5_000.0, durationSeconds = 600.0, createdAt = 100L, transport = mode,
+        distanceMeters = 5_000.0, durationSeconds = 600.0, createdAt = 100L, transport = mode, hasHighway = false,
     )
 }
-

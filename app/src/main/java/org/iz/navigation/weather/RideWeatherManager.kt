@@ -415,7 +415,7 @@ class RideWeatherManager(
         networkJob = scope.launch {
             try {
                 val route = if (reroute) plannerFactory(preferences.routeEndpoint).plan(
-                    listOf(RouteStop("Mevcut konum", fix!!.coordinate)) + remainingStops, now, current.transport, oldRoute.travelSpeedKmh,
+                    listOf(RouteStop("Mevcut konum", fix!!.coordinate)) + remainingStops, now, current.transport, oldRoute.travelSpeedKmh, oldRoute.preferences,
                 ) else oldRoute
                 require(route.transport == current.transport) { "Rota servisi farklı ulaşım türünde rota döndürdü." }
                 currentCoroutineContext().ensureActive()

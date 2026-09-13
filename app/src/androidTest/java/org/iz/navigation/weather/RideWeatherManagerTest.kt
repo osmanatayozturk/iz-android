@@ -565,7 +565,7 @@ class RideWeatherManagerTest {
         plannerFactory = {
             object : RoutePlanner {
                 override suspend fun plan(stops: List<RouteStop>, departureAt: Long,
-                    transport: Transport, travelSpeedKmh: Double?): PlannedRoute {
+                    transport: Transport, travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences): PlannedRoute {
                     plannerCalls.add(stops.toList() to departureAt)
                     plannerProfiles.add(transport to travelSpeedKmh)
                     return requireNotNull(plannedReplacement) {
