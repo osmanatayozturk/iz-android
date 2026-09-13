@@ -42,4 +42,6 @@ data class NavigationState(
     val sharingLocation: Boolean = false,
     val locationActive: Boolean = false,
     val roadSpeed: org.iz.navigation.speed.RoadSpeedState = org.iz.navigation.speed.RoadSpeedState(),
+    val trackFollow: org.iz.navigation.gpx.TrackFollowState? = null,
+    val interruptedTrackFollow: Boolean = false,
 )

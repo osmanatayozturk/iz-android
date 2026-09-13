@@ -7,6 +7,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class WearNavigationFactoryTest {
+    @Test fun trackFollowingCannotPublishOldTurnOrEtaEvenIfLegacyFlagsRemain() {
+        val track = org.iz.navigation.gpx.ImportedTrack(name = "GPX", segments = emptyList())
+        val follow = org.iz.navigation.gpx.TrackFollowState(track, org.iz.navigation.gpx.TrackFollowSelection(),
+            org.iz.navigation.gpx.TrackFollowProgress(0.0, 100.0, null, org.iz.navigation.gpx.TrackFollowStatus.WAITING_FOR_GPS))
+        assertNull(WearNavigationFactory.create(state().copy(trackFollow = follow), now))
+    }
     private val now = 1_000_000L
     private val route = PlannedRoute("route", listOf(RouteStop("A", WeatherCoordinate(0.0, 0.0)),
         RouteStop("Kızılay", WeatherCoordinate(0.01, 0.01))),

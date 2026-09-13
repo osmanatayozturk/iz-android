@@ -6,6 +6,7 @@ import org.iz.navigation.wearprotocol.WearNavigationSummary
 /** Only the phone's existing route progress produces guidance; publishing never renews a GPS fix. */
 internal object WearNavigationFactory {
     fun create(state: NavigationState, now: Long): WearNavigationSummary? {
+        if (state.trackFollow != null) return null
         val session = state.sessionId?.takeIf { it.isNotBlank() } ?: return null
         if (!state.guidance && !state.loading && !state.arrived) return null
         val fixAt = state.fix?.recordedAt?.takeIf { it >= 0 && it <= now + 5_000 }

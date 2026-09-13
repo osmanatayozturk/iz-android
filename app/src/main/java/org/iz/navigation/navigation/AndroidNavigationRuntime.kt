@@ -70,6 +70,30 @@ internal class AndroidNavigationRuntime(private val context: Context) : Navigati
         }
     }
     override fun setPreparingNoRecord(enabled: Boolean) { TrackingService.preparingNoRecord = enabled }
+    override suspend fun prepareTrackFollowSession(transport: Transport, stillCurrent: () -> Boolean,
+        onDiscard: (Journey) -> Unit, commit: (Journey?) -> Unit) = TrackingCoordinator.mutex.withLock {
+        check(stillCurrent()) { "Başlatma işlemi iptal edildi." }
+        val existing = repository.activeJourney()
+        check(stillCurrent()) { "Başlatma işlemi iptal edildi." }
+        val reusable = trackRecordingToReuse(existing, transport, recordingId(), TrackingCoordinator.pendingManualStartId() != null)
+        var discardedId: String? = null
+        try {
+            if (existing != null && reusable == null) {
+                onDiscard(existing)
+                if (existing.status == JourneyStatus.TEMPORARY) repository.rejectJourney(existing.id)
+                else repository.markInterrupted(existing.id)
+                discardedId = existing.id
+                TrackingCoordinator.clearPendingManualStart(existing.id)
+            }
+            check(stillCurrent()) { "Başlatma işlemi iptal edildi." }
+            // Commit the session's GPS demand before releasing the same mutex used by manual/auto writers.
+            commit(reusable)
+        } finally {
+            discardedId?.takeIf { TrackingService.runningJourneyId == it }?.let {
+                TrackingService.detachRecording(context, it)
+            }
+        }
+    }
     override fun locationActive() = TrackingService.locationDeliveryActive
     override fun setLocationSession(id: String?, transport: Transport?, highFrequency: Boolean, suppressAutomatic: Boolean) {
         TrackingService.setSession(context, id, transport, highFrequency, suppressAutomatic)

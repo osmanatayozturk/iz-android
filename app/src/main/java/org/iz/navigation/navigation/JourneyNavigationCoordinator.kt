@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.iz.navigation.speed.*
+import org.iz.navigation.gpx.*
 
 /** Side effects are isolated so concurrent car/phone/watch commands can be tested without a host. */
 interface NavigationRuntime {
@@ -36,6 +37,19 @@ interface NavigationRuntime {
         check(stillCurrent()) { "Başlatma işlemi iptal edildi." }
         commit()
     }
+    /** Android commits under the recorder mutex; this default supports non-Android runtimes. */
+    suspend fun prepareTrackFollowSession(transport: Transport, stillCurrent: () -> Boolean,
+        onDiscard: (Journey) -> Unit, commit: (Journey?) -> Unit) {
+        val existing = activeJourney()
+        check(stillCurrent()) { "Başlatma işlemi iptal edildi." }
+        val reusable = trackRecordingToReuse(existing, transport, recordingId(), existing?.let { startPending(it.id) } == true)
+        if (existing != null && reusable == null) {
+            onDiscard(existing)
+            if (existing.status == JourneyStatus.TEMPORARY) discardCandidate(existing.id) else interrupt(existing.id)
+        }
+        check(stillCurrent()) { "Başlatma işlemi iptal edildi." }
+        commit(reusable)
+    }
     fun setLocationSession(id: String?, transport: Transport?, highFrequency: Boolean, suppressAutomatic: Boolean) {}
     fun setPreparingNoRecord(enabled: Boolean) {}
     fun locationActive(): Boolean = recordingId() != null
@@ -56,15 +70,26 @@ interface NavigationRuntime {
     fun cancelSpeech()
 }
 
+/** A real pending manual start is never discarded as an automatic candidate or orphan. */
+internal fun trackRecordingToReuse(existing: Journey?, transport: Transport, recordingId: String?, pending: Boolean): Journey? {
+    require(!pending) { "Kaydın başlamasını bekle ve GPX takibini tekrar başlat." }
+    val reusable = existing?.takeIf { it.status == JourneyStatus.CONFIRMED && it.id == recordingId &&
+        !it.interrupted && it.endedAt == null }
+    require(reusable == null || reusable.transport == transport) { "Açık kaydın yolculuk türü farklı. Önce mevcut kaydı durdur." }
+    return reusable
+}
+
 /** Phone-owned route and recorder identity. A car Session owns only a display subscription. */
 class JourneyNavigationCoordinator(
     private val runtime: NavigationRuntime,
     private val cache: NavigationRouteCache?,
     private val clock: () -> Long = System::currentTimeMillis,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
+    private val trackFollowStore: TrackFollowSessionStore? = null,
 ) {
     constructor(context: Context) : this(AndroidNavigationRuntime(context.applicationContext),
-        NavigationRouteCache(java.io.File(context.applicationContext.noBackupFilesDir, "navigation")))
+        NavigationRouteCache(java.io.File(context.applicationContext.noBackupFilesDir, "navigation")),
+        trackFollowStore = TrackFollowSessionStore(java.io.File(context.applicationContext.noBackupFilesDir, "navigation")))
 
     private val mutableState = MutableStateFlow(NavigationState())
     val state = mutableState.asStateFlow()
@@ -72,9 +97,15 @@ class JourneyNavigationCoordinator(
     val simulationPoints = mutableSimulationPoints.asStateFlow()
     private val commands = Mutex()
     private val cacheLock = Mutex()
-    private val fixes = Channel<Pair<String, NavigationFix>>(Channel.CONFLATED)
+    private data class AcceptedFix(val id: String, val fix: NavigationFix, val epoch: Long)
+    private val fixes = Channel<AcceptedFix>(Channel.CONFLATED)
     @Volatile private var epoch = 0L
     private var engine: NavigationEngine? = null
+    private var trackEngine: TrackFollowEngine? = null
+    private var trackStartPending = false
+    private val markerLock = Mutex()
+    @Volatile private var markerRevision = 0L
+    private var markerProblem: String? = null
     private val cues = NavigationCuePolicy()
     private var rerouteJob: Job? = null
     private var simulationJob: Job? = null
@@ -99,6 +130,11 @@ class JourneyNavigationCoordinator(
         scope.launch {
             val restored = withContext(Dispatchers.IO) { cacheLock.withLock { cache?.read() } }
             if (hydrationEpoch == epoch && cachedRoute == null) cachedRoute = restored
+            val interrupted = withContext(Dispatchers.IO) { markerLock.withLock { runCatching { trackFollowStore?.read() == true } } }
+            if (hydrationEpoch == epoch && markerRevision == 0L) {
+                publish(mutableState.value.copy(interruptedTrackFollow = interrupted.getOrDefault(false),
+                    message = if (interrupted.isFailure) "Kesilen GPX bilgisi okunamadı." else mutableState.value.message))
+            }
         }
         scope.launch {
             runtime.journeys.collect { values ->
@@ -119,13 +155,17 @@ class JourneyNavigationCoordinator(
                 // Candidates and retired snapshots cannot change an opt-out.
                 if (before.sessionId != null && before.journey == null) {
                     if (current == null || current.status != JourneyStatus.CONFIRMED ||
-                        runtime.recordingId() != current.id || current.transport != before.sessionTransport) return@collect
-                    publish(before.copy(journey = current, recording = true))
+                        runtime.recordingId() != current.id) return@collect
+                    if (current.transport != before.sessionTransport) {
+                        if (before.trackFollow == null) return@collect
+                        clearRoute()
+                    }
+                    publish(mutableState.value.copy(journey = current, sessionTransport = current.transport, recording = true))
                     return@collect
                 }
                 if (before.journey?.id != null && current?.id != before.journey.id && stoppingRecordingId != before.journey.id) {
                     endLocalSession()
-                } else if (before.route != null && current != null && before.journey != null &&
+                } else if ((before.route != null || before.trackFollow != null) && current != null && before.journey != null &&
                     (current.transport != before.journey.transport || current.status != JourneyStatus.CONFIRMED)) clearRoute()
                 publish(mutableState.value.copy(journey = current,
                     sessionId = mutableState.value.sessionId ?: current?.id?.takeIf { runtime.recordingId() == it },
@@ -134,24 +174,102 @@ class JourneyNavigationCoordinator(
                     fix = mutableState.value.fix.takeIf { before.journey?.id == current?.id }))
             }
         }
-        scope.launch { for ((id, fix) in fixes) accept(id, fix) }
+        scope.launch { for (accepted in fixes) if (accepted.epoch == epoch) accept(accepted.id, accepted.fix) }
         scope.launch {
             while (isActive) {
                 delay(1000)
                 val before = mutableState.value
-                val fresh = before.fix?.let { fresh(it, clock()) } == true
+                val fresh = before.fix?.let { fresh(it, clock()) } == true &&
+                    (before.trackFollow == null || runtime.locationActive())
                 if (!fresh && !before.gpsStale) runtime.cancelSpeech()
                 val alive = if (before.simulation) before.recording else before.journey?.id?.let { runtime.recordingId() == it } == true
                 if (before.recording && !alive && stoppingRecordingId != before.journey?.id) {
-                    clearRoute()
+                    if (before.trackFollow != null) endLocalSession() else clearRoute()
                     publish(mutableState.value.copy(sharingLocation = false))
                 }
                 publish(mutableState.value.copy(recording = alive, gpsStale = !fresh,
                     sessionId = mutableState.value.sessionId ?: before.journey?.id?.takeIf { alive },
                     sessionTransport = before.journey?.transport ?: mutableState.value.sessionTransport,
-                    locationActive = !before.simulation && runtime.locationActive()))
+                    locationActive = !before.simulation && runtime.locationActive(),
+                    trackFollow = mutableState.value.trackFollow?.let { follow ->
+                        if (!fresh) follow.copy(progress = follow.progress.copy(status = TrackFollowStatus.WAITING_FOR_GPS)) else follow
+                    }))
                 if (fresh && mutableState.value.progress?.offRoute == true) requestReroute()
                 else if (fresh) requestTrafficRefresh()
+            }
+        }
+    }
+
+    suspend fun startTrackFollow(track: ImportedTrack, selection: TrackFollowSelection, transport: Transport,
+        replaceExisting: Boolean = false): String = commands.withLock {
+        require(transport != Transport.UNKNOWN) { "Yolculuk türünü seç." }
+        check(!simulationEnabled && !mutableState.value.simulation) { "Önce deneme sürüşünü bitir." }
+        fun checkReplacement() {
+            require(replaceExisting || mutableState.value.let { it.route == null && it.trackFollow == null }) {
+                "Açık yol tarifini veya GPX takibini değiştirmek için onay ver."
+            }
+        }
+        checkReplacement()
+        val token = epoch
+        trackStartPending = true
+        runtime.setPreparingNoRecord(true)
+        try {
+            val prepared = withContext(Dispatchers.Default) { TrackFollowEngine(selectedTrackPoints(track, selection)) }
+            check(token == epoch) { "Başlatma işlemi iptal edildi." }
+            runtime.prepareTrackFollowSession(transport, stillCurrent = { token == epoch }, onDiscard = { existing ->
+                retireJourney(existing.id)
+                publish(mutableState.value.copy(journey = null, recording = false,
+                    sessionId = mutableState.value.sessionId.takeUnless { it == existing.id }))
+            }, commit = { recording ->
+                check(token == epoch) { "Başlatma işlemi iptal edildi." }
+                checkReplacement()
+                val id = mutableState.value.sessionId ?: recording?.id ?: UUID.randomUUID().toString()
+                clearRoute()
+                trackEngine = prepared
+                markerProblem = null
+                publish(mutableState.value.copy(sessionId = id, sessionTransport = transport,
+                    journey = recording, recording = recording != null, interruptedTrackFollow = false,
+                    trackFollow = TrackFollowState(track, selection, prepared.initial), message = null))
+                updateTrackMarker(true)
+            })
+            requireNotNull(mutableState.value.sessionId)
+        } finally {
+            runtime.setPreparingNoRecord(false)
+            trackStartPending = false
+        }
+    }
+
+    suspend fun stopTrackFollow() {
+        // A stop must invalidate a suspended preparation before waiting for its command lock.
+        val token = ++epoch
+        commands.withLock {
+            if (token != epoch) return@withLock
+            trackEngine = null
+            markerProblem = null
+            publish(mutableState.value.copy(trackFollow = null, interruptedTrackFollow = false, routeRevision = epoch, message = null))
+            updateTrackMarker(false)
+            releaseIfIdle()
+        }
+    }
+
+    fun dismissInterruptedTrackFollow() {
+        epoch++
+        publish(mutableState.value.copy(interruptedTrackFollow = false, routeRevision = epoch))
+        updateTrackMarker(mutableState.value.trackFollow != null)
+    }
+
+    private fun updateTrackMarker(active: Boolean) {
+        val revision = ++markerRevision
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                markerLock.withLock {
+                    if (revision != markerRevision) return@withLock Result.success(Unit)
+                    runCatching { if (active) trackFollowStore?.write() else trackFollowStore?.clear(); Unit }
+                }
+            }
+            if (revision == markerRevision && result.isFailure) {
+                markerProblem = if (active) "GPX takibi açık; kesilme bilgisi saklanamadı." else "GPX kesilme bilgisi temizlenemedi."
+                publish(mutableState.value.copy(message = markerProblem))
             }
         }
     }
@@ -207,10 +325,12 @@ class JourneyNavigationCoordinator(
         }
     }
 
-    suspend fun startGuidance(route: PlannedRoute, recordJourney: Boolean = true): String = activate(route, true, recordJourney)
-    suspend fun activateRoute(route: PlannedRoute): String = activate(route, false, true)
+    suspend fun startGuidance(route: PlannedRoute, recordJourney: Boolean = true, replaceTrackFollow: Boolean = false): String =
+        activate(route, true, recordJourney, replaceTrackFollow)
+    suspend fun activateRoute(route: PlannedRoute, replaceTrackFollow: Boolean = false): String = activate(route, false, true, replaceTrackFollow)
 
-    private suspend fun activate(route: PlannedRoute, guidance: Boolean, recordJourney: Boolean): String = commands.withLock {
+    private suspend fun activate(route: PlannedRoute, guidance: Boolean, recordJourney: Boolean, replaceTrackFollow: Boolean): String = commands.withLock {
+        require(mutableState.value.trackFollow == null || replaceTrackFollow) { "Açık GPX takibini değiştirmek için onay ver." }
         require(route.vertices.size >= 2 && route.durationSeconds > 0) { "Geçerli bir rota hesapla." }
         require(!guidance || route.maneuvers.isNotEmpty()) { "Bu rota dönüş talimatı içermiyor. Yeniden hesapla." }
         val simulated = simulationEnabled && guidance
@@ -233,7 +353,7 @@ class JourneyNavigationCoordinator(
             simulation = simulated))
         if (!simulated) saveRoute(route)
         if (simulated) startSimulation(route, requireNotNull(journey))
-        else mutableState.value.fix?.takeIf { fresh(it, clock()) }?.let { fixes.trySend(sessionId to it) }
+        else mutableState.value.fix?.takeIf { fresh(it, clock()) }?.let { onAcceptedLocation(sessionId, it) }
         sessionId
     }
 
@@ -282,6 +402,7 @@ class JourneyNavigationCoordinator(
     }
 
     fun stopGuidance() { scope.launch {
+        if (mutableState.value.trackFollow != null || trackStartPending) return@launch
         clearRoute()
         releaseIfIdle()
     } }
@@ -295,7 +416,7 @@ class JourneyNavigationCoordinator(
             // Clear ownership before Room can emit the finished diary row.
             publish(before.copy(journey = null, recording = false))
             runtime.stopRecording(expectedJourneyId)
-            if (before.route == null) freeDrive = false
+            if (before.route == null && before.trackFollow == null) freeDrive = false
             releaseIfIdle()
         } catch (error: Exception) {
             retiredJourneys.remove(expectedJourneyId)
@@ -332,7 +453,7 @@ class JourneyNavigationCoordinator(
 
     private fun releaseIfIdle() {
         val before = mutableState.value
-        if (before.sessionId != null && !before.recording && before.route == null && !before.sharingLocation && !freeDrive) endLocalSession()
+        if (before.sessionId != null && !before.recording && before.route == null && before.trackFollow == null && !before.sharingLocation && !freeDrive) endLocalSession()
     }
 
     private fun endLocalSession() {
@@ -348,19 +469,21 @@ class JourneyNavigationCoordinator(
         publish(mutableState.value.copy(muted = muted))
     } }
 
-    fun onAcceptedLocation(journeyId: String, fix: NavigationFix) { fixes.trySend(journeyId to fix) }
+    fun onAcceptedLocation(journeyId: String, fix: NavigationFix) { fixes.trySend(AcceptedFix(journeyId, fix, epoch)) }
 
     fun onTrackingStopped(journeyId: String?) { scope.launch {
         if (!mutableState.value.simulation && (journeyId == null || mutableState.value.journey?.id == journeyId)) {
             if (stoppingRecordingId != journeyId && mutableState.value.journey != null) endLocalSession()
-            publish(mutableState.value.copy(recording = false, gpsStale = true, locationActive = false))
+            publish(mutableState.value.copy(recording = false, gpsStale = true, locationActive = false,
+                trackFollow = mutableState.value.trackFollow?.let { it.copy(progress = it.progress.copy(status = TrackFollowStatus.WAITING_FOR_GPS)) }))
         }
     } }
 
     fun invalidateAfterDiaryReplacement() {
         // Invalidate synchronously before any already-completed HTTP result can publish.
-        epoch++
+        val token = ++epoch
         scope.launch {
+            if (token != epoch) return@launch
             clearRoute()
             simulationEnabled = false
             cachedRoute = null
@@ -395,7 +518,16 @@ class JourneyNavigationCoordinator(
         if (before.sessionId != id && before.journey?.id != id || !fresh(fix, now)) return
         if (before.fix?.let { fix.recordedAt <= it.recordedAt } == true) return
         val currentEngine = engine
+        val currentTrackEngine = trackEngine
         val token = epoch
+        if (currentTrackEngine != null) {
+            val progress = withContext(Dispatchers.Default) { currentTrackEngine.update(fix, now) } ?: return
+            if (token != epoch || mutableState.value.sessionId != before.sessionId || trackEngine !== currentTrackEngine) return
+            val follow = mutableState.value.trackFollow ?: return
+            publish(mutableState.value.copy(fix = fix, gpsStale = false, trackFollow = follow.copy(progress = progress),
+                locationActive = runtime.locationActive(), message = markerProblem))
+            return
+        }
         val progress = if (currentEngine != null) withContext(Dispatchers.Default) { currentEngine.update(fix, now) } else null
         if (token != epoch || mutableState.value.sessionId != before.sessionId) return
         val arrived = progress?.arrived == true
@@ -477,17 +609,21 @@ class JourneyNavigationCoordinator(
         rerouteJob?.cancel(); rerouteJob = null
         simulationJob?.cancel(); simulationJob = null
         engine = null; cues.reset(); lastRerouteAttempt = null; lastTrafficCheckAt = null
+        trackEngine = null
+        if (mutableState.value.trackFollow != null) updateTrackMarker(false)
+        markerProblem = null
         runtime.cancelSpeech()
         publish(mutableState.value.copy(route = null, guidance = false, arrived = false, progress = null,
-            loading = false, routeRevision = epoch, message = null))
+            loading = false, routeRevision = epoch, message = null, trackFollow = null))
     }
 
     private fun publish(value: NavigationState, refreshSpeed: Boolean = true) {
         val rendered = value.copy(roadSpeed = runtime.roadSpeedState(value, clock()))
         mutableState.value = rendered
-        runtime.setHighFrequency(value.journey?.id.takeIf { value.guidance && value.recording && !value.simulation })
+        val highFrequency = value.guidance || value.trackFollow != null
+        runtime.setHighFrequency(value.journey?.id.takeIf { highFrequency && value.recording && !value.simulation })
         runtime.setLocationSession(value.sessionId.takeIf { !value.simulation }, value.sessionTransport,
-            value.guidance, value.sessionId != null && !value.recording && !value.simulation)
+            highFrequency, value.sessionId != null && !value.recording && !value.simulation)
         // Display/notification failures cannot take down the recorder's process or state collector.
         runCatching { runtime.render(rendered) }
         val eligible = value.sessionId != null && speedMode(value.sessionTransport) && !value.simulation && !value.gpsStale
@@ -527,7 +663,7 @@ class JourneyNavigationCoordinator(
                 val fix = NavigationFix(coordinate, now, 3f, 12f)
                 mutableSimulationPoints.value = (mutableSimulationPoints.value + TrackPoint(journeyId = journey.id,
                     latitude = coordinate.latitude, longitude = coordinate.longitude, recordedAt = now, accuracy = 3f, speed = 12f)).takeLast(10_000)
-                fixes.send(journey.id to fix)
+                fixes.send(AcceptedFix(journey.id, fix, epoch))
                 seconds = (seconds + 1).coerceAtMost(route.durationSeconds)
                 delay(1000)
             }
