@@ -27,7 +27,6 @@ import org.iz.navigation.navigation.NavigationFix
 import org.iz.navigation.weather.WeatherEngine
 import java.util.Locale
 
-private data class GpxStartRequest(val track: ImportedTrack, val selection: TrackFollowSelection, val transport: Transport)
 private data class GpxPreview(val distance: Double, val points: Int)
 
 /** A callback-only phone surface: opening, choosing or leaving never starts/stops a session. */
@@ -38,7 +37,7 @@ internal fun GpxTrackScreen(
     currentTransport: Transport?, existingNavigation: Boolean, interrupted: Boolean,
     busy: Boolean = false, message: String? = null,
     onImport: () -> Unit, onSave: (ImportedTrack) -> Unit,
-    onStart: (ImportedTrack, TrackFollowSelection, Transport, Boolean) -> Unit,
+    onStart: (ImportedTrack, TrackFollowSelection, Transport, Boolean, String?) -> Unit,
     onStop: () -> Unit, onDismiss: () -> Unit, onDismissInterrupted: () -> Unit,
     replacementKey: String? = null,
 ) {
@@ -179,9 +178,10 @@ internal fun GpxTrackScreen(
                 if (currentTransport != null) Text("Açık oturumun ulaşım türü korunur. Bu ekran günlük kaydını değiştirmez.", color = Muted)
                 Text("GPX çizgisinin yol erişimi doğrulanmaz; çizgi değiştirilmez. Dönüş talimatı verilmez.", style = MaterialTheme.typography.bodySmall, color = Muted)
                 Button(onClick = {
-                    val request = GpxStartRequest(displayed, selection, transport)
+                    val request = GpxStartRequest(displayed, selection, transport,
+                        existingNavigation || active != null, replacementKey)
                     if (existingNavigation || active != null) pendingStart = request
-                    else onStart(request.track, request.selection, request.transport, false)
+                    else onStart(request.track, request.selection, request.transport, false, request.expectedReplacementKey)
                 }, enabled = enabled && preview != null && preview!!.distance > 0.0,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("gpx-start")) {
                     Text(if (matchingActive != null) "Seçilen başlangıçla yeniden başlat" else "Çizgiyi takip et")
@@ -222,7 +222,7 @@ internal fun GpxTrackScreen(
         title = { Text(if (active != null) "GPX takibini yeniden başlat?" else "Yönlendirmeden GPX takibine geç?") },
         text = { Text("Devam eden ${if (active != null) "GPX takibi" else "yol yönlendirmesi"} sona erecek. “${request.track.name}”, seçilen bölüm ve başlangıçla takip edilecek. Varsa açık günlük kaydı devam eder.") },
         confirmButton = { TextButton(onClick = {
-            pendingStart = null; onStart(request.track, request.selection, request.transport, true)
+            pendingStart = null; onStart(request.track, request.selection, request.transport, true, request.expectedReplacementKey)
         }, enabled = !busy, modifier = Modifier.heightIn(min = 48.dp).testTag("gpx-confirm-replace")) { Text("GPX takibine geç") } },
         dismissButton = { TextButton(onClick = { pendingStart = null }, modifier = Modifier.heightIn(min = 48.dp).testTag("gpx-cancel-replace")) { Text("Vazgeç") } }) }
     if (candidates.isNotEmpty()) AlertDialog(onDismissRequest = { candidates = emptyList() }, title = { Text("Hangi geçişten başlamak istiyorsun?") },

@@ -180,7 +180,8 @@ internal fun PhoneDirectionsContent(
                     enabled = !locked, label = { Text("Feribottan kaçın") }, modifier = Modifier.testTag("directions-avoid-ferries"))
             }
             if (activeMode && ui.preferences.avoidHighways) Text("Otoyolsuz rota servis haritasından doğrulanır; doğrulanamazsa başlatılmaz. Harita verileri eksik olabilir.", style = MaterialTheme.typography.bodySmall)
-            Text("Kaçınma tercihleri mümkün olduğunda uygulanır; kesin yol yasağı değildir.", style = MaterialTheme.typography.bodySmall)
+            Text(if (activeMode) "Feribottan kaçınma tercihi mümkün olduğunda uygulanır; kesin feribot yasağı değildir."
+                else "Otoyol, ücretli yol ve feribottan kaçınma tercihleri mümkün olduğunda uygulanır; kesin yol yasağı değildir.", style = MaterialTheme.typography.bodySmall)
             saveRoute?.let { OutlinedButton(it, enabled = ui.stops.size in 2..5 && !locked, modifier = Modifier.testTag("directions-save-route")) { Text("Rotayı kaydet") } }
         }
         if (ui.preview != null) item {

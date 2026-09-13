@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import org.iz.navigation.IzApplication
 import org.iz.navigation.data.Transport
 import org.iz.navigation.navigation.prepareRouteStartStops
+import org.iz.navigation.navigation.TrackReplacementConsent
+import org.iz.navigation.navigation.trackReplacementKey
 import org.iz.navigation.weather.*
 import org.iz.navigation.weather.ConfiguredRoutePlanner
 import org.iz.navigation.weather.LocationForecast
@@ -305,14 +307,15 @@ internal class WeatherPlannerCoordinator(
     fun dismissStopOrder() { mutableState.value = mutableState.value.copy(orderProposal = null) }
 
     private fun commitDeparture(requestedAt: Long, bundle: WeatherDepartureBundle) {
-        candidates[requestedAt] = bundle.copy(context = context(mutableState.value, bundle.route))
+        val acceptedContext = context(mutableState.value, bundle.route)
+        candidates[requestedAt] = bundle.copy(context = acceptedContext)
         val comparisons = baseComparisons.map { approximate ->
-            candidates[approximate.departureAt]?.takeIf { it.context == context(mutableState.value, bundle.route) }?.assessment?.copy(departureAt = approximate.departureAt) ?: approximate
+            candidates[approximate.departureAt]?.takeIf { it.context == acceptedContext }?.assessment?.copy(departureAt = approximate.departureAt) ?: approximate
         }
         mutableState.value = mutableState.value.copy(route = bundle.route, forecasts = bundle.forecasts,
             selectedDepartureAt = requestedAt, effectiveDepartureAt = bundle.assessment.departureAt,
             selectedWeather = bundle.assessment, comparisons = comparisons, requestedDepartureAt = null,
-            verifiedDepartures = candidates.filterValues { it.route.provider == RouteProvider.TOMTOM }.keys.toSet(),
+            verifiedDepartures = candidates.filterValues { it.context == acceptedContext && it.route.provider == RouteProvider.TOMTOM }.keys.toSet(),
             trafficFreeDeparture = null, busy = false, error = null, orderProposal = null, ordering = false)
     }
 
@@ -631,6 +634,9 @@ internal class WeatherPlannerViewModel(application: Application) : AndroidViewMo
     private val settingsStore = WeatherSettingsStore(application)
     private val planStore = WeatherPlanStore(application)
     private val manager = (application as IzApplication).weatherManager
+    val navigation = (application as IzApplication).navigation
+    private val trackConsent = TrackReplacementConsent()
+    fun approveTrackReplacement(key: String?) = trackConsent.approve(key)
     private val coordinator = WeatherPlannerCoordinator(
         scope = viewModelScope,
         initialPlan = planStore.read(),
@@ -640,7 +646,11 @@ internal class WeatherPlannerViewModel(application: Application) : AndroidViewMo
             readSettings = settingsStore::read,
             saveSettings = settingsStore::save,
             savePlan = planStore::save,
-            activate = manager::activateGuidance,
+            activate = { route, forecasts ->
+                val key = navigation.state.value.trackReplacementKey()
+                val replace = trackConsent.consume(key)
+                manager.activateGuidance(route, forecasts, key.takeIf { replace })
+            },
             startRoutePlanner = { ConfiguredRoutePlanner(application) },
             verificationPlanner = { VerifiedTomTomRoutePlanner(application) },
             trafficFreePlanner = { settings -> ValhallaRoutePlanner(application, settings.routeEndpoint) },

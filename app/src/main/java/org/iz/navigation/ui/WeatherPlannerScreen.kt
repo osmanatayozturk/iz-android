@@ -63,6 +63,7 @@ import org.iz.navigation.integration.FullscreenMapDialog
 import org.iz.navigation.integration.WeatherRouteMap
 import org.iz.navigation.weather.RideWeatherSettings
 import org.iz.navigation.weather.RoutePreferences
+import org.iz.navigation.navigation.trackReplacementKey
 import org.iz.navigation.weather.SavedWeatherPlan
 import org.iz.navigation.weather.defaultWeatherSettings
 import org.iz.navigation.weather.RouteStop
@@ -115,6 +116,10 @@ private fun WeatherPlannerScreenContent(
     val state by vm.state.collectAsStateWithLifecycle()
     androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) { vm.refreshCredentials() }
     val live by vm.liveState.collectAsStateWithLifecycle()
+    val navigation by vm.navigation.state.collectAsStateWithLifecycle()
+    var trackReplacementDialog by remember(navigation.trackReplacementKey(), state.route?.id) {
+        mutableStateOf<String?>(null)
+    }
     val repository = remember(context) { DiaryRepository(context) }
     val places by repository.places.collectAsStateWithLifecycle(initialValue = emptyList())
     var notificationsEnabled by remember { mutableStateOf(NotificationManagerCompat.from(context).areNotificationsEnabled()) }
@@ -158,8 +163,16 @@ private fun WeatherPlannerScreenContent(
         notificationsEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
         locationRequestVersion++
     }
-    fun requestLocation(action: WeatherLocationAction) {
+    fun requestLocation(action: WeatherLocationAction, approvedTrackKey: String? = null) {
         if (state.starting || locationBusy || pendingLocationAction != null) return
+        if (action == WeatherLocationAction.START) {
+            val key = vm.navigation.state.value.trackReplacementKey()
+            if (key != null && approvedTrackKey != key) {
+                trackReplacementDialog = key
+                return
+            }
+            vm.approveTrackReplacement(approvedTrackKey)
+        }
         localError = null
         locationBusy = true
         pendingLocationAction = action
@@ -177,6 +190,18 @@ private fun WeatherPlannerScreenContent(
         if (required.isEmpty()) locationRequestVersion++ else locationPermission.launch(required.toTypedArray())
     }
 
+    trackReplacementDialog?.let { key ->
+        AlertDialog(
+            onDismissRequest = { trackReplacementDialog = null },
+            title = { Text("GPX takibi değişsin mi?") },
+            text = { Text("Bu rotayı başlatınca açık GPX takibi kapanacak. Açık yolculuk kaydın korunur.") },
+            confirmButton = { TextButton(onClick = {
+                trackReplacementDialog = null
+                requestLocation(WeatherLocationAction.START, key)
+            }) { Text("Rotayı başlat") } },
+            dismissButton = { TextButton(onClick = { trackReplacementDialog = null }) { Text("Vazgeç") } },
+        )
+    }
     val now = System.currentTimeMillis()
     fun showDatePicker() {
         val calendar = Calendar.getInstance().apply { timeInMillis = state.departureAt.coerceAtLeast(now) }

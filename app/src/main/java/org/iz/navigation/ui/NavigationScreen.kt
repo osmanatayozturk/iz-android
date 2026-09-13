@@ -24,6 +24,8 @@ import org.iz.navigation.data.*
 import org.iz.navigation.integration.FullscreenMapDialog
 import org.iz.navigation.integration.WeatherRouteMap
 import org.iz.navigation.weather.*
+import org.iz.navigation.navigation.TrackReplacementConsent
+import org.iz.navigation.navigation.trackReplacementKey
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.CoroutineScope
@@ -79,17 +81,25 @@ internal class PhoneNavigationViewModel(application: Application) : AndroidViewM
     val navigation = (application as IzApplication).navigation
     private val repository = DiaryRepository(application)
     private val settingsStore = WeatherSettingsStore(application)
+    private val trackConsent = TrackReplacementConsent()
+    private suspend fun activateDirections(route: PlannedRoute, record: Boolean): String {
+        val key = navigation.state.value.trackReplacementKey()
+        val replace = trackConsent.consume(key)
+        return navigation.startGuidance(route, record, replace, key.takeIf { replace })
+    }
+    fun approveTrackReplacement(key: String?) = trackConsent.approve(key)
     val directions = PhoneDirectionsCoordinator(viewModelScope,
         locate = { navigation.currentLocation().coordinate },
         plan = navigation::previewRoute,
-        activate = { navigation.startGuidance(it) },
-        activateWithRecording = { route, record -> navigation.startGuidance(route, record) },
+        activate = { activateDirections(it, true) },
+        activateWithRecording = ::activateDirections,
         readSettings = settingsStore::read,
         savePreferences = { mode, preferences -> settingsStore.save(settingsStore.read(mode).copy(preferences = preferences), mode) },
         planWithPreferences = { stops, mode, speed, preferences ->
             ConfiguredRoutePlanner(application).plan(stops, System.currentTimeMillis(), mode, speed, preferences) },
         routeAlternatives = { stops, mode, speed, preferences ->
             ConfiguredRoutePlanner(application).alternatives(stops, System.currentTimeMillis(), mode, speed, preferences) },
+        startRoutePlanner = { ConfiguredRoutePlanner(application) },
         suggestOrderWithPreferences = ConfiguredStopOrderPlanner(application)::propose,
         credentialRevision = { TrafficSettingsStore(application).read().revision })
     val ui = directions.state
@@ -182,6 +192,9 @@ internal fun NavigationScreen(
     var showTrafficSettings by remember { mutableStateOf(false) }
     var incomingQuery by remember(entryId) { mutableStateOf("") }
     var savedPlanPreviewRequested by remember(entryId, initialPlan) { mutableStateOf(false) }
+    var trackReplacementDialog by remember(entryId, nav.trackReplacementKey(), vm.directions.revisionToken) {
+        mutableStateOf<String?>(null)
+    }
     fun hasFineLocation() = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
     val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         val precise = hasFineLocation()
@@ -196,9 +209,17 @@ internal fun NavigationScreen(
         if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
         if (ui.transport.supportsSteps && ui.recordJourney) add(Manifest.permission.ACTIVITY_RECOGNITION)
     }.toTypedArray()
-    fun requestAction(action: DirectionsAction) {
+    fun requestAction(action: DirectionsAction, approvedTrackKey: String? = null) {
         val actionState = vm.ui.value
         if (actionState.starting || commandBusy) return
+        if (action == DirectionsAction.START) {
+            val key = vm.navigation.state.value.trackReplacementKey()
+            if (key != null && approvedTrackKey != key) {
+                trackReplacementDialog = key
+                return
+            }
+            vm.approveTrackReplacement(approvedTrackKey)
+        }
         val required = buildList {
             if ((action != DirectionsAction.PREVIEW || actionState.originCurrent) && !hasFineLocation()) {
                 add(Manifest.permission.ACCESS_COARSE_LOCATION)
@@ -222,6 +243,18 @@ internal fun NavigationScreen(
         else if (pickerOrigin) vm.directions.setOrigin(stop) else vm.directions.setDestination(stop)
     }
     fun closePlanner() { showPlanning = false; vm.directions.showLiveRoute(); onClose() }
+    trackReplacementDialog?.let { key ->
+        AlertDialog(
+            onDismissRequest = { trackReplacementDialog = null },
+            title = { Text("GPX takibi değişsin mi?") },
+            text = { Text("Bu rotayı başlatınca açık GPX takibi kapanacak. Açık yolculuk kaydın korunur.") },
+            confirmButton = { TextButton(onClick = {
+                trackReplacementDialog = null
+                requestAction(DirectionsAction.START, key)
+            }) { Text("Rotayı başlat") } },
+            dismissButton = { TextButton(onClick = { trackReplacementDialog = null }) { Text("Vazgeç") } },
+        )
+    }
     BackHandler(enabled = showPlanning, onBack = ::closePlanner)
     var previousSession by remember { mutableStateOf(nav.sessionId) }
     LaunchedEffect(nav.sessionId) {
@@ -336,4 +369,3 @@ internal fun NavigationScreen(
     }
     if (showTrafficSettings) TrafficSettingsDialog(onDismiss = { showTrafficSettings = false; vm.directions.showLiveRoute() })
 }
-

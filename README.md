@@ -1,5 +1,7 @@
 # İz 0.9.2 - navigasyon ve yolculuk günlüğü
 
+**Geliştirme dalı: 0.10.0 / code 18.** Rotalarım, Geziler ve GPX çizgi takibi bu dalda ekleniyor; aşağıdaki indirme bağlantısı doğrulanmış 0.9.2 paketine aittir. [0.10 kullanım rehberi](docs/IZ_010_KULLANIM.md).
+
 [Değişiklik geçmişi](CHANGELOG.md) · [Sürüm değişikliği planı](docs/SURUM_PLANI.md)
 
 Araba, motosiklet, bisiklet, yürüyüş, koşu ve yolcu için haritayla açılan Kotlin / Jetpack Compose uygulaması. Üstte **Nereye?**, yanda konum ve katmanlar, altta **Kaydet / Grup / Menü** bulunur. Yol tarifi günlük kaydı olmadan da çalışır; yeni başlangıçta **Yolculuğu kaydet** seçimi açıktır. Yolculuklar, ziyaretler, özel notlar ve fotoğraflar telefonda saklanır. Geçmiş, istatistikler, yerler, ısı haritası, OSM Topluluğu ve ayarlara Menüden ulaşılır.
@@ -35,6 +37,15 @@ Supabase grup sunucusu ve TomTom trafik bağlantısı varsayılan kaynak yapıla
 [OSM Topluluğu](docs/OSM_TOPLULUGU.md) mesajlar, kişiler, hesap ve OSM sitesindeki takip işlemlerini kapsar. [Android Auto](docs/ANDROID_AUTO.md) hedefsiz sürüş kaydı ve navigasyon sunar. Wear OS 0.6.0, kayıt ve navigasyon durumunu telefondan alır; kart ve kadran alanında günlük Samsung Health adımlarını ve ayrı İz kayıtlarını gösterir. Sağlık sensörleri yalnız uygun bir kayıt sırasında çalışır. [Saat desteği ve kimlik geçişi](docs/WATCH_SUPPORT.md) · [Saat sağlık ölçümü](docs/WATCH_HEALTH_LIVE.md) · [Kart ve kadran](docs/WATCH_SURFACES.md).
 
 Altı yolculuk türünde rota havası, kalkış karşılaştırması ve türe özel canlı uyarılar için [hava durumu kullanımına](docs/weather/USAGE.md) bakın.
+
+## 0.10 geliştirmesi
+
+- **Rotalarım:** İki ile beş duraklı planları adlandırın; ulaşım türü, kişisel hız ve yol tercihleri saklanır. Konumum başlangıcı yeniden açılışta güncellenir. Planı açmak kayıt başlatmaz.
+- **Yol tercihleri:** Yürüyüş, koşu ve bisiklette **Otoyola girme** varsayılan açıktır. Son seçiminiz her ulaşım türü için ayrı saklanır; kaydedilen plan kendi tercihlerini korur. Bu üç türde otoyolsuzluğu doğrulanamayan rota kullanılmaz.
+- **Alternatifler:** Desteklenen planlarda en fazla iki ek güzergâh istenir. Hava karşılaştırması seçilen güzergâha bağlıdır; başlangıçta farklı bir yol sessizce seçilmez.
+- **GPX takibi:** GPX 1.0/1.1 izlerini bölüm, yön ve başlangıç seçerek takip edin veya Rotalarım'a kaydedin. GPX takibi günlük kaydından ayrıdır; dönüş talimatı, tahmini varış ve otomatik yeniden rota hesabı sunmaz.
+- **Geziler:** Tamamlanmış yolculukları sıralı koleksiyonlarda biriktirin. Koleksiyondan çıkarmak günlük kaydını silmez.
+- **Paylaşım ve yedek:** GPX tarih/saat bilgisi her dışa aktarımda varsayılan kapalıdır. Paylaşılan fotoğrafların gömülü üstverileri temizlenir; özgünler korunur. Manuel yedek 7, eski 1–6 yedekleri okuyabilir.
 
 ## Açma ve derleme
 

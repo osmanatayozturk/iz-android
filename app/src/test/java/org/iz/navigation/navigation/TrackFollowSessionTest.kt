@@ -25,6 +25,12 @@ class TrackFollowSessionTest {
         var pending: String? = null
         var actual: Journey? = null
         var read: (suspend () -> Unit)? = null
+        var beforeDiscard: (suspend () -> Unit)? = null
+        var afterDiscard: (suspend () -> Unit)? = null
+        var beforeInterrupt: (suspend () -> Unit)? = null
+        var afterInterrupt: (suspend () -> Unit)? = null
+        var beforeFinish: (suspend () -> Unit)? = null
+        var afterFinish: (suspend () -> Unit)? = null
         var delivered = true
         var starts = 0; var confirms = 0; var finishes = 0; var discards = 0; var plans = 0
         override suspend fun activeJourney(): Journey? { read?.invoke(); return actual ?: journeys.value.firstOrNull { it.endedAt == null && !it.interrupted } }
@@ -34,9 +40,15 @@ class TrackFollowSessionTest {
         }
         fun attach(journey: Journey): Journey { running = journey.id; journeys.value = listOf(journey); return journey }
         override suspend fun confirm(id: String, transport: Transport) { confirms++; journeys.value = journeys.value.map { it.copy(status = JourneyStatus.CONFIRMED, transport = transport) } }
-        override suspend fun finish(id: String) { finishes++; running = null; journeys.value = emptyList() }
-        override suspend fun discardCandidate(id: String) { discards++; running = null; journeys.value = emptyList() }
-        override suspend fun interrupt(id: String) { running = null; journeys.value = emptyList() }
+        override suspend fun finish(id: String) {
+            beforeFinish?.invoke(); finishes++; running = null; journeys.value = emptyList(); afterFinish?.invoke()
+        }
+        override suspend fun discardCandidate(id: String) {
+            beforeDiscard?.invoke(); discards++; running = null; journeys.value = emptyList(); afterDiscard?.invoke()
+        }
+        override suspend fun interrupt(id: String) {
+            beforeInterrupt?.invoke(); running = null; journeys.value = emptyList(); afterInterrupt?.invoke()
+        }
         override fun recordingId() = running
         override fun startPending(id: String) = pending == id
         override fun setHighFrequency(journeyId: String?) = Unit
@@ -104,6 +116,178 @@ class TrackFollowSessionTest {
         assertNull(coordinator.state.value.journey)
         assertEquals(1, runtime.discards)
         assertEquals(0, runtime.confirms + runtime.starts + runtime.finishes)
+    }
+
+    @Test fun failedCandidateDiscardPreservesOwnershipAndDoesNotRetireTheLiveRow() = runTest {
+        assertFailedPreparationKeepsJourney(JourneyStatus.TEMPORARY, recorderAlive = true)
+    }
+
+    @Test fun failedOrphanInterruptionPreservesTheRowAndLaterObservations() = runTest {
+        assertFailedPreparationKeepsJourney(JourneyStatus.CONFIRMED, recorderAlive = false)
+    }
+
+    private suspend fun TestScope.assertFailedPreparationKeepsJourney(status: JourneyStatus, recorderAlive: Boolean) {
+        val runtime = Runtime()
+        val journey = runtime.attach(Journey(id = "not-discarded", transport = Transport.WALK, status = status, startedAt = 1))
+        if (!recorderAlive) runtime.running = null
+        val coordinator = JourneyNavigationCoordinator(runtime, null, { 1000L }, backgroundScope)
+        runCurrent()
+        val before = coordinator.state.value
+        val demand = runtime.session
+        val failure = java.io.IOException("injected repository failure")
+        runtime.beforeDiscard = { throw failure }
+        runtime.beforeInterrupt = { throw failure }
+
+        val result = runCatching { coordinator.startTrackFollow(track(), TrackFollowSelection(), Transport.WALK) }
+
+        assertSame(failure, result.exceptionOrNull())
+        assertEquals("Failed persistence must not hide or retire the existing journey", before, coordinator.state.value)
+        assertEquals(demand, runtime.session)
+        assertEquals(if (recorderAlive) journey.id else null, runtime.running)
+        assertFalse(runtime.preparing)
+        // A subsequent Room emission for the same identity must remain observable after the error.
+        val updated = journey.copy(startedAt = 2)
+        runtime.journeys.value = listOf(updated)
+        runCurrent()
+        assertEquals(updated, coordinator.state.value.journey)
+        assertEquals(0, runtime.starts + runtime.confirms + runtime.finishes + runtime.discards)
+    }
+
+    @Test fun successfulCandidateDiscardSurvivesEarlyEmptyAndLateStaleRoomEmissions() = runTest {
+        assertSuccessfulPreparationSurvivesRoomEmissions(JourneyStatus.TEMPORARY, recorderAlive = true)
+    }
+
+    @Test fun successfulOrphanInterruptionSurvivesEarlyEmptyAndLateStaleRoomEmissions() = runTest {
+        assertSuccessfulPreparationSurvivesRoomEmissions(JourneyStatus.CONFIRMED, recorderAlive = false)
+    }
+
+    private suspend fun TestScope.assertSuccessfulPreparationSurvivesRoomEmissions(status: JourneyStatus, recorderAlive: Boolean) {
+        val runtime = Runtime()
+        val journey = runtime.attach(Journey(id = "discarded", transport = Transport.WALK, status = status, startedAt = 1))
+        if (!recorderAlive) runtime.running = null
+        val coordinator = JourneyNavigationCoordinator(runtime, null, { 1000L }, backgroundScope)
+        runCurrent()
+        // Repository commit may notify Room before the suspend call returns to its caller.
+        runtime.afterDiscard = { advanceTimeBy(1100); runCurrent() }
+        runtime.afterInterrupt = { advanceTimeBy(1100); runCurrent() }
+        val id = coordinator.startTrackFollow(track(), TrackFollowSelection(), Transport.WALK)
+        assertEquals(id, runtime.session)
+        assertNotEquals(journey.id, id)
+        assertNotNull(coordinator.state.value.trackFollow)
+        assertNull(coordinator.state.value.journey)
+        runtime.journeys.value = listOf(journey)
+        runCurrent()
+        assertEquals(id, coordinator.state.value.sessionId)
+        assertNotNull(coordinator.state.value.trackFollow)
+        assertNull(coordinator.state.value.journey)
+        assertTrue(runtime.high && runtime.suppressed)
+        assertFalse(runtime.preparing)
+    }
+
+    private class MarkerStore : TrackFollowSessionStore(File("unused")) {
+        val active = java.util.concurrent.atomic.AtomicBoolean(false)
+        val written = CompletableDeferred<Unit>()
+        val cleared = CompletableDeferred<Unit>()
+        override fun read() = active.get()
+        override fun write() { active.set(true); written.complete(Unit) }
+        override fun clear() { active.set(false); cleared.complete(Unit) }
+    }
+
+    @Test fun failedFinishPreservesTrackGpsSharingAndMarkerWhileRecorderRemainsLive() = runTest {
+        val runtime = Runtime()
+        val journey = runtime.attach(Journey(id = "record", transport = Transport.WALK, startedAt = 1))
+        val store = MarkerStore()
+        val coordinator = JourneyNavigationCoordinator(runtime, null, { 1000L }, backgroundScope, store)
+        val id = coordinator.startTrackFollow(track(), TrackFollowSelection(), Transport.WALK)
+        coordinator.setSharingLocation(true)
+        store.written.await()
+        val before = coordinator.state.value
+        val entered = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+        val failure = java.io.IOException("injected finish failure")
+        runtime.beforeFinish = { entered.complete(Unit); release.await(); throw failure }
+        val finish = async { runCatching { coordinator.finishSession(id) } }
+        entered.await()
+        // Nothing may be cleared merely because a finish request was sent to persistence.
+        val pendingState = coordinator.state.value
+        val pendingDemand = runtime.session
+        val pendingHigh = runtime.high
+        val pendingMarker = store.active.get() && !store.cleared.isCompleted
+        release.complete(Unit)
+        assertSame(failure, finish.await().exceptionOrNull())
+        assertEquals(before, pendingState)
+        assertEquals(id, pendingDemand)
+        assertTrue(pendingHigh && pendingMarker)
+        assertEquals(before, coordinator.state.value)
+        assertEquals(journey.id, runtime.running)
+        assertEquals(id, runtime.session)
+        assertTrue(runtime.high && store.active.get())
+        assertFalse(store.cleared.isCompleted)
+        val updated = journey.copy(startedAt = 2)
+        runtime.journeys.value = listOf(updated)
+        runCurrent()
+        assertEquals(updated, coordinator.state.value.journey)
+        assertNotNull(coordinator.state.value.trackFollow)
+        assertTrue(coordinator.state.value.sharingLocation)
+    }
+
+    @Test fun successfulFinishClearsOnlyAfterRuntimeSuccessAndRejectsStaleRecorderSnapshot() = runTest {
+        val runtime = Runtime()
+        val journey = runtime.attach(Journey(id = "record", transport = Transport.WALK, startedAt = 1))
+        val store = MarkerStore()
+        val coordinator = JourneyNavigationCoordinator(runtime, null, { 1000L }, backgroundScope, store)
+        val id = coordinator.startTrackFollow(track(), TrackFollowSelection(), Transport.WALK)
+        store.written.await()
+        val committed = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+        runtime.afterFinish = { committed.complete(Unit); release.await() }
+        val finish = async { coordinator.finishSession(id) }
+        committed.await()
+        coordinator.onTrackingStopped(journey.id)
+        advanceTimeBy(1100)
+        runCurrent()
+        assertEquals(id, coordinator.state.value.sessionId)
+        assertEquals(journey, coordinator.state.value.journey)
+        assertNotNull(coordinator.state.value.trackFollow)
+        assertEquals(id, runtime.session)
+        assertTrue(runtime.high && store.active.get())
+        assertFalse(store.cleared.isCompleted)
+        release.complete(Unit)
+        finish.await()
+        store.cleared.await()
+        assertNull(coordinator.state.value.trackFollow)
+        assertNull(runtime.session)
+        assertFalse(store.active.get())
+        runtime.journeys.value = listOf(journey)
+        runCurrent()
+        assertNull(coordinator.state.value.journey)
+        assertNull(coordinator.state.value.sessionId)
+        assertNull(coordinator.state.value.trackFollow)
+    }
+
+    @Test fun pendingFinishDefersRoomQueryThatStartedBeforeTheCommand() = runTest {
+        val runtime = Runtime()
+        val journey = runtime.attach(Journey(id = "record", transport = Transport.WALK, startedAt = 1))
+        val coordinator = JourneyNavigationCoordinator(runtime, null, { 1000L }, backgroundScope)
+        val id = coordinator.startTrackFollow(track(), TrackFollowSelection(), Transport.WALK)
+        runCurrent()
+        val reading = CompletableDeferred<Unit>(); val returnRead = CompletableDeferred<Unit>()
+        runtime.read = { reading.complete(Unit); returnRead.await() }
+        runtime.journeys.value = listOf(journey.copy(status = JourneyStatus.TEMPORARY))
+        reading.await()
+        val committed = CompletableDeferred<Unit>(); val finishReturn = CompletableDeferred<Unit>()
+        runtime.afterFinish = { committed.complete(Unit); finishReturn.await() }
+        val finish = async { coordinator.finishSession(id) }
+        committed.await()
+        // This collector passed its entry guard before finish started and now reads the ended row.
+        returnRead.complete(Unit)
+        runCurrent()
+        assertEquals(id, coordinator.state.value.sessionId)
+        assertNotNull(coordinator.state.value.trackFollow)
+        assertEquals(id, runtime.session)
+        finishReturn.complete(Unit)
+        finish.await()
+        runCurrent()
+        assertNull(coordinator.state.value.sessionId)
+        assertNull(coordinator.state.value.trackFollow)
     }
 
     @Test fun confirmedIncompatibleRecorderIsRefused() = runTest {
@@ -305,7 +489,7 @@ class TrackFollowSessionTest {
         private fun track(id: String = "track") = ImportedTrack(id, "Test", listOf(TrackSegment("A", listOf(WeatherCoordinate(40.0, 29.0), WeatherCoordinate(40.01, 29.0)))), 1)
         private fun route() = PlannedRoute("road", listOf(RouteStop("A", WeatherCoordinate(40.0, 29.0)), RouteStop("B", WeatherCoordinate(40.01, 29.0))),
             listOf(RouteVertex(WeatherCoordinate(40.0, 29.0), 0.0), RouteVertex(WeatherCoordinate(40.01, 29.0), 100.0)),
-            1110.0, 100.0, 1000, transport = Transport.WALK,
+            1110.0, 100.0, 1000, transport = Transport.WALK, hasHighway = false,
             maneuvers = listOf(RouteManeuver(1, "Kuzeye", "Kuzeye", emptyList(), 0, 1, 0.0, 100.0)))
     }
 }

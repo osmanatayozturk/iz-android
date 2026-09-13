@@ -158,7 +158,8 @@ internal fun WeatherPlannerContent(
                         enabled = !interactionLocked, label = { Text("Feribottan kaçın") }, modifier = Modifier.testTag("route_avoid_ferries"))
                 }
                 if (activeMode && preferences.avoidHighways) Text("Otoyolsuz rota servis haritasından doğrulanır; doğrulanamazsa başlatılmaz. Harita verileri eksik olabilir.", style = MaterialTheme.typography.bodySmall)
-                Text("Kaçınma tercihleri mümkün olduğunda uygulanır; kesin yol yasağı değildir.", style = MaterialTheme.typography.bodySmall)
+                Text(if (activeMode) "Feribottan kaçınma tercihi mümkün olduğunda uygulanır; kesin feribot yasağı değildir."
+                    else "Otoyol, ücretli yol ve feribottan kaçınma tercihleri mümkün olduğunda uygulanır; kesin yol yasağı değildir.", style = MaterialTheme.typography.bodySmall)
                 if (canSaveRoute) OutlinedButton(actions.saveRoute, enabled = state.stops.size in 2..5 && !interactionLocked,
                     modifier = Modifier.testTag("weather_save_route")) { Text("Rotayı kaydet") }
             }

@@ -50,6 +50,11 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import org.iz.navigation.BuildConfig
 import org.iz.navigation.data.*
+import org.iz.navigation.gpx.ImportedTrack
+import org.iz.navigation.navigation.navigationReplacementKey
+import org.iz.navigation.weather.RoutePreferences
+import org.iz.navigation.weather.RouteStop
+import org.iz.navigation.weather.SavedWeatherPlan
 import org.iz.navigation.integration.*
 import org.iz.navigation.tracking.TrackerSettings
 import org.iz.navigation.tracking.TrackingPolicy
@@ -119,6 +124,20 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     var navigationStops by remember { mutableStateOf<List<org.iz.navigation.weather.RouteStop>?>(null) }
     var navigationTransport by remember { mutableStateOf<Transport?>(null) }
     var navigationTarget by remember { mutableStateOf<org.iz.navigation.car.NavigationTarget?>(null) }
+    var navigationInitialPlan by remember { mutableStateOf<SavedWeatherPlan?>(null) }
+    var libraryOpen by rememberSaveable { mutableStateOf(false) }
+    var collectionsOpen by rememberSaveable { mutableStateOf(false) }
+    var gpxPage by rememberSaveable { mutableStateOf(false) }
+    var routeToSave by remember { mutableStateOf<SavedRoutePlan?>(null) }
+    var libraryBusy by remember { mutableStateOf(false) }
+    var gpxStarting by remember { mutableStateOf(false) }
+    var gpxPermissionPending by remember { mutableStateOf(false) }
+    val gpxPermissionGate = remember { GpxStartPermissionGate() }
+    val library = remember { TravelLibraryRepository(context) }
+    val gpxImports: GpxImportViewModel = viewModel()
+    val importedGpx by gpxImports.state.collectAsStateWithLifecycle()
+    val navigation = (context.applicationContext as org.iz.navigation.IzApplication).navigation
+    val navigationState by navigation.state.collectAsStateWithLifecycle()
     var contributionPicker by remember { mutableStateOf(false) }
     var contributionPlace by remember { mutableStateOf<Place?>(null) }
     var contributionEdit by remember { mutableStateOf<ContributionDraft?>(null) }
@@ -141,9 +160,11 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     val healthManager = remember { (context.applicationContext as org.iz.navigation.IzApplication).healthManager }
     val active = state.active(now)
 
-    fun openDirections(stops: List<org.iz.navigation.weather.RouteStop>? = null, transport: Transport? = active?.transport) {
+    fun openDirections(stops: List<RouteStop>? = null, transport: Transport? = active?.transport,
+        plan: SavedWeatherPlan? = null) {
         navigationStops = stops
         navigationTransport = transport
+        navigationInitialPlan = plan
         navigationTarget = null
         navigationEntryId++
         navigationPage = true
@@ -153,12 +174,45 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
         selectedJourney = null
         selectedPlace = null
         contributionsPage = false
+        libraryOpen = false; collectionsOpen = false; gpxPage = false
+    }
+
+    fun openGpx(track: ImportedTrack? = null) {
+        gpxPermissionGate.cancel(); gpxPermissionPending = false
+        gpxImports.show(track)
+        gpxPage = true; libraryOpen = false; collectionsOpen = false
+        navigationPage = false; weatherPage = false; groupPage = false; communityPage = false
+        selectedJourney = null; selectedPlace = null; contributionsPage = false
+        groups.dismissScreenRequest()
+    }
+
+    fun prepareSaveRoute(stops: List<RouteStop>, transport: Transport, preferences: RoutePreferences,
+        originCurrent: Boolean, speed: Double?) {
+        if (stops.size !in 2..5) { vm.message("Kaydetmek için başlangıç ve varış seç."); return }
+        routeToSave = SavedRoutePlan(name = "${stops.first().label} → ${stops.last().label}".take(300),
+            stops = stops.toList(), transport = transport, preferences = preferences,
+            originUsesCurrentLocation = originCurrent, travelSpeedKmh = speed)
     }
 
     fun openAddPlace(journeyId: String? = active?.id, location: GeoCoordinate? = null) {
         targetJourney = journeyId; pin = location; osmSelection = null; addPlace = true
     }
     fun hasPermission(permission: String) = ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+    fun completeGpxStart() {
+        val precise = hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+        val request = try { gpxPermissionGate.consume(precise, navigation.state.value.navigationReplacementKey()) }
+        catch (error: IllegalStateException) { vm.message(error.message ?: "GPX takibini yeniden onayla."); return }
+        if (request == null) {
+            if (!precise) vm.message("GPX takibi için hassas konum izni gerekli. İzinleri ayarlayıp yeniden dene.")
+            return
+        }
+        gpxStarting = true
+        vm.execute {
+            try { navigation.startTrackFollow(request.track, request.selection, request.transport,
+                request.replaceExisting, request.expectedReplacementKey) }
+            finally { gpxStarting = false }
+        }
+    }
     suspend fun importStoredPhoto(uri: Uri, target: PhotoTarget) {
         val photo = media.importPhoto(uri, target.journeyId, target.visitId)
         try { vm.repository.savePhoto(photo) }
@@ -167,6 +221,13 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     }
     val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         refresh++; vm.message("İzinler güncellendi. İlgili işlemi yeniden seçebilirsin.")
+    }
+    val gpxPermissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        gpxPermissionPending = false
+        if (gpxPage) completeGpxStart() else gpxPermissionGate.cancel()
+    }
+    LaunchedEffect(gpxPage) {
+        if (!gpxPage) { gpxPermissionGate.cancel(); gpxPermissionPending = false }
     }
     val gallery = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(20)) { uris ->
         val target = photoTarget
@@ -207,6 +268,9 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
         } else if (uri != null) vm.message("Önizleme kapandı. Rotayı yeniden dışa aktarabilirsin.")
     }
     val importBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> restoreUri = uri }
+    val importTrack = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) gpxImports.read(uri)
+    }
 
     LaunchedEffect(Unit) {
         vm.events.collect { snackbar.showSnackbar(it) }
@@ -218,6 +282,10 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { refresh++; vm.execute { vm.repository.cleanupExpired() } }
     LaunchedEffect(incoming) {
         incoming ?: return@LaunchedEffect
+        if (incoming.getBooleanExtra("openGpx", false)) {
+            openGpx(); consumeIntent(); return@LaunchedEffect
+        }
+        gpxPage = false; libraryOpen = false; collectionsOpen = false
         if (incoming.action == org.iz.navigation.osmcommunity.CommunityNotifications.ACTION_OPEN_MESSAGE) {
             communityMessageId = incoming.getLongExtra(org.iz.navigation.osmcommunity.CommunityNotifications.EXTRA_MESSAGE_ID, -1L)
             communityAccountId = incoming.getLongExtra(org.iz.navigation.osmcommunity.CommunityNotifications.EXTRA_ACCOUNT_ID, -1L)
@@ -237,6 +305,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
             groups.dismissScreenRequest()
             navigationStops = null
             navigationTransport = null
+            navigationInitialPlan = null
             navigationEntryId++
             navigationTarget = target
             navigationPage = true
@@ -280,10 +349,11 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
         tab = 0; selectedJourney = null; selectedPlace = null; contributionsPage = false
         weatherPage = false; navigationPage = false; navigationTarget = null; communityPage = false
         communityMessageId = null; communityAccountId = null; groupPage = false
+        libraryOpen = false; collectionsOpen = false; gpxPage = false
         groups.dismissScreenRequest()
     }
     val homeVisible = (tab == 0 || navigationPage) && selectedJourney == null && selectedPlace == null &&
-        !contributionsPage && !weatherPage && !communityPage && !groupPage
+        !contributionsPage && !weatherPage && !communityPage && !groupPage && !gpxPage
     BackHandler(enabled = !homeVisible, onBack = ::returnToMap)
     LaunchedEffect(groupState.screenRequested) { if (groupState.screenRequested) groupPage = true }
 
@@ -301,7 +371,54 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
             }
             val journey = state.journeys.firstOrNull { it.id == selectedJourney }
             val place = state.places.firstOrNull { it.id == selectedPlace }
+            if (homeVisible && navigationState.trackFollow != null) {
+                TextButton(onClick = { openGpx() }, modifier = Modifier.fillMaxWidth().testTag("home-active-gpx")) {
+                    Text("GPX takibine dön")
+                }
+            }
             when {
+                gpxPage -> GpxTrackScreen(track = importedGpx.track, active = navigationState.trackFollow,
+                    fix = navigationState.fix, gpsStale = navigationState.gpsStale,
+                    currentTransport = navigationState.sessionTransport.takeIf {
+                        navigationState.sessionId != null && navigationState.journey?.status != JourneyStatus.TEMPORARY },
+                    existingNavigation = navigationState.route != null,
+                    interrupted = navigationState.interruptedTrackFollow,
+                    busy = importedGpx.loading || gpxStarting || gpxPermissionPending || libraryBusy,
+                    message = importedGpx.message ?: navigationState.message,
+                    onImport = { importTrack.launch(arrayOf("application/gpx+xml", "application/xml", "text/xml", "application/octet-stream")) },
+                    onSave = { track ->
+                        if (!libraryBusy) {
+                            libraryBusy = true
+                            vm.execute("GPX izi Rotalarım'a kaydedildi.") {
+                                try { library.saveTrack(track); gpxImports.show(track) }
+                                finally { libraryBusy = false }
+                            }
+                        }
+                    },
+                    onStart = { track, selection, transport, replace, expectedKey ->
+                        if (!gpxStarting && !gpxPermissionPending) {
+                            val prompt = gpxPermissionGate.request(GpxStartRequest(track, selection, transport, replace, expectedKey),
+                                hasPermission(Manifest.permission.ACCESS_FINE_LOCATION),
+                                Build.VERSION.SDK_INT < 33 || hasPermission(Manifest.permission.POST_NOTIFICATIONS),
+                                Build.VERSION.SDK_INT >= 33)
+                            if (prompt != null) {
+                                if (prompt.needed) {
+                                    gpxPermissionPending = true
+                                    val required = buildList {
+                                        if (prompt.location) {
+                                            add(Manifest.permission.ACCESS_COARSE_LOCATION); add(Manifest.permission.ACCESS_FINE_LOCATION)
+                                        }
+                                        if (prompt.notifications) add(Manifest.permission.POST_NOTIFICATIONS)
+                                    }
+                                    gpxPermissions.launch(required.toTypedArray())
+                                } else completeGpxStart()
+                            }
+                        }
+                    },
+                    onStop = { vm.execute { navigation.stopTrackFollow() } },
+                    onDismiss = ::returnToMap,
+                    onDismissInterrupted = navigation::dismissInterruptedTrackFollow,
+                    replacementKey = navigationState.navigationReplacementKey())
                 groupPage -> GroupScreen(groups, onClose = { groupPage = false; groups.dismissScreenRequest() },
                     onOpenRoute = { stops, transport -> groups.dismissScreenRequest(); openDirections(stops, transport) })
                 communityPage -> OsmCommunityScreen(onClose = { communityPage = false; communityMessageId = null; communityAccountId = null },
@@ -309,6 +426,8 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     onOpenSettings = { communityPage = false; communityMessageId = null; communityAccountId = null; tab = 4 })
                 weatherPage -> WeatherPlannerScreen(onClose = { weatherPage = false }, initialTransport = active?.transport,
                     onDirections = { stops, transport -> openDirections(stops, transport) },
+                    onDirectionsWithPlan = { plan -> openDirections(plan.stops, plan.transport, plan) },
+                    onSaveRoute = ::prepareSaveRoute,
                     onNavigationStarted = { openDirections() })
                 contributionsPage -> ContributionsScreen(state.contributions, contributionBusy,
                     onNew = { contributionPlace = null; contributionPicker = true }, onEdit = { contributionEdit = it; contributionEditId = it.id },
@@ -350,6 +469,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                 tab == 0 || navigationPage -> NavigationScreen(onClose = { navigationPage = false; navigationTarget = null },
                     incomingTarget = navigationTarget, initialStops = navigationStops, initialTransport = navigationTransport,
                     entryId = navigationEntryId, initiallyPlanning = navigationPage,
+                    initialPlan = navigationInitialPlan, onSaveRoute = ::prepareSaveRoute,
                     onMenu = { menuOpen = true }, onGroup = { groupPage = true }, onWeather = { weatherPage = true },
                     onPin = { openAddPlace(location = it) })
                 tab == 1 -> JourneysScreen(state, now, onJourney = { selectedJourney = it.id }, onStart = { transportAction = TransportAction() }, onConfirm = { transportAction = TransportAction(it.id) }, onReject = { j -> deletion = Deletion("Bu geçici rota silinecek ve açıksa takip duracak.") { vm.tracker.reject(j.id) } })
@@ -374,6 +494,9 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             fun open(action: () -> Unit) { menuOpen = false; returnToMap(); action() }
             TextButton({ open { tab = 1 } }, Modifier.fillMaxWidth().testTag("menu-journeys")) { Text("Yolculuklar") }
+            TextButton({ open { libraryOpen = true } }, Modifier.fillMaxWidth().testTag("menu-route-library")) { Text("Rotalarım") }
+            TextButton({ open { collectionsOpen = true } }, Modifier.fillMaxWidth().testTag("menu-collections")) { Text("Geziler") }
+            TextButton({ open { openGpx() } }, Modifier.fillMaxWidth().testTag("menu-gpx-follow")) { Text("GPX izi takip et") }
             TextButton({ open { tab = 5 } }, Modifier.fillMaxWidth().testTag("menu-statistics")) { Text("İstatistikler") }
             TextButton({ open { tab = 2 } }, Modifier.fillMaxWidth().testTag("menu-places")) { Text("Yerler") }
             TextButton({ open { tab = 3 } }, Modifier.fillMaxWidth().testTag("menu-heatmap")) { Text("Yoğunluk haritası") }
@@ -384,7 +507,25 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
             TextButton({ open { tab = 4 } }, Modifier.fillMaxWidth().testTag("menu-settings")) { Text("Ayarlar") }
         }
     }, confirmButton = { TextButton({ menuOpen = false }) { Text("Haritaya dön") } })
-    if (osmActions) AlertDialog(onDismissRequest = { osmActions = false }, title = { Text("OpenStreetMap’e katkı") }, text = {
+    if (libraryOpen) TravelLibraryScreen(repository = library, onDismiss = { libraryOpen = false },
+        onOpenPlan = { plan ->
+            openDirections(plan.stops, plan.transport, SavedWeatherPlan(plan.stops, System.currentTimeMillis(),
+                plan.transport, plan.preferences, plan.originUsesCurrentLocation, plan.travelSpeedKmh))
+        }, onOpenTrack = ::openGpx)
+    if (collectionsOpen) JourneyCollectionsScreen(repository = library,
+        snapshot = DiarySnapshot(journeys = state.journeys, points = state.points),
+        onDismiss = { collectionsOpen = false }, onOpenJourney = {
+            collectionsOpen = false; selectedJourney = it.id; tab = 1
+        })
+    routeToSave?.let { plan -> SaveRoutePlanDialog(plan, libraryBusy, onDismiss = { routeToSave = null },
+        onSave = { named ->
+            libraryBusy = true
+            vm.execute("Rota Rotalarım'a kaydedildi.") {
+                try { library.savePlan(named); routeToSave = null }
+                finally { libraryBusy = false }
+            }
+        }) }
+    if (osmActions) AlertDialog(onDismissRequest = { osmActions = false }, title = { Text("OpenStreetMap'e katkı") }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedButton(onClick = { osmActions = false; mapEditsPage = true }, Modifier.fillMaxWidth()) { Text("Doğrudan mekân ekle") }
             OutlinedButton(onClick = { osmActions = false; contributionsPage = true }, Modifier.fillMaxWidth()) { Text("Harita notları ve bildirimler") }
@@ -748,5 +889,3 @@ private fun PhotoGrid(photos: List<Photo>, onDelete: (Photo) -> Unit, onEdit: (P
 @Composable private fun ModeBadge(transport: Transport) { Icon(transport.icon(), null, tint = transport.accentColor(), modifier = Modifier.size(44.dp).background(transport.badgeColor(), RoundedCornerShape(14.dp)).padding(10.dp)) }
 @Composable private fun Notice(text: String) { Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(14.dp)) { Text(text, Modifier.padding(14.dp), style = MaterialTheme.typography.bodySmall) } }
 @Composable private fun EmptyCard(icon: ImageVector, title: String, body: String) { Surface(shape = RoundedCornerShape(24.dp), color = Color.White) { Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { Icon(icon, null, Modifier.size(42.dp), tint = Forest); Text(title, style = MaterialTheme.typography.titleLarge); Text(body, color = Muted) } } }
-
-

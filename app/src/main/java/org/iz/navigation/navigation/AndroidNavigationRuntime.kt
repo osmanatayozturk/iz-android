@@ -79,10 +79,10 @@ internal class AndroidNavigationRuntime(private val context: Context) : Navigati
         var discardedId: String? = null
         try {
             if (existing != null && reusable == null) {
-                onDiscard(existing)
                 if (existing.status == JourneyStatus.TEMPORARY) repository.rejectJourney(existing.id)
                 else repository.markInterrupted(existing.id)
                 discardedId = existing.id
+                onDiscard(existing)
                 TrackingCoordinator.clearPendingManualStart(existing.id)
             }
             check(stillCurrent()) { "Başlatma işlemi iptal edildi." }
@@ -111,8 +111,11 @@ internal class AndroidNavigationRuntime(private val context: Context) : Navigati
     }
     override suspend fun plan(stops: List<RouteStop>, transport: Transport): PlannedRoute {
         val settings = WeatherSettingsStore(context).read(transport)
-        return ConfiguredRoutePlanner(context).plan(stops, System.currentTimeMillis(), transport, settings.travelSpeedKmh)
+        return plan(stops, transport, settings.preferences, settings.travelSpeedKmh)
     }
+    override suspend fun plan(stops: List<RouteStop>, transport: Transport, preferences: RoutePreferences,
+        travelSpeedKmh: Double?): PlannedRoute = ConfiguredRoutePlanner(context).plan(
+            stops, System.currentTimeMillis(), transport, travelSpeedKmh, preferences)
     override fun trafficRefreshEnabled(route: PlannedRoute): Boolean {
         if (route.transport !in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE)) return false
         return TrafficSettingsStore(context).read().let { it.enabled && it.hasKey && it.freePlanAcknowledged }

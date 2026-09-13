@@ -43,7 +43,7 @@ Bu dosya her İz güncellemesiyle güncellenir ve kaynak koduyla birlikte GitHub
 
 ## Sonraki uygulama güncellemesinin numarası
 
-Sonraki özellik kapsamı henüz seçilmedi. Aşağıdaki numaralar değişiklik türüne göre alternatiflerdir; iki ayrı sürüm taahhüdü değildir.
+Onaylanan sonraki özellik sürümü telefon **0.10.0 / code 18**'dir. Saat uygulaması değişmediği için **0.6.0 / code 10** korunur. Aşağıdaki tablo ilerideki güncellemelerde kullanılan numaralandırma türlerini gösterir; ayrı sürüm taahhüdü değildir.
 
 | Değişiklik | Telefon için sonraki sürüm | Saat de değişirse sonraki saat sürümü |
 |---|---|---|

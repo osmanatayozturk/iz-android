@@ -48,6 +48,10 @@ interface RideWeatherNavigationSource {
     val state: StateFlow<NavigationState>
     suspend fun activateRoute(route: PlannedRoute): String
     suspend fun startGuidance(route: PlannedRoute): String = error("Sesli yol tarifi başlatılamadı.")
+    suspend fun startGuidance(route: PlannedRoute, expectedTrackFollowKey: String?): String {
+        check(expectedTrackFollowKey == null) { "GPX takibini değiştirme bu bağlantıda desteklenmiyor." }
+        return startGuidance(route)
+    }
 }
 
 interface RideWeatherAlertOutput {
@@ -76,6 +80,9 @@ class RideWeatherManager(
             override val state = owner.state
             override suspend fun activateRoute(route: PlannedRoute) = owner.activateRoute(route)
             override suspend fun startGuidance(route: PlannedRoute) = owner.startGuidance(route)
+            override suspend fun startGuidance(route: PlannedRoute, expectedTrackFollowKey: String?) =
+                owner.startGuidance(route, replaceTrackFollow = expectedTrackFollowKey != null,
+                    expectedTrackFollowKey = expectedTrackFollowKey)
         }
     },
 ) {
@@ -183,11 +190,12 @@ class RideWeatherManager(
     }
 
     /** Explicit planner Start records and enables turn guidance through the shared owner. */
-    suspend fun activateGuidance(route: PlannedRoute, forecasts: List<LocationForecast>): String =
+    suspend fun activateGuidance(route: PlannedRoute, forecasts: List<LocationForecast>,
+        expectedTrackFollowKey: String? = null): String =
         withContext(Dispatchers.Main.immediate) {
             activationMutex.withLock {
                 val source = checkNotNull(navigationSource) { "Sesli yol tarifi şu an kullanılamıyor." }
-                val id = source.startGuidance(route)
+                val id = source.startGuidance(route, expectedTrackFollowKey)
                 currentCoroutineContext().ensureActive()
                 // Starting again explicitly also resumes weather disabled earlier on this trip.
                 disabledJourneyId = null

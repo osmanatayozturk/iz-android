@@ -57,6 +57,7 @@ internal class PhoneDirectionsCoordinator(
     private val planWithPreferences: (suspend (List<RouteStop>, Transport, Double?, RoutePreferences) -> PlannedRoute)? = null,
     private val routeAlternatives: (suspend (List<RouteStop>, Transport, Double?, RoutePreferences) -> RouteAlternatives)? = null,
     private val suggestOrderWithPreferences: (suspend (List<RouteStop>, Long, Transport, RoutePreferences) -> StopOrderProposal?)? = null,
+    private val startRoutePlanner: (() -> RoutePlanner)? = null,
 ) {
     private val mutableState = MutableStateFlow(PhoneDirectionsState(
         preferences = readSettings(Transport.CAR).preferences, travelSpeedKmh = readSettings(Transport.CAR).travelSpeedKmh))
@@ -227,11 +228,17 @@ internal class PhoneDirectionsCoordinator(
                 else before.stops
                 val freshStops = prepareRouteStartStops(plannedStops, coordinate)
                 val route = if (before.preview.selectionLocked) {
-                    val result = routeAlternatives?.invoke(freshStops, before.transport, before.travelSpeedKmh, before.preferences)
-                        ?: RouteAlternatives(listOf(requestPlan(freshStops, before)))
-                    result.routes.firstOrNull { it.geometryKey() == before.preview.geometryKey() }
-                        ?.copy(selectionLocked = true)
-                        ?: throw RouteServiceException("Seçilen yol veya başlangıç konumu değişti. Rotayı yeniden hesaplayıp seç.")
+                    // Production supplies a planner that accepts the predicted arrival time at A.
+                    // The adapter retains compatibility with callers of the original callbacks.
+                    val planner = startRoutePlanner?.invoke() ?: object : RoutePlanner {
+                        override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
+                            travelSpeedKmh: Double?, preferences: RoutePreferences) = requestPlan(stops, before)
+                        override suspend fun alternatives(stops: List<RouteStop>, departureAt: Long, transport: Transport,
+                            travelSpeedKmh: Double?, preferences: RoutePreferences) =
+                            routeAlternatives?.invoke(stops, transport, travelSpeedKmh, preferences)
+                                ?: RouteAlternatives(listOf(requestPlan(stops, before)))
+                    }
+                    planner.revalidateSelection(before.preview, freshStops, clock(), before.transport, before.travelSpeedKmh, before.preferences)
                 } else requestPlan(freshStops, before)
                 require(route.preferences == before.preferences)
                 route.requireUsablePreferences()

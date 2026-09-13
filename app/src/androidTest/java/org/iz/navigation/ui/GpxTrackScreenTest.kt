@@ -35,7 +35,7 @@ class GpxTrackScreenTest {
         val starts = mutableListOf<Pair<Transport, Boolean>>()
         var saves = 0; var stops = 0; var dismissals = 0
         compose.setContent { TestScreen(track, currentTransport = Transport.MOTORCYCLE,
-            onStart = { _, _, transport, replace -> starts += transport to replace },
+            onStart = { _, _, transport, replace, _ -> starts += transport to replace },
             onSave = { saves++ }, onStop = { stops++ }, onDismiss = { dismissals++ }) }
         compose.onNodeWithTag("gpx-transport").performScrollTo().assertIsNotEnabled()
         compose.runOnIdle { assertTrue(starts.isEmpty()); assertEquals(0, saves); assertEquals(0, stops) }
@@ -48,7 +48,7 @@ class GpxTrackScreenTest {
     @Test fun replacementRequiresConcreteConfirmationAndCancelDoesNotStopAnything() {
         val starts = mutableListOf<Boolean>(); var stops = 0
         compose.setContent { TestScreen(track, existingNavigation = true,
-            onStart = { _, _, _, replace -> starts += replace }, onStop = { stops++ }) }
+            onStart = { _, _, _, replace, _ -> starts += replace }, onStop = { stops++ }) }
         startPreview()
         compose.runOnIdle { assertTrue(starts.isEmpty()); assertEquals(0, stops) }
         compose.onNodeWithTag("gpx-cancel-replace").performClick()
@@ -62,7 +62,7 @@ class GpxTrackScreenTest {
         var stops = 0; var starts = 0
         val state = TrackFollowState(track, TrackFollowSelection(segmentIndex = 1, reversed = true),
             TrackFollowProgress(100.0, 700.0, 12.0, TrackFollowStatus.TRACKING))
-        compose.setContent { TestScreen(track, active = state, onStop = { stops++ }, onStart = { _, _, _, _ -> starts++ }) }
+        compose.setContent { TestScreen(track, active = state, onStop = { stops++ }, onStart = { _, _, _, _, _ -> starts++ }) }
         compose.onNodeWithTag("gpx-progress").performScrollTo().assertTextContains("700 m", substring = true)
         compose.onNodeWithTag("gpx-segment").assertTextContains("İkinci bölüm", substring = true)
         compose.onNodeWithTag("gpx-stop").performScrollTo().performClick()
@@ -71,7 +71,7 @@ class GpxTrackScreenTest {
 
     @Test fun saveRequiresUserSuppliedNameAndDoesNotStartTrack() {
         val saved = mutableListOf<ImportedTrack>(); var starts = 0
-        compose.setContent { TestScreen(track, onSave = { saved += it }, onStart = { _, _, _, _ -> starts++ }) }
+        compose.setContent { TestScreen(track, onSave = { saved += it }, onStart = { _, _, _, _, _ -> starts++ }) }
         compose.onNodeWithTag("gpx-save").performScrollTo().performClick()
         compose.onNodeWithTag("gpx-save-name").performTextReplacement("Hafta sonu izi")
         compose.runOnIdle { assertTrue(saved.isEmpty()) }
@@ -86,7 +86,7 @@ class GpxTrackScreenTest {
     @Test fun completionNeverStartsNextSegmentAutomatically() {
         val selections = mutableListOf<TrackFollowSelection>()
         val state = TrackFollowState(track, TrackFollowSelection(), TrackFollowProgress(1500.0, 0.0, 0.0, TrackFollowStatus.SEGMENT_COMPLETE))
-        compose.setContent { TestScreen(track, active = state, onStart = { _, selection, _, _ -> selections += selection }) }
+        compose.setContent { TestScreen(track, active = state, onStart = { _, selection, _, _, _ -> selections += selection }) }
         compose.onNodeWithTag("gpx-next-segment").performScrollTo().performClick()
         compose.runOnIdle { assertTrue(selections.isEmpty()) }
         startPreview()
@@ -98,7 +98,7 @@ class GpxTrackScreenTest {
         val selections = mutableListOf<TrackFollowSelection>()
         val state = TrackFollowState(track, TrackFollowSelection(startFraction = .5),
             TrackFollowProgress(0.0, 800.0, null, TrackFollowStatus.WAITING_FOR_GPS))
-        compose.setContent { TestScreen(track, active = state, onStart = { _, selection, _, _ -> selections += selection }) }
+        compose.setContent { TestScreen(track, active = state, onStart = { _, selection, _, _, _ -> selections += selection }) }
         compose.onNodeWithTag("gpx-reverse").performScrollTo().performClick()
         compose.runOnIdle { assertTrue(selections.isEmpty()) }
         startPreview()
@@ -111,7 +111,7 @@ class GpxTrackScreenTest {
         val state = TrackFollowState(track, TrackFollowSelection(),
             TrackFollowProgress(100.0, 700.0, 0.0, TrackFollowStatus.NEEDS_START_POINT))
         compose.setContent { TestScreen(track, active = state,
-            onStart = { _, _, _, _ -> starts++ }, onStop = { stops++ }) }
+            onStart = { _, _, _, _, _ -> starts++ }, onStop = { stops++ }) }
         compose.onNodeWithTag("gpx-reselect").performScrollTo().performClick()
         compose.runOnIdle { assertEquals(0, starts); assertEquals(0, stops) }
         compose.onNodeWithTag("gpx-map").assertIsDisplayed()
@@ -126,16 +126,16 @@ class GpxTrackScreenTest {
 
     @Test fun replacementIdentityChangeRequiresNewConfirmation() {
         val key = mutableStateOf("session-a")
-        var starts = 0
+        val approvedKeys = mutableListOf<String?>()
         compose.setContent { TestScreen(track, existingNavigation = true, replacementKey = key.value,
-            onStart = { _, _, _, _ -> starts++ }) }
+            onStart = { _, _, _, _, approvedKey -> approvedKeys += approvedKey }) }
         startPreview()
         compose.runOnIdle { key.value = "session-b" }
         compose.onNodeWithTag("gpx-confirm-replace").assertDoesNotExist()
-        compose.runOnIdle { assertEquals(0, starts) }
+        compose.runOnIdle { assertTrue(approvedKeys.isEmpty()) }
         startPreview()
         compose.onNodeWithTag("gpx-confirm-replace").performClick()
-        compose.runOnIdle { assertEquals(1, starts) }
+        compose.runOnIdle { assertEquals(listOf("session-b"), approvedKeys) }
     }
 
     @Test fun replacementSurvivesProgressButNotActiveSelectionChange() {
@@ -143,7 +143,7 @@ class GpxTrackScreenTest {
             TrackFollowProgress(100.0, 700.0, 0.0, TrackFollowStatus.TRACKING)))
         val starts = mutableListOf<TrackFollowSelection>()
         compose.setContent { TestScreen(track, active = state.value, replacementKey = "same-session",
-            onStart = { _, selection, _, _ -> starts += selection }) }
+            onStart = { _, selection, _, _, _ -> starts += selection }) }
         startPreview()
         compose.runOnIdle { state.value = state.value.copy(progress =
             TrackFollowProgress(110.0, 690.0, 2.0, TrackFollowStatus.TRACKING)) }
@@ -178,7 +178,7 @@ class GpxTrackScreenTest {
         currentTransport: Transport? = null, existingNavigation: Boolean = false, interrupted: Boolean = false,
         replacementKey: String? = null,
         onImport: () -> Unit = {}, onSave: (ImportedTrack) -> Unit = {},
-        onStart: (ImportedTrack, TrackFollowSelection, Transport, Boolean) -> Unit = { _, _, _, _ -> },
+        onStart: (ImportedTrack, TrackFollowSelection, Transport, Boolean, String?) -> Unit = { _, _, _, _, _ -> },
         onStop: () -> Unit = {}, onDismiss: () -> Unit = {}, onDismissInterrupted: () -> Unit = {}) {
         IzTheme { GpxTrackScreen(track, active,
             NavigationFix(WeatherCoordinate(41.0, 29.0), System.currentTimeMillis(), 5f), gpsStale,

@@ -1,5 +1,19 @@
 # Değişiklik geçmişi
 
+## Telefon 0.10.0 — geliştirme ve doğrulama sürüyor
+
+**versionCode: 18 · Uyumlu saat: 0.6.0 / code 10 · İletişim: v5**
+
+- Rotalarım: adlandırılmış planlar ve ayrı GPX kütüphanesi, yeniden açma, ad değiştirme ve silme.
+- Yürüyüş, koşu ve bisiklette varsayılan otoyoldan kaçınma; ulaşım türüne göre kalıcı tercihler, doğrulanan alternatif güzergâhlar ve seçilmiş rotaya bağlı hava karşılaştırması.
+- Rota başlangıcı, trafik yenileme ve yeniden hesaplamada aynı yol tercihleri ve kişisel hızın korunması.
+- GPX izlerinde bağımsız bölüm/yön/başlangıç seçimi ve çizgi takibi; kesilen konumda ilerleme dondurma, belirsiz döngüde açık seçim, uygulama kapanmasında otomatik başlamayan takip.
+- Geziler: tamamlanmış, kalıcı yolculukların sıralı koleksiyonları. Koleksiyon silme günlük kaydını etkilemez.
+- Room ve manuel yedek sürümü 7; eski 1–6 yedeklerinin okunması. Kayıtlı planlar, GPX izleri ve koleksiyonların yedeklenmesi.
+- GPX dışa aktarımında isteğe bağlı tarih/saat; paylaşılan fotoğraflarda üstveri temizliği ve özgün fotoğrafların korunması.
+
+Birleşik sürümün nihai test, APK ve GitHub teslimi henüz tamamlanmadı.
+
 Telefon ve Wear OS sürümleri ayrı numaralandırılır. Plan ve teslim kuralları için [sürüm planına](docs/SURUM_PLANI.md) bakın. Buradaki tarihler değişikliklerin tamamlandığı tarihlerdir.
 
 ## Çalışma düzeni - 2026-09-13
