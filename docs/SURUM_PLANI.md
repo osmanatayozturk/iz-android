@@ -64,3 +64,7 @@ Sonraki özellik kapsamı henüz seçilmedi. Aşağıdaki numaralar değişiklik
 5. Uzak commit kimliğini ve GitHub'daki plan dosyasını kontrol et; teslimde ilgili bağlantıyı ver. Fiziksel cihaz kurulumu yapıldıysa ayrıca belirt.
 
 Bu talimatlar [AGENTS.md](../AGENTS.md) içinde de kayıtlıdır. Zamanlanmış bir görev kurulmaz; gönderim her geliştirme çalışmasının tamamlanma adımıdır.
+## Devam eden plan: İz 0.10.0 / code 18
+
+Telefon odaklı Rotalarım, rota tercihleri/alternatifler, GPX çizgi takibi ve gezi koleksiyonları; fotoğraf/GPX paylaşım gizliliği ve genel dayanıklılık. Yürüyüş/koşu/bisiklette Otoyola girme varsayılan açık. Çevrimdışı harita ve yeni offline rota hesaplama kapsam dışında. Room ve manuel yedek 7'ye göç eder; eski 1-6 yedekleri okunur. Wear 0.6.0/code10 ve v5 korunur. Ayrıntılı bağlayıcı kapsam: [Uygulama sözleşmesi](PLAN_010.md). Test ve teslim henüz tamamlanmadı.
+
