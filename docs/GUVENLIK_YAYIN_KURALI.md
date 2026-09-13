@@ -8,13 +8,21 @@ Bir değişiklik, onu geliştirmemiş bağımsız bir inceleyici tarafından den
 
 Bu koşul kaynak, bağımlılık, yapılandırma ve teslim süreci değişiklikleri için geçerlidir. Yalnız belge değişikliği için APK üretmek veya uygulama sürümünü artırmak gerekmez; güvenlik yönergelerinin tutarlılığı ve yayımlanacak içerik yine incelenir.
 
-13 Eylül 2026 tarihli ilk mevcut uygulama incelemesi bir yayın onayı değildir. Bu doküman güncellemesine verilen onay yalnız incelenen belge değişikliklerini kapsar; uygulama koduna veya daha önce onaylanmamış sürümlere güvenlik onayı vermez. Uygulamanın ayrı inceleme sonucu ve kapanmamış bulguları kendi kapsamında geçerliliğini korur.
+Bir belge değişikliğinin incelenmesi yalnız o belge kapsamı için geçerlidir; uygulama koduna veya diğer sürümlere güvenlik onayı vermez.
+
+## Raporlar kullanıcıya özeldir
+
+Tam güvenlik raporu, bulgu listesi, tarama kanıtları ve sonuçları, inceleme durumları ve geçmişi yalnız kullanıcıyla özel olarak paylaşılır. Public PR, issue, yorum, check, log, site veya kaynak deposunda yayımlanmaz; güvenlik sonucu özeti de paylaşılmaz. Bu genel politika belgesi bir güvenlik raporu değildir ve kaynak deposunda bulunabilir.
+
+Uygulama ekipleriyle iletişim tam rapor paylaşımı değildir: yalnız ilgili uygulamanın gerekli en az düzeltme bilgisi iletilir. Öncelik uygulamayı yöneten koordinatör ajandadır; böyle bir ajan yoksa ilgili geliştiriciyle iletişim kurulur. Kanalın özel olduğu ve alıcının yetkisi doğrulanır. Uygun özel kanal bulunamazsa kullanıcıya bildirilir; public kanala geçilmez.
+
+Bağımsız inceleyiciye incelemeyi, geliştiriciye düzeltmeyi yapabilmesi için gereken en az görev bağlamı verilir. Başka uygulamaların bulguları ve görev için gerekmeyen kanıtlar aktarılmaz. İnceleme sonucu ve tam rapor kullanıcıya özel kalır; yayın koşullarını uygulamak bunları public bir check veya log'da açıklama yetkisi vermez.
 
 ## Görev dalından teslimata
 
 1. Geliştirici görev dalını oluşturur, sürüm planını günceller ve değişikliği tamamlar. Gönderilecek diff, sır ve kişisel veri açısından kontrol edilir. Yalnız görevle ilgili dosyalar commitlenir.
-2. Görev dalı gönderilir ve PR açılır. PR metni değişikliğin amacını, güvenli kapsam özetini ve test durumunu içerir. Sır değerleri, kişisel kayıtlar, ayrıntılı saldırı örnekleri ve henüz açık bir zafiyetin kötüye kullanılmasını kolaylaştıran bilgiler public PR'a veya kaynak deposuna konmaz. Ayrıntılı güvenlik değerlendirmesi Güvenlik sohbetinde ya da kullanıcı tarafından belirlenmiş uygun özel kanalda tutulur.
-3. Geliştirmeye katılmamış inceleyici son commit'i ve gerekli çevre kaynaklarını bağımsız olarak değerlendirir. İnceleme isteğinde hedef sürüm, tam 40 karakterli PR head SHA'sı, hedef base SHA'sı, varsa aday birleşim kaynak ağacı kimliği, kapsam ve mevcut test kanıtları belirtilir. Bir ajanı çağırmak veya otomasyon yorumu almak incelemenin tamamlandığı anlamına gelmez.
+2. Görev dalı gönderilir ve PR açılır. PR metni değişikliğin amacını, genel kapsamını ve güvenlik incelemesine ait olmayan olağan test bilgilerini içerebilir. Güvenlik raporu, bulgu listesi, tarama kanıtları/sonuçları ve durum özeti public PR'a veya kaynak deposuna konmaz. Sır değerleri ve kişisel kayıtlar da yayımlanmaz. Güvenlik değerlendirmesi kullanıcıya özel tutulur; düzeltmeler yukarıdaki özel iletişim kuralıyla koordine edilir.
+3. Geliştirmeye katılmamış inceleyici son commit'i ve gerekli çevre kaynaklarını bağımsız olarak değerlendirir. Özel inceleme isteğinde hedef sürüm, tam 40 karakterli PR head SHA'sı, hedef base SHA'sı, varsa aday birleşim kaynak ağacı kimliği, kapsam ve görev için gerekli test kanıtları belirtilir. Bir ajanı çağırmak veya görevin tetiklenmesi incelemenin tamamlandığı anlamına gelmez.
 4. Geliştirici doğrulanmış bulguları düzeltir ve yeni commitleri gönderir. İnceleyici son SHA'da düzeltmeleri, değişikliklerin getirdiği yeni riskleri ve açık kalan kapsamı yeniden değerlendirir. Eksik kanıtı başarılı test gibi yazmaz.
 5. Birleştirme öncesinde PR head SHA'sı, hedef base SHA'sı ve kapsamın bağımsız `PASS` veya `PASS_WITH_ACCEPTED_RISK` kaydıyla aynı olduğu doğrulanır. Bu girdilerden biri değişmişse yeniden inceleme yapılır. Yeni birleşim içeriğine eski onay taşınmaz.
 6. Merge/squash sonrasında oluşan tam SHA ve kaynak ağacı ayrıca doğrulanır. Bağımsız inceleyici bu karşılaştırma sonucuyla son sürüm kaydını günceller; bu adım tamamlanmadan canlı yayın veya APK/AAB dağıtımı yapılmaz. Kaynak SHA'sı, paket sürümü ve APK/AAB dosya özeti teslim kaydına alınır; paket, incelenen kaynak ve doğrulanan derleme girdileriyle ilişkilendirilir. İmza veya paket içeriği değişirse ilgili kontroller yenilenir.
@@ -42,19 +50,19 @@ Doğrulanmış açıkların kapanması varsayılan koşuldur; düşük önem der
 
 Genel bir “yayınla”, “devam et” veya toplu teslim talimatı güvenlik incelemesini atlama kabulü değildir. Risk kabulü incelenmemiş kapsamı incelenmiş yapmaz; belirsizliği gizleyen `PASS` veya `PASS_WITH_ACCEPTED_RISK` verilemez. Kaynak girdileri değişen yeni bir commit için önceki risk kabulü otomatik taşınmaz. Merge/squash yalnız commit kimliğini değiştiriyorsa inceleyici, kabul edilen bulguların ve kapsamın aynı kaldığını doğrulayarak son sürüm kaydında yeni SHA ile ilişkilendirir; kabul kapsamını genişletemez.
 
-İnceleme kaydı en az hedef sürümü, PR head/base SHA'larını, varsa aday birleşim ağacı kimliğini, kapsamı, inceleyiciyi, doğrulanmış/olası bulguları, uygulanan düzeltmeleri, test kanıtını, taranmamış alanları, açık risk kabulünü ve son kararı içerir. Birleşim sonrası yeni SHA, kaynak ağacı karşılaştırması ve dağıtım kaydı eklenir. Public PR'da yalnız hassas ayrıntı içermeyen sonuç özeti paylaşılır.
+Kullanıcıya özel inceleme kaydı en az hedef sürümü, PR head/base SHA'larını, varsa aday birleşim ağacı kimliğini, kapsamı, inceleyiciyi, doğrulanmış/olası bulguları, uygulanan düzeltmeleri, test kanıtını, taranmamış alanları, açık risk kabulünü ve son kararı içerir. Birleşim sonrası yeni SHA, kaynak ağacı karşılaştırması ve dağıtım kaydı eklenir. Bu kayıt ve sonuç özeti public PR'a veya başka bir public kanala aktarılmaz.
 
 ## Kurulu olay görevi ve henüz yapılmayan teknik kontroller
 
-**İz kod güvenlik incelemesi** adlı görev kurulmuştur; İz reposunda PR açılışını ve yeni commitleri takip ederek bu Güvenlik sohbetindeki incelemeyi tetikler. Bu PR olaylarına bağlı görevdir; zamanlı görev kurulmamıştır. Sürüm planındaki önceki “zamanlanmış görev kurulmaz” ifadesi, sürüm planının kendisinin görev üretmediğini anlatır; kurulmuş PR olay görevini veya kullanıcının ileride vereceği ayrı görev talimatlarını yasaklamaz.
+**İz kod güvenlik incelemesi** adlı görev kurulmuştur; İz reposunda PR açılışını ve yeni commitleri takip ederek kullanıcıya özel Güvenlik sohbetindeki incelemeyi tetikler. Public güvenlik yorumu veya sonuç özeti üretmez. Bu PR olaylarına bağlı görevdir; zamanlı görev kurulmamıştır. Sürüm planındaki önceki “zamanlanmış görev kurulmaz” ifadesi, sürüm planının kendisinin görev üretmediğini anlatır; kurulmuş PR olay görevini veya kullanıcının ileride vereceği ayrı görev talimatlarını yasaklamaz.
 
-**Bu doküman ve otomasyon yorumu teknik yayın kilidi değildir.** 13 Eylül 2026 tarihinde incelenen `60d1ea73920bf4db3a4c9a09f1fc9870f80a79f3` kaynak durumunda `main` dalı korumalı değildi (`protected=false`) ve depoda CI workflow'u yoktu. Bu belge değişikliği bunları kurmaz; dış ortamda doğrulanmamış bir korumanın varlığı da varsayılmaz.
+**Bu doküman ve olay görevi teknik yayın kilidi değildir.** Bu belge değişikliği teknik korumaları kurmaz; dış ortamda doğrulanmamış bir korumanın varlığı da varsayılmaz.
 
 Aşağıdaki teknik işler henüz yapılandırılmadı:
 
-- Son incelenen SHA'ya bağlı zorunlu güvenlik durum kontrolü ve tamamlanmamış/başarısız kontrolde birleştirmeyi engelleyen dal koruması veya repository ruleset.
+- Son incelenen SHA'ya bağlı zorunlu kontrol ve tamamlanmamış/başarısız kontrolde birleştirmeyi engelleyen dal koruması veya repository ruleset; güvenlik inceleme kaydı ve sonucu public check/log'a taşınmadan çalışacak biçimde tasarlanmalıdır.
 - Yeni commit sonrasında eski onayı geçersiz kılan ve bağımsız inceleme koşulunu uygulayan GitHub ayarları.
 - APK/AAB derleme ve dağıtımında onaylı SHA, bağımlılık kaydı, test sonucu, imza ve dosya özetini ilişkilendiren zorunlu CI/release kontrolleri.
 - Yayın ortamı izinleri, dağıtım kimlik bilgileri ve imzalama malzemesinin yalnız onaylı iş akışı tarafından kullanılmasını sağlayan erişim kısıtları.
 
-Bu eksikler tamamlanıp doğrulanıncaya kadar her ajan yayın kuralını kendi eylemlerinde uygular ve eksik incelemede durur. Görevin çalışıyor olması, bir PR yorumu, testlerin geçmesi veya branch adı tek başına yayın izni sayılmaz. Teknik korumalar daha sonra kurulduğunda kapsamı ve gerçek doğrulama kanıtı bu bölümde güncellenir; kurulmadan “aktif” veya “yayını engelliyor” denmez.
+Bu eksikler tamamlanıp doğrulanıncaya kadar her ajan yayın kuralını kendi eylemlerinde uygular ve eksik incelemede durur. Görevin çalışıyor olması, testlerin geçmesi veya branch adı tek başına yayın izni sayılmaz. Teknik korumalar daha sonra kurulduğunda genel iş akışı bu bölümde güncellenir; güvenlik doğrulama kanıtları ve sonuçları kullanıcıya özel kalır. Kurulmadan “aktif” veya “yayını engelliyor” denmez.

@@ -6,7 +6,7 @@ Telefon ve Wear OS sürümleri ayrı numaralandırılır. Plan ve teslim kuralla
 
 - Doğrudan `main` gönderimi yerine görev dalı ve PR akışı tanımlandı. Bağımsız güvenlik incelemesi, bulgu düzeltmeleri ve PR head/base SHA'larına bağlı onay zorunlu oldu. Uygulama dağıtımı için birleşim sonrası SHA ve kaynak ağacı ayrıca doğrulanır, inceleyici son sürüm kaydını günceller.
 - İnceleme eksikse veya sonucu `BLOCKED` / `INCOMPLETE` ise main birleştirmesi, canlı yayın ve APK/AAB dağıtımı durur. Açık bulgu istisnası yalnız kullanıcının sürüm, SHA ve bulgu bazında açık risk kabulüyle mümkündür.
-- Public PR'da sır, kişisel veri ve kötüye kullanılabilir açık ayrıntılarının paylaşılmaması kaydedildi. Kurulu PR olay görevi ile henüz yapılandırılmamış teknik yayın kontrolleri [güvenlik yayın kuralında](docs/GUVENLIK_YAYIN_KURALI.md) ayrıldı.
+- Güvenlik raporlarının, bulgu listelerinin, tarama kanıtları/sonuçlarının ve durum özetlerinin yalnız kullanıcıya özel paylaşılması kaydedildi. Uygulamalara yalnız gerekli en az düzeltme bilgisinin özel/yetkili kanaldan, öncelikle koordinatör ajana iletilmesi tanımlandı. Kurulu PR olay görevi ile henüz yapılandırılmamış teknik yayın kontrolleri [güvenlik yayın kuralında](docs/GUVENLIK_YAYIN_KURALI.md) ayrıldı.
 - Bu değişiklik yalnız belgelerdedir; telefon 0.9.2 / code 17, saat 0.6.0 / code 10, uygulama kodu ve paketler değişmez.
 
 ## Telefon 0.9.2 - 2026-09-13
