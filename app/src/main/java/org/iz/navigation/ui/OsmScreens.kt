@@ -18,6 +18,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -271,13 +273,22 @@ private fun OsmServiceEditor(onDismiss: () -> Unit, onSaved: () -> Unit) {
 @Composable
 internal fun GpxExportSheet(journey: Journey, points: List<TrackPoint>, onDismiss: () -> Unit, onExport: (String) -> Unit) {
     val all = remember(journey, points) { runCatching { gpxSegments(journey, points).flatMap { segment -> segment.mapIndexed { index, point -> if (index == 0) point.copy(breakBefore = true) else point } } }.getOrDefault(emptyList()) }
-    var start by remember { mutableIntStateOf(0) }
-    var end by remember { mutableIntStateOf(0) }
+    var start by remember(journey.id) { mutableIntStateOf(0) }
+    var end by remember(journey.id) { mutableIntStateOf(0) }
+    var includeTimestamps by remember(journey.id) { mutableStateOf(false) }
     val prepared = remember(journey, points, start, end) { runCatching { gpxSegments(journey, points, start, end) } }
     val previewPoints = prepared.getOrNull()?.flatMap { segment -> segment.mapIndexed { index, point -> if (index == 0) point.copy(breakBefore = true) else point } }.orEmpty()
     OsmPopup(onDismiss = onDismiss) {
             Text("Rotayı GPX olarak dışa aktar", style = MaterialTheme.typography.headlineSmall)
             Text("Başlangıcı ve bitişi kısaltabilirsin. Notlar ve fotoğraflar dosyaya eklenmez. Dosya otomatik yayımlanmaz.", color = Muted)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text("Kayıt tarih ve saatlerini ekle", modifier = Modifier.weight(1f))
+                Checkbox(checked = includeTimestamps, onCheckedChange = { includeTimestamps = it },
+                    modifier = Modifier.testTag("gpx_include_timestamps").semantics { contentDescription = "Kayıt tarih ve saatlerini ekle" })
+            }
+            Text(if (includeTimestamps) "Dosyada konumlar, varsa rakım ve kayıt tarih/saatleri bulunacak."
+                else "Dosyada konumlar ve varsa rakım bulunacak; tarih ve saatler eklenmeyecek.", style = MaterialTheme.typography.bodySmall)
             if (all.size >= 2) {
                 DiaryMap(previewPoints, emptyList(), Modifier.fillMaxWidth().height(230.dp))
                 Text("Başlangıçtan çıkarılan: ${DiaryRules.distanceMeters(all.take(start + 1)).toInt()} m")
@@ -287,7 +298,7 @@ internal fun GpxExportSheet(journey: Journey, points: List<TrackPoint>, onDismis
                 Text("${previewPoints.size} konum · ${prepared.getOrNull()?.size ?: 0} rota bölümü", style = MaterialTheme.typography.bodySmall)
             }
             prepared.exceptionOrNull()?.let { Text(it.message ?: "Dışa aktarılabilir rota bulunamadı.", color = MaterialTheme.colorScheme.error) }
-            Button(enabled = prepared.isSuccess, onClick = { onExport(buildGpx(journey, points, start, end)) }, modifier = Modifier.fillMaxWidth()) { Text("GPX dosyasını kaydet") }
+            Button(enabled = prepared.isSuccess, onClick = { onExport(buildGpx(journey, points, start, end, includeTimestamps)) }, modifier = Modifier.fillMaxWidth()) { Text("GPX dosyasını kaydet") }
             TextButton(onClick = onDismiss) { Text("Kapat") }
     }
 }

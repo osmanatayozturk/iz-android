@@ -114,6 +114,7 @@ object DiaryRules {
         require(snapshot.mapEdits.map { it.id }.toSet().size == snapshot.mapEdits.size)
         snapshot.mapEdits.forEach(::validateMapEdit)
         WatchHealthRules.validateSnapshot(snapshot.journeys, snapshot.watchHealthSessions, snapshot.watchHealthSamples)
+        TravelLibraryRules.validate(snapshot)
     }
 
     fun isSafePhotoPath(path: String): Boolean =

@@ -11,7 +11,7 @@ class BackupV6Test {
 
     @Test fun versionSixExportsAndRestoresExplicitOrderRatherThanRecentVisits() {
         val encoded = BackupJson.encode(source())
-        assertEquals(6, encoded.getInt("version"))
+        assertEquals(7, encoded.getInt("version"))
         val places = encoded.getJSONArray("places")
         places.getJSONObject(0).put("sortOrder", 20L)
         places.getJSONObject(1).put("sortOrder", 30L)

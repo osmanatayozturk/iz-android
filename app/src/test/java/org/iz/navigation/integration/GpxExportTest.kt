@@ -13,7 +13,7 @@ class GpxExportTest {
     @Test fun exportsMeasuredCoordinatesUtcTimeAndFiniteAltitudeWithoutDiaryText() {
         val first = point(1_000).copy(altitude = 12.5)
         val second = point(2_000, 41.0001)
-        val xml = buildGpx(journey, listOf(second, first))
+        val xml = buildGpx(journey, listOf(second, first), includeTimestamps = true)
         val document = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(xml.byteInputStream())
         assertEquals("gpx", document.documentElement.nodeName)
         assertEquals("http://www.topografix.com/GPX/1/1", document.documentElement.getAttribute("xmlns"))

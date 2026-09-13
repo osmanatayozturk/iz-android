@@ -8,12 +8,13 @@ import java.io.File
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 
-class DiaryRepository(context: Context) {
+class DiaryRepository internal constructor(context: Context, private val db: DiaryDatabase) {
+    constructor(context: Context) : this(context, DiaryDatabase.get(context.applicationContext))
     private val appContext = context.applicationContext
-    private val db = DiaryDatabase.get(appContext)
     private val dao = db.diaryDao()
     private val mapDao = db.mapEditDao()
     private val watchDao = db.watchHealthDao()
+    private val libraryDao = db.travelLibraryDao()
     private val clock = flow {
         while (true) { emit(System.currentTimeMillis()); delay(1_000) }
     }
@@ -204,6 +205,7 @@ class DiaryRepository(context: Context) {
             listOfNotNull(entity.stepCount, current?.takeIf { it.transport.supportsSteps }?.stepCount).maxOrNull()
         } else null
         dao.save(entity.copy(stepCount = steps))
+        libraryDao.pruneIneligibleMemberships()
         dao.pruneHealthOutsideJourney(entity.id, entity.startedAt, entity.endedAt ?: System.currentTimeMillis())
         watchDao.pruneOutsideJourney(entity.id, entity.startedAt, entity.endedAt ?: System.currentTimeMillis())
     }
@@ -381,7 +383,9 @@ class DiaryRepository(context: Context) {
 
     suspend fun snapshot(): DiarySnapshot = db.withTransaction {
         DiarySnapshot(dao.allJourneys(), dao.allPoints(), dao.allPlaces(), dao.allVisits(), dao.allPhotos(), dao.allDrafts(), dao.allContributions(), dao.allHealthSamples(),
-            mapEdits = mapDao.all(), watchHealthSessions = watchDao.allSessions(), watchHealthSamples = watchDao.allSamples())
+            mapEdits = mapDao.all(), watchHealthSessions = watchDao.allSessions(), watchHealthSamples = watchDao.allSamples(),
+            savedPlans = libraryDao.allPlans().map { it.model() }, importedTracks = libraryDao.allTracks().map { it.model() },
+            collections = libraryDao.allCollections().map { it.model() }, memberships = libraryDao.allMemberships().map { it.model() })
     }
 
     suspend fun restore(snapshot: DiarySnapshot) {
@@ -406,6 +410,7 @@ class DiaryRepository(context: Context) {
         DiaryRules.validate(snapshot.copy(journeys = restoredJourneys, healthSamples = restoredHealth,
             watchHealthSessions = restoredWatchSessions, watchHealthSamples = restoredWatchSamples))
         deleteWithFiles {
+            libraryDao.clearCollections(); libraryDao.clearTracks(); libraryDao.clearPlans()
             dao.clearHealthSamples(); dao.clearHealthSyncs()
             watchDao.clearSamples(); watchDao.clearSessions(); mapDao.clear()
             dao.clearContributions(); dao.clearDrafts(); dao.clearPhotos(); dao.clearVisits(); dao.clearPoints(); dao.clearJourneys(); dao.clearPlaces()
@@ -420,6 +425,10 @@ class DiaryRepository(context: Context) {
             watchDao.restoreSessions(restoredWatchSessions)
             watchDao.restoreSamples(restoredWatchSamples)
             snapshot.mapEdits.forEach { mapDao.save(if (it.status == MapEditStatus.SENDING) it.copy(status = MapEditStatus.UNKNOWN) else it) }
+            snapshot.savedPlans.forEach { libraryDao.save(SavedRoutePlanEntity.from(TravelLibraryRules.normalizePlan(it))) }
+            snapshot.importedTracks.forEach { libraryDao.storeTrack(TravelLibraryRules.normalizeTrack(it)) }
+            snapshot.collections.forEach { libraryDao.save(JourneyCollectionEntity.from(it)) }
+            libraryDao.saveMemberships(snapshot.memberships.map(CollectionMembershipEntity::from))
         }
     }
 

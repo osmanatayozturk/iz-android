@@ -29,8 +29,8 @@ fun gpxSegments(journey: Journey, points: List<TrackPoint>, startTrim: Int = 0, 
     }
 }
 
-/** Only measured track geometry and its timestamps leave the private diary. */
-fun buildGpx(journey: Journey, points: List<TrackPoint>, startTrim: Int = 0, endTrim: Int = 0): String {
+/** Measured geometry only by default; recording timestamps require a per-export opt-in. */
+fun buildGpx(journey: Journey, points: List<TrackPoint>, startTrim: Int = 0, endTrim: Int = 0, includeTimestamps: Boolean = false): String {
     val segments = gpxSegments(journey, points, startTrim, endTrim)
     return buildString {
         append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
@@ -40,7 +40,8 @@ fun buildGpx(journey: Journey, points: List<TrackPoint>, startTrim: Int = 0, end
             segment.forEach { point ->
                 append("<trkpt lat=\"").append(point.latitude).append("\" lon=\"").append(point.longitude).append("\">")
                 point.altitude?.takeIf { it.isFinite() }?.let { append("<ele>").append(it).append("</ele>") }
-                append("<time>").append(xmlEscape(Instant.ofEpochMilli(point.recordedAt).toString())).append("</time></trkpt>\n")
+                if (includeTimestamps) append("<time>").append(xmlEscape(Instant.ofEpochMilli(point.recordedAt).toString())).append("</time>")
+                append("</trkpt>\n")
             }
             append("</trkseg>\n")
         }

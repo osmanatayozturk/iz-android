@@ -110,4 +110,8 @@ data class DiarySnapshot(
     val mapEdits: List<MapEditDraft> = emptyList(),
     val watchHealthSessions: List<WatchHealthSession> = emptyList(),
     val watchHealthSamples: List<WatchHealthSample> = emptyList(),
+    val savedPlans: List<SavedRoutePlan> = emptyList(),
+    val importedTracks: List<org.iz.navigation.gpx.ImportedTrack> = emptyList(),
+    val collections: List<JourneyCollection> = emptyList(),
+    val memberships: List<CollectionMembership> = emptyList(),
 )

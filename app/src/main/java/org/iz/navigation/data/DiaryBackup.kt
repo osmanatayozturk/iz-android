@@ -122,6 +122,7 @@ class DiaryBackup(context: Context, private val repository: DiaryRepository) {
             healthSamples = if (includeHealth) snapshot.healthSamples.filter { it.journeyId in ids } else emptyList(),
             watchHealthSessions = if (includeHealth) snapshot.watchHealthSessions.filter { it.journeyId in ids } else emptyList(),
             watchHealthSamples = if (includeHealth) snapshot.watchHealthSamples.filter { it.journeyId in ids } else emptyList(),
+            memberships = snapshot.memberships.filter { it.journeyId in ids },
         )
     }
 
@@ -148,7 +149,7 @@ class DiaryBackup(context: Context, private val repository: DiaryRepository) {
 }
 
 internal object BackupJson {
-    private const val VERSION = 6
+    private const val VERSION = 7
     private const val FORMAT = "org.iz.navigation.backup"
     // Read compatibility for user-created backups from the former application identity.
     private const val LEGACY_FORMAT = "com.atay.iz.backup"
@@ -196,7 +197,12 @@ internal object BackupJson {
             json("sessionId" to it.sessionId, "sequence" to it.sequence, "journeyId" to it.journeyId,
                 "metric" to it.metric.name, "startAt" to it.startAt, "endAt" to it.endAt, "value" to it.value)
         },
+        "savedPlans" to array(value.savedPlans, TravelLibraryJson::plan),
+        "importedTracks" to array(value.importedTracks, TravelLibraryJson::track),
+        "collections" to array(value.collections, TravelLibraryJson::collection),
+        "memberships" to array(value.memberships, TravelLibraryJson::membership),
     ).also {
+        TravelLibraryRules.validate(value)
         PlaceOrderRules.validate(value.places)
         validateMapSnapshot(value)
         value.mapEdits.forEach(::validateMapEdit)
@@ -216,6 +222,13 @@ internal object BackupJson {
             require(values.length() <= 500_000) { "Yedekte çok fazla kayıt var." }
             return List(values.length()) { parse(values.getJSONObject(it)) }
         }
+        fun <T> libraryRecords(key: String, limit: Int = TravelLibraryRules.MAX_ITEMS, parse: (JSONObject) -> T): List<T> {
+            if (version < 7 || !value.has(key)) return emptyList()
+            val array = value.getJSONArray(key)
+            require(array.length() <= limit) { "Yedekte çok fazla kütüphane kaydı var." }
+            return List(array.length()) { parse(array.getJSONObject(it)) }
+        }
+        var libraryPoints = 0L
         return DiarySnapshot(
             journeys = records("journeys") { Journey(it.getString("id"), it.getString("title"), Transport.valueOf(it.getString("transport")),
                 JourneyStatus.valueOf(it.getString("status")), it.getLong("startedAt"), it.nullLong("endedAt"), it.nullLong("expiresAt"),
@@ -270,6 +283,15 @@ internal object BackupJson {
                 WatchHealthSample(it.strictString("sessionId"), it.strictLong("sequence"), it.strictString("journeyId"),
                     HealthMetric.valueOf(it.strictString("metric")), it.strictLong("startAt"), it.strictLong("endAt"), it.strictDouble("value"))
             },
+            savedPlans = libraryRecords("savedPlans", parse = TravelLibraryJson::readPlan),
+            importedTracks = libraryRecords("importedTracks") { record ->
+                TravelLibraryJson.readTrack(record).also { track ->
+                    libraryPoints += track.segments.sumOf { it.points.size.toLong() }
+                    require(libraryPoints <= TravelLibraryRules.MAX_TOTAL_POINTS) { "Yedekte çok fazla GPX noktası var." }
+                }
+            },
+            collections = libraryRecords("collections", parse = TravelLibraryJson::readCollection),
+            memberships = libraryRecords("memberships", TravelLibraryRules.MAX_MEMBERSHIPS, TravelLibraryJson::readMembership),
         ).let { snapshot ->
             if (version < 6) snapshot.copy(places = PlaceOrderRules.legacy(snapshot.places, snapshot.visits)) else snapshot
         }.also { DiaryRules.validate(it); validateMapSnapshot(it) }.let { snapshot ->
