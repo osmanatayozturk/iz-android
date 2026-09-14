@@ -27,7 +27,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.iz.navigation.data.*
 import org.iz.navigation.integration.*
 import org.iz.navigation.integration.osm.OsmAuthManager
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -40,37 +39,40 @@ internal fun Context.findActivity(): Activity? = when (this) {
 }
 
 @Composable
-internal fun OsmSearchDialog(onDismiss: () -> Unit, onSelect: (SelectedOsmPlace) -> Unit, initialQuery: String = "") {
+internal fun OsmSearchDialog(
+    onDismiss: () -> Unit,
+    onSelect: (SelectedOsmPlace) -> Unit,
+    initialQuery: String = "",
+    searchPlaces: (suspend (String) -> List<SelectedOsmPlace>)? = null,
+) {
     val context = LocalContext.current
-    val service = remember { OsmPlaces(context) }
+    val search = searchPlaces ?: remember(context) { OsmPlaces(context)::search }
     val scope = rememberCoroutineScope()
     var query by rememberSaveable(initialQuery) { mutableStateOf(initialQuery) }
-    var results by remember { mutableStateOf<List<SelectedOsmPlace>>(emptyList()) }
-    var busy by remember { mutableStateOf(false) }
-    var searched by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    val controller = remember(scope, search, initialQuery) { OsmSearchController(scope, query, search) }
+    val searchState by controller.state.collectAsStateWithLifecycle()
+    val results = searchState.results
+    val busy = searchState.busy
+    val searched = searchState.searched
+    val error = searchState.error
+    DisposableEffect(controller) { onDispose { controller.close() } }
     AlertDialog(onDismissRequest = onDismiss, title = { Text("OpenStreetMap’te yer ara") }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedTextField(query, { query = it }, label = { Text("Yer adı veya adres") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            Button(enabled = query.isNotBlank() && !busy, onClick = {
-                busy = true; error = null; results = emptyList()
-                val submitted = query.trim()
-                scope.launch {
-                    try { results = service.search(submitted); searched = true }
-                    catch (cancel: CancellationException) { throw cancel }
-                    catch (failure: Exception) { error = failure.message ?: "Arama tamamlanamadı." }
-                    finally { busy = false }
-                }
-            }) { Text("Ara") }
-            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            if (searched && results.isEmpty() && !busy && error == null) Text("Yer bulunamadı. Haritadan bir nokta seçebilirsin.")
-            LazyColumn(Modifier.heightIn(max = 320.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(searchState.query, { query = it; controller.edit(it) }, label = { Text("Yer adı veya adres") }, singleLine = true,
+                modifier = Modifier.fillMaxWidth().testTag("osm-search-query"))
+            Button(enabled = searchState.query.isNotBlank() && !busy, onClick = controller::submit,
+                modifier = Modifier.testTag("osm-search-submit")) { Text("Ara") }
+            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().testTag("osm-search-progress"))
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("osm-search-error")) }
+            if (searched && results.isEmpty() && !busy && error == null) Text("Yer bulunamadı. Haritadan bir nokta seçebilirsin.",
+                modifier = Modifier.testTag("osm-search-empty"))
+            LazyColumn(Modifier.heightIn(max = 320.dp).testTag("osm-search-results"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(results) { place -> OutlinedCard(onClick = { onSelect(place) }, modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp)) { Text(place.name); Text("${place.latitude}, ${place.longitude}", style = MaterialTheme.typography.bodySmall) }
                 } }
             }
-            Text("Arama Nominatim üzerinden yapılır. Sonuçlar © OpenStreetMap katkıcıları.", style = MaterialTheme.typography.bodySmall, color = Muted)
+            Text("Arama Nominatim üzerinden yapılır. Sonuçlar © OpenStreetMap katkıcıları.", style = MaterialTheme.typography.bodySmall,
+                color = Muted, modifier = Modifier.testTag("osm-search-attribution"))
         }
     }, confirmButton = {}, dismissButton = { TextButton(onClick = onDismiss) { Text("Kapat") } })
 }
