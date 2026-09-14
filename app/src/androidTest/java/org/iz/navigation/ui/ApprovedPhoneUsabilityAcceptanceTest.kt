@@ -100,7 +100,7 @@ class ApprovedPhoneUsabilityAcceptanceTest {
         compose.onNodeWithText("Bu ziyarete özel not").performScrollTo().performTextReplacement(fixture.visitNote)
         closeSoftKeyboard() // Parent setup only.
         fun openAndSearch() {
-            compose.onNodeWithText("OSM'de yer eşleştir").performScrollTo().performClick()
+            compose.onNodeWithText("OSM’de yer eşleştir").performScrollTo().performClick()
             waitForTag("osm-search-query")
             compose.onNodeWithTag("osm-search-query").performTextReplacement(query)
             compose.onNodeWithTag("osm-search-query").performClick()
@@ -168,7 +168,7 @@ class ApprovedPhoneUsabilityAcceptanceTest {
             compose.onNodeWithTag("menu-add-place").performClick()
             compose.onNodeWithText("Bu ziyarete özel not").performScrollTo().performTextReplacement(fixture.visitNote)
             closeSoftKeyboard() // Parent setup only.
-            compose.onNodeWithText("OSM'de yer eşleştir").performScrollTo().performClick()
+            compose.onNodeWithText("OSM’de yer eşleştir").performScrollTo().performClick()
             waitForTag("osm-search-query")
             val query = "${fixture.query}-k05-dns"
             val input = compose.onNodeWithTag("osm-search-query")
