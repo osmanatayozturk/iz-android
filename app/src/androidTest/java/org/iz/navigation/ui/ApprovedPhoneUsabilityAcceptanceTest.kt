@@ -136,7 +136,8 @@ class ApprovedPhoneUsabilityAcceptanceTest {
         compose.onNodeWithText(fixture.selected.name).assertExists()
         compose.onNodeWithText(fixture.visitNote).assertExists()
         // Persist only this fixture's owned selection to verify exact OSM identity and draft content.
-        compose.onNodeWithText("Ziyareti kaydet").performScrollTo().performClick()
+        // The parent dialog confirm button is fixed outside its scrollable form.
+        compose.onNodeWithText("Ziyareti kaydet").assertIsDisplayed().assertIsEnabled().performClick()
         compose.waitUntil(5_000) { fixture.io { fixture.repository.snapshot() }.places.any { it.osmId == fixture.selected.osmRef?.id } }
         val snapshot = fixture.io { fixture.repository.snapshot() }
         val selectedPlace = snapshot.places.single { it.osmId == fixture.selected.osmRef?.id && it.osmType == fixture.selected.osmRef?.type }
