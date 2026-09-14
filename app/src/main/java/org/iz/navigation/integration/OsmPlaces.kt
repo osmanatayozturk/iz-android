@@ -6,13 +6,10 @@ import org.iz.navigation.data.OsmRef
 import org.iz.navigation.data.OsmType
 import org.iz.navigation.data.SelectedOsmPlace
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
-import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -29,7 +26,6 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.TimeUnit
-import kotlin.coroutines.coroutineContext
 
 internal val osmUserAgent: String get() = "Iz/${BuildConfig.VERSION_NAME} (org.iz.navigation)"
 
@@ -40,37 +36,18 @@ class OsmPlaces(context: Context) {
     private val preferences = app.getSharedPreferences("osm_read_limits", Context.MODE_PRIVATE)
     private val cacheDirectory = File(app.cacheDir, "osm_place_queries")
 
+    private val nominatimSearch = NominatimSearch(
+        mutex = nominatimLock,
+        endpoint = { settings.read().nominatim },
+        readCached = { cached(it, 86_400_000, ::parseNominatimPlaces) },
+        writeCache = ::storeCache,
+        readLong = { preferences.getLong(it, 0) },
+        writeLong = { key, value -> preferences.edit().putLong(key, value).commit() },
+        execute = { client.newCall(it).execute() },
+    )
+
     suspend fun search(query: String): List<SelectedOsmPlace> = withContext(Dispatchers.IO) {
-        val normalized = query.trim().replace(Regex("\\s+"), " ")
-        if (normalized.length < 2) return@withContext emptyList()
-        require(normalized.length <= 200) { "Arama en fazla 200 karakter olabilir." }
-        nominatimLock.withLock {
-            val endpoint = settings.read().nominatim
-            val key = "search:$endpoint:${normalized.lowercase(Locale.ROOT)}"
-            cached(key, 86_400_000, ::parseNominatimPlaces)?.let { return@withLock it }
-            var now = System.currentTimeMillis()
-            if (now < preferences.getLong("nominatim_cooldown", 0)) throw OsmServiceException("Yer arama servisi beklememizi istiyor. Biraz sonra yeniden ara.")
-            val wait = (preferences.getLong("nominatim_last_request", 0) + 1_000 - now).coerceIn(0, 1_000)
-            if (wait > 0) delay(wait)
-            coroutineContext.ensureActive()
-            now = System.currentTimeMillis()
-            check(preferences.edit().putLong("nominatim_last_request", now).commit()) { "Arama sınırı kaydedilemedi." }
-            val url = endpoint.toHttpUrl().newBuilder()
-                .addQueryParameter("q", normalized).addQueryParameter("format", "jsonv2")
-                .addQueryParameter("limit", "10").addQueryParameter("addressdetails", "0").build()
-            val request = readRequest(url.toString()).get().build()
-            client.newCall(request).execute().use { response ->
-                if (response.code == 429 || response.code == 406) {
-                    preferences.edit().putLong("nominatim_cooldown", System.currentTimeMillis() + retryAfterMillis(response)).commit()
-                    throw OsmServiceException("Yer arama servisi beklememizi istiyor. Biraz sonra yeniden ara.")
-                }
-                if (!response.isSuccessful) throw OsmServiceException("Yer araması şu an kullanılamıyor (${response.code}).")
-                val json = readLimited(response, 512_000) {}
-                val result = parseNominatimPlaces(json)
-                storeCache(key, json)
-                result
-            }
-        }
+        nominatimSearch.search(query)
     }
 
     suspend fun nearby(latitude: Double, longitude: Double): List<SelectedOsmPlace> = withContext(Dispatchers.IO) {
@@ -254,14 +231,14 @@ internal fun validCoordinate(latitude: Double?, longitude: Double?): Boolean =
 
 private fun cacheKey(key: String): String = MessageDigest.getInstance("SHA-256").digest(key.toByteArray()).joinToString("") { "%02x".format(it) }
 
-private fun retryAfterMillis(response: Response): Long {
+internal fun retryAfterMillis(response: Response): Long {
     val value = response.header("Retry-After")
     val seconds = value?.toLongOrNull()
     val dateDelay = runCatching { ZonedDateTime.parse(value, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant().toEpochMilli() - System.currentTimeMillis() }.getOrNull()
     return (seconds?.let { it.coerceAtMost(86_400) * 1_000 } ?: dateDelay ?: 30_000).coerceIn(30_000, 86_400_000)
 }
 
-private fun readLimited(response: Response, maxBytes: Long, onBytes: (Long) -> Unit): String {
+internal fun readLimited(response: Response, maxBytes: Long, onBytes: (Long) -> Unit): String {
     val body = response.body ?: throw OsmServiceException("Servis boş yanıt verdi.")
     val output = ByteArrayOutputStream()
     body.byteStream().use { input ->
