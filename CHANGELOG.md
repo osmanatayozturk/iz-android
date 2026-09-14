@@ -9,7 +9,7 @@ Bu bölüm 0.10.1 kaynak kodundaki telefon değişikliklerini açıklar. Adayın
 - Sonuçta yer adının altında mevcut `display_name` adres metni doğal biçimde sarılır. Boş veya yalnız adı tekrarlayan açıklamada “Adres bilgisi yok” gösterilir. Mahalle/sokak bilgisi tahmin edilmez; koordinat adres yerine kullanılmaz. Büyük yazıda sonuçlar ve tam OpenStreetMap atfı erişilebilir kalır.
 - Aktif yol tarifi kartı, mevcut “Nereye?” panelini planlama durumunu sıfırlamadan açar. “Yol tarifini bitir” ve “Yolculuk kaydını bitir” ayrı teyitlerle yalnız ilgili işi sonlandırır; diğer açık iş ve grup paylaşımı korunur. “Yolculuğu tamamen bitir” en altta, kapanacak işleri belirten teyitle sunulur.
 - Aktif yol tarifinde İz ön plandayken ekran açık tutulur. Uygulama içi menüler bu davranışı kesmez; elle kilitleme korunur. Yol tarifi bitince veya uygulama arka plana geçince normal ekran zaman aşımı geçerli olur. Yalnız kayıt veya rota önizleme ekranı açık tutmaz.
-- Hedef telefon sürümü **0.10.1 / code 19**'dur; Wear OS **0.6.0 / code 10**, iletişim **v5**, günlük ve yedek veri biçimleri değişmez. Dağıtım niteliği önizleme (prerelease) olarak kalır.
+- Telefon sürümü **0.10.1 / code 19**’dur; Wear OS **0.6.0 / code 10**, iletişim **v5**, günlük ve yedek veri biçimleri değişmez. Dağıtım niteliği önizleme (prerelease) olarak kalır.
 
 ## Yeni uygulama sürümlerinde güvenlik kabulü — 2026-09-14
 
