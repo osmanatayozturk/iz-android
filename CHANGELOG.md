@@ -1,8 +1,8 @@
 # Değişiklik geçmişi
 
-## 0.10.1 — Hazırlanan telefon önizleme adayı
+## 0.10.1 — Telefon önizleme sürümü
 
-Uygulama geliştirmesi ve doğrulama sürüyor. Bu bölüm hedeflenen değişiklikleri belirtir; nihai paket, bağımsız Test ve UI/UX kabulü, aynı aday için açık olumlu Siber Güvenlik raporu ve koordinatörün son kabul/yayın onayı henüz tamamlanmamıştır.
+Bu bölüm 0.10.1 kaynak kodundaki telefon değişikliklerini açıklar. Adayın paket, Test, UI/UX, güvenlik ve kabul aşamaları yerel teslim kaydında; yayında doğrulanmış sonuçlar ilgili Release metninde izlenir.
 
 - Yer aramada ilk sayfa 1–9 geçerli sonuç ve en az bir OSM referansı içeriyorsa en fazla bir devam isteği yapılır. İlk sayfa boşsa, tam 10 sonuç içeriyorsa veya referans yoksa devam edilmez. Sayfa başına en fazla 10, birleşik listede en fazla 20 sonuç işlenir; bütün yerlerin bulunması garanti edilmez.
 - Sayfalar mevcut v2 ham JSON önbelleğinde ayrı anahtarlarla saklanır. İkinci sayfa başarısızsa ilk sayfa korunur; mevcut istek hızı, bekleme ve iptal sınırları sürer. Sorgu değişince eski sonuç, hata ve boş durum yeni sorguya taşınmaz.
