@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 let handler;
-globalThis.Deno={env:{get:name=>name==='SUPABASE_URL'?'https://example.supabase.co':'test-server-secret'},serve:value=>{handler=value;}};
+const denoStub={env:{get:name=>name==='SUPABASE_URL'?'https://example.supabase.co':'test-server-secret'},serve:value=>{handler=value;}};
+if(globalThis.Deno)Object.assign(globalThis.Deno,denoStub); else globalThis.Deno=denoStub;
 await import('../functions/group-api/index.ts');
 const user='00000000-0000-4000-8000-000000000001';
 const req=(body={},token='device-token')=>new Request('https://example.test/group-api',{method:'POST',headers:token?{Authorization:'Bearer '+token}:{},body:JSON.stringify(body)});
@@ -40,4 +41,153 @@ test('relay performs fresh recipient authorization and emits only a private serv
  assert.equal(calls.at(-2).body.p_recipient,'peer');
  assert.equal(calls.at(-1).body.messages[0].private,true);
  assert.equal(calls.at(-1).body.messages[0].topic,'iz:inbox:inbox');
+});
+
+const bodyLimit = 16_384;
+function allowSmallCommands() {
+ const calls=[];
+ globalThis.fetch=async(url,options)=>{
+  calls.push(url);
+  if(url.endsWith('/user'))return json({id:user,is_anonymous:true});
+  if(url.endsWith('/iz_group_rate_limit'))return json(true);
+  if(url.endsWith('/iz_group_command'))return json({ok:true});
+  throw Error('Unexpected external request');
+ };
+ return calls;
+}
+function streamedRequest(chunks, {length, cancelError=false, cancelPending=false, readError=false}={}) {
+ let reads=0, cancelled=false;
+ const stream=new ReadableStream({
+  pull(controller) {
+   if(readError) { controller.error(Error('private input failure')); return; }
+   if(reads===chunks.length)controller.close();
+   else controller.enqueue(chunks[reads++]);
+  },
+  cancel() {
+   cancelled=true;
+   if(cancelError)return Promise.reject(Error('private cancellation failure'));
+   if(cancelPending)return new Promise(()=>{});
+  }
+ },{highWaterMark:0});
+ const headers={Authorization:'Bearer device-token'};
+ if(length!==undefined)headers['Content-Length']=length;
+ const request=new Request('https://example.test/group-api',{method:'POST',headers,body:stream,duplex:'half'});
+ return {request,stream,get reads(){return reads;},get cancelled(){return cancelled;}};
+}
+const bytes=text=>new TextEncoder().encode(text);
+const statusOfSize=size=>bytes('{"action":"status"}'+' '.repeat(size-19));
+async function assertTooLarge(input,calls) {
+ const response=await handler(input.request);
+ assert.equal(response.status,400);
+ assert.deepEqual(await response.json(),{ok:false,error:'request_failed'});
+ assert.equal(input.cancelled,true);
+ assert.equal(input.stream.locked,false);
+ assert.equal(calls.length,2);
+ assert.ok(calls[1].endsWith('/iz_group_rate_limit'));
+}
+test('body limit accepts exactly 16384 bytes and rejects one additional byte',async()=>{
+ let calls=allowSmallCommands();
+ const exact=streamedRequest([statusOfSize(bodyLimit)]);
+ assert.equal((await handler(exact.request)).status,200);
+ assert.ok(calls.at(-1).endsWith('/iz_group_command'));
+ calls=allowSmallCommands();
+ await assertTooLarge(streamedRequest([statusOfSize(bodyLimit+1)]),calls);
+});
+test('body limit counts UTF-8 bytes with missing, small or invalid length headers',async()=>{
+ const payload=bytes(JSON.stringify({action:'status',padding:'ü'.repeat(8200)}));
+ assert.ok(payload.length>bodyLimit);
+ for(const length of [undefined,'1','-1','nonnumeric']) {
+  const calls=allowSmallCommands();
+  await assertTooLarge(streamedRequest([payload],{length}),calls);
+ }
+});
+test('body limit cancels a 1 MiB chunked stream before consuming its remainder',async()=>{
+ const calls=allowSmallCommands();
+ const input=streamedRequest(Array.from({length:256},()=>new Uint8Array(4096).fill(32)));
+ await assertTooLarge(input,calls);
+ assert.equal(input.reads,5);
+});
+test('body limit rejects an oversized declared length without reading its stream',async()=>{
+ const calls=allowSmallCommands();
+ const input=streamedRequest([bytes('{"action":"status"}')],{length:'16385'});
+ await assertTooLarge(input,calls);
+ assert.equal(input.reads,0);
+});
+test('body limit preserves safe errors when stream cancellation rejects or never settles',async()=>{
+ for(const options of [{cancelError:true},{cancelPending:true}]) {
+  const calls=allowSmallCommands();
+  const input=streamedRequest([statusOfSize(bodyLimit+1)],options);
+  let timer;
+  try {
+   await Promise.race([
+    assertTooLarge(input,calls),
+    new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Oversized response waited for cancellation')),1000);})
+   ]);
+  } finally {clearTimeout(timer);}
+ }
+});
+test('small UTF-8 JSON split between bytes and BOM remains valid',async()=>{
+ const calls=allowSmallCommands();
+ const data=bytes('\uFEFF'+JSON.stringify({action:'status',padding:'İz şüş🌍'}));
+ const input=streamedRequest(Array.from(data,value=>new Uint8Array([value])));
+ const response=await handler(input.request);
+ assert.equal(response.status,200);
+ assert.deepEqual(await response.json(),{ok:true});
+ assert.ok(calls.at(-1).endsWith('/iz_group_command'));
+});
+test('small invalid JSON and failed body reads preserve safe errors',async()=>{
+ for(const input of [streamedRequest([bytes('{')]),streamedRequest([],{readError:true})]) {
+  const calls=allowSmallCommands();
+  const response=await handler(input.request);
+  assert.equal(response.status,400);
+  assert.deepEqual(await response.json(),{ok:false,error:'request_failed'});
+  assert.equal(calls.length,2);
+ }
+});
+
+test('body limit accepts an exact-boundary UTF-8 request and preserves decoded arguments',async()=>{
+ const calls=allowSmallCommands();
+ const acceptedFetch=globalThis.fetch;
+ let command;
+ globalThis.fetch=async(url,options)=>{
+  if(url.endsWith('/iz_group_command'))command=JSON.parse(options.body);
+  return acceptedFetch(url,options);
+ };
+ const value=JSON.stringify({action:'status',padding:'ü'.repeat(8176)});
+ const payload=bytes(value+' '.repeat(bodyLimit-bytes(value).length));
+ assert.equal(payload.byteLength,16384);
+ const input=streamedRequest([payload.subarray(0,200),payload.subarray(200)],{length:'1'});
+ assert.equal((await handler(input.request)).status,200);
+ assert.deepEqual(command,{p_user:user,p_action:'status',p_args:JSON.parse(value)});
+ assert.equal(input.stream.locked,false);
+ assert.equal(input.cancelled,false);
+ assert.equal(calls.length,3);
+});
+test('small route creation preserves Unicode fields and validation',async()=>{
+ const calls=allowSmallCommands();
+ const acceptedFetch=globalThis.fetch;
+ let command;
+ globalThis.fetch=async(url,options)=>{
+  if(url.endsWith('/iz_group_command'))command=JSON.parse(options.body);
+  return acceptedFetch(url,options);
+ };
+ const body={action:'create',name:'İz 🌍',stops:[{label:'Şile',latitude:41,longitude:29,privateNote:'discard'}]};
+ const input=streamedRequest([bytes(JSON.stringify(body))]);
+ assert.equal((await handler(input.request)).status,200);
+ assert.deepEqual(command,{p_user:user,p_action:'create',p_args:{action:'create',name:'İz 🌍',stops:[{label:'Şile',latitude:41,longitude:29}]}});
+ assert.equal(calls.length,3);
+});
+test('empty body and failed stream reads preserve safe errors and release locks',async()=>{
+ const calls=allowSmallCommands();
+ const empty=new Request('https://example.test/group-api',{method:'POST',headers:{Authorization:'Bearer device-token'}});
+ const response=await handler(empty);
+ assert.equal(response.status,400);
+ assert.deepEqual(await response.json(),{ok:false,error:'request_failed'});
+ assert.equal(calls.length,2);
+ const failed=streamedRequest([],{readError:true});
+ const failedResponse=await handler(failed.request);
+ assert.equal(failedResponse.status,400);
+ assert.deepEqual(await failedResponse.json(),{ok:false,error:'request_failed'});
+ assert.equal(failed.stream.locked,false);
+ assert.equal(calls.length,4);
 });

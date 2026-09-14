@@ -7,6 +7,32 @@ async function rpc(name: string, args: unknown) {
   if (!res.ok) { const error=await res.json().catch(()=>({})); throw Error(typeof error.message==='string' ? error.message : 'server_error'); }
   return await res.json();
 }
+const MAX_BODY_BYTES = 16_384;
+async function readRequestText(req: Request): Promise<string> {
+  const reader = req.body?.getReader();
+  try {
+    // The header is only an early rejection hint; every actual chunk is counted.
+    if (Number(req.headers.get('content-length') ?? 0) > MAX_BODY_BYTES) throw Error('invalid_request');
+    if (!reader) return '';
+    const bytes = new Uint8Array(MAX_BODY_BYTES);
+    let size = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value.byteLength > MAX_BODY_BYTES - size) throw Error('invalid_request');
+      bytes.set(value, size);
+      size += value.byteLength;
+    }
+    return new TextDecoder().decode(bytes.subarray(0, size));
+  } catch (error) {
+    // Cancellation must not hide the original error or delay the response.
+    if (reader) void reader.cancel().catch(() => {});
+    throw error;
+  } finally {
+    reader?.releaseLock();
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return Response.json({ok:false,error:'method_not_allowed'},{status:405});
   try {
@@ -17,8 +43,7 @@ Deno.serve(async (req) => {
     const user = await auth.json();
     if (typeof user.id!=='string' || user.is_anonymous!==true) return Response.json({ok:false,error:'anonymous_identity_required'},{status:403});
     if (!await rpc('iz_group_rate_limit',{p_user:user.id})) throw Error('rate_limited');
-    if (Number(req.headers.get('content-length') ?? 0)>16384) throw Error('invalid_request');
-    const raw=await req.text(); if (raw.length>16384) throw Error('invalid_request');
+    const raw=await readRequestText(req);
     const body=validateAction(JSON.parse(raw));
     if (body.action==='publish') {
       const result=await relayLocation(body,user.id,{
