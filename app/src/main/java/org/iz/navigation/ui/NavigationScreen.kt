@@ -8,10 +8,13 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
@@ -25,6 +28,7 @@ import org.iz.navigation.integration.FullscreenMapDialog
 import org.iz.navigation.integration.WeatherRouteMap
 import org.iz.navigation.weather.*
 import org.iz.navigation.navigation.TrackReplacementConsent
+import org.iz.navigation.navigation.NavigationState
 import org.iz.navigation.navigation.trackReplacementKey
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -106,8 +110,12 @@ internal class PhoneNavigationViewModel(application: Application) : AndroidViewM
     val permissionGate = DirectionsPermissionGate()
     val places = repository.places.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val commandBusy = MutableStateFlow(false)
+    val commandErrorVersion = MutableStateFlow(0L)
     private val work = PhoneNavigationWork(viewModelScope, { commandBusy.value = it },
-        { directions.reportMessage(it.message ?: "İşlem tamamlanamadı.") })
+        {
+            directions.reportMessage(it.message ?: "İşlem tamamlanamadı.")
+            commandErrorVersion.update { version -> version + 1 }
+        })
     val points = navigation.state.flatMapLatest { state ->
         when {
             state.simulation -> navigation.simulationPoints
@@ -145,13 +153,15 @@ internal class PhoneNavigationViewModel(application: Application) : AndroidViewM
             directions.sessionStarted()
         }
     }
-    fun stopRecording() {
-        val id = navigation.state.value.journey?.id ?: return
-        work.mutate { navigation.stopRecording(id) }
-    }
-    fun finish() {
-        val id = navigation.state.value.sessionId ?: return
-        finishNavigationWork(directions, work) { navigation.finishSession(id) }
+    fun confirmEnd(request: PhoneSessionEndRequest) {
+        if (commandBusy.value || ui.value.starting || !request.matches(navigation.state.value)) return
+        work.mutate {
+            val accepted = dispatchPhoneSessionEnd(request, navigation.state.value, ui.value.starting,
+                stopGuidance = { navigation.stopGuidance(it) },
+                stopRecording = { navigation.stopRecording(it) },
+                finish = { navigation.finishSession(it) })
+            if (accepted && request.action == PhoneSessionEnd.ALL) directions.showLiveRoute()
+        }
     }
 }
 
@@ -178,6 +188,7 @@ internal fun NavigationScreen(
     val points by vm.points.collectAsStateWithLifecycle()
     val places by vm.places.collectAsStateWithLifecycle()
     val commandBusy by vm.commandBusy.collectAsStateWithLifecycle()
+    val commandErrorVersion by vm.commandErrorVersion.collectAsStateWithLifecycle()
     val app = context.applicationContext as IzApplication
     val groupState by app.groups.state.collectAsStateWithLifecycle()
     val weather by app.weatherManager.state.collectAsStateWithLifecycle()
@@ -185,6 +196,13 @@ internal fun NavigationScreen(
     var addingVia by remember(entryId) { mutableStateOf(false) }
     var recordDialog by remember { mutableStateOf(false) }
     var sessionActions by remember { mutableStateOf(false) }
+    var pendingEnd by remember(entryId) { mutableStateOf<PhoneSessionEndRequest?>(null) }
+    fun requestEnd(action: PhoneSessionEnd) {
+        if (vm.commandBusy.value || vm.ui.value.starting) return
+        val request = phoneSessionEndRequest(action, vm.navigation.state.value) ?: return
+        sessionActions = false
+        pendingEnd = request
+    }
     var pickerOrigin by remember(entryId) { mutableStateOf(false) }
     var showSource by remember(entryId) { mutableStateOf(false) }
     var showSearch by remember(entryId) { mutableStateOf(false) }
@@ -242,7 +260,7 @@ internal fun NavigationScreen(
         if (addingVia) { vm.directions.addVia(stop); addingVia = false }
         else if (pickerOrigin) vm.directions.setOrigin(stop) else vm.directions.setDestination(stop)
     }
-    fun closePlanner() { showPlanning = false; vm.directions.showLiveRoute(); onClose() }
+    fun closePlanner() { showPlanning = false; onClose() }
     trackReplacementDialog?.let { key ->
         AlertDialog(
             onDismissRequest = { trackReplacementDialog = null },
@@ -254,6 +272,11 @@ internal fun NavigationScreen(
             }) { Text("Rotayı başlat") } },
             dismissButton = { TextButton(onClick = { trackReplacementDialog = null }) { Text("Vazgeç") } },
         )
+    }
+    pendingEnd?.let { request ->
+        PhoneSessionEndConfirmation(request, nav, commandBusy || ui.starting,
+            onDismiss = { pendingEnd = null },
+            onConfirm = { pendingEnd = null; vm.confirmEnd(it) })
     }
     BackHandler(enabled = showPlanning, onBack = ::closePlanner)
     var previousSession by remember { mutableStateOf(nav.sessionId) }
@@ -284,8 +307,9 @@ internal fun NavigationScreen(
         showPlanner = showPlanning,
         weatherLabel = weather.assessment?.samples?.firstOrNull()?.reading?.temperatureC?.let { "${it.toInt()}° · Hava" } ?: "Hava durumu",
         onSearch = {
-            if (!showPlanning) vm.enter(System.nanoTime(), null, nav.sessionTransport ?: ui.transport)
-            showPlanning = true
+            val current = vm.navigation.state.value
+            openPhoneDirectionsPanel(current, showPlanning,
+                { vm.enter(System.nanoTime(), null, current.sessionTransport ?: vm.ui.value.transport) }, { showPlanning = true })
         },
         onRecord = {
             if (nav.recording) sessionActions = true
@@ -296,24 +320,24 @@ internal fun NavigationScreen(
             } else recordDialog = true
         },
         onGroup = onGroup, onMenu = onMenu, onWeather = onWeather,
-        onMute = { vm.navigation.setMuted(!nav.muted) }, onFinish = vm::finish,
+        onMute = { vm.navigation.setMuted(!nav.muted) }, onManageSession = { showPlanning = true },
         onLocate = { requestAction(DirectionsAction.CURRENT_ORIGIN) }, onPin = onPin,
     ) {
     PhoneDirectionsContent(
-        ui = ui, nav = nav, points = points, commandBusy = commandBusy,
+        ui = ui, nav = nav, points = points, commandBusy = commandBusy, commandErrorVersion = commandErrorVersion,
         onClose = ::closePlanner,
         chooseOrigin = { addingVia = false; pickerOrigin = true; showSource = true },
         chooseDestination = { addingVia = false; pickerOrigin = false; showSource = true },
         currentOrigin = { requestAction(DirectionsAction.CURRENT_ORIGIN) },
         transport = vm.directions::transport,
         preview = { requestAction(DirectionsAction.PREVIEW) }, start = { requestAction(DirectionsAction.START) },
-        freeDrive = { requestAction(DirectionsAction.FREE_DRIVE) }, finish = vm::finish,
-        mute = { vm.navigation.setMuted(!nav.muted) }, stopGuidance = vm.navigation::stopGuidance,
+        freeDrive = { requestAction(DirectionsAction.FREE_DRIVE) }, finish = { requestEnd(PhoneSessionEnd.ALL) },
+        mute = { vm.navigation.setMuted(!nav.muted) }, stopGuidance = { requestEnd(PhoneSessionEnd.GUIDANCE) },
         showLive = vm.directions::showLiveRoute,
         trafficSettings = { showTrafficSettings = true },
         lastDestination = if (vm.navigation.lastRoute != null) vm::lastDestination else null,
         permissions = { permissions.launch(permissionNames()) },
-        showMap = false, recordJourney = vm.directions::setRecordJourney, stopRecording = vm::stopRecording,
+        showMap = false, recordJourney = vm.directions::setRecordJourney, stopRecording = { requestEnd(PhoneSessionEnd.RECORDING) },
         addVia = { addingVia = true; pickerOrigin = false; showSource = true }, removeVia = vm.directions::removeVia,
         suggestStopOrder = { vm.directions.suggestStopOrder() }, acceptStopOrder = vm.directions::acceptStopOrder,
         dismissStopOrder = vm.directions::dismissStopOrder,
@@ -331,11 +355,10 @@ internal fun NavigationScreen(
         requestAction(DirectionsAction.FREE_DRIVE)
     }
     if (sessionActions) AlertDialog(onDismissRequest = { sessionActions = false }, title = { Text("Yolculuk işlemleri") }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Kaydı durdurmak yönlendirmeyi veya grup paylaşımını kapatmaz.")
-            if (nav.recording) OutlinedButton({ sessionActions = false; vm.stopRecording() }, enabled = !commandBusy && !ui.starting) { Text("Kaydı durdur") }
-            if (nav.guidance) OutlinedButton({ sessionActions = false; vm.navigation.stopGuidance() }, enabled = !commandBusy && !ui.starting) { Text("Yönlendirmeyi durdur") }
-            Button({ sessionActions = false; vm.finish() }, enabled = !commandBusy && !ui.starting) { Text("Yolculuğu bitir") }
+        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (nav.guidance) OutlinedButton({ requestEnd(PhoneSessionEnd.GUIDANCE) }, enabled = !commandBusy && !ui.starting) { Text(PhoneSessionEnd.GUIDANCE.label) }
+            if (nav.recording) OutlinedButton({ requestEnd(PhoneSessionEnd.RECORDING) }, enabled = !commandBusy && !ui.starting) { Text(PhoneSessionEnd.RECORDING.label) }
+            Button({ requestEnd(PhoneSessionEnd.ALL) }, enabled = !commandBusy && !ui.starting) { Text(PhoneSessionEnd.ALL.label) }
         }
     }, confirmButton = { TextButton({ sessionActions = false }) { Text("Kapat") } })
     if (showSource) WeatherStopSourceDialog(
@@ -368,4 +391,27 @@ internal fun NavigationScreen(
         )
     }
     if (showTrafficSettings) TrafficSettingsDialog(onDismiss = { showTrafficSettings = false; vm.directions.showLiveRoute() })
+}
+
+@Composable
+internal fun PhoneSessionEndConfirmation(
+    request: PhoneSessionEndRequest,
+    current: NavigationState,
+    locked: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (PhoneSessionEndRequest) -> Unit,
+) {
+    val currentRequest = request.matches(current)
+    LaunchedEffect(currentRequest) { if (!currentRequest) onDismiss() }
+    if (!currentRequest) return
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(request.title) },
+        text = { Column(Modifier.verticalScroll(rememberScrollState())) { Text(request.explanation) } },
+        confirmButton = {
+            TextButton(onClick = { if (!locked && request.matches(current)) onConfirm(request) }, enabled = !locked,
+                modifier = Modifier.testTag("confirm-session-end")) { Text(request.action.label) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.testTag("cancel-session-end")) { Text("Vazgeç") } },
+    )
 }

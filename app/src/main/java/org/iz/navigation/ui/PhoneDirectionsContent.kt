@@ -66,16 +66,24 @@ internal fun PhoneDirectionsContent(
     requestAlternatives: () -> Unit = {},
     selectAlternative: (String) -> Unit = {},
     saveRoute: (() -> Unit)? = null,
+    commandErrorVersion: Long = 0,
 ) {
     val listState = rememberLazyListState()
     val shownRoute = ui.preview ?: nav.route
     val live = ui.preview == null && (nav.sessionId != null || nav.guidance || nav.recording || nav.locationActive)
     val locked = ui.starting || commandBusy
+    val sessionActive = nav.sessionId != null || nav.recording || nav.guidance || nav.locationActive
     var turnsRoute by remember { mutableStateOf<PlannedRoute?>(null) }
     LaunchedEffect(ui.startedCount) { if (ui.startedCount > 0) listState.animateScrollToItem(0) }
     LaunchedEffect(nav.recording) { if (nav.recording) listState.animateScrollToItem(0) }
+    LaunchedEffect(ui.message, nav.message, commandErrorVersion) {
+        if (ui.message != null || nav.message != null) listState.animateScrollToItem(0)
+    }
     LazyColumn(Modifier.fillMaxSize().testTag("navigation-screen"), state = listState,
         contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        ui.message?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.testTag("directions-command-error")) } }
+        nav.message?.let { message -> item { Text(message) } }
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -88,6 +96,17 @@ internal fun PhoneDirectionsContent(
                 }
                 TextButton(onClick = onClose, modifier = Modifier.testTag("close-directions-planner")) { Text("Haritaya dön") }
             }
+        }
+        if (sessionActive) item {
+            Column(Modifier.fillMaxWidth().testTag("active-session-actions"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (nav.guidance) OutlinedButton(stopGuidance, enabled = !locked,
+                    modifier = Modifier.fillMaxWidth().testTag("stop-navigation-guidance")) { Text(PhoneSessionEnd.GUIDANCE.label) }
+                if (nav.recording) OutlinedButton(stopRecording, enabled = !locked,
+                    modifier = Modifier.fillMaxWidth().testTag("stop-navigation-recording")) { Text(PhoneSessionEnd.RECORDING.label) }
+            }
+            Text(navigationInstruction(nav), style = MaterialTheme.typography.titleMedium)
+            if (ui.preview != null) TextButton(showLive) { Text("Canlı rotaya dön") }
+            if (nav.guidance) OutlinedButton(mute) { Text(if (nav.muted) "Sesi aç" else "Sesi kapat") }
         }
         if (showMap) item {
             WeatherRouteMap(
@@ -127,17 +146,6 @@ internal fun PhoneDirectionsContent(
                     }
                 },
             )
-        }
-        if (nav.sessionId != null || nav.recording || nav.guidance || nav.locationActive) item {
-            Text(navigationInstruction(nav), style = MaterialTheme.typography.titleMedium)
-            if (ui.preview != null) TextButton(showLive) { Text("Canlı rotaya dön") }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(mute) { Text(if (nav.muted) "Sesi aç" else "Sesi kapat") }
-                if (nav.guidance) OutlinedButton(stopGuidance, enabled = !locked) { Text("Yönlendirmeyi durdur") }
-                if (nav.recording) OutlinedButton(stopRecording, enabled = !locked, modifier = Modifier.testTag("stop-navigation-recording")) { Text("Kaydı durdur") }
-                Button(finish, enabled = !locked, modifier = Modifier.testTag("finish-navigation-journey")) { Text("Yolculuğu bitir") }
-            }
-            Text("Yönlendirmeyi durdur yalnızca yol tarifini, Kaydı durdur yalnızca günlüğü durdurur. Yolculuğu bitir hepsini ve konum paylaşımını kapatır.", style = MaterialTheme.typography.bodySmall)
         }
         item {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -204,7 +212,7 @@ internal fun PhoneDirectionsContent(
                         else "Yalnızca yol tarifi; günlük ve sağlık kaydı tutulmaz.", style = MaterialTheme.typography.bodySmall)
                 }
             }
-            if (nav.recording && !ui.recordJourney) Text("Kayıt açık. Kayıtsız başlamak için önce Kaydı durdur'u seç.",
+            if (nav.recording && !ui.recordJourney) Text("Kayıt açık. Kayıtsız başlamak için önce Yolculuk kaydını bitir'i seç.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(preview, enabled = ui.canPreview && !commandBusy,
@@ -238,8 +246,6 @@ internal fun PhoneDirectionsContent(
             }
         } }
         if (ui.busy || ui.locating || nav.loading || commandBusy) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-        ui.message?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
-        nav.message?.let { message -> item { Text(message) } }
         item {
             TextButton(trafficSettings, enabled = !locked, modifier = Modifier.testTag("directions-traffic-settings")) { Text("Trafik ayarları") }
             lastDestination?.let { TextButton(it, enabled = !locked) { Text("Son hedefi seç") } }
@@ -247,6 +253,11 @@ internal fun PhoneDirectionsContent(
                 modifier = Modifier.testTag("start-free-drive")) { Text("Hedefsiz sürüş başlat") }
             OutlinedButton(permissions) { Text("Konum ve bildirim izinlerini ayarla") }
             Text("Android Auto bağlantısı kesilse de telefon kaydı ve yönlendirme devam eder.", style = MaterialTheme.typography.bodySmall)
+        }
+        if (sessionActive) item {
+            Button(finish, enabled = !locked, modifier = Modifier.fillMaxWidth().testTag("finish-navigation-journey")) {
+                Text(PhoneSessionEnd.ALL.label)
+            }
         }
     }
     turnsRoute?.let { route ->
@@ -282,9 +293,9 @@ private fun DirectionsMapActions(route: PlannedRoute?, nav: NavigationState, ena
             if (nav.sessionId != null || nav.recording || nav.guidance || nav.locationActive) {
                 DropdownMenuItem(text = { Text(if (nav.muted) "Sesi aç" else "Sesi kapat") },
                     onClick = { expanded = false; mute() }, modifier = Modifier.testTag("directions-menu-mute"))
-                if (nav.route != null) DropdownMenuItem(text = { Text("Yönlendirmeyi durdur") },
+                if (nav.route != null) DropdownMenuItem(text = { Text(PhoneSessionEnd.GUIDANCE.label) },
                     onClick = { expanded = false; stop() }, enabled = enabled, modifier = Modifier.testTag("directions-menu-stop"))
-                DropdownMenuItem(text = { Text("Yolculuğu bitir") }, onClick = { expanded = false; finish() },
+                DropdownMenuItem(text = { Text(PhoneSessionEnd.ALL.label) }, onClick = { expanded = false; finish() },
                     enabled = enabled, modifier = Modifier.testTag("directions-menu-finish"))
             }
         }

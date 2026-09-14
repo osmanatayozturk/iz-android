@@ -94,11 +94,54 @@ class PhoneDirectionsUiTest {
                 freeDrive = {}, finish = { finished++ }, mute = {}, stopGuidance = { stopped++ },
                 showLive = {}, trafficSettings = {}, lastDestination = null, permissions = {})
         } }
-        compose.onNodeWithText("Yönlendirmeyi durdur").performScrollTo().performClick()
+        compose.onNodeWithText("Yol tarifini bitir").performScrollTo().performClick()
         compose.runOnIdle { assertEquals(1, stopped); assertEquals(0, finished) }
         compose.onNodeWithTag("finish-navigation-journey").performScrollTo().performClick()
         compose.runOnIdle { assertEquals(1, finished) }
     }
+    @Test fun onlyActiveEndActionsAreOfferedAndStartingOrBusyLocksEveryEnd() {
+        val nav = mutableStateOf(NavigationState(sessionId = "session-a", guidance = true))
+        val ui = mutableStateOf(PhoneDirectionsState())
+        val busy = mutableStateOf(false)
+        compose.setContent { IzTheme { SessionContent(ui.value, nav.value, busy.value) } }
+        compose.onNodeWithTag("stop-navigation-guidance").assertIsEnabled()
+        compose.onNodeWithTag("stop-navigation-recording").assertDoesNotExist()
+        compose.runOnIdle { nav.value = nav.value.copy(recording = true) }
+        compose.onNodeWithTag("stop-navigation-recording").assertIsEnabled()
+        for (starting in listOf(false, true)) {
+            compose.runOnIdle { busy.value = !starting; ui.value = ui.value.copy(starting = starting) }
+            compose.onNodeWithTag("navigation-screen").performScrollToNode(hasTestTag("stop-navigation-guidance"))
+            compose.onNodeWithTag("stop-navigation-guidance").assertIsNotEnabled()
+            compose.onNodeWithTag("navigation-screen").performScrollToNode(hasTestTag("stop-navigation-recording"))
+            compose.onNodeWithTag("stop-navigation-recording").assertIsNotEnabled()
+            compose.onNodeWithTag("navigation-screen").performScrollToNode(hasTestTag("finish-navigation-journey"))
+            compose.onNodeWithTag("finish-navigation-journey").assertIsNotEnabled()
+        }
+        compose.runOnIdle { busy.value = false; ui.value = PhoneDirectionsState(); nav.value = NavigationState() }
+        compose.onNodeWithTag("stop-navigation-guidance").assertDoesNotExist()
+        compose.onNodeWithTag("stop-navigation-recording").assertDoesNotExist()
+        compose.onNodeWithTag("finish-navigation-journey").assertDoesNotExist()
+    }
+
+    @Test fun repeatedIdenticalFailureBecomesVisibleAfterScrollingBackToBottom() {
+        val state = mutableStateOf(PhoneDirectionsState())
+        val errors = mutableStateOf(0L)
+        compose.setContent { IzTheme { SessionContent(state.value, NavigationState(sessionId = "session-a"), false, errors.value) } }
+        repeat(2) {
+            compose.onNodeWithTag("navigation-screen").performScrollToNode(hasTestTag("finish-navigation-journey"))
+            compose.runOnIdle { state.value = state.value.copy(message = "Sentetik işlem hatası"); errors.value++ }
+            compose.onNodeWithTag("directions-command-error").assertIsDisplayed().assertTextEquals("Sentetik işlem hatası")
+        }
+    }
+
+    @Composable
+    private fun SessionContent(ui: PhoneDirectionsState, nav: NavigationState, busy: Boolean, errors: Long = 0) {
+        PhoneDirectionsContent(ui = ui, nav = nav, points = emptyList(), commandBusy = busy,
+            onClose = {}, chooseOrigin = {}, chooseDestination = {}, currentOrigin = {}, transport = {},
+            preview = {}, start = {}, freeDrive = {}, finish = {}, mute = {}, stopGuidance = {},
+            showLive = {}, trafficSettings = {}, lastDestination = null, permissions = {}, showMap = false, commandErrorVersion = errors)
+    }
+
     @Composable
     private fun Content(state: PhoneDirectionsState, transport: (Transport) -> Unit = {},
         origin: () -> Unit = {}, destination: () -> Unit = {}, preview: () -> Unit = {}, start: () -> Unit = {}) {

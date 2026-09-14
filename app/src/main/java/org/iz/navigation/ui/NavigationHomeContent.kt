@@ -20,6 +20,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.iz.navigation.R
@@ -46,7 +47,7 @@ internal fun NavigationHomeContent(
     onMenu: () -> Unit,
     onWeather: () -> Unit,
     onMute: () -> Unit,
-    onFinish: () -> Unit,
+    onManageSession: () -> Unit,
     onLocate: () -> Unit,
     onPin: (GeoCoordinate) -> Unit,
     planner: @Composable () -> Unit,
@@ -95,8 +96,9 @@ internal fun NavigationHomeContent(
                     }
                 }
             }
-            if (!showPlanner && live) Surface(shape = RoundedCornerShape(20.dp), shadowElevation = 2.dp,
-                color = MaterialTheme.colorScheme.surface.copy(alpha = .98f), modifier = Modifier.fillMaxWidth().padding(end = 60.dp).testTag("live-guidance-card")) {
+            if (!showPlanner && live) Surface(onClick = onManageSession, shape = RoundedCornerShape(20.dp), shadowElevation = 2.dp,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = .98f), modifier = Modifier.fillMaxWidth().padding(end = 60.dp).testTag("live-guidance-card")
+                    .semantics { onClick(label = "Yolculuk işlemlerini aç", action = null) }) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(if (nav.simulation) "SİMÜLASYON" else if (nav.recording) "KAYIT AÇIK" else "KAYITSIZ YOLCULUK",
@@ -105,7 +107,7 @@ internal fun NavigationHomeContent(
                             Icon(if (nav.muted) Icons.Outlined.VolumeOff else Icons.Outlined.VolumeUp,
                                 if (nav.muted) "Sesi aç" else "Sesi kapat")
                         }
-                        if (compact) TextButton(onFinish,
+                        if (compact) TextButton(onManageSession,
                             modifier = Modifier.height(40.dp).testTag("home-finish-session").semantics { contentDescription = "Yolculuğu bitir" },
                             contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) { Text("Bitir") }
                     }
@@ -122,7 +124,7 @@ internal fun NavigationHomeContent(
                         style = MaterialTheme.typography.bodySmall)
                     if (!nav.locationActive && !nav.simulation) Text("Konum bağlantısı kuruluyor", style = MaterialTheme.typography.bodySmall)
                     nav.message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-                    if (!compact) TextButton(onFinish, modifier = Modifier.align(Alignment.End).testTag("home-finish-session")) { Text("Yolculuğu bitir") }
+                    if (!compact) TextButton(onManageSession, modifier = Modifier.align(Alignment.End).testTag("home-finish-session")) { Text("Yolculuğu bitir") }
                 }
             }
             if (!showPlanner && nav.roadSpeed.visible) {

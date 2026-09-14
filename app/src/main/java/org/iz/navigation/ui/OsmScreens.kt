@@ -56,8 +56,9 @@ internal fun OsmSearchDialog(
     val searched = searchState.searched
     val error = searchState.error
     DisposableEffect(controller) { onDispose { controller.close() } }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("OpenStreetMap’te yer ara") }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Yer ara") }, text = {
+        Column(Modifier.verticalScroll(rememberScrollState()).testTag("osm-search-content"),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedTextField(searchState.query, { query = it; controller.edit(it) }, label = { Text("Yer adı veya adres") }, singleLine = true,
                 modifier = Modifier.fillMaxWidth().testTag("osm-search-query"))
             Button(enabled = searchState.query.isNotBlank() && !busy, onClick = controller::submit,
@@ -68,7 +69,11 @@ internal fun OsmSearchDialog(
                 modifier = Modifier.testTag("osm-search-empty"))
             LazyColumn(Modifier.heightIn(max = 320.dp).testTag("osm-search-results"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(results) { place -> OutlinedCard(onClick = { onSelect(place) }, modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(12.dp)) { Text(place.name); Text("${place.latitude}, ${place.longitude}", style = MaterialTheme.typography.bodySmall) }
+                    Column(Modifier.padding(12.dp)) {
+                        Text(place.name)
+                        Text(place.displayName?.takeIf { it.isNotBlank() && it.trim() != place.name.trim() } ?: "Adres bilgisi yok",
+                            style = MaterialTheme.typography.bodySmall)
+                    }
                 } }
             }
             Text("Arama Nominatim üzerinden yapılır. Sonuçlar © OpenStreetMap katkıcıları.", style = MaterialTheme.typography.bodySmall,
