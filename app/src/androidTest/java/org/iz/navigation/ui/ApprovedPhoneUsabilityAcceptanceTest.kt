@@ -102,7 +102,8 @@ class ApprovedPhoneUsabilityAcceptanceTest {
         fun openAndSearch() {
             compose.onNodeWithText("OSM'de yer eşleştir").performScrollTo().performClick()
             waitForTag("osm-search-query")
-            compose.onNodeWithTag("osm-search-query").performTextReplacement(query).performClick()
+            compose.onNodeWithTag("osm-search-query").performTextReplacement(query)
+            compose.onNodeWithTag("osm-search-query").performClick()
             compose.waitUntil(5_000) { OsmDialogImeTouch.keyboardIsVisible() }
             OsmDialogImeTouch.tapButton("Ara") // No reveal or result scrolling.
             compose.waitUntil(5_000) { compose.onAllNodesWithText(places.first().name).fetchSemanticsNodes().isNotEmpty() }
@@ -171,7 +172,8 @@ class ApprovedPhoneUsabilityAcceptanceTest {
             waitForTag("osm-search-query")
             val query = "${fixture.query}-k05-dns"
             val input = compose.onNodeWithTag("osm-search-query")
-            input.performTextReplacement(query).performClick()
+            input.performTextReplacement(query)
+            input.performClick()
             compose.waitUntil(5_000) { OsmDialogImeTouch.keyboardIsVisible() }
             repeat(2) { attempt ->
                 if (attempt > 0) {
