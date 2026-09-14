@@ -8,6 +8,7 @@ import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -16,10 +17,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -56,35 +60,65 @@ internal fun OsmSearchDialog(
     val searched = searchState.searched
     val error = searchState.error
     DisposableEffect(controller) { onDispose { controller.close() } }
-    AlertDialog(
+    Dialog(
         onDismissRequest = onDismiss,
-        // Constrain the whole dialog, including its fixed dismiss action, above the keyboard.
         properties = DialogProperties(decorFitsSystemWindows = false),
-        modifier = Modifier.systemBarsPadding().imePadding(),
-        title = { Text("Yer ara") }, text = {
-        Column(Modifier.verticalScroll(rememberScrollState()).testTag("osm-search-content"),
-            verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedTextField(searchState.query, { query = it; controller.edit(it) }, label = { Text("Yer adı veya adres") }, singleLine = true,
-                modifier = Modifier.fillMaxWidth().testTag("osm-search-query"))
-            Button(enabled = searchState.query.isNotBlank() && !busy, onClick = controller::submit,
-                modifier = Modifier.testTag("osm-search-submit")) { Text("Ara") }
-            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().testTag("osm-search-progress"))
-            error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("osm-search-error")) }
-            if (searched && results.isEmpty() && !busy && error == null) Text("Yer bulunamadı. Haritadan bir nokta seçebilirsin.",
-                modifier = Modifier.testTag("osm-search-empty"))
-            LazyColumn(Modifier.heightIn(max = 320.dp).testTag("osm-search-results"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(results) { place -> OutlinedCard(onClick = { onSelect(place) }, modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(12.dp)) {
-                        Text(place.name)
-                        Text(place.displayName?.takeIf { it.isNotBlank() && it.trim() != place.name.trim() } ?: "Adres bilgisi yok",
-                            style = MaterialTheme.typography.bodySmall)
+    ) {
+        // A full-height host makes IME insets independent of the changing result content.
+        // Only the surface wraps its contents; its body receives the space left by title/footer.
+        Box(Modifier.fillMaxSize().systemBarsPadding().imePadding().padding(vertical = 12.dp)
+            .testTag("osm-search-viewport")
+            .pointerInput(onDismiss) { detectTapGestures { onDismiss() } },
+            contentAlignment = Alignment.Center) {
+            Surface(
+                modifier = Modifier.fillMaxWidth().testTag("osm-search-surface")
+                    .semantics { paneTitle = "Yer ara" }
+                    .pointerInput(Unit) { detectTapGestures { /* Absorb taps on blank surface space. */ } },
+                shape = AlertDialogDefaults.shape,
+                color = AlertDialogDefaults.containerColor,
+                tonalElevation = AlertDialogDefaults.TonalElevation,
+            ) {
+                Column(Modifier.padding(24.dp)) {
+                    Text("Yer ara", style = MaterialTheme.typography.headlineSmall,
+                        color = AlertDialogDefaults.titleContentColor)
+                    Spacer(Modifier.height(16.dp))
+                    CompositionLocalProvider(LocalContentColor provides AlertDialogDefaults.textContentColor) {
+                        ProvideTextStyle(MaterialTheme.typography.bodyMedium) {
+                            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).testTag("osm-search-content"),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                OutlinedTextField(searchState.query, { query = it; controller.edit(it) }, label = { Text("Yer adı veya adres") }, singleLine = true,
+                                    modifier = Modifier.fillMaxWidth().testTag("osm-search-query"))
+                                Button(enabled = searchState.query.isNotBlank() && !busy, onClick = controller::submit,
+                                    modifier = Modifier.testTag("osm-search-submit")) { Text("Ara") }
+                                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().testTag("osm-search-progress"))
+                                error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("osm-search-error")) }
+                                if (searched && results.isEmpty() && !busy && error == null) Text("Yer bulunamadı. Haritadan bir nokta seçebilirsin.",
+                                    modifier = Modifier.testTag("osm-search-empty"))
+                                LazyColumn(Modifier.heightIn(max = 320.dp).testTag("osm-search-results"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    items(results) { place -> OutlinedCard(onClick = { onSelect(place) }, modifier = Modifier.fillMaxWidth()) {
+                                        Column(Modifier.padding(12.dp)) {
+                                            Text(place.name)
+                                            Text(place.displayName?.takeIf { it.isNotBlank() && it.trim() != place.name.trim() } ?: "Adres bilgisi yok",
+                                                style = MaterialTheme.typography.bodySmall)
+                                        }
+                                    } }
+                                }
+                                Text("Arama Nominatim üzerinden yapılır. Sonuçlar © OpenStreetMap katkıcıları.", style = MaterialTheme.typography.bodySmall,
+                                    color = Muted, modifier = Modifier.testTag("osm-search-attribution"))
+                            }
+                        }
                     }
-                } }
+                    Spacer(Modifier.height(24.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = onDismiss, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
+                            Text("Kapat")
+                        }
+                    }
+                }
             }
-            Text("Arama Nominatim üzerinden yapılır. Sonuçlar © OpenStreetMap katkıcıları.", style = MaterialTheme.typography.bodySmall,
-                color = Muted, modifier = Modifier.testTag("osm-search-attribution"))
         }
-    }, confirmButton = {}, dismissButton = { TextButton(onClick = onDismiss) { Text("Kapat") } })
+    }
+
 }
 
 internal fun ContributionKind.label(): String = when (this) {
