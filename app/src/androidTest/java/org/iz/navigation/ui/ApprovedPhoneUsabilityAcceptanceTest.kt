@@ -109,7 +109,8 @@ class ApprovedPhoneUsabilityAcceptanceTest {
         closeSoftKeyboard() // Only setup: the search's IME must remain open through Ara and Kapat.
         compose.onNodeWithText("OSM’de yer eşleştir").performScrollTo().performClick()
         waitForTag("osm-search-query")
-        compose.onNodeWithTag("osm-search-query").performTextReplacement(query).performClick()
+        compose.onNodeWithTag("osm-search-query").performTextReplacement(query)
+        compose.onNodeWithTag("osm-search-query").performClick()
         compose.waitUntil(5_000) { OsmDialogImeTouch.keyboardIsVisible() }
         val stateTag = if (localError) "osm-search-error" else "osm-search-empty"
         fixture.capture("ime_before_submit", OsmDialogImeTouch.tapButton("Ara", reveal = true))
@@ -117,7 +118,16 @@ class ApprovedPhoneUsabilityAcceptanceTest {
         if (localError) compose.onNodeWithTag(stateTag).assertTextEquals("Arama en fazla 200 karakter olabilir.")
         // Fail before any workaround: the whole fixed footer hit area must already be above IME.
         fixture.capture("ime_after_result", OsmDialogImeTouch.buttonFacts("Kapat"))
-        compose.onNodeWithTag("osm-search-query").assertTextContains(query)
+        val input = compose.onNodeWithTag("osm-search-query")
+        input.assertTextContains(query)
+        // Clear the old result first: an ignored second tap must never reuse a previous PASS state.
+        input.performTextReplacement("$query ")
+        compose.onNodeWithTag(stateTag).assertDoesNotExist()
+        input.performTextReplacement(query)
+        input.assertTextContains(query)
+        compose.onNodeWithTag(stateTag).assertDoesNotExist()
+        compose.onNodeWithTag("osm-search-progress").assertDoesNotExist()
+        fixture.assertSearchStayedCached()
         fixture.capture("ime_resubmit", OsmDialogImeTouch.tapButton("Ara", reveal = true))
         waitForTag(stateTag)
         fixture.assertSearchStayedCached()
