@@ -427,9 +427,9 @@ class JourneyNavigationCoordinator(
     } }
 
     /** Applies a confirmed stop only to the same guidance after earlier commands finish. */
-    suspend fun stopGuidance(expectedSessionId: String, expectedRouteRevision: Long): Boolean = commands.withLock {
+    suspend fun stopGuidance(expected: NavigationStopSnapshot): Boolean = commands.withLock {
         val before = mutableState.value
-        if (before.sessionId != expectedSessionId || before.routeRevision != expectedRouteRevision ||
+        if (NavigationStopSnapshot.from(before) != expected ||
             !before.guidance || before.trackFollow != null || trackStartPending) return@withLock false
         clearRoute()
         releaseIfIdle()
@@ -437,8 +437,20 @@ class JourneyNavigationCoordinator(
     }
 
     suspend fun stopRecording(expectedJourneyId: String) = commands.withLock {
+        stopRecordingLocked(expectedJourneyId)
+    }
+
+    suspend fun stopRecording(expected: NavigationStopSnapshot): Boolean = commands.withLock {
         val before = mutableState.value
-        if (before.simulation || before.journey?.id != expectedJourneyId) return@withLock
+        if (NavigationStopSnapshot.from(before) != expected || before.simulation ||
+            !before.recording || before.journey == null) return@withLock false
+        stopRecordingLocked(before.journey.id)
+        true
+    }
+
+    private suspend fun stopRecordingLocked(expectedJourneyId: String) {
+        val before = mutableState.value
+        if (before.simulation || before.journey?.id != expectedJourneyId) return
         stoppingRecordingId = expectedJourneyId
         retireJourney(expectedJourneyId)
         try {
@@ -464,6 +476,12 @@ class JourneyNavigationCoordinator(
 
     suspend fun finishSession(expectedSessionId: String) = commands.withLock {
         finishSessionLocked(expectedSessionId)
+    }
+
+    suspend fun finishSession(expected: NavigationStopSnapshot): Boolean = commands.withLock {
+        if (NavigationStopSnapshot.from(mutableState.value) != expected) return@withLock false
+        finishSessionLocked(expected.sessionId)
+        true
     }
 
     private suspend fun finishSessionLocked(expectedSessionId: String) {

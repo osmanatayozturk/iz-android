@@ -25,6 +25,8 @@ class JourneyNavigationCoordinatorTest {
         var preparing = false
         var renderFailure = false
         var speechFailure: RuntimeException? = null
+        var finishFailure: RuntimeException? = null
+        var onStopRecording: (suspend () -> Unit)? = null
         var planCalls = 0
         var onPlan: (suspend (List<RouteStop>, Transport) -> PlannedRoute)? = null
         override suspend fun activeJourney(): Journey? {
@@ -42,7 +44,8 @@ class JourneyNavigationCoordinatorTest {
             confirmed++; journeys.value = journeys.value.map { it.copy(status = JourneyStatus.CONFIRMED, transport = transport) }
             onConfirmed?.invoke()
         }
-        override suspend fun finish(id: String) { finished++; journeys.value = journeys.value.map { it.copy(endedAt = 2000) }; running = null }
+        override suspend fun stopRecording(id: String) { onStopRecording?.invoke(); finish(id) }
+        override suspend fun finish(id: String) { finishFailure?.let { throw it }; finished++; journeys.value = journeys.value.map { it.copy(endedAt = 2000) }; running = null }
         override suspend fun interrupt(id: String) { journeys.value = journeys.value.map { it.copy(interrupted = true, endedAt = 2000) }; running = null; onInterrupted?.invoke() }
         override fun setPreparingNoRecord(enabled: Boolean) { preparing = enabled }
         override fun recordingId() = running
@@ -128,7 +131,7 @@ class JourneyNavigationCoordinatorTest {
         val session = controller.startGuidance(route())
         controller.setSharingLocation(true)
         val before = controller.state.value
-        assertTrue(controller.stopGuidance(session, before.routeRevision))
+        assertTrue(controller.stopGuidance(requireNotNull(NavigationStopSnapshot.from(before))))
         val stopped = controller.state.value
         assertFalse(stopped.guidance)
         assertNull(stopped.route)
@@ -144,7 +147,7 @@ class JourneyNavigationCoordinatorTest {
     @Test fun guardedStopReleasesSessionWhenGuidanceWasItsLastDemand() = runTest {
         val controller = JourneyNavigationCoordinator(Runtime(), null, {1000L}, backgroundScope)
         val session = controller.startGuidance(route(), recordJourney = false)
-        assertTrue(controller.stopGuidance(session, controller.state.value.routeRevision))
+        assertTrue(controller.stopGuidance(captureStop(controller)))
         assertNull(controller.state.value.sessionId)
         assertFalse(controller.state.value.guidance)
         assertFalse(controller.state.value.recording)
@@ -154,7 +157,7 @@ class JourneyNavigationCoordinatorTest {
         val controller = JourneyNavigationCoordinator(Runtime(), null, {1000L}, backgroundScope)
         val session = controller.startGuidance(route(), recordJourney = false)
         controller.setSharingLocation(true)
-        assertTrue(controller.stopGuidance(session, controller.state.value.routeRevision))
+        assertTrue(controller.stopGuidance(captureStop(controller)))
         assertNull(controller.state.value.route)
         assertEquals(session, controller.state.value.sessionId)
         assertTrue(controller.state.value.sharingLocation)
@@ -168,7 +171,7 @@ class JourneyNavigationCoordinatorTest {
         val controller = JourneyNavigationCoordinator(runtime, null, {1000L}, backgroundScope)
         controller.startGuidance(route())
         val before = controller.state.value
-        assertFalse(controller.stopGuidance("another-session", before.routeRevision))
+        assertFalse(controller.stopGuidance(captureStop(controller).copy(sessionId = "another-session")))
         assertSame(before, controller.state.value)
         assertEquals(before.journey!!.id, runtime.demand)
         assertEquals(0, runtime.finished)
@@ -178,10 +181,11 @@ class JourneyNavigationCoordinatorTest {
         val controller = JourneyNavigationCoordinator(Runtime(), null, {1000L}, backgroundScope)
         val session = controller.startGuidance(route())
         val oldRevision = controller.state.value.routeRevision
+        val oldExpected = captureStop(controller)
         assertEquals(session, controller.startGuidance(route().copy(id = "replacement")))
         val before = controller.state.value
         assertNotEquals(oldRevision, before.routeRevision)
-        assertFalse(controller.stopGuidance(session, oldRevision))
+        assertFalse(controller.stopGuidance(oldExpected))
         assertSame(before, controller.state.value)
         assertEquals("replacement", controller.state.value.route!!.id)
     }
@@ -192,12 +196,13 @@ class JourneyNavigationCoordinatorTest {
         val session = controller.startGuidance(route())
         runCurrent()
         val oldRevision = controller.state.value.routeRevision
+        val oldExpected = captureStop(controller)
         val entered = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
         runtime.onActive = { entered.complete(Unit); release.await() }
         val replacement = async { runCatching { controller.startGuidance(route().copy(id = "new-route")) } }
         entered.await()
-        val stop = async { controller.stopGuidance(session, oldRevision) }
+        val stop = async { controller.stopGuidance(oldExpected) }
         runCurrent()
         val queued = !stop.isCompleted
         release.complete(Unit)
@@ -212,7 +217,8 @@ class JourneyNavigationCoordinatorTest {
     @Test fun guardedStopRejectsIdleCoordinatorWithoutMutation() = runTest {
         val controller = JourneyNavigationCoordinator(Runtime(), null, {1000L}, backgroundScope)
         val before = controller.state.value
-        assertFalse(controller.stopGuidance("closed-session", before.routeRevision))
+        assertNull(NavigationStopSnapshot.from(before))
+        assertFalse(controller.stopGuidance(NavigationStopSnapshot("closed-session", null, 0, false, false, false, false)))
         assertSame(before, controller.state.value)
     }
 
@@ -221,7 +227,7 @@ class JourneyNavigationCoordinatorTest {
         val session = controller.activateRoute(route())
         val before = controller.state.value
         assertFalse(before.guidance)
-        assertFalse(controller.stopGuidance(session, before.routeRevision))
+        assertFalse(controller.stopGuidance(requireNotNull(NavigationStopSnapshot.from(before))))
         assertSame(before, controller.state.value)
         assertNotNull(controller.state.value.route)
         assertTrue(controller.state.value.recording)
@@ -233,7 +239,7 @@ class JourneyNavigationCoordinatorTest {
             WeatherCoordinate(40.0, 29.0), WeatherCoordinate(40.01, 29.0)))), 1)
         val session = controller.startTrackFollow(track, TrackFollowSelection(), Transport.CAR)
         val before = controller.state.value
-        assertFalse(controller.stopGuidance(session, before.routeRevision))
+        assertFalse(controller.stopGuidance(requireNotNull(NavigationStopSnapshot.from(before))))
         assertSame(before, controller.state.value)
         assertEquals(track.id, controller.state.value.trackFollow!!.track.id)
     }
@@ -244,6 +250,7 @@ class JourneyNavigationCoordinatorTest {
         val session = controller.startGuidance(route())
         runCurrent()
         val oldRevision = controller.state.value.routeRevision
+        val oldExpected = captureStop(controller)
         val entered = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
         runtime.onActive = { entered.complete(Unit); release.await() }
@@ -251,7 +258,7 @@ class JourneyNavigationCoordinatorTest {
             WeatherCoordinate(40.0, 29.0), WeatherCoordinate(40.01, 29.0)))), 1)
         val activation = async { controller.startTrackFollow(track, TrackFollowSelection(), Transport.CAR, replaceExisting = true) }
         entered.await()
-        val stop = async { controller.stopGuidance(session, oldRevision) }
+        val stop = async { controller.stopGuidance(oldExpected) }
         runCurrent()
         val queued = !stop.isCompleted
         release.complete(Unit)
@@ -269,9 +276,242 @@ class JourneyNavigationCoordinatorTest {
         val session = controller.startGuidance(route())
         val failure = IllegalStateException("Synthetic speech stop failure")
         runtime.speechFailure = failure
-        val result = runCatching { controller.stopGuidance(session, controller.state.value.routeRevision) }
+        val result = runCatching { controller.stopGuidance(captureStop(controller)) }
         runtime.speechFailure = null
         assertSame(failure, result.exceptionOrNull())
+    }
+
+    @Test fun queuedSharingChangeInvalidatesGUIDANCE() = runTest { queuedSharingChangeInvalidates(StopAction.GUIDANCE) }
+    @Test fun queuedSharingChangeInvalidatesRECORDING() = runTest { queuedSharingChangeInvalidates(StopAction.RECORDING) }
+    @Test fun queuedSharingChangeInvalidatesSESSION() = runTest { queuedSharingChangeInvalidates(StopAction.SESSION) }
+
+    private suspend fun TestScope.queuedSharingChangeInvalidates(action: StopAction) {
+        val runtime = Runtime()
+        val controller = JourneyNavigationCoordinator(runtime, null, {1000L}, backgroundScope)
+        val session = controller.startGuidance(route())
+        runCurrent()
+        val expected = captureStop(controller)
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        runtime.onActive = { entered.complete(Unit); release.await() }
+        val holder = async { controller.startFreeDrive(Transport.CAR) }
+        entered.await()
+        val sharing = async { controller.setSharingLocation(true, session) }
+        runCurrent()
+        val stopping = async { controller.stopConfirmed(action, expected) }
+        runCurrent()
+        val queued = !stopping.isCompleted
+        release.complete(Unit)
+        assertEquals(session, holder.await())
+        sharing.await()
+        assertFalse("$action must reject newly enabled sharing", stopping.await())
+        assertTrue(queued)
+        assertEquals(session, controller.state.value.sessionId)
+        assertTrue(controller.state.value.guidance)
+        assertTrue(controller.state.value.recording)
+        assertTrue(controller.state.value.sharingLocation)
+        assertEquals(0, runtime.finished)
+    }
+
+    @Test fun queuedRecordingStartInvalidatesGUIDANCE() = runTest { queuedRecordingStartInvalidates(StopAction.GUIDANCE) }
+    @Test fun queuedRecordingStartInvalidatesSESSION() = runTest { queuedRecordingStartInvalidates(StopAction.SESSION) }
+
+    private suspend fun TestScope.queuedRecordingStartInvalidates(action: StopAction) {
+        val runtime = Runtime()
+        val controller = JourneyNavigationCoordinator(runtime, null, {1000L}, backgroundScope)
+        val session = controller.startGuidance(route(), recordJourney = false)
+        runCurrent()
+        val expected = captureStop(controller)
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        runtime.onActive = { entered.complete(Unit); release.await() }
+        val recording = async { controller.startFreeDrive(Transport.CAR) }
+        entered.await()
+        val stopping = async { controller.stopConfirmed(action, expected) }
+        runCurrent()
+        val queued = !stopping.isCompleted
+        release.complete(Unit)
+        assertEquals(session, recording.await())
+        assertFalse("$action must reject newly started recording", stopping.await())
+        assertTrue(queued)
+        assertEquals(session, controller.state.value.sessionId)
+        assertTrue(controller.state.value.guidance)
+        assertTrue(controller.state.value.recording)
+        assertEquals("trip-1", runtime.running)
+        assertEquals(0, runtime.finished)
+    }
+
+    @Test fun queuedRecordingStopInvalidatesGUIDANCE() = runTest { queuedRecordingStopInvalidates(StopAction.GUIDANCE) }
+    @Test fun queuedRecordingStopInvalidatesRECORDING() = runTest { queuedRecordingStopInvalidates(StopAction.RECORDING) }
+    @Test fun queuedRecordingStopInvalidatesSESSION() = runTest { queuedRecordingStopInvalidates(StopAction.SESSION) }
+
+    private suspend fun TestScope.queuedRecordingStopInvalidates(action: StopAction) {
+        val runtime = Runtime()
+        val controller = JourneyNavigationCoordinator(runtime, null, {1000L}, backgroundScope)
+        val session = controller.startGuidance(route())
+        controller.setSharingLocation(true)
+        runCurrent()
+        val expected = captureStop(controller)
+        val journey = controller.state.value.journey!!.id
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        runtime.onStopRecording = { entered.complete(Unit); release.await() }
+        val recording = async { controller.stopRecording(journey) }
+        entered.await()
+        val stopping = async { controller.stopConfirmed(action, expected) }
+        runCurrent()
+        val queued = !stopping.isCompleted
+        release.complete(Unit)
+        recording.await()
+        assertFalse("$action must reject changed recording ownership", stopping.await())
+        assertTrue(queued)
+        assertEquals(session, controller.state.value.sessionId)
+        assertTrue(controller.state.value.guidance)
+        assertFalse(controller.state.value.recording)
+        assertNull(controller.state.value.journey)
+        assertTrue(controller.state.value.sharingLocation)
+        assertEquals(1, runtime.finished)
+    }
+
+    @Test fun recordingConfirmationStopsOnlyRecordingAndPreservesGuidanceAndSharing() = runTest {
+        val runtime = Runtime()
+        val controller = JourneyNavigationCoordinator(runtime, null, {1000L}, backgroundScope)
+        val session = controller.startGuidance(route())
+        controller.setSharingLocation(true)
+        val expected = captureStop(controller)
+        assertTrue(controller.stopConfirmed(StopAction.RECORDING, expected))
+        assertEquals(session, controller.state.value.sessionId)
+        assertEquals("r", controller.state.value.route!!.id)
+        assertTrue(controller.state.value.guidance)
+        assertTrue(controller.state.value.sharingLocation)
+        assertFalse(controller.state.value.recording)
+        assertNull(controller.state.value.journey)
+        assertEquals(1, runtime.finished)
+        assertNull(runtime.running)
+    }
+
+    @Test fun wholeSessionConfirmationEndsExactlyTheConfirmedWork() = runTest {
+        val runtime = Runtime()
+        val controller = JourneyNavigationCoordinator(runtime, null, {1000L}, backgroundScope)
+        controller.startGuidance(route())
+        controller.setSharingLocation(true)
+        assertTrue(controller.stopConfirmed(StopAction.SESSION, captureStop(controller)))
+        assertNull(controller.state.value.sessionId)
+        assertNull(controller.state.value.route)
+        assertFalse(controller.state.value.recording)
+        assertFalse(controller.state.value.sharingLocation)
+        assertEquals(1, runtime.finished)
+    }
+
+    @Test fun everyStableConfirmationFieldIsCheckedByEveryEndingAction() = runTest {
+        val runtime = Runtime()
+        val controller = JourneyNavigationCoordinator(runtime, null, {1000L}, backgroundScope)
+        controller.startGuidance(route())
+        controller.setSharingLocation(true)
+        val before = controller.state.value
+        val expected = captureStop(controller)
+        val changed = listOf(
+            expected.copy(sessionId = "different-session"),
+            expected.copy(journeyId = "different-recording"),
+            expected.copy(routeRevision = expected.routeRevision + 1),
+            expected.copy(guidance = false),
+            expected.copy(recording = false),
+            expected.copy(sharingLocation = false),
+            expected.copy(simulation = true),
+        )
+        for (action in StopAction.entries) for (other in changed) {
+            assertFalse("$action must reject a changed confirmation tuple", controller.stopConfirmed(action, other))
+            assertSame(before, controller.state.value)
+            assertEquals(0, runtime.finished)
+        }
+    }
+
+    @Test fun locationProgressAndPresentationChangesDoNotInvalidateConfirmation() = runTest {
+        for (action in StopAction.entries) {
+            val controller = JourneyNavigationCoordinator(Runtime(), null, {1000L}, backgroundScope)
+            val session = controller.startGuidance(route())
+            controller.setSharingLocation(true)
+            val expected = captureStop(controller)
+            controller.onAcceptedLocation(session, NavigationFix(route().stops.first().coordinate, 1000, 5f))
+            while (controller.state.value.fix == null) yield()
+            controller.setMuted(true)
+            runCurrent()
+            assertNotNull(controller.state.value.progress)
+            assertTrue(controller.state.value.muted)
+            assertTrue("$action must ignore changing GPS/progress/presentation", controller.stopConfirmed(action, expected))
+        }
+    }
+
+    @Test fun recordingConfirmationRejectsSimulationOrMissingRecordingWithoutMutation() = runTest {
+        for (simulation in listOf(false, true)) {
+            val runtime = Runtime()
+            val controller = JourneyNavigationCoordinator(runtime, null, {1000L}, backgroundScope)
+            if (simulation) controller.enableSimulation()
+            controller.startGuidance(route(), recordJourney = simulation)
+            val before = controller.state.value
+            assertFalse(controller.stopConfirmed(StopAction.RECORDING, captureStop(controller)))
+            assertSame(before, controller.state.value)
+            assertEquals(0, runtime.finished)
+        }
+    }
+
+    @Test fun repeatedEndingConfirmationReturnsFalseAfterTheFirstAction() = runTest {
+        for (action in StopAction.entries) {
+            val runtime = Runtime()
+            val controller = JourneyNavigationCoordinator(runtime, null, {1000L}, backgroundScope)
+            controller.startGuidance(route())
+            val expected = captureStop(controller)
+            assertTrue(controller.stopConfirmed(action, expected))
+            val stopped = controller.state.value
+            assertFalse(controller.stopConfirmed(action, expected))
+            assertSame(stopped, controller.state.value)
+            assertEquals(if (action == StopAction.GUIDANCE) 0 else 1, runtime.finished)
+        }
+    }
+
+    @Test fun recordingFailureRestoresOwnershipAndAllowsTheSameConfirmationToRetry() = runTest {
+        val runtime = Runtime()
+        val controller = JourneyNavigationCoordinator(runtime, null, {1000L}, backgroundScope)
+        controller.startGuidance(route())
+        controller.setSharingLocation(true)
+        val before = controller.state.value
+        val expected = captureStop(controller)
+        val failure = IllegalStateException("Synthetic recorder failure")
+        runtime.finishFailure = failure
+        assertSame(failure, runCatching { controller.stopConfirmed(StopAction.RECORDING, expected) }.exceptionOrNull())
+        runtime.finishFailure = null
+        runCurrent()
+        assertEquals(before.journey, controller.state.value.journey)
+        assertTrue(controller.state.value.recording)
+        assertTrue(controller.state.value.guidance)
+        assertTrue(controller.state.value.sharingLocation)
+        assertTrue(controller.stopConfirmed(StopAction.RECORDING, expected))
+        assertEquals(1, runtime.finished)
+    }
+
+    @Test fun wholeSessionFailurePropagatesAndAllowsTheSameConfirmationToRetry() = runTest {
+        val runtime = Runtime()
+        val controller = JourneyNavigationCoordinator(runtime, null, {1000L}, backgroundScope)
+        controller.startGuidance(route())
+        val expected = captureStop(controller)
+        val failure = IllegalStateException("Synthetic finish failure")
+        runtime.finishFailure = failure
+        assertSame(failure, runCatching { controller.stopConfirmed(StopAction.SESSION, expected) }.exceptionOrNull())
+        runtime.finishFailure = null
+        assertTrue(controller.state.value.recording)
+        assertTrue(controller.state.value.guidance)
+        assertTrue(controller.stopConfirmed(StopAction.SESSION, expected))
+        assertNull(controller.state.value.sessionId)
+        assertEquals(1, runtime.finished)
+    }
+
+    private enum class StopAction { GUIDANCE, RECORDING, SESSION }
+    private fun captureStop(controller: JourneyNavigationCoordinator): NavigationStopSnapshot =
+        requireNotNull(NavigationStopSnapshot.from(controller.state.value))
+    private suspend fun JourneyNavigationCoordinator.stopConfirmed(action: StopAction, expected: NavigationStopSnapshot): Boolean = when (action) {
+        StopAction.GUIDANCE -> stopGuidance(expected)
+        StopAction.RECORDING -> stopRecording(expected)
+        StopAction.SESSION -> finishSession(expected)
     }
 
     @Test fun sharingRequiresLiveSessionAndSimulationCannotShare() = runTest {

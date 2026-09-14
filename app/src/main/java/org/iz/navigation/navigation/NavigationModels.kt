@@ -45,3 +45,20 @@ data class NavigationState(
     val trackFollow: org.iz.navigation.gpx.TrackFollowState? = null,
     val interruptedTrackFollow: Boolean = false,
 )
+/** Ephemeral confirmation identity; changing fixes, progress and messages do not invalidate it. */
+data class NavigationStopSnapshot(
+    val sessionId: String,
+    val journeyId: String?,
+    val routeRevision: Long,
+    val guidance: Boolean,
+    val recording: Boolean,
+    val sharingLocation: Boolean,
+    val simulation: Boolean,
+) {
+    companion object {
+        fun from(state: NavigationState): NavigationStopSnapshot? = state.sessionId?.let { sessionId ->
+            NavigationStopSnapshot(sessionId, state.journey?.id, state.routeRevision, state.guidance,
+                state.recording, state.sharingLocation, state.simulation)
+        }
+    }
+}
