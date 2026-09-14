@@ -9,6 +9,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.iz.navigation.data.SelectedOsmPlace
+import org.iz.navigation.integration.OsmServiceException
+import java.net.SocketException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 
 internal data class OsmSearchUiState(
     val query: String,
@@ -50,7 +54,7 @@ internal class OsmSearchController(
             catch (cancel: CancellationException) { throw cancel }
             catch (failure: Exception) {
                 if (request == generation && isActive) {
-                    mutable.value = mutable.value.copy(error = failure.message ?: "Arama tamamlanamadı.")
+                    mutable.value = mutable.value.copy(error = searchErrorMessage(failure))
                 }
             }
             finally {
@@ -70,4 +74,31 @@ internal class OsmSearchController(
         job?.cancel()
         job = null
     }
+}
+
+// Only this screen's existing controlled exception contracts may supply a specific UI message.
+// Return local literals/reconstructed numeric codes; never forward arbitrary diagnostic text.
+private const val searchConnectionMessage = "Arama servisine ulaşılamadı. Bağlantını kontrol edip yeniden ara."
+private const val searchGenericMessage = "Arama tamamlanamadı. Biraz sonra yeniden dene."
+private const val searchQueryLimitMessage = "Arama en fazla 200 karakter olabilir."
+private val controlledSearchServiceMessages = setOf(
+    "Yer arama servisi beklememizi istiyor. Biraz sonra yeniden ara.",
+    "Servis boş yanıt verdi.",
+    "Servis yanıtı boyut sınırını aştı.",
+)
+private val controlledSearchStateMessages = setOf(
+    "Arama sınırı kaydedilemedi.",
+    "Arama bekleme süresi kaydedilemedi.",
+)
+private val searchHttpMessage = Regex("""Yer araması şu an kullanılamıyor \(([1-5][0-9]{2})\)\.""")
+
+private fun searchErrorMessage(failure: Exception): String = when (failure) {
+    is OsmServiceException -> controlledSearchServiceMessages.firstOrNull { it == failure.message }
+        ?: searchHttpMessage.matchEntire(failure.message.orEmpty())?.let {
+            "Yer araması şu an kullanılamıyor (${it.groupValues[1].toInt()})."
+        } ?: searchGenericMessage
+    is UnknownHostException, is SocketException, is SocketTimeoutException -> searchConnectionMessage
+    is IllegalArgumentException -> if (failure.message == searchQueryLimitMessage) searchQueryLimitMessage else searchGenericMessage
+    is IllegalStateException -> controlledSearchStateMessages.firstOrNull { it == failure.message } ?: searchGenericMessage
+    else -> searchGenericMessage
 }
