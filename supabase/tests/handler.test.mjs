@@ -191,3 +191,31 @@ test('empty body and failed stream reads preserve safe errors and release locks'
  assert.equal(failed.stream.locked,false);
  assert.equal(calls.length,4);
 });
+
+test('authorization and denied quota reject streamed bodies before reading or command dispatch',async()=>{
+ const cases=[
+  {kind:'missing',status:401,error:'unauthorized',calls:0},
+  {kind:'forged',status:401,error:'unauthorized',calls:1},
+  {kind:'nonanonymous',status:403,error:'anonymous_identity_required',calls:1},
+  {kind:'quota',status:429,error:'rate_limited',calls:2},
+ ];
+ for(const item of cases) {
+  const input=streamedRequest([new Uint8Array(1024*1024)]);
+  if(item.kind==='missing')input.request.headers.delete('Authorization');
+  const calls=[];
+  globalThis.fetch=async(url)=>{
+   calls.push(url);
+   if(url.endsWith('/user'))return item.kind==='forged'
+    ? json({},401) : json({id:user,is_anonymous:item.kind!=='nonanonymous'});
+   if(url.endsWith('/iz_group_rate_limit'))return json(false);
+   throw Error('Unexpected command or publish dispatch');
+  };
+  const response=await handler(input.request);
+  assert.equal(response.status,item.status,item.kind);
+  assert.deepEqual(await response.json(),{ok:false,error:item.error},item.kind);
+  assert.equal(input.reads,0,item.kind);
+  assert.equal(input.stream.locked,false,item.kind);
+  assert.equal(calls.length,item.calls,item.kind);
+  assert.equal(calls.some(url=>url.endsWith('/iz_group_command') || url.endsWith('/iz_group_publish')),false,item.kind);
+ }
+});
