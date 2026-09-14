@@ -5,12 +5,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -115,17 +113,15 @@ class OsmSearchDialogTest {
         compose.runOnIdle { assertSame(place, selected) }
     }
 
-    @Test fun fullNameAndExistingAddressWrapWithoutTruncationAtLargeFont() {
+    @Test fun fullLongNameAndExistingAddressWrapAtActualDialogFontScale() {
         val place = SelectedOsmPlace(
-            "Sentetik araştırma binası", 40.0, 30.0, OsmRef(OsmType.WAY, 301),
-            displayName = "Sentetik araştırma binası, Uzun Deneme Sokağı 12, Örnek Mahallesi, Test İlçesi",
+            "Sentetik araştırma binası ek hizmet ve deney merkezi", 40.0, 30.0, OsmRef(OsmType.WAY, 301),
+            displayName = "Sentetik araştırma binası ek hizmet ve deney merkezi, Uzun Deneme Sokağı 12, Örnek Mahallesi, Test İlçesi",
         )
         var selected: SelectedOsmPlace? = null
         compose.setContent {
-            val density = LocalDensity.current
-            CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale = 2f)) {
-                IzTheme { OsmSearchDialog({}, { selected = it }, initialQuery = "bina", searchPlaces = { listOf(place) }) }
-            }
+            // Dialog owns its density; Test controls the actual system font-scale matrix.
+            IzTheme { OsmSearchDialog({}, { selected = it }, initialQuery = "bina", searchPlaces = { listOf(place) }) }
         }
         compose.onNodeWithText("Yer ara").assertIsDisplayed()
         submit()
@@ -267,8 +263,9 @@ class OsmSearchDialogTest {
         target.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
         val layout = layouts.single()
         val node = target.fetchSemanticsNode()
+        val systemFontScale = InstrumentationRegistry.getInstrumentation().targetContext.resources.configuration.fontScale
         val metrics = "text=$expected; density=${layout.layoutInput.density.density}; " +
-            "fontScale=${layout.layoutInput.density.fontScale}; rootDensity=${compose.density.density}; rootFontScale=${compose.density.fontScale}; " +
+            "fontScale=${layout.layoutInput.density.fontScale}; systemFontScale=$systemFontScale; rootDensity=${compose.density.density}; rootFontScale=${compose.density.fontScale}; " +
             "fontSize=${layout.layoutInput.style.fontSize}; constraints=${layout.layoutInput.constraints}; " +
             "lines=${layout.lineCount}; overflowWidth=${layout.didOverflowWidth}; overflowHeight=${layout.didOverflowHeight}; hasVisualOverflow=${layout.hasVisualOverflow}; " +
             "size=${layout.size}; paragraphWidth=${layout.multiParagraph.width}; paragraphHeight=${layout.multiParagraph.height}; " +
@@ -288,9 +285,21 @@ class OsmSearchDialogTest {
             }
         }
         if (requireWrapping) assertTrue("Long text must wrap naturally: $metrics", layout.lineCount > 1)
-        assertFalse("Text layout overflows: $metrics", layout.hasVisualOverflow)
-        assertEquals("Text must include the last character: $metrics", layout.layoutInput.text.length, layout.getLineEnd(layout.lineCount - 1))
-        assertTrue("The last line must fit the measured text: $metrics", layout.getLineBottom(layout.lineCount - 1) <= layout.size.height + 1f)
+        assertEquals("Dialog must use the actual system font scale: $metrics", systemFontScale, layout.layoutInput.density.fontScale, .01f)
+        assertEquals("Layout must preserve the original text: $metrics", expected, layout.layoutInput.text.text)
+        // Cached paragraph width can exceed an intrinsic text node without clipping its lines.
+        // Check every rendered line against both measured sizes instead of hasVisualOverflow.
+        assertFalse("Text height overflows: $metrics", layout.didOverflowHeight)
+        val availableWidth = minOf(layout.size.width, node.size.width) + 1f
+        val availableHeight = minOf(layout.size.height, node.size.height) + 1f
+        for (line in 0 until layout.lineCount) {
+            assertFalse("Line $line is ellipsized: $metrics", layout.isLineEllipsized(line))
+            assertTrue("Line $line starts outside the text node: $metrics", layout.getLineLeft(line) >= -1f)
+            assertTrue("Line $line ends outside the text node: $metrics", layout.getLineRight(line) <= availableWidth)
+            assertTrue("Line $line starts above the text node: $metrics", layout.getLineTop(line) >= -1f)
+            assertTrue("Line $line ends below the text node: $metrics", layout.getLineBottom(line) <= availableHeight)
+        }
+        assertEquals("Text must include the last character: $metrics", expected.length, layout.getLineEnd(layout.lineCount - 1))
         assertFullyVisible(target)
     }
 
