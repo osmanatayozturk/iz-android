@@ -86,8 +86,10 @@ class CompactNavigationCardTest {
         capture("long-320")
         compose.onNodeWithTag("home-finish-session").performClick()
         compose.onNodeWithTag("live-guidance-card").assertDoesNotExist()
-        compose.onNodeWithText(instruction, useUnmergedTree = true).performScrollTo().assertIsDisplayed()
-        compose.onNodeWithTag("directions-route-summary").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("navigation-screen").performScrollToNode(hasText(instruction))
+        compose.onNodeWithText(instruction, useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag("navigation-screen").performScrollToNode(hasTestTag("directions-route-summary"))
+        compose.onNodeWithTag("directions-route-summary").assertIsDisplayed()
     }
 
     @Test fun warningsAndArrivalRecordingRemainVisible() {
@@ -168,9 +170,11 @@ class CompactNavigationCardTest {
 
     private fun assertPanelAndReturn(original: NavigationState, expectedOpens: Int) {
         compose.onNodeWithTag("live-guidance-card").assertDoesNotExist()
-        compose.onNodeWithTag("directions-route-summary").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("navigation-screen").performScrollToNode(hasTestTag("directions-route-summary"))
+        compose.onNodeWithTag("directions-route-summary").assertIsDisplayed()
         compose.runOnIdle { assertEquals(original, state.value); assertEquals(expectedOpens, opens) }
-        compose.onNodeWithTag("close-directions-planner").performScrollTo().performClick()
+        compose.onNodeWithTag("navigation-screen").performScrollToNode(hasTestTag("close-directions-planner"))
+        compose.onNodeWithTag("close-directions-planner").performClick()
         compose.onAllNodesWithTag("live-guidance-card").assertCountEquals(1)
         compose.runOnIdle { assertEquals(original, state.value) }
     }
