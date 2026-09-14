@@ -99,33 +99,37 @@ internal fun NavigationHomeContent(
             if (!showPlanner && live) Surface(onClick = onManageSession, shape = RoundedCornerShape(20.dp), shadowElevation = 2.dp,
                 color = MaterialTheme.colorScheme.surface.copy(alpha = .98f), modifier = Modifier.fillMaxWidth().padding(end = 60.dp).testTag("live-guidance-card")
                     .semantics { onClick(label = "Yolculuk işlemlerini aç", action = null) }) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(if (nav.simulation) "SİMÜLASYON" else if (nav.recording) "KAYIT AÇIK" else "KAYITSIZ YOLCULUK",
-                            Modifier.weight(1f), color = Forest, style = MaterialTheme.typography.labelSmall)
-                        if (nav.guidance) IconButton(onMute, Modifier.size(40.dp)) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (nav.guidance) nav.progress?.nextManeuverDistanceMeters?.let { meters ->
+                            Text(if (meters >= 1000) "%.1f km sonra".format(meters / 1000) else "${meters.roundToInt().coerceAtLeast(0)} m sonra",
+                                modifier = Modifier.align(Alignment.CenterVertically),
+                                style = MaterialTheme.typography.titleLarge, color = Forest)
+                        }
+                        if (nav.guidance) IconButton(onMute,
+                            Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+                                .align(Alignment.CenterVertically).testTag("compact-card-mute")) {
                             Icon(if (nav.muted) Icons.Outlined.VolumeOff else Icons.Outlined.VolumeUp,
                                 if (nav.muted) "Sesi aç" else "Sesi kapat")
                         }
-                        if (compact) TextButton(onManageSession,
-                            modifier = Modifier.height(40.dp).testTag("home-finish-session").semantics { contentDescription = "Yolculuk işlemlerini aç" },
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) { Text("İşlemler") }
+                        TextButton(onManageSession,
+                            modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+                                .align(Alignment.CenterVertically).testTag("home-finish-session")
+                                .semantics { contentDescription = "Yolculuk işlemlerini aç" },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("İşlemler") }
                     }
+                    if (nav.simulation) Text("Simülasyon", color = Forest, style = MaterialTheme.typography.labelSmall)
                     if (nav.guidance) {
-                        nav.progress?.nextManeuverDistanceMeters?.let { meters ->
-                            Text(if (meters >= 1000) "%.1f km sonra".format(meters / 1000) else "${meters.roundToInt().coerceAtLeast(0)} m sonra",
-                                style = MaterialTheme.typography.titleLarge, color = Forest)
-                        }
                         Text(navigationInstruction(nav), fontSize = 24.sp, lineHeight = 29.sp,
                             maxLines = 3, overflow = TextOverflow.Ellipsis)
-                        route?.let { RouteTimingText(it, nav, preview = false) }
                     } else Text("${nav.sessionTransport?.label().orEmpty()} · Serbest yolculuk", style = MaterialTheme.typography.titleLarge)
                     if (nav.gpsStale) Text("GPS konumu bekleniyor", color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall)
                     if (!nav.locationActive && !nav.simulation) Text("Konum bağlantısı kuruluyor", style = MaterialTheme.typography.bodySmall)
-                    nav.message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-                    if (!compact) TextButton(onManageSession, modifier = Modifier.align(Alignment.End).testTag("home-finish-session")
-                        .semantics { contentDescription = "Yolculuk işlemlerini aç" }) { Text("İşlemler") }
+                    // The simulation identity stays here; the full explanation remains in the directions panel.
+                    // Unknown messages and every operational warning keep their original visibility.
+                    nav.message?.takeUnless { nav.simulation && it == "Deneme sürüşü · günlüğe kaydedilmez" }
+                        ?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                 }
             }
             if (!showPlanner && nav.roadSpeed.visible) {

@@ -210,7 +210,22 @@ class ApprovedPhoneUsabilityAcceptanceTest {
         val session = NavigationStopSnapshot.from(fixture.app.navigation.state.value)
         val route = fixture.app.navigation.state.value.route
         val planned = vm.ui.value
-        for (entry in listOf("live-guidance-card", "open-navigation")) {
+        val originalMuted = fixture.app.navigation.state.value.muted
+        repeat(2) { index ->
+            compose.onNodeWithTag("compact-card-mute").performTouchInput { click() }
+            compose.waitUntil(5_000) { fixture.app.navigation.state.value.muted == if (index == 0) !originalMuted else originalMuted }
+            compose.onNodeWithTag("navigation-screen").assertDoesNotExist()
+            compose.onAllNodesWithTag("live-guidance-card").assertCountEquals(1)
+            compose.runOnIdle {
+                assertEquals(session, NavigationStopSnapshot.from(fixture.app.navigation.state.value))
+                assertEquals(route, fixture.app.navigation.state.value.route)
+                assertEquals(planned.stops, vm.ui.value.stops)
+                assertEquals(planned.preferences, vm.ui.value.preferences)
+                assertEquals(planned.recordJourney, vm.ui.value.recordJourney)
+            }
+        }
+        fixture.capture("compact_card_mute_roundtrip", windowFacts())
+        for (entry in listOf("live-guidance-card", "home-finish-session", "open-navigation")) {
             compose.onNodeWithTag(entry).performClick()
             waitForTag("navigation-screen")
             compose.onNodeWithTag("active-session-actions").assertExists()
