@@ -6,6 +6,7 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.iz.navigation.data.Transport
+import org.iz.navigation.data.Journey
 import org.iz.navigation.navigation.NavigationState
 import org.iz.navigation.weather.PlannedRoute
 import org.iz.navigation.weather.RouteStop
@@ -96,7 +97,8 @@ class PhoneDirectionsUiTest {
         } }
         compose.onNodeWithText("Yol tarifini bitir").performScrollTo().performClick()
         compose.runOnIdle { assertEquals(1, stopped); assertEquals(0, finished) }
-        compose.onNodeWithTag("finish-navigation-journey").performScrollTo().performClick()
+        compose.onNodeWithTag("navigation-screen").performScrollToNode(hasTestTag("finish-navigation-journey"))
+        compose.onNodeWithTag("finish-navigation-journey").performClick()
         compose.runOnIdle { assertEquals(1, finished) }
     }
     @Test fun onlyActiveEndActionsAreOfferedAndStartingOrBusyLocksEveryEnd() {
@@ -121,6 +123,26 @@ class PhoneDirectionsUiTest {
         compose.onNodeWithTag("stop-navigation-guidance").assertDoesNotExist()
         compose.onNodeWithTag("stop-navigation-recording").assertDoesNotExist()
         compose.onNodeWithTag("finish-navigation-journey").assertDoesNotExist()
+    }
+
+    @Test fun statusCopyDistinguishesGuidanceRecordingSimulationAndUnknownTransport() {
+        val state = mutableStateOf(NavigationState())
+        val journey = Journey(id = "synthetic-journey", transport = Transport.CAR)
+        compose.setContent { IzTheme { SessionContent(PhoneDirectionsState(), state.value, false) } }
+        val cases = listOf(
+            NavigationState() to "İki nokta seç, rotanı önizle.",
+            NavigationState(guidance = true) to "Yol tarifi açık · Kayıt kapalı",
+            NavigationState(guidance = true, recording = true, journey = journey) to "Yol tarifi açık · Kayıt açık",
+            NavigationState(recording = true, journey = journey) to "Araba · Kayıt açık",
+            NavigationState(recording = true, journey = journey.copy(transport = Transport.UNKNOWN)) to "Kayıt açık",
+            NavigationState(recording = true) to "Kayıt açık",
+            NavigationState(simulation = true, guidance = true) to "Simülasyon · Günlüğe kaydedilmez",
+            NavigationState(simulation = true, guidance = true, recording = true, journey = journey) to "Simülasyon · Günlüğe kaydedilmez",
+        )
+        for ((nav, expected) in cases) {
+            compose.runOnIdle { state.value = nav }
+            compose.onNodeWithText(expected).assertIsDisplayed()
+        }
     }
 
     @Test fun repeatedIdenticalFailureBecomesVisibleAfterScrollingBackToBottom() {

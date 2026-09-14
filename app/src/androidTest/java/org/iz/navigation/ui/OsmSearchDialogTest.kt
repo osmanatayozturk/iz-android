@@ -1,6 +1,10 @@
 package org.iz.navigation.ui
 
+import android.graphics.Bitmap
 import androidx.compose.runtime.*
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.test.platform.app.InstrumentationRegistry
+import java.io.File
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.text.TextLayoutResult
@@ -262,10 +266,31 @@ class OsmSearchDialogTest {
         val layouts = mutableListOf<TextLayoutResult>()
         target.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
         val layout = layouts.single()
-        if (requireWrapping) assertTrue("Long text must wrap naturally", layout.lineCount > 1)
-        assertFalse("Text is truncated inside its measured height", layout.hasVisualOverflow)
-        assertEquals(layout.layoutInput.text.length, layout.getLineEnd(layout.lineCount - 1))
-        assertTrue("The last line must fit the measured text", layout.getLineBottom(layout.lineCount - 1) <= layout.size.height + 1f)
+        val node = target.fetchSemanticsNode()
+        val metrics = "text=$expected; density=${layout.layoutInput.density.density}; " +
+            "fontScale=${layout.layoutInput.density.fontScale}; rootDensity=${compose.density.density}; rootFontScale=${compose.density.fontScale}; " +
+            "fontSize=${layout.layoutInput.style.fontSize}; constraints=${layout.layoutInput.constraints}; " +
+            "lines=${layout.lineCount}; overflowWidth=${layout.didOverflowWidth}; overflowHeight=${layout.didOverflowHeight}; hasVisualOverflow=${layout.hasVisualOverflow}; " +
+            "size=${layout.size}; paragraphWidth=${layout.multiParagraph.width}; paragraphHeight=${layout.multiParagraph.height}; " +
+            "lineEdges=${(0 until layout.lineCount).map { layout.getLineLeft(it) to layout.getLineRight(it) }}; " +
+            "lastLineBottom=${layout.getLineBottom(layout.lineCount - 1)}; " +
+            "lastLineEnd=${layout.getLineEnd(layout.lineCount - 1)}; textLength=${layout.layoutInput.text.length}; " +
+            "nodeSize=${node.size}; nodePosition=${node.positionInRoot}; visibleBounds=${node.boundsInRoot}"
+        android.util.Log.i("OsmSearchTextLayout", metrics)
+        if (requireWrapping || expected == "  Sentetik Sokak 12  ") {
+            // Only these synthetic fixtures are captured; preserve each attempt for Test to inspect.
+            val folder = File(requireNotNull(InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null)),
+                "qa/osm-text-layout").apply { mkdirs() }
+            val prefix = "text-${System.nanoTime()}"
+            File(folder, "$prefix.txt").writeText(metrics + "\n" + compose.onNode(isDialog()).printToString())
+            File(folder, "$prefix.png").outputStream().use {
+                check(compose.onNode(isDialog()).captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it))
+            }
+        }
+        if (requireWrapping) assertTrue("Long text must wrap naturally: $metrics", layout.lineCount > 1)
+        assertFalse("Text layout overflows: $metrics", layout.hasVisualOverflow)
+        assertEquals("Text must include the last character: $metrics", layout.layoutInput.text.length, layout.getLineEnd(layout.lineCount - 1))
+        assertTrue("The last line must fit the measured text: $metrics", layout.getLineBottom(layout.lineCount - 1) <= layout.size.height + 1f)
         assertFullyVisible(target)
     }
 

@@ -8,6 +8,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.iz.navigation.navigation.NavigationState
 import org.junit.Assert.*
@@ -19,12 +20,16 @@ import org.junit.runner.RunWith
 class NavigationSessionEntryTest {
     @get:Rule val compose = createComposeRule()
 
-    @Test fun bodyAndFinishShortcutOpenSamePanelWhileMuteStaysIndependent() {
+    @Test fun compactCardOpensOperationsWhileMuteStaysIndependent() = verifySessionEntry(560.dp)
+
+    @Test fun wideCardOpensOperationsWhileMuteStaysIndependent() = verifySessionEntry(760.dp)
+
+    private fun verifySessionEntry(height: Dp) {
         val nav = NavigationState(sessionId = "session-a", guidance = true)
         val panel = mutableStateOf(false)
         var opens = 0; var resets = 0; var mutes = 0
         val open = { openPhoneDirectionsPanel(nav, panel.value, { resets++ }, { opens++; panel.value = true }) }
-        compose.setContent { IzTheme { Box(Modifier.requiredSize(360.dp, 560.dp)) {
+        compose.setContent { IzTheme { Box(Modifier.requiredSize(360.dp, height)) {
             NavigationHomeContent(ui = PhoneDirectionsState(), nav = nav, points = emptyList(), members = emptyList(),
                 showPlanner = panel.value, weatherLabel = "Hava", onSearch = open, onRecord = {}, onGroup = {},
                 onMenu = {}, onWeather = {}, onMute = { mutes++ }, onManageSession = open, onLocate = {}, onPin = {}, planner = {})
@@ -35,7 +40,8 @@ class NavigationSessionEntryTest {
             .fetchSemanticsNode().config[SemanticsActions.OnClick].label)
         compose.onNodeWithTag("live-guidance-card").performClick()
         compose.runOnIdle { assertEquals(1, opens); assertEquals(0, resets); assertTrue(panel.value); panel.value = false }
-        compose.onNodeWithTag("home-finish-session").performClick()
+        compose.onNodeWithTag("home-finish-session").assertTextEquals("İşlemler")
+            .assertContentDescriptionEquals("Yolculuk işlemlerini aç").assertHasClickAction().performClick()
         compose.runOnIdle { assertEquals(2, opens); assertEquals(0, resets); panel.value = false }
         compose.onNodeWithTag("open-navigation").performClick()
         compose.runOnIdle { assertEquals(3, opens); assertEquals(0, resets) }

@@ -3,7 +3,11 @@ package org.iz.navigation.ui
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.test.espresso.Espresso.pressBack
+import android.view.KeyEvent
+import androidx.test.espresso.Espresso.onView
+import androidx.test.espresso.action.ViewActions.pressKey
+import androidx.test.espresso.matcher.RootMatchers.isDialog as isDialogWindow
+import androidx.test.espresso.matcher.ViewMatchers.isRoot as isRootView
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.iz.navigation.data.Journey
 import org.iz.navigation.navigation.NavigationState
@@ -50,7 +54,7 @@ class PhoneSessionConfirmationTest {
             if (visible.value) PhoneSessionEndConfirmation(request, nav, false, { visible.value = false }, { confirms++ })
         } }
         compose.onNodeWithText("Yol tarifi bitecek. Yolculuk kaydı bitecek. Grup paylaşımı bitecek.").assertIsDisplayed()
-        pressBack()
+        onView(isRootView()).inRoot(isDialogWindow()).perform(pressKey(KeyEvent.KEYCODE_BACK))
         compose.onNodeWithTag("confirm-session-end").assertDoesNotExist()
         compose.runOnIdle { assertEquals(0, confirms) }
     }

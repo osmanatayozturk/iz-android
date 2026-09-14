@@ -90,7 +90,10 @@ internal fun PhoneDirectionsContent(
                     Text("Yol tarifi", style = MaterialTheme.typography.headlineSmall)
                     Text(when {
                         nav.simulation -> "Simülasyon · Günlüğe kaydedilmez"
-                        nav.recording -> "${nav.journey?.transport?.label().orEmpty()} · Kayıt açık"
+                        nav.guidance && nav.recording -> "Yol tarifi açık · Kayıt açık"
+                        nav.guidance -> "Yol tarifi açık · Kayıt kapalı"
+                        nav.recording -> nav.journey?.transport?.takeUnless { it == Transport.UNKNOWN }?.label()
+                            ?.let { "$it · Kayıt açık" } ?: "Kayıt açık"
                         else -> "İki nokta seç, rotanı önizle."
                     }, style = MaterialTheme.typography.bodyMedium)
                 }

@@ -108,8 +108,8 @@ internal fun NavigationHomeContent(
                                 if (nav.muted) "Sesi aç" else "Sesi kapat")
                         }
                         if (compact) TextButton(onManageSession,
-                            modifier = Modifier.height(40.dp).testTag("home-finish-session").semantics { contentDescription = "Yolculuğu bitir" },
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) { Text("Bitir") }
+                            modifier = Modifier.height(40.dp).testTag("home-finish-session").semantics { contentDescription = "Yolculuk işlemlerini aç" },
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) { Text("İşlemler") }
                     }
                     if (nav.guidance) {
                         nav.progress?.nextManeuverDistanceMeters?.let { meters ->
@@ -124,7 +124,8 @@ internal fun NavigationHomeContent(
                         style = MaterialTheme.typography.bodySmall)
                     if (!nav.locationActive && !nav.simulation) Text("Konum bağlantısı kuruluyor", style = MaterialTheme.typography.bodySmall)
                     nav.message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-                    if (!compact) TextButton(onManageSession, modifier = Modifier.align(Alignment.End).testTag("home-finish-session")) { Text("Yolculuğu bitir") }
+                    if (!compact) TextButton(onManageSession, modifier = Modifier.align(Alignment.End).testTag("home-finish-session")
+                        .semantics { contentDescription = "Yolculuk işlemlerini aç" }) { Text("İşlemler") }
                 }
             }
             if (!showPlanner && nav.roadSpeed.visible) {
