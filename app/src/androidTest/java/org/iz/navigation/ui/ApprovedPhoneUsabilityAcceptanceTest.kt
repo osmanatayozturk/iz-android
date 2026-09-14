@@ -19,6 +19,7 @@ import org.iz.navigation.navigation.NavigationStopSnapshot
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.*
+import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -30,7 +31,7 @@ import org.junit.runner.RunWith
  * -e izApprovedAcceptance isolated-offline -e izCandidateCommit <full-final-commit>
  * -e izExpectedAvd <allocated-isolated-avd>
  *
- * No live recording, group/auth, physical lock/timeout or final UI/UX acceptance is claimed.
+ * No live recording, group/auth, physical-device power button or final UI/UX acceptance is claimed.
  */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(AndroidJUnit4::class)
@@ -192,9 +193,56 @@ class ApprovedPhoneUsabilityAcceptanceTest {
         waitForScreenFlag(false)
         assertFalse(fixture.app.navigation.state.value.guidance)
         fixture.capture("window_guidance_ended", windowFacts())
-        // FLAG/lifecycle evidence only. Real timeout/manual lock requires a separate observation
-        // outside instrumentation, with stay-awake/charging/wake-lock effects excluded and a
-        // same-timeout negative screen-off control before/after guidance.
+        // FLAG/lifecycle evidence only; the separate paired test measures actual display state.
+    }
+
+    @Test fun pairedActualTimeoutAndShellSleepExcludeAlwaysAwakeRunner() = evidenceCase("paired_timeout") {
+        launch()
+        fixture.withPairedTimeoutControls {
+            assertFalse(windowKeepsScreenOn())
+            val baseline = fixture.observeScreen("paired_no_guidance_before")
+            // A runner/charging/device policy that prevents real screen-off invalidates the experiment.
+            assumeTrue("No-guidance negative control did not turn the display off; inspect power evidence",
+                baseline.sawDisplayOff)
+            fixture.wakeAllocatedScreen()
+            waitForTag("navigation-home")
+            fixture.startSimulation()
+            waitForScreenFlag(true)
+            val session = NavigationStopSnapshot.from(fixture.app.navigation.state.value)
+            assertTrue("Guidance must retain an actually ON interactive display past the same timeout",
+                fixture.observeScreen("paired_guidance").allInteractive)
+            assertEquals(session, NavigationStopSnapshot.from(fixture.app.navigation.state.value))
+            assertTrue(windowKeepsScreenOn())
+
+            compose.onNodeWithTag("open-navigation").performClick()
+            waitForTag("active-session-actions")
+            assertTrue(fixture.observeScreen("paired_guidance_panel").allInteractive)
+            compose.onNodeWithTag("stop-navigation-guidance").performScrollTo().performClick()
+            waitForTag("confirm-session-end")
+            assertTrue(fixture.observeScreen("paired_guidance_confirmation").allInteractive)
+            compose.onNodeWithTag("cancel-session-end").performClick()
+            assertEquals(session, NavigationStopSnapshot.from(fixture.app.navigation.state.value))
+
+            scenario!!.moveToState(Lifecycle.State.CREATED)
+            waitForScreenFlag(false)
+            assertTrue(fixture.observeScreen("paired_guidance_background").sawDisplayOff)
+            fixture.wakeAllocatedScreen()
+            scenario!!.moveToState(Lifecycle.State.RESUMED)
+            waitForScreenFlag(true)
+            assertEquals(session, NavigationStopSnapshot.from(fixture.app.navigation.state.value))
+
+            fixture.sleepAllocatedScreen()
+            assertTrue("Explicit emulator sleep input must turn the actual display off",
+                fixture.observeScreen("paired_shell_sleep", 3_000).sawDisplayOff)
+            fixture.wakeAllocatedScreen()
+            waitForScreenFlag(true)
+            assertEquals(session, NavigationStopSnapshot.from(fixture.app.navigation.state.value))
+            assertTrue(fixture.stopOwnedGuidance())
+            waitForScreenFlag(false)
+            assertTrue("After guidance, actual screen-off must return under identical settings",
+                fixture.observeScreen("paired_no_guidance_after").sawDisplayOff)
+            fixture.wakeAllocatedScreen()
+        }
     }
 
     private fun launch() {

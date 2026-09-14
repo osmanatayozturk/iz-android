@@ -5,6 +5,10 @@ import android.app.KeyguardManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Rect
+import android.hardware.display.DisplayManager
+import android.os.PowerManager
+import android.os.SystemClock
+import android.view.Display
 import android.net.ConnectivityManager
 import android.os.ParcelFileDescriptor
 import android.provider.Settings
@@ -72,6 +76,7 @@ internal class ApprovedPhoneUsabilityFixture(val app: IzApplication) {
     private var ownedSimulationId: String? = null
     private var enabledSimulation = false
     private var originalMuted = false
+    private var pairedChargingContext: String? = null
 
     fun prepare() {
         val args = InstrumentationRegistry.getArguments()
@@ -196,6 +201,95 @@ internal class ApprovedPhoneUsabilityFixture(val app: IzApplication) {
             check(state.sessionId == ownedSimulationId && state.simulation)
             app.navigation.stopGuidance(requireNotNull(NavigationStopSnapshot.from(state)))
         }
+    }
+
+    data class ScreenObservation(val allInteractive: Boolean, val sawDisplayOff: Boolean)
+
+    /** Only allocated-emulator settings; exact values restored even if the negative control blocks. */
+    fun withPairedTimeoutControls(block: () -> Unit) {
+        check(before != null)
+        val originalTimeout = shell("settings get system screen_off_timeout")
+        val originalStayAwake = shell("settings get global stay_on_while_plugged_in")
+        check(originalTimeout.matches(Regex("[0-9]+")) && originalStayAwake.matches(Regex("[0-9]+"))) {
+            "Unknown existing power settings; leave unchanged"
+        }
+        File(evidenceDirectory, "paired_power_before.json").writeText(powerFacts().toString(2))
+        try {
+            shell("settings put system screen_off_timeout 15000")
+            shell("settings put global stay_on_while_plugged_in 0")
+            check(shell("settings get system screen_off_timeout") == "15000")
+            check(shell("settings get global stay_on_while_plugged_in") == "0")
+            pairedChargingContext = powerFacts().getString("chargingContext")
+            wakeAllocatedScreen()
+            block()
+        } finally {
+            shell("settings put system screen_off_timeout $originalTimeout")
+            shell("settings put global stay_on_while_plugged_in $originalStayAwake")
+            shell("input keyevent KEYCODE_WAKEUP")
+            File(evidenceDirectory, "paired_power_restored.json").writeText(powerFacts().toString(2))
+            check(shell("settings get system screen_off_timeout") == originalTimeout)
+            check(shell("settings get global stay_on_while_plugged_in") == originalStayAwake)
+        }
+    }
+
+    fun wakeAllocatedScreen() {
+        shell("input keyevent KEYCODE_WAKEUP")
+        val deadline = SystemClock.elapsedRealtime() + 5_000
+        while (!checkNotNull(app.getSystemService(PowerManager::class.java)).isInteractive &&
+            SystemClock.elapsedRealtime() < deadline) Thread.sleep(100)
+        check(checkNotNull(app.getSystemService(PowerManager::class.java)).isInteractive)
+        check(!checkNotNull(app.getSystemService(KeyguardManager::class.java)).isKeyguardLocked) {
+            "Emulator locked; no automatic credential or keyguard dismissal"
+        }
+    }
+
+    /** A shell KEYCODE_SLEEP proves emulator input/system behavior, not a physical power button. */
+    fun sleepAllocatedScreen() { shell("input keyevent KEYCODE_SLEEP") }
+
+    fun powerFacts(): JSONObject {
+        val power = shell("dumpsys power")
+        val relevant = Regex("Wakefulness|WakeLock|Wake Locks|wake lock|SCREEN_|FULL_WAKE|PARTIAL_WAKE|mStayOn|mIsPowered|mPlugType|mUserActivitySummary|Display Power|mScreenOffTimeout|mUserActivityTimeoutOverride")
+        return JSONObject().put("timeMillis", System.currentTimeMillis())
+            .put("timeout", shell("settings get system screen_off_timeout"))
+            .put("stayAwake", shell("settings get global stay_on_while_plugged_in"))
+            .put("chargingContext", power.lineSequence().filter { it.contains("mIsPowered=") || it.contains("mPlugType=") }.joinToString(";"))
+            .put("powerEvidence", power.lineSequence().filter { relevant.containsMatchIn(it) }.take(120).joinToString("\n"))
+            .put("windowEvidence", shell("dumpsys window windows").lineSequence()
+                .filter { it.contains("mHoldScreen") || it.contains("mCurrentFocus") }.take(20).joinToString("\n"))
+    }
+
+    /** No Espresso, Compose input, screenshots or wake requests during this passive interval. */
+    fun observeScreen(label: String, durationMillis: Long = 25_000): ScreenObservation {
+        check(label.matches(Regex("[a-zA-Z0-9_-]+")))
+        val power = checkNotNull(app.getSystemService(PowerManager::class.java))
+        val display = checkNotNull(app.getSystemService(DisplayManager::class.java))
+        val startFacts = powerFacts()
+        val started = SystemClock.elapsedRealtime()
+        val samples = JSONArray()
+        var allInteractive = true
+        var sawDisplayOff = false
+        do {
+            val interactive = power.isInteractive
+            val displayState = display.getDisplay(Display.DEFAULT_DISPLAY)?.state
+            allInteractive = allInteractive && interactive && displayState == Display.STATE_ON
+            sawDisplayOff = sawDisplayOff || (!interactive && displayState == Display.STATE_OFF)
+            samples.put(JSONObject().put("elapsedMs", SystemClock.elapsedRealtime() - started)
+                .put("interactive", interactive).put("displayState", displayState))
+            if (SystemClock.elapsedRealtime() - started >= durationMillis) break
+            Thread.sleep(500)
+        } while (true)
+        val endFacts = powerFacts()
+        File(evidenceDirectory, "$label-power.json").writeText(JSONObject()
+            .put("before", startFacts).put("after", endFacts).put("samples", samples)
+            .put("allInteractive", allInteractive).put("sawDisplayOff", sawDisplayOff).toString(2))
+        for (facts in listOf(startFacts, endFacts)) {
+            check(facts.getString("timeout") == "15000" && facts.getString("stayAwake") == "0")
+            check(facts.getString("chargingContext").isNotBlank() &&
+                facts.getString("chargingContext") == pairedChargingContext) {
+                "Charging conditions changed; paired screen experiment is invalid"
+            }
+        }
+        return ScreenObservation(allInteractive, sawDisplayOff)
     }
 
     fun capture(label: String, facts: JSONObject = JSONObject()) {
