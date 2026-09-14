@@ -426,6 +426,16 @@ class JourneyNavigationCoordinator(
         releaseIfIdle()
     } }
 
+    /** Applies a confirmed stop only to the same guidance after earlier commands finish. */
+    suspend fun stopGuidance(expectedSessionId: String, expectedRouteRevision: Long): Boolean = commands.withLock {
+        val before = mutableState.value
+        if (before.sessionId != expectedSessionId || before.routeRevision != expectedRouteRevision ||
+            !before.guidance || before.trackFollow != null || trackStartPending) return@withLock false
+        clearRoute()
+        releaseIfIdle()
+        true
+    }
+
     suspend fun stopRecording(expectedJourneyId: String) = commands.withLock {
         val before = mutableState.value
         if (before.simulation || before.journey?.id != expectedJourneyId) return@withLock
