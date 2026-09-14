@@ -5,6 +5,12 @@
 - Tarayıcı gerektiğinde önce Codex'in kendi tarayıcısını, sonra Edge'i kullan. Chrome son seçenek olsun veya kullanıcı açıkça istesin.
 - Mümkün olduğunca açık kaynak projelerini kullan ve açık kaynak dünyasını destekle. Mevcut GPL lisansını, üçüncü taraf lisanslarını ve OpenStreetMap atıflarını koru.
 
+## Teşhis, plan onayı ve UI/UX sahipliği
+
+- Yeni hata veya özellik isteğinde önce teşhis yapılır; koordinatör somut çözüm planını kullanıcıyla değerlendirir. Kullanıcı planı açıkça onayladıktan sonra koordinatör onaylanan kapsamı teknik lidere iletir ve uygulama başlar. Hata bildirimi veya rol ataması tek başına uygulama onayı değildir.
+- Plan onayından önce kaynak ve mevcut kanıtlar okunabilir, ilgili uzmanlardan teknik teşhis ve UI/UX görüşü alınabilir. Onaylı kapsamın rutin uygulama ayrıntıları için tekrar kullanıcı izni istenmez; kapsam değişirse plan kullanıcıya yeniden sunulur.
+- Görsel yerleşim, kullanım akışı, arayüz metinleri, erişilebilirlik incelemesi ve UI/UX kabulü UI/UX uzmanına aittir. Geliştiriciler teknik teşhis, uygulanabilirlik, uygulama ve kendi ilgili kontrollerini sağlar; Test bağımsız davranış ve regresyon kanıtını üretir. Teknik lider görev ve dosya tahsisini bu sahipliğe göre yapar.
+
 ## Yönetim ve uzman rolleri
 
 Koordinatör ürün kapsamını, öncelikleri, hedef sürümü, kullanıcı iletişimini, proje dışı iletişimi ve son yayın onayını yönetir. Çekirdek ve Teknik Lider, koordinatörün onayladığı kapsam içinde uzmanlara doğrudan teknik iş atar; ortak dosyaları tahsis eder, mimariyi ve incelemeyi yürütür, yerel birleşmiş kaynak adayını hazırlar.

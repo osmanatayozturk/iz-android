@@ -6,9 +6,22 @@ Bu dosyayı Sürüm Belgeleri her İz güncellemesinde günceller; GitHub teslim
 
 | Bileşen | versionName | versionCode | Durum |
 |---|---|---|---|
-| Telefon | 0.10.0 | 18 | GitHub önizleme sürümü |
-| Wear OS | 0.6.0 | 10 | Telefon 0.10.0 ile iletişim biçimi değişmedi |
+| Telefon | 0.10.1 | 19 | Hazırlanan önizleme adayı; henüz yayımlanmadı |
+| Wear OS | 0.6.0 | 10 | Değişmedi; telefon 0.10.1 iletişim biçimini korur |
 | Ortak iletişim | v5 | — | Eski v1–v4 desteği korunuyor |
+
+## 0.10.1 — Hazırlanan telefon önizleme adayı
+
+Uygulama geliştirmesi ve doğrulama sürüyor. Bu bölüm hedeflenen değişiklikleri belirtir; nihai paket, bağımsız Test ve UI/UX kabulü, aynı aday için açık olumlu Siber Güvenlik raporu ve koordinatörün son kabul/yayın onayı henüz tamamlanmamıştır.
+
+- Yer aramada ilk sayfa 1–9 geçerli sonuç ve en az bir OSM referansı içeriyorsa en fazla bir devam isteği yapılır. İlk sayfa boşsa, tam 10 sonuç içeriyorsa veya referans yoksa devam edilmez. Sayfa başına en fazla 10, birleşik listede en fazla 20 sonuç işlenir; bütün yerlerin bulunması garanti edilmez.
+- Sayfalar mevcut v2 ham JSON önbelleğinde ayrı anahtarlarla saklanır. İkinci sayfa başarısızsa ilk sayfa korunur; mevcut istek hızı, bekleme ve iptal sınırları sürer. Sorgu değişince eski sonuç, hata ve boş durum yeni sorguya taşınmaz.
+- Sonuçta yer adının altında mevcut `display_name` adres metni doğal biçimde sarılır. Boş veya yalnız adı tekrarlayan açıklamada “Adres bilgisi yok” gösterilir. Mahalle/sokak bilgisi tahmin edilmez; koordinat adres yerine kullanılmaz. Büyük yazıda sonuçlar ve tam OpenStreetMap atfı erişilebilir kalır.
+- Aktif yol tarifi kartı, mevcut “Nereye?” panelini planlama durumunu sıfırlamadan açar. “Yol tarifini bitir” ve “Yolculuk kaydını bitir” ayrı teyitlerle yalnız ilgili işi sonlandırır; diğer açık iş ve grup paylaşımı korunur. “Yolculuğu tamamen bitir” en altta, kapanacak işleri belirten teyitle sunulur.
+- Aktif yol tarifinde İz ön plandayken ekran açık tutulur. Uygulama içi menüler bu davranışı kesmez; elle kilitleme korunur. Yol tarifi bitince veya uygulama arka plana geçince normal ekran zaman aşımı geçerli olur. Yalnız kayıt veya rota önizleme ekranı açık tutmaz.
+- Hedef telefon sürümü **0.10.1 / code 19**'dur; Wear OS **0.6.0 / code 10**, iletişim **v5**, günlük ve yedek veri biçimleri değişmez. Dağıtım niteliği önizleme (prerelease) olarak kalır.
+
+Son yayımlanmış telefon önizlemesi [0.10.0](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.10.0)'dır. Yeni adayın özel ve herkese açık paketleri son kaynak ve ilgili yapılandırmayla ayrı ayrı doğrulanacaktır. Teknik Test sonuçları ve UI/UX raporu, aynı adaya ait açık olumlu Siber Güvenlik raporu ve koordinatörün son kabulü ayrı kaydedilir. GitHub ve kullanıcı cihazı işlemleri kendi somut onaylarını bekler.
 
 ## 2026-09-14: Yeni uygulama sürümleri için güvenlik kabul şartı
 

@@ -2,6 +2,16 @@
 
 [İz 0.10.0 telefon APK'sını indirin](https://github.com/osmanatayozturk/iz-android/releases/download/v0.10.0/iz-0.10.0-android.apk). Paket Android 10 veya üzerini ve Google Play hizmetlerini gerektirir. [Sürüm notları ve doğrulama sonuçları](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.10.0).
 
+## 0.10.1 önizleme adayı — hazırlanan kullanım değişiklikleri
+
+Aşağıdaki değişiklikler henüz yayımlanmamış 0.10.1 adayı içindir; uygulama ve kabul çalışmaları sürüyor. Yukarıdaki indirme bağlantısı mevcut 0.10.0 sürümüne aittir.
+
+**Yer ara:** Yer adının altında mevcut adres açıklaması gösterilir. Açıklama yoksa “Adres bilgisi yok” yazar. Uzun metinler sarılır; sonuçlara ve OpenStreetMap kaynak gösteriminin tamamına kaydırarak erişilebilir. Arama yalnız **Ara** ile başlar; sonuçlar sınırlıdır ve bütün yerleri kapsamayabilir.
+
+**Yolculuk işlemleri:** Aktif yol tarifi kartına dokunmak mevcut **Nereye?** panelini açar ve yolculuğu sonlandırmaz. **Yol tarifini bitir** ile **Yolculuk kaydını bitir** ayrı eylemlerdir. Teyit, hangi işin biteceğini ve hangi açık işlerin devam edeceğini belirtir. En alttaki **Yolculuğu tamamen bitir** seçeneği açık işleri birlikte sonlandırmadan önce sonuçlarını gösterir. **Vazgeç**, geri veya paneli kapatma hiçbir işi bitirmez.
+
+**Ekran:** Yol tarifi aktifken ve İz öndeyken ekran açık kalır; menüyü açmak bunu kesmez. Elle kilitleme geçerlidir. Yol tarifi bitince veya İz arka plana geçince normal ekran zaman aşımı geri gelir. Yalnız kayıt veya rota önizlemede bu davranış açılmaz.
+
 ## Rotalarım
 
 Menüden **Rotalarım** bölümünü açın. Yol tarifi ve Hava ekranlarında hazırladığınız planı bir ad vererek kaydedebilirsiniz. Başlangıç, varış, ara duraklar, ulaşım türü, kişisel hız ve yol tercihleri saklanır.

@@ -1,5 +1,16 @@
 # Değişiklik geçmişi
 
+## 0.10.1 — Hazırlanan telefon önizleme adayı
+
+Uygulama geliştirmesi ve doğrulama sürüyor. Bu bölüm hedeflenen değişiklikleri belirtir; nihai paket, bağımsız Test ve UI/UX kabulü, aynı aday için açık olumlu Siber Güvenlik raporu ve koordinatörün son kabul/yayın onayı henüz tamamlanmamıştır.
+
+- Yer aramada ilk sayfa 1–9 geçerli sonuç ve en az bir OSM referansı içeriyorsa en fazla bir devam isteği yapılır. İlk sayfa boşsa, tam 10 sonuç içeriyorsa veya referans yoksa devam edilmez. Sayfa başına en fazla 10, birleşik listede en fazla 20 sonuç işlenir; bütün yerlerin bulunması garanti edilmez.
+- Sayfalar mevcut v2 ham JSON önbelleğinde ayrı anahtarlarla saklanır. İkinci sayfa başarısızsa ilk sayfa korunur; mevcut istek hızı, bekleme ve iptal sınırları sürer. Sorgu değişince eski sonuç, hata ve boş durum yeni sorguya taşınmaz.
+- Sonuçta yer adının altında mevcut `display_name` adres metni doğal biçimde sarılır. Boş veya yalnız adı tekrarlayan açıklamada “Adres bilgisi yok” gösterilir. Mahalle/sokak bilgisi tahmin edilmez; koordinat adres yerine kullanılmaz. Büyük yazıda sonuçlar ve tam OpenStreetMap atfı erişilebilir kalır.
+- Aktif yol tarifi kartı, mevcut “Nereye?” panelini planlama durumunu sıfırlamadan açar. “Yol tarifini bitir” ve “Yolculuk kaydını bitir” ayrı teyitlerle yalnız ilgili işi sonlandırır; diğer açık iş ve grup paylaşımı korunur. “Yolculuğu tamamen bitir” en altta, kapanacak işleri belirten teyitle sunulur.
+- Aktif yol tarifinde İz ön plandayken ekran açık tutulur. Uygulama içi menüler bu davranışı kesmez; elle kilitleme korunur. Yol tarifi bitince veya uygulama arka plana geçince normal ekran zaman aşımı geçerli olur. Yalnız kayıt veya rota önizleme ekranı açık tutmaz.
+- Hedef telefon sürümü **0.10.1 / code 19**'dur; Wear OS **0.6.0 / code 10**, iletişim **v5**, günlük ve yedek veri biçimleri değişmez. Dağıtım niteliği önizleme (prerelease) olarak kalır.
+
 ## Yeni uygulama sürümlerinde güvenlik kabulü — 2026-09-14
 
 - Her yeni İz uygulama sürümünün kabulü, kullanıcı telefonu/saati güncellemesi ve GitHub kaynak/etiket/Release/APK yayını öncesinde, Güvenlik projesindeki Siber Güvenlik görevinden o aday için açık olumlu dönüş şartı eklendi. Talebi ve sonucu yalnız koordinatör yönetir.

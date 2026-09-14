@@ -5,7 +5,9 @@
 ## Servisler
 
 - MapLibre, çevrimiçi raster haritayı görünür OpenStreetMap kaynak gösterimiyle çizer. Çevrimdışı bölge indirme veya toplu karo ön yükleme yapılmaz.
-- Nominatim yalnız kullanıcı **Ara** düğmesine bastığında sorgulanır. Sonuçlar önbelleğe alınır ve uygulama genelindeki istek hızı sınırlandırılır.
+- Nominatim yalnız kullanıcı **Ara** düğmesine bastığında sorgulanır. İlk sayfada 1–9 geçerli sonuç ve en az bir OSM referansı varsa, mevcut referanslar `exclude_place_ids` ile dışlanarak en fazla bir devam isteği yapılır. İlk sayfa boşsa, tam 10 sonuç içeriyorsa veya referans yoksa devam edilmez. Her sayfa en fazla 10, birleşik liste en fazla 20 sonuçla sınırlıdır; bu sınır eksiksiz yer keşfi garantisi değildir.
+- Mevcut yapılandırılabilir sağlayıcı, `format=jsonv2`, `limit=10`, `addressdetails=0` ve Türkçe dil tercihi korunur. Ham yanıtlar endpoint, sorgu, seçenekler, dil ve dışlama listesiyle ayrılan v2 sayfa anahtarlarında önbelleğe alınır. İkinci sayfa başarısız olursa ilk sayfa korunur; mevcut istek hızı, yanıt boyutu, bekleme ve iptal sınırları sürer.
+- Arama sonuçlarında `name` başlık olarak kalır; mevcut yanıttaki `display_name` ayrı bir sunum alanıyla telefon listesine taşınır. Boş veya yalnız başlığı tekrarlayan açıklama için “Adres bilgisi yok” kullanılır. Yapılandırılmış adres alanı istenmez, virgülden mahalle/sokak türü çıkarılmaz ve adres için ek sorgu yapılmaz. Bu sunum alanı günlük, rota veya yedek veri biçimine eklenmez.
 - Overpass küçük, görünür harita alanlarında yakındaki OSM nesnelerini bulur. Yanıt boyutu ve günlük kullanım sınırlandırılır; servis kota yanıtı verdiğinde yeniden deneme geciktirilir.
 - OSM Notes yazma, yalnız kullanıcı metni ve konumu önizleyip açıkça onayladıktan sonra gerçekleşir. Özel günlük notları, fotoğraflar ve sağlık verileri gönderilmez.
 
