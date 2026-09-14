@@ -12,6 +12,8 @@ Bu bölüm 0.10.1 kaynak kodundaki telefon değişikliklerini açıklar. Adayın
 - Onaylı UI/UX r2 kapsamında sol üst aktif kart küçültüldü: manevraya mesafe, talimat, bağımsız ses düğmesi ve **İşlemler** korundu. Kalan toplam mesafe, süre ve tahmini varış mevcut Yol tarifi panelinde kalır.
 - Kart veya İşlemler mevcut paneli açar; yolculuğu bitirmez ve ikinci kart oluşturmaz. Ses düğmesi yalnız ses durumunu değiştirir. Simülasyon, GPS/konum, bağlantı, hata, varış ve varışta kaydın sürmesi uyarıları korunur.
 - Kartın 8 bileşen ve 1 ana ekran testi geçti; normal yazıdaki kompakt yerleşim UI/UX kabulünü aldı. Dar ekranda kontroller alt satıra geçer. İncelenen sentetik 320 dp senaryolarında B harita işaretçisi uzun talimatta kısmen, uyarı görünümünde büyük ölçüde örtüldü; kamera davranışı değişmedi. Bu sonuç kart kapsamındadır; nihai sürüm veya kişisel cihaz kabulü değildir.
+- OSM arama penceresi klavye üstündeki kullanılabilir yüksekliğe sınırlandırıldı; başlık ve **Kapat** sabit kalırken sonuç gövdesi kaydırılır.
+- Grup servisi istek gövdesi okumasında 16KiB gerçek bayt sınırı uygulanır; sınır aşımında okuma iptal edilir ve kilit bırakılır; kimlik doğrulama, kota ve güvenli hata yanıtları davranışı korunur.
 - Telefon sürümü **0.10.1 / code 19**’dur; Wear OS **0.6.0 / code 10**, iletişim **v5**, günlük ve yedek veri biçimleri değişmez. Dağıtım niteliği önizleme (prerelease) olarak kalır.
 
 ## Yeni uygulama sürümlerinde güvenlik kabulü — 2026-09-14

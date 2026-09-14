@@ -32,6 +32,13 @@ Bu bölüm 0.10.1 kaynak kodundaki telefon değişikliklerini açıklar. Adayın
 - **UI/UX ve görünürlük sınırı:** Atanan normal yazı görünümlerinde kompakt yerleşim kabul edildi. İncelenen sentetik 320 dp senaryolarında B harita işaretçisi uzun talimatta kısmen, uyarı görünümünde büyük ölçüde örtüldü; bütün işaretçilerin her durumda görünür olduğu iddia edilmez. Kamera davranışı değişmedi. Yeni büyütülmüş yazı testi yapılmadı; mevcut metin ölçekleme desteği korundu.
 - **Uyumluluk ve sınır:** Telefon 0.10.1 / code 19, Wear OS 0.6.0 / code 10, iletişim v5 ve günlük/yedek biçimleri korunur. Bu kart düzenlemesi yeni API, izin, kamera veya servis kapsamı eklemez. Güvenlik, sürüm kabulü, cihaz kurulumu ve yayın tamamlandı olarak gösterilmez.
 
+### OSM araması ve grup servisi düzeltmeleri
+
+- OSM arama penceresi klavye üstündeki kullanılabilir yüksekliğe sınırlandırıldı; başlık ve **Kapat** sabit kalırken sonuç gövdesi kaydırılır.
+- Grup servisi istek gövdesi okumasında 16 KiB gerçek bayt sınırı uygular; aşımda okumayı iptal edip kilidi bırakır. Kimlik doğrulama, kota ve güvenli hata yanıtları korunur.
+- Sunucu tarafında 16 odaklı test ve bunları içeren toplam 24 test geçti. İlgili kaynak canlıya uygulanıp yeniden okunarak doğrulandı; kimliği doğrulanmış canlı işlem veya büyük gövde yük testi yapılmadı.
+- Arama penceresinin ekran/dokunma kanıtı, güvenlik kararı ve son sürüm kabulü ayrı izlenir.
+
 Paketler ve yayında doğrulanmış sonuçlar ilgili [GitHub Release](https://github.com/osmanatayozturk/iz-android/releases) kaydında sunulur. Her özel ve herkese açık paket kaynak ve ilgili yapılandırmayla ayrı doğrulanır. Teknik Test ve UI/UX kanıtı, aynı adaya ait açık olumlu Siber Güvenlik raporu ve koordinatörün son kabulü yerel aday kaydında ayrı tutulur. GitHub ve kullanıcı cihazı işlemleri somut onaylarına bağlıdır.
 
 ## 2026-09-14: Yeni uygulama sürümleri için güvenlik kabul şartı
