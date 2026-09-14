@@ -205,6 +205,54 @@ class OsmSearchDialogTest {
         compose.onNodeWithText("Örnek bina").assertDoesNotExist()
     }
 
+    @Test fun initialTenLongResultsKeepCloseTouchableAboveImeWithoutScrolling() {
+        assertEquals(1f, InstrumentationRegistry.getInstrumentation().targetContext.resources.configuration.fontScale, .01f)
+        val places = List(10) { index ->
+            SelectedOsmPlace(if (index == 0) "Sentetik araştırma binası ek hizmet ve deney merkezi" else "Sentetik IME durağı $index",
+                .001 + index * .001, .002 + index * .001, OsmRef(OsmType.WAY, 4_100_692_000_000L + index),
+                displayName = if (index == 0) "Sentetik araştırma binası ek hizmet ve deney merkezi, Uzun Deneme Sokağı 12, Örnek Mahallesi, Test İlçesi"
+                else "Sentetik IME durağı $index, Test Sokağı $index")
+        }
+        val queries = CopyOnWriteArrayList<String>()
+        var selected: SelectedOsmPlace? = null
+        var visible by mutableStateOf(true)
+        compose.setContent { IzTheme {
+            if (visible) OsmSearchDialog({ visible = false }, { selected = it },
+                initialQuery = "sentetik uzun sonuç", searchPlaces = { query -> queries += query; places })
+        } }
+        compose.onNodeWithTag("osm-search-query").performClick()
+        compose.waitUntil(5_000) { OsmDialogImeTouch.keyboardIsVisible() }
+        OsmDialogImeTouch.tapButton("Ara") // No reveal, scroll or keyboard dismissal.
+        compose.waitUntil(5_000) { compose.onAllNodesWithText(places.first().name).fetchSemanticsNodes().isNotEmpty() }
+        val folder = File(requireNotNull(InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null)),
+            "qa/k05-initial-close/${SystemClock.uptimeMillis()}").apply { check(mkdirs()) }
+        val screenshot = checkNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot())
+        try { File(folder, "initial.png").outputStream().use { check(screenshot.compress(Bitmap.CompressFormat.PNG, 100, it)) } }
+        finally { screenshot.recycle() }
+        // This is deliberately before attribution/result scrolling: earlier tests missed this state.
+        File(folder, "initial-close.json").writeText(OsmDialogImeTouch.buttonFacts("Kapat").toString(2))
+        OsmDialogImeTouch.tapButton("Kapat")
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag("osm-search-query").fetchSemanticsNodes().isEmpty() }
+        compose.runOnIdle { assertNull(selected); assertEquals(listOf("sentetik uzun sonuç"), queries.toList()) }
+    }
+
+    @Test fun tappingOutsideSearchSurfaceDismissesWithoutSelecting() {
+        var visible by mutableStateOf(true)
+        var selected: SelectedOsmPlace? = null
+        compose.setContent { IzTheme {
+            if (visible) OsmSearchDialog({ visible = false }, { selected = it }, searchPlaces = { emptyList() })
+        } }
+        closeSoftKeyboard()
+        val viewport = compose.onNodeWithTag("osm-search-viewport")
+        val surface = compose.onNodeWithTag("osm-search-surface")
+        val area = viewport.fetchSemanticsNode().boundsInRoot
+        val card = surface.fetchSemanticsNode().boundsInRoot
+        assertTrue("Empty dialog must leave a genuine outside area", card.top - area.top > 4f)
+        viewport.performTouchInput { click(androidx.compose.ui.geometry.Offset(center.x, 1f)) }
+        compose.onNodeWithTag("osm-search-query").assertDoesNotExist()
+        compose.runOnIdle { assertNull(selected) }
+    }
+
     @Test fun longResultsStayScrollableWithinLimitAndKeepAttributionVisible() {
         verifyLongResults(keepKeyboardOpen = false)
     }
@@ -229,6 +277,7 @@ class OsmSearchDialogTest {
         // Use the actual measured size: clipped bounds alone could hide an oversized list.
         val height = results.fetchSemanticsNode().size.height
         assertTrue(height > 0 && height <= with(compose.density) { 320.dp.toPx() } + 1f)
+        if (keepKeyboardOpen) OsmDialogImeTouch.buttonFacts("Kapat") // Initial state, before any result/attribution swipe.
         assertFullAttribution()
         val searchButton = compose.onNodeWithTag("osm-search-submit")
         revealInDialog(searchButton)
@@ -253,10 +302,13 @@ class OsmSearchDialogTest {
 
     @Test fun errorKeepsCloseTouchableWithKeyboard() = verifyEmptyOrErrorImeClose(true)
 
-    private fun verifyEmptyOrErrorImeClose(error: Boolean) {
+    @Test fun dnsErrorKeepsCloseTouchableWithKeyboard() = verifyEmptyOrErrorImeClose(error = true, dns = true)
+
+    private fun verifyEmptyOrErrorImeClose(error: Boolean, dns: Boolean = false) {
         var visible by mutableStateOf(true)
         compose.setContent { IzTheme {
             if (visible) OsmSearchDialog({ visible = false }, {}, initialQuery = "bina", searchPlaces = {
+                if (dns) throw java.net.UnknownHostException("synthetic.invalid")
                 if (error) throw IllegalArgumentException("Arama en fazla 200 karakter olabilir.")
                 emptyList()
             })
@@ -266,6 +318,7 @@ class OsmSearchDialogTest {
         OsmDialogImeTouch.tapButton("Ara", reveal = true)
         val stateTag = if (error) "osm-search-error" else "osm-search-empty"
         compose.waitUntil(5_000) { compose.onAllNodesWithTag(stateTag).fetchSemanticsNodes().isNotEmpty() }
+        if (dns) compose.onNodeWithTag(stateTag).assertTextEquals("Arama servisine ulaşılamadı. Bağlantını kontrol edip yeniden ara.")
         OsmDialogImeTouch.buttonFacts("Kapat")
         OsmDialogImeTouch.tapButton("Kapat")
         compose.waitUntil(5_000) { compose.onAllNodesWithTag("osm-search-query").fetchSemanticsNodes().isEmpty() }

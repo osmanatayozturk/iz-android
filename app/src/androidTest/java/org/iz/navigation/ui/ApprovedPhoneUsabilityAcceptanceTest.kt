@@ -90,12 +90,158 @@ class ApprovedPhoneUsabilityAcceptanceTest {
     @Test fun nestedSearchLocalErrorKeepsActionsTouchableAboveIme() =
         verifyNestedSearchImeClose(localError = true)
 
-    private fun verifyNestedSearchImeClose(localError: Boolean) = evidenceCase(
+    @Test fun normalNestedTenResultsKeepInitialCloseAndExactSelection() = evidenceCase("k05_nested_long") {
+        assertEquals("K05 uses actual normal system font", 1f, fixture.app.resources.configuration.fontScale, .01f)
+        val baseline = fixture.io { fixture.repository.snapshot() }
+        val (query, places) = fixture.seedK05LongSearch()
+        launch()
+        compose.onNodeWithTag("home-menu").performClick()
+        compose.onNodeWithTag("menu-add-place").performClick()
+        compose.onNodeWithText("Bu ziyarete özel not").performScrollTo().performTextReplacement(fixture.visitNote)
+        closeSoftKeyboard() // Parent setup only.
+        fun openAndSearch() {
+            compose.onNodeWithText("OSM'de yer eşleştir").performScrollTo().performClick()
+            waitForTag("osm-search-query")
+            compose.onNodeWithTag("osm-search-query").performTextReplacement(query).performClick()
+            compose.waitUntil(5_000) { OsmDialogImeTouch.keyboardIsVisible() }
+            OsmDialogImeTouch.tapButton("Ara") // No reveal or result scrolling.
+            compose.waitUntil(5_000) { compose.onAllNodesWithText(places.first().name).fetchSemanticsNodes().isNotEmpty() }
+        }
+        openAndSearch()
+        // Capture native PNG/XML before visibility assertions can fail.
+        fixture.capture("k05_initial_long_before_assert")
+        fixture.capture("k05_initial_close_bounds", OsmDialogImeTouch.buttonFacts("Kapat"))
+        OsmDialogImeTouch.tapButton("Kapat")
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag("osm-search-query").fetchSemanticsNodes().isEmpty() }
+        compose.onNodeWithText(fixture.visitNote).assertExists()
+        assertEquals(baseline, fixture.io { fixture.repository.snapshot() })
+        fixture.assertSearchStayedCached()
+
+        openAndSearch()
+        fixture.capture("k05_reopened_before_assert")
+        OsmDialogImeTouch.buttonFacts("Kapat")
+        val results = compose.onNodeWithTag("osm-search-results")
+        results.performScrollTo().performScrollToNode(hasText(requireNotNull(places.last().displayName)))
+        val last = compose.onNodeWithText(requireNotNull(places.last().displayName))
+        last.performScrollTo().assertIsDisplayed()
+        val body = compose.onNodeWithTag("osm-search-content")
+        val bodyBounds = body.fetchSemanticsNode().boundsInRoot
+        val lastNode = last.fetchSemanticsNode()
+        val overflow = lastNode.positionInRoot.y + lastNode.size.height - bodyBounds.bottom
+        if (overflow > 0) body.performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.ScrollBy) { it(0f, overflow) }
+        fixture.capture("k05_last_before_selection")
+        OsmDialogImeTouch.tapButton(fixture.selected.name)
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag("osm-search-query").fetchSemanticsNodes().isEmpty() }
+        compose.onNodeWithText(fixture.selected.name).assertExists()
+        compose.onNodeWithText(fixture.visitNote).assertExists()
+        // Persist only this fixture's owned selection to verify exact OSM identity and draft content.
+        compose.onNodeWithText("Ziyareti kaydet").performScrollTo().performClick()
+        compose.waitUntil(5_000) { fixture.io { fixture.repository.snapshot() }.places.any { it.osmId == fixture.selected.osmRef?.id } }
+        val snapshot = fixture.io { fixture.repository.snapshot() }
+        val selectedPlace = snapshot.places.single { it.osmId == fixture.selected.osmRef?.id && it.osmType == fixture.selected.osmRef?.type }
+        assertEquals(fixture.selected.name, selectedPlace.name)
+        assertEquals(fixture.selected.latitude, selectedPlace.latitude!!, .0000001)
+        assertEquals(fixture.selected.longitude, selectedPlace.longitude!!, .0000001)
+        val visit = snapshot.visits.single { it.placeId == selectedPlace.id && it.note == fixture.visitNote }
+        assertNull(visit.journeyId)
+        fixture.assertSearchStayedCached()
+        fixture.capture("k05_selected_exact_identity", JSONObject().put("osmId", selectedPlace.osmId).put("visitId", visit.id))
+    }
+
+    @Test fun normalNestedSearchDnsKeepsActionsAndRestoresOwnedCounters() = evidenceCase("k05_nested_dns") {
+        assertEquals("K05 uses actual normal system font", 1f, fixture.app.resources.configuration.fontScale, .01f)
+        fixture.requireOffline()
+        val preferences = fixture.app.getSharedPreferences("osm_read_limits", android.content.Context.MODE_PRIVATE)
+        val keys = listOf("nominatim_last_request", "nominatim_cooldown")
+        val before = keys.associateWith { key -> preferences.all[key] }
+        check(before.values.all { it == null || it is Long })
+        check((before["nominatim_cooldown"] as? Long ?: 0L) <= System.currentTimeMillis()) {
+            "Existing cooldown blocks this DNS scenario; preserve it"
+        }
+        val startedAt = System.currentTimeMillis()
+        var requestPending = false
+        val baseline = fixture.io { fixture.repository.snapshot() }
+        try {
+            launch()
+            compose.onNodeWithTag("home-menu").performClick()
+            compose.onNodeWithTag("menu-add-place").performClick()
+            compose.onNodeWithText("Bu ziyarete özel not").performScrollTo().performTextReplacement(fixture.visitNote)
+            closeSoftKeyboard() // Parent setup only.
+            compose.onNodeWithText("OSM'de yer eşleştir").performScrollTo().performClick()
+            waitForTag("osm-search-query")
+            val query = "${fixture.query}-k05-dns"
+            val input = compose.onNodeWithTag("osm-search-query")
+            input.performTextReplacement(query).performClick()
+            compose.waitUntil(5_000) { OsmDialogImeTouch.keyboardIsVisible() }
+            repeat(2) { attempt ->
+                if (attempt > 0) {
+                    input.performTextReplacement("$query ")
+                    compose.onNodeWithTag("osm-search-error").assertDoesNotExist()
+                    input.performTextReplacement(query)
+                    compose.onNodeWithTag("osm-search-error").assertDoesNotExist()
+                }
+                fixture.requireOffline()
+                requestPending = true
+                OsmDialogImeTouch.tapButton("Ara", reveal = attempt > 0)
+                compose.waitUntil(10_000) {
+                    compose.onAllNodesWithTag("osm-search-error").fetchSemanticsNodes().isNotEmpty() &&
+                        compose.onAllNodesWithTag("osm-search-progress").fetchSemanticsNodes().isEmpty()
+                }
+                // Error plus busy=false comes after the real search's terminal catch/finally.
+                compose.onNodeWithTag("osm-search-submit").assertIsEnabled()
+                requestPending = false
+                compose.onNodeWithTag("osm-search-error").assertTextEquals(
+                    "Arama servisine ulaşılamadı. Bağlantını kontrol edip yeniden ara.")
+                fixture.capture("k05_dns_${attempt}_before_bounds")
+                fixture.capture("k05_dns_${attempt}_bounds", OsmDialogImeTouch.buttonFacts("Kapat"))
+                compose.onNodeWithTag("osm-search-attribution").performScrollTo().assertIsDisplayed()
+            }
+            OsmDialogImeTouch.tapButton("Kapat")
+            compose.waitUntil(5_000) { compose.onAllNodesWithTag("osm-search-query").fetchSemanticsNodes().isEmpty() }
+            compose.onNodeWithText(fixture.visitNote).assertExists()
+            assertEquals(baseline, fixture.io { fixture.repository.snapshot() })
+            fixture.capture("k05_dns_closed_parent")
+        } finally {
+            // Dispose/cancel the dialog before touching preferences. An unobserved in-flight request
+            // is an explicit cleanup blocker, never permission to mask a counter mismatch.
+            scenario?.close()
+            scenario = null
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+            fixture.requireOffline()
+            val after = keys.associateWith { key -> preferences.all[key] }
+            check(!requestPending) {
+                "K05 counter restoration blocked: request completion was not observed; preserve evidence/counters"
+            }
+            check(after["nominatim_cooldown"] == before["nominatim_cooldown"]) {
+                "Unexpected cooldown change; preserve counters"
+            }
+            if (after != before) {
+                val last = after["nominatim_last_request"] as? Long
+                check(last != null && last in startedAt..System.currentTimeMillis()) {
+                    "Request counter is outside this owned offline scenario; preserve it"
+                }
+                val editor = preferences.edit()
+                keys.forEach { key -> (before[key] as? Long)?.let { editor.putLong(key, it) } ?: editor.remove(key) }
+                check(editor.commit()) { "K05 counter restoration failed" }
+            }
+            check(keys.associateWith { preferences.all[it] } == before)
+            fixture.assertSearchStayedCached()
+        }
+    }
+
+    @Test fun normalNestedSearchEmptyKeepsActionsTouchableAboveIme() = verifyNestedSearchImeClose(localError = false, normalFont = true)
+
+    @Test fun normalNestedSearchLocalErrorKeepsActionsTouchableAboveIme() = verifyNestedSearchImeClose(localError = true, normalFont = true)
+
+    private fun verifyNestedSearchImeClose(localError: Boolean, normalFont: Boolean = false) = evidenceCase(
         if (localError) "nested_search_error_ime" else "nested_search_empty_ime",
     ) {
         val config = fixture.app.resources.configuration
-        assertEquals("Allocate the real 320dp display before running IME-001", 320, config.screenWidthDp)
-        assertEquals("Allocate actual system font2, not a CompositionLocal", 2f, config.fontScale, .01f)
+        if (normalFont) assertEquals("Allocate normal system font for K05", 1f, config.fontScale, .01f)
+        else {
+            assertEquals("Allocate the real 320dp display before running IME-001", 320, config.screenWidthDp)
+            assertEquals("Allocate actual system font2, not a CompositionLocal", 2f, config.fontScale, .01f)
+        }
         assertTrue("IME-001 requires the allocated Gboard",
             android.provider.Settings.Secure.getString(fixture.app.contentResolver,
                 android.provider.Settings.Secure.DEFAULT_INPUT_METHOD).orEmpty()
@@ -117,6 +263,7 @@ class ApprovedPhoneUsabilityAcceptanceTest {
         waitForTag(stateTag)
         if (localError) compose.onNodeWithTag(stateTag).assertTextEquals("Arama en fazla 200 karakter olabilir.")
         // Fail before any workaround: the whole fixed footer hit area must already be above IME.
+        fixture.capture("ime_after_result_before_assert")
         fixture.capture("ime_after_result", OsmDialogImeTouch.buttonFacts("Kapat"))
         val input = compose.onNodeWithTag("osm-search-query")
         input.assertTextContains(query)

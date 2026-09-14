@@ -134,6 +134,32 @@ internal class ApprovedPhoneUsabilityFixture(val app: IzApplication) {
         writeOwnedCache(searchCacheKey(secondUrl), "[]")
     }
 
+    /** K05 only: a long first result and nine following synthetic rows; existing ownership guards apply. */
+    fun seedK05LongSearch(): Pair<String, List<SelectedOsmPlace>> {
+        val baseline = checkNotNull(before) { "Run preservation guards before seeding" }
+        val longQuery = "$query-k05-long"
+        val places = List(10) { index ->
+            if (index == 9) selected else SelectedOsmPlace(
+                if (index == 0) "Sentetik araştırma binası ek hizmet ve deney merkezi" else "$namespace IME durağı $index",
+                .001 + index * .001, .002 + index * .001, OsmRef(OsmType.WAY, firstId + 100 + index),
+                displayName = if (index == 0) "Sentetik araştırma binası ek hizmet ve deney merkezi, Uzun Deneme Sokağı 12, Örnek Mahallesi, Test İlçesi"
+                    else "$namespace IME durağı $index, Test Sokağı $index",
+            )
+        }
+        val ids = places.map { requireNotNull(it.osmRef).id }.toSet()
+        check(baseline.places.none { it.osmType == OsmType.WAY && it.osmId in ids })
+        val url = OsmServiceSettings(app).read().nominatim.toHttpUrl().newBuilder()
+            .setQueryParameter("q", longQuery).setQueryParameter("format", "jsonv2")
+            .setQueryParameter("limit", "10").setQueryParameter("addressdetails", "0")
+            .removeAllQueryParameters("exclude_place_ids").build()
+        val json = JSONArray().also { rows -> places.forEach { rows.put(resultJson(it)) } }.toString()
+        writeOwnedCache(searchCacheKey(url), json)
+        val exclusions = places.map { requireNotNull(it.osmRef) }
+            .map { it.type.name.first().toString() + it.id }.sorted().joinToString(",")
+        writeOwnedCache(searchCacheKey(url.newBuilder().setQueryParameter("exclude_place_ids", exclusions).build()), "[]")
+        return longQuery to places
+    }
+
     fun seedEmptySearch(): String {
         check(before != null) { "Run preservation guards before seeding" }
         val emptyQuery = "$query-empty"
