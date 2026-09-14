@@ -9,7 +9,7 @@ data class GeoCoordinate(val latitude: Double, val longitude: Double)
 enum class OsmType { NODE, WAY, RELATION }
 data class OsmRef(val type: OsmType, val id: Long)
 enum class PlaceSource { LEGACY, OSM, USER }
-data class SelectedOsmPlace(val name: String, val latitude: Double, val longitude: Double, val osmRef: OsmRef? = null)
+data class SelectedOsmPlace(val name: String, val latitude: Double, val longitude: Double, val osmRef: OsmRef? = null, val displayName: String? = null)
 
 enum class ContributionKind { MISSING_PLACE, WRONG_DETAILS, CLOSED_PLACE, OTHER }
 enum class ContributionStatus { DRAFT, SENDING, SENT, FAILED, UNKNOWN }
