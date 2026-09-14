@@ -333,6 +333,19 @@ class NominatimSearchTest {
         }
     }
 
+    @Test fun bothPagesAndTheirV2CachesKeepDisplayNamesWithoutChangingIdentity() = runTest {
+        fixture().use { f ->
+            f.enqueue(page(place(1, "Atlas"), place(2, "Stop", "node")))
+            f.enqueue(page(place(1, "Atlas"), place(3, "Atlas")))
+            val first = f.search.search("atlas")
+            assertEquals(listOf(1L, 2L, 3L), first.map { it.osmRef!!.id })
+            assertEquals(listOf("Atlas, Example", "Stop, Example", "Atlas, Example"), first.map { it.displayName })
+            assertEquals(first, f.newSearch().search(" ATLAS "))
+            assertEquals(2, f.server.requestCount)
+            assertTrue(f.writtenKeys.all { it.startsWith("search-v2:") && it.contains("addressdetails=0") })
+            assertEquals(2, f.writtenKeys.size)
+        }
+    }
     private fun TestScope.fixture() = Fixture(this, temporary.newFolder())
 
     private class Fixture(private val scope: TestScope, private val folder: File) : AutoCloseable {

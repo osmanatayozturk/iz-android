@@ -21,6 +21,44 @@ class OsmReadPolicyTest {
         assertNull(places[1].osmRef)
     }
 
+    @Test fun nominatimKeepsRawDisplayNameSeparateFromNameAndGeometry() {
+        val display = "  Atlas, 154, Örnek Caddesi, Deneme Mahallesi  "
+        val places = parseNominatimPlaces("""[
+          {"osm_type":"way","osm_id":42,"name":"Atlas","display_name":"$display","lat":"0.01","lon":"0.02"},
+          {"osm_type":"node","osm_id":43,"name":"Atlas","display_name":"Atlas, Başka Sokak","lat":"0.03","lon":"0.04"}
+        ]""")
+        assertEquals(listOf("Atlas", "Atlas"), places.map { it.name })
+        assertEquals(listOf(display, "Atlas, Başka Sokak"), places.map { it.displayName })
+        assertEquals(listOf(42L, 43L), places.map { it.osmRef?.id })
+        assertEquals(OsmType.WAY, places[0].osmRef?.type)
+        assertEquals(0.01, places[0].latitude, 0.0)
+        assertEquals(0.02, places[0].longitude, 0.0)
+    }
+
+    @Test fun nominatimMissingDisplayNameStaysNullableAndFallbackNameIsUnchanged() {
+        val places = parseNominatimPlaces("""[
+          {"name":"Missing","lat":"0","lon":"0"},
+          {"name":"Null","display_name":null,"lat":"0","lon":"0"},
+          {"name":"Empty","display_name":"","lat":"0","lon":"0"},
+          {"name":"Blank","display_name":"   ","lat":"0","lon":"0"},
+          {"name":"Number","display_name":123,"lat":"0","lon":"0"},
+          {"name":"Object","display_name":{"road":"Example"},"lat":"0","lon":"0"},
+          {"name":"Literal","display_name":"null","lat":"0","lon":"0"},
+          {"name":"Same","display_name":"Same","lat":"0","lon":"0"},
+          {"name":"","display_name":"Address only","lat":"0","lon":"0"}
+        ]""")
+        assertEquals(listOf("Missing", "Null", "Empty", "Blank", "Number", "Object", "Literal", "Same", "Address only"), places.map { it.name })
+        assertEquals(listOf(null, null, null, null, null, null, "null", "Same", "Address only"), places.map { it.displayName })
+        assertTrue(places.all { it.osmRef == null })
+    }
+
+    @Test fun cachedRawNominatimJsonRetainsAddressWithoutEnvelopeMigration() {
+        val file = temporaryFolder.newFile("existing-v2-page")
+        file.writeText("""[{"name":"Atlas","display_name":"Atlas, Test Street","lat":"0.01","lon":"0.02"}]""")
+        val result = readValidCachedPlaces(file, System.currentTimeMillis(), 86_400_000, ::parseNominatimPlaces)!!.single()
+        assertEquals("Atlas", result.name)
+        assertEquals("Atlas, Test Street", result.displayName)
+    }
     @Test fun overpassUsesWayCenterAndKeepsUnrelatedSameNamePlaces() {
         val places = parseOverpassPlaces("""{"elements":[
           {"type":"node","id":1,"lat":41,"lon":29,"tags":{"name":"Cafe","amenity":"cafe"}},
@@ -29,6 +67,7 @@ class OsmReadPolicyTest {
           {"type":"relation","id":3,"tags":{"name":"Missing geometry"}}
         ]}""")
         assertEquals(2, places.size)
+        assertTrue(places.all { it.displayName == null })
         assertEquals(OsmType.WAY, places[1].osmRef?.type)
         assertEquals(41.001, places[1].latitude, 0.000001)
     }
@@ -81,6 +120,7 @@ class OsmReadPolicyTest {
           "properties":{"name":"Rendered cafe","osmType":"WAY","osmId":42}
         }""")
         assertNotNull(selected)
+        assertNull(selected?.displayName)
         assertEquals("Rendered cafe", selected?.name)
         assertEquals(42L, selected?.osmRef?.id)
         assertEquals(OsmType.WAY, selected?.osmRef?.type)

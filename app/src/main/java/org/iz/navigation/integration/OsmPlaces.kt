@@ -176,7 +176,10 @@ internal fun parseNominatimPlaces(json: String): List<SelectedOsmPlace> {
         val longitude = item.optDouble("lon", Double.NaN)
         if (!validCoordinate(latitude, longitude)) return@mapNotNull null
         val name = item.optString("name").takeIf { it.isNotBlank() } ?: item.optString("display_name").takeIf { it.isNotBlank() } ?: return@mapNotNull null
-        SelectedOsmPlace(name, latitude, longitude, osmRef(item.optString("osm_type"), item.optLong("osm_id")))
+        SelectedOsmPlace(
+            name, latitude, longitude, osmRef(item.optString("osm_type"), item.optLong("osm_id")),
+            displayName = (item.opt("display_name") as? String)?.takeIf { it.isNotBlank() },
+        )
     }
 }
 
