@@ -1,5 +1,12 @@
 package org.iz.navigation.ui
 
+import android.graphics.Rect
+import android.os.ParcelFileDescriptor
+import android.os.SystemClock
+import android.view.InputDevice
+import android.view.MotionEvent
+import android.view.accessibility.AccessibilityNodeInfo
+import org.json.JSONObject
 import android.graphics.Bitmap
 import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.asAndroidBitmap
@@ -238,8 +245,30 @@ class OsmSearchDialogTest {
         if (keepKeyboardOpen) assertTrue("Keyboard must remain open during the regression", keyboardIsVisible())
         val close = compose.onNodeWithText("Kapat")
         assertFullyVisible(close)
-        close.performClick()
+        if (keepKeyboardOpen) OsmDialogImeTouch.tapButton("Kapat") else close.performClick()
         compose.onNodeWithTag("osm-search-query").assertDoesNotExist()
+    }
+
+    @Test fun emptyResultKeepsCloseTouchableWithKeyboard() = verifyEmptyOrErrorImeClose(false)
+
+    @Test fun errorKeepsCloseTouchableWithKeyboard() = verifyEmptyOrErrorImeClose(true)
+
+    private fun verifyEmptyOrErrorImeClose(error: Boolean) {
+        var visible by mutableStateOf(true)
+        compose.setContent { IzTheme {
+            if (visible) OsmSearchDialog({ visible = false }, {}, initialQuery = "bina", searchPlaces = {
+                if (error) throw IllegalArgumentException("Arama en fazla 200 karakter olabilir.")
+                emptyList()
+            })
+        } }
+        compose.onNodeWithTag("osm-search-query").performClick()
+        compose.waitUntil(5_000) { OsmDialogImeTouch.keyboardIsVisible() }
+        OsmDialogImeTouch.tapButton("Ara", reveal = true)
+        val stateTag = if (error) "osm-search-error" else "osm-search-empty"
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag(stateTag).fetchSemanticsNodes().isNotEmpty() }
+        OsmDialogImeTouch.buttonFacts("Kapat")
+        OsmDialogImeTouch.tapButton("Kapat")
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag("osm-search-query").fetchSemanticsNodes().isEmpty() }
     }
 
     private fun keyboardIsVisible(): Boolean {
@@ -342,5 +371,130 @@ class OsmSearchDialogTest {
             val job = currentCoroutineContext().job
             return suspendCoroutine { calls += Call(job, it) }
         }
+    }
+}
+
+/** IME-001: screen hit regions + real touch input, shared by component and real Activity tests. */
+internal object OsmDialogImeTouch {
+    private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
+    private val automation get() = instrumentation.uiAutomation
+
+    private fun imeWindow(): String? {
+        val dump = ParcelFileDescriptor.AutoCloseInputStream(automation.executeShellCommand("dumpsys window windows"))
+            .bufferedReader().use { it.readText() }
+        return dump.split(Regex("(?m)(?=^  Window #[0-9]+)"))
+            .singleOrNull { it.lineSequence().first().contains(" u0 InputMethod}") &&
+                it.contains("mViewVisibility=0x0") && it.contains("mHasSurface=true") }
+    }
+
+    fun keyboardIsVisible(): Boolean = imeWindow()?.contains("touchable region=SkRegion((") == true
+
+    private data class Geometry(val usable: Rect, val ime: Rect, val window: String)
+
+    private fun geometry(): Geometry {
+        val window = checkNotNull(imeWindow()) { "A visible IME window is required" }
+        // WindowManager reports this touchable region in SCREEN coordinates (not IME-local insets).
+        val region = checkNotNull(Regex("touchable region=SkRegion\\(\\(([0-9]+),([0-9]+),([0-9]+),([0-9]+)\\)\\)").find(window)) {
+            "Expected the allocated docked keyboard's single rectangular touch region"
+        }
+        val ime = Rect(region.groupValues[1].toInt(), region.groupValues[2].toInt(),
+            region.groupValues[3].toInt(), region.groupValues[4].toInt())
+        val display = checkNotNull(Regex("display=\\[([0-9]+),([0-9]+)\\]\\[([0-9]+),([0-9]+)\\]").find(window))
+        val usable = Rect(display.groupValues[1].toInt(), display.groupValues[2].toInt(),
+            display.groupValues[3].toInt(), ime.top)
+        check(!usable.isEmpty && ime.left <= usable.left && ime.right >= usable.right) {
+            "Unknown keyboard/display geometry; do not guess touch coordinates"
+        }
+        return Geometry(usable, ime, window.lineSequence().filter {
+            it.contains("touchable region=") || it.contains("Frames:") || it.contains("mAttrs=")
+        }.joinToString("\n"))
+    }
+
+    private fun findNode(node: AccessibilityNodeInfo, predicate: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo? {
+        if (predicate(node)) return AccessibilityNodeInfo.obtain(node)
+        for (index in 0 until node.childCount) {
+            val child = node.getChild(index) ?: continue
+            try { findNode(child, predicate)?.let { return it } } finally { child.recycle() }
+        }
+        return null
+    }
+
+    private fun searchRoot(): AccessibilityNodeInfo {
+        val root = checkNotNull(automation.rootInActiveWindow) { "No active application root" }
+        val title = findNode(root) { it.text?.toString() == "Yer ara" }
+        if (title == null) { root.recycle(); error("The active root must be the search dialog") }
+        title.recycle()
+        return root
+    }
+
+    private fun buttonBounds(label: String): Rect? {
+        val root = searchRoot()
+        try {
+            var node = findNode(root) { it.text?.toString() == label } ?: return null
+            try {
+                while (!node.isClickable) {
+                    val parent = node.parent ?: error("No clickable ancestor for $label")
+                    node.recycle(); node = parent
+                }
+                check(node.isEnabled) { "$label is disabled" }
+                return Rect().also(node::getBoundsInScreen)
+            } finally { node.recycle() }
+        } finally { root.recycle() }
+    }
+
+    fun buttonFacts(label: String): JSONObject {
+        val geometry = geometry()
+        val bounds = checkNotNull(buttonBounds(label)) { "No $label button in search window" }
+        val minimum = 48 * instrumentation.targetContext.resources.displayMetrics.density
+        check(bounds.width() >= minimum - 1 && bounds.height() >= minimum - 1 && geometry.usable.contains(bounds)) {
+            "$label full clickable bounds=$bounds must fit IME-free viewport=${geometry.usable}; IME=${geometry.ime}"
+        }
+        return JSONObject().put("button", label).put("clickableBoundsScreen", bounds.flattenToString())
+            .put("usableScreen", geometry.usable.flattenToString()).put("imeTouchableScreen", geometry.ime.flattenToString())
+            .put("windowGeometry", geometry.window)
+    }
+
+    fun tapButton(label: String, reveal: Boolean = false): JSONObject {
+        if (reveal) {
+            for (attempt in 0 until 5) {
+                val geometry = geometry()
+                val bounds = buttonBounds(label)
+                if (bounds != null && geometry.usable.contains(bounds)) break
+                val root = searchRoot()
+                val scroll = try { findNode(root) { it.isScrollable && it.className == "android.widget.ScrollView" } }
+                    finally { root.recycle() }
+                checkNotNull(scroll) { "No outer scroll viewport for $label" }
+                val viewport = try { Rect().also(scroll::getBoundsInScreen) } finally { scroll.recycle() }
+                check(viewport.intersect(geometry.usable)) { "Scroll viewport is behind IME" }
+                viewport.inset(12, 12)
+                check(viewport.height() > 40 && viewport.width() > 24) { "No safe swipe area" }
+                val towardTop = bounds == null || bounds.top < geometry.usable.top
+                val fromY = if (towardTop) viewport.top.toFloat() else viewport.bottom.toFloat()
+                val toY = if (towardTop) viewport.bottom.toFloat() else viewport.top.toFloat()
+                gesture(viewport.exactCenterX(), fromY, toY)
+            }
+        }
+        val facts = buttonFacts(label) // Fresh full-bounds check immediately before input.
+        val bounds = checkNotNull(Rect.unflattenFromString(facts.getString("clickableBoundsScreen")))
+        gesture(bounds.exactCenterX(), bounds.exactCenterY(), bounds.exactCenterY())
+        return facts.put("input", "screen ACTION_DOWN/ACTION_UP")
+    }
+
+    private fun gesture(x: Float, fromY: Float, toY: Float) {
+        val downTime = SystemClock.uptimeMillis()
+        fun inject(action: Int, y: Float) {
+            val event = MotionEvent.obtain(downTime, SystemClock.uptimeMillis(), action, x, y, 0)
+            event.source = InputDevice.SOURCE_TOUCHSCREEN
+            try { check(automation.injectInputEvent(event, true)) { "Screen input was rejected" } }
+            finally { event.recycle() }
+        }
+        inject(MotionEvent.ACTION_DOWN, fromY)
+        if (fromY != toY) for (step in 1..8) {
+            SystemClock.sleep(30)
+            inject(MotionEvent.ACTION_MOVE, fromY + (toY - fromY) * step / 8)
+        }
+        SystemClock.sleep(60)
+        inject(MotionEvent.ACTION_UP, toY)
+        instrumentation.waitForIdleSync()
     }
 }

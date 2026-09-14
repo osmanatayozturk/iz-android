@@ -82,6 +82,54 @@ class ApprovedPhoneUsabilityAcceptanceTest {
             .put("osmId", place.osmId).put("latitude", place.latitude).put("longitude", place.longitude))
     }
 
+    // IME-001 red evidence: Test's 2e1b441/801695d reproduction, 320dp/font2/Gboard.
+    // These tests require that matrix to be allocated externally; they never change device settings.
+    @Test fun nestedSearchEmptyKeepsActionsTouchableAboveIme() =
+        verifyNestedSearchImeClose(localError = false)
+
+    @Test fun nestedSearchLocalErrorKeepsActionsTouchableAboveIme() =
+        verifyNestedSearchImeClose(localError = true)
+
+    private fun verifyNestedSearchImeClose(localError: Boolean) = evidenceCase(
+        if (localError) "nested_search_error_ime" else "nested_search_empty_ime",
+    ) {
+        val config = fixture.app.resources.configuration
+        assertEquals("Allocate the real 320dp display before running IME-001", 320, config.screenWidthDp)
+        assertEquals("Allocate actual system font2, not a CompositionLocal", 2f, config.fontScale, .01f)
+        assertTrue("IME-001 requires the allocated Gboard",
+            android.provider.Settings.Secure.getString(fixture.app.contentResolver,
+                android.provider.Settings.Secure.DEFAULT_INPUT_METHOD).orEmpty()
+                .startsWith("com.google.android.inputmethod.latin/"))
+        val baseline = fixture.io { fixture.repository.snapshot() }
+        val query = if (localError) "a".repeat(201) else fixture.seedEmptySearch()
+        launch()
+        compose.onNodeWithTag("home-menu").performClick()
+        compose.onNodeWithTag("menu-add-place").performClick()
+        compose.onNodeWithText("Bu ziyarete özel not").performScrollTo().performTextReplacement(fixture.visitNote)
+        closeSoftKeyboard() // Only setup: the search's IME must remain open through Ara and Kapat.
+        compose.onNodeWithText("OSM’de yer eşleştir").performScrollTo().performClick()
+        waitForTag("osm-search-query")
+        compose.onNodeWithTag("osm-search-query").performTextReplacement(query).performClick()
+        compose.waitUntil(5_000) { OsmDialogImeTouch.keyboardIsVisible() }
+        val stateTag = if (localError) "osm-search-error" else "osm-search-empty"
+        fixture.capture("ime_before_submit", OsmDialogImeTouch.tapButton("Ara", reveal = true))
+        waitForTag(stateTag)
+        if (localError) compose.onNodeWithTag(stateTag).assertTextEquals("Arama en fazla 200 karakter olabilir.")
+        // Fail before any workaround: the whole fixed footer hit area must already be above IME.
+        fixture.capture("ime_after_result", OsmDialogImeTouch.buttonFacts("Kapat"))
+        compose.onNodeWithTag("osm-search-query").assertTextContains(query)
+        fixture.capture("ime_resubmit", OsmDialogImeTouch.tapButton("Ara", reveal = true))
+        waitForTag(stateTag)
+        fixture.assertSearchStayedCached()
+        fixture.capture("ime_before_close", OsmDialogImeTouch.buttonFacts("Kapat"))
+        OsmDialogImeTouch.tapButton("Kapat") // Real screen DOWN/UP, never semantics OnClick.
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag("osm-search-query").fetchSemanticsNodes().isEmpty() }
+        compose.onNodeWithText(fixture.visitNote).assertExists()
+        compose.onNodeWithText("Ziyareti kaydet").assertExists()
+        assertEquals("Closing search must not save/delete a visit", baseline, fixture.io { fixture.repository.snapshot() })
+        fixture.assertSearchStayedCached()
+    }
+
     @Test fun defaultSearchReachesRealDirectionsDestinationAndPreservesOtherStops() = evidenceCase("route_receiver") {
         fixture.seedSearch()
         launch()

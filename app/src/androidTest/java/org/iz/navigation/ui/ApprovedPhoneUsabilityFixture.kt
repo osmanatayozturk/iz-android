@@ -134,6 +134,17 @@ internal class ApprovedPhoneUsabilityFixture(val app: IzApplication) {
         writeOwnedCache(searchCacheKey(secondUrl), "[]")
     }
 
+    fun seedEmptySearch(): String {
+        check(before != null) { "Run preservation guards before seeding" }
+        val emptyQuery = "$query-empty"
+        val url = OsmServiceSettings(app).read().nominatim.toHttpUrl().newBuilder()
+            .setQueryParameter("q", emptyQuery).setQueryParameter("format", "jsonv2")
+            .setQueryParameter("limit", "10").setQueryParameter("addressdetails", "0")
+            .removeAllQueryParameters("exclude_place_ids").build()
+        writeOwnedCache(searchCacheKey(url), "[]")
+        return emptyQuery
+    }
+
     // Match NominatimSearch.page, including OkHttp's remove-and-append ordering of q.
     private fun searchCacheKey(url: HttpUrl): String {
         val cacheUrl = url.newBuilder()

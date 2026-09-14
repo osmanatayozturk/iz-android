@@ -56,7 +56,12 @@ internal fun OsmSearchDialog(
     val searched = searchState.searched
     val error = searchState.error
     DisposableEffect(controller) { onDispose { controller.close() } }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Yer ara") }, text = {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        // Constrain the whole dialog, including its fixed dismiss action, above the keyboard.
+        properties = DialogProperties(decorFitsSystemWindows = false),
+        modifier = Modifier.systemBarsPadding().imePadding(),
+        title = { Text("Yer ara") }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()).testTag("osm-search-content"),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedTextField(searchState.query, { query = it; controller.edit(it) }, label = { Text("Yer adı veya adres") }, singleLine = true,
