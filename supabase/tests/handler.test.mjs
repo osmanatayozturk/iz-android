@@ -219,3 +219,184 @@ test('authorization and denied quota reject streamed bodies before reading or co
   assert.equal(calls.some(url=>url.endsWith('/iz_group_command') || url.endsWith('/iz_group_publish')),false,item.kind);
  }
 });
+
+const realTimeout = globalThis.setTimeout;
+const realClearTimeout = globalThis.clearTimeout;
+const flushBodyTasks = () => new Promise(resolve => realTimeout(resolve, 0));
+function bodyClock() {
+ const oldNow = Object.getOwnPropertyDescriptor(performance, 'now');
+ const timers = new Map(); let now = 0, next = 0;
+ Object.defineProperty(performance, 'now', {configurable:true,value:()=>now});
+ globalThis.setTimeout=(fn,ms=0,...args)=>{const id=++next;timers.set(id,{at:now+ms,fn:()=>fn(...args)});return id;};
+ globalThis.clearTimeout=id=>timers.delete(id);
+ return {
+  advance(ms, fire=true) {
+   now+=ms;
+   if(fire) for(const [id,timer] of [...timers].sort((a,b)=>a[1].at-b[1].at)) {
+    if(timer.at<=now && timers.delete(id))timer.fn();
+   }
+  },
+  get pending(){return timers.size;},
+  restore(){
+   globalThis.setTimeout=realTimeout;globalThis.clearTimeout=realClearTimeout;
+   if(oldNow)Object.defineProperty(performance,'now',oldNow);else delete performance.now;
+  }
+ };
+}
+function controlledBody({initial=[],cancelMode='',emptyChunks=0,onPull=()=>{}}={}) {
+ const abort=new AbortController(); let controller,reads=0,cancels=0;
+ const queued=[...initial];
+ const stream=new ReadableStream({
+  start(value){controller=value;},
+  pull(value){
+   reads++;onPull();
+   if(queued.length)value.enqueue(queued.shift());
+   else if(emptyChunks-->0)value.enqueue(new Uint8Array());
+  },
+  cancel(){cancels++;if(cancelMode==='reject')return Promise.reject(Error('private cancel'));
+   if(cancelMode==='pending')return new Promise(()=>{});}
+ },{highWaterMark:0});
+ const request=new Request('https://example.test/group-api',{method:'POST',
+  headers:{Authorization:'Bearer device-token'},body:stream,duplex:'half',signal:abort.signal});
+ const listeners=new Set();
+ const add=request.signal.addEventListener.bind(request.signal);
+ const remove=request.signal.removeEventListener.bind(request.signal);
+ request.signal.addEventListener=(type,listener,options)=>{if(type==='abort')listeners.add(listener);return add(type,listener,options);};
+ request.signal.removeEventListener=(type,listener,options)=>{if(type==='abort')listeners.delete(listener);return remove(type,listener,options);};
+ return {request,stream,abort,
+  push(value){try{controller.enqueue(value);return true;}catch{return false;}},
+  close(){try{controller.close();}catch{}},
+  fail(){try{controller.error(Error('private read'));}catch{}},
+  get reads(){return reads;},get cancels(){return cancels;},get listeners(){return listeners.size;}
+ };
+}
+function observeBody(input) {
+ const state={response:null,promise:null};
+ state.promise=handler(input.request).then(response=>{state.response=response;return response;});
+ return state;
+}
+async function assertBodyStopped(input,state,calls,clock) {
+ assert.ok(state.response,'body did not settle within its deadline/abort');
+ assert.equal(state.response.status,400);
+ assert.deepEqual(await state.response.json(),{ok:false,error:'request_failed'});
+ assert.equal(input.stream.locked,false);assert.equal(input.listeners,0);
+ if(clock)assert.equal(clock.pending,0,'timer leaked');
+ assert.equal(calls.some(url=>url.endsWith('/iz_group_command')||url.endsWith('/iz_group_publish')),false);
+}
+
+test('body deadline releases 40 empty or full-limit EOF-less streams after five seconds',async()=>{
+ const calls=allowSmallCommands();
+ const inputs=Array.from({length:40},(_,i)=>controlledBody({initial:i%2?[statusOfSize(bodyLimit)]:[]}));
+ const states=inputs.map(observeBody);let guard;
+ try {
+  await Promise.race([Promise.all(states.map(s=>s.promise)),new Promise((_,reject)=>{
+   guard=realTimeout(()=>reject(Error('40 bodies exceeded five-second deadline plus scheduling allowance')),6500);
+  })]);
+  for(let i=0;i<inputs.length;i++){await assertBodyStopped(inputs[i],states[i],calls);assert.equal(inputs[i].cancels,1);}
+  assert.equal(calls.length,80);
+ } finally {
+  realClearTimeout(guard);inputs.forEach(i=>i.close());await Promise.all(states.map(s=>s.promise));
+ }
+});
+
+test('body deadline is absolute across trickles and blocks late EOF or command',async()=>{
+ const clock=bodyClock(),calls=allowSmallCommands();
+ const input=controlledBody({initial:[bytes('{"action":')]});const state=observeBody(input);
+ try {
+  await flushBodyTasks();clock.advance(3000);input.push(bytes('"status"'));await flushBodyTasks();
+  clock.advance(1999);input.push(bytes('}'));await flushBodyTasks();assert.equal(state.response,null);
+  clock.advance(1);await flushBodyTasks();await assertBodyStopped(input,state,calls,clock);
+  assert.equal(input.push(bytes(' ')),false);input.close();await flushBodyTasks();assert.equal(calls.length,2);
+ } finally {input.close();await state.promise;clock.restore();}
+});
+
+test('body deadline checks EOF against monotonic time even before timer callback',async()=>{
+ for(const elapsed of [4999,5000]) {
+  const clock=bodyClock(),calls=allowSmallCommands();
+  const input=controlledBody({initial:[statusOfSize(bodyLimit)]});const state=observeBody(input);
+  try {
+   await flushBodyTasks();clock.advance(elapsed,false);input.close();await flushBodyTasks();
+   if(elapsed===4999){assert.equal(state.response?.status,200);assert.equal(calls.length,3);}
+   else await assertBodyStopped(input,state,calls,clock);
+   assert.equal(input.stream.locked,false);assert.equal(input.listeners,0);assert.equal(clock.pending,0);
+  } finally {input.close();await state.promise;clock.restore();}
+ }
+});
+
+test('body client abort before read during read or racing EOF never dispatches',async()=>{
+ for(const phase of ['before','during','eof']) {
+  const clock=bodyClock(),calls=allowSmallCommands();
+  const input=controlledBody({initial:[bytes('{"action":"status"}')]});
+  if(phase==='before')input.abort.abort();
+  const state=observeBody(input);
+  try {
+   await flushBodyTasks();
+   if(phase==='eof')input.close();
+   if(phase!=='before')input.abort.abort();
+   await flushBodyTasks();await assertBodyStopped(input,state,calls,clock);
+   assert.equal(calls.length,2);
+  } finally {input.close();await state.promise;clock.restore();}
+ }
+});
+
+test('body deadline never waits for rejected or pending cancellation and cleans resources',async()=>{
+ for(const cancelMode of ['reject','pending']) {
+  const clock=bodyClock(),calls=allowSmallCommands();
+  const input=controlledBody({cancelMode});const state=observeBody(input);
+  try {
+   await flushBodyTasks();clock.advance(5000);await flushBodyTasks();
+   await assertBodyStopped(input,state,calls,clock);assert.equal(input.cancels,1);
+  } finally {input.close();await state.promise;clock.restore();}
+ }
+});
+
+test('body deadline cannot be starved by immediately fulfilled empty reads',async()=>{
+ const clock=bodyClock(),calls=allowSmallCommands();
+ const input=controlledBody({emptyChunks:100,onPull:()=>clock.advance(100,false)});
+ const state=observeBody(input);
+ try {
+  await flushBodyTasks();await assertBodyStopped(input,state,calls,clock);
+  assert.ok(input.reads<=50);assert.equal(input.cancels,1);
+ } finally {input.close();await state.promise;clock.restore();}
+});
+
+test('body reader yields bounded empty-read batches and clears pending yield on timeout',async()=>{
+ const clock=bodyClock(),calls=allowSmallCommands();
+ const input=controlledBody({emptyChunks:200});const state=observeBody(input);
+ try {
+  await flushBodyTasks();assert.ok(input.reads<=64,'empty reads monopolized the microtask queue');
+  clock.advance(5000);await flushBodyTasks();await assertBodyStopped(input,state,calls,clock);
+ } finally {input.close();await state.promise;clock.restore();}
+});
+
+test('body deadline starts only after authentication and quota resolve',async()=>{
+ const clock=bodyClock(),calls=allowSmallCommands();const allowed=globalThis.fetch;let quota;
+ globalThis.fetch=(url,options)=>url.endsWith('/iz_group_rate_limit')
+  ? new Promise(resolve=>{quota=()=>{calls.push(url);resolve(json(true));};}):allowed(url,options);
+ const input=controlledBody();const state=observeBody(input);
+ try {
+  await flushBodyTasks();clock.advance(10000);assert.equal(clock.pending,0);assert.equal(input.reads,0);
+  quota();await flushBodyTasks();clock.advance(4999);await flushBodyTasks();assert.equal(state.response,null);
+  clock.advance(1);await flushBodyTasks();await assertBodyStopped(input,state,calls,clock);
+ } finally {if(quota)quota();input.close();await state.promise;clock.restore();}
+});
+
+test('body reader clears deadline and abort listener on success read failure and overflow',async()=>{
+ for(const mode of ['success','read-error','overflow','declared']) {
+  const clock=bodyClock(),calls=allowSmallCommands();
+  const input=controlledBody({initial:mode==='overflow'?[statusOfSize(bodyLimit+1)]:[bytes('{"action":"status"}')]});
+  if(mode==='declared')input.request.headers.set('Content-Length','16385');
+  const state=observeBody(input);
+  try {
+   await flushBodyTasks();
+   if(mode==='read-error')input.fail();
+   if(mode==='success')input.close();
+   await flushBodyTasks();
+   if(mode==='success')assert.equal(state.response?.status,200);
+   else await assertBodyStopped(input,state,calls,clock);
+   assert.equal(input.listeners,0);assert.equal(clock.pending,0);assert.equal(input.stream.locked,false);
+   clock.advance(5000);input.abort.abort();await flushBodyTasks();
+   assert.equal(calls.length,mode==='success'?3:2);
+  } finally {input.close();await state.promise;clock.restore();}
+ }
+});

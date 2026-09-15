@@ -8,27 +8,70 @@ async function rpc(name: string, args: unknown) {
   return await res.json();
 }
 const MAX_BODY_BYTES = 16_384;
+const MAX_BODY_MILLIS = 5_000;
 async function readRequestText(req: Request): Promise<string> {
+  const deadline = performance.now() + MAX_BODY_MILLIS;
   const reader = req.body?.getReader();
+  let stopped = false;
+  let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+  let yieldTimer: ReturnType<typeof setTimeout> | undefined;
+  let resumeYield: (() => void) | undefined;
+  let stop: (() => void) | undefined;
+  const ensureActive = () => {
+    if (stopped || req.signal.aborted || performance.now() >= deadline) throw Error('invalid_request');
+  };
   try {
+    ensureActive();
     // The header is only an early rejection hint; every actual chunk is counted.
     if (Number(req.headers.get('content-length') ?? 0) > MAX_BODY_BYTES) throw Error('invalid_request');
     if (!reader) return '';
-    const bytes = new Uint8Array(MAX_BODY_BYTES);
-    let size = 0;
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value.byteLength > MAX_BODY_BYTES - size) throw Error('invalid_request');
-      bytes.set(value, size);
-      size += value.byteLength;
-    }
-    return new TextDecoder().decode(bytes.subarray(0, size));
+    const interruption = new Promise<never>((_, reject) => {
+      stop = () => { stopped = true; reject(Error('invalid_request')); };
+      deadlineTimer = setTimeout(stop, Math.max(0, deadline - performance.now()));
+      req.signal.addEventListener('abort', stop, { once: true });
+    });
+    const reading = (async () => {
+      const bytes = new Uint8Array(MAX_BODY_BYTES);
+      let size = 0, reads = 0;
+      while (true) {
+        ensureActive();
+        const { done, value } = await reader.read();
+        // Cancellation can settle a pending read as EOF; it must never permit decode.
+        ensureActive();
+        if (done) break;
+        if (value.byteLength > MAX_BODY_BYTES - size) throw Error('invalid_request');
+        bytes.set(value, size);
+        size += value.byteLength;
+        if (++reads % 64 === 0) {
+          // Even immediately fulfilled empty reads must let timers and aborts run.
+          await new Promise<void>(resolve => {
+            resumeYield = resolve;
+            yieldTimer = setTimeout(resolve, 0);
+          });
+          clearTimeout(yieldTimer);
+          yieldTimer = undefined;
+          resumeYield = undefined;
+        }
+      }
+      ensureActive();
+      const text = new TextDecoder().decode(bytes.subarray(0, size));
+      ensureActive();
+      return text;
+    })();
+    // One race bounds the reader task without accumulating handlers per chunk.
+    const text = await Promise.race([reading, interruption]);
+    ensureActive();
+    return text;
   } catch (error) {
+    stopped = true;
     // Cancellation must not hide the original error or delay the response.
     if (reader) void reader.cancel().catch(() => {});
     throw error;
   } finally {
+    clearTimeout(deadlineTimer);
+    clearTimeout(yieldTimer);
+    resumeYield?.();
+    if (stop) req.signal.removeEventListener('abort', stop);
     reader?.releaseLock();
   }
 }
@@ -44,6 +87,7 @@ Deno.serve(async (req) => {
     if (typeof user.id!=='string' || user.is_anonymous!==true) return Response.json({ok:false,error:'anonymous_identity_required'},{status:403});
     if (!await rpc('iz_group_rate_limit',{p_user:user.id})) throw Error('rate_limited');
     const raw=await readRequestText(req);
+    if (req.signal.aborted) throw Error('invalid_request');
     const body=validateAction(JSON.parse(raw));
     if (body.action==='publish') {
       const result=await relayLocation(body,user.id,{
