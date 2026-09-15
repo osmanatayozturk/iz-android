@@ -1,8 +1,13 @@
 # Değişiklik geçmişi
 
-## 0.10.1 — Telefon önizleme sürümü
+## 0.10.1 / code 20 — Telefon önizleme adayı
 
-Bu bölüm 0.10.1 kaynak kodundaki telefon değişikliklerini açıklar. Adayın paket, Test, UI/UX, güvenlik ve kabul aşamaları yerel teslim kaydında; yayında doğrulanmış sonuçlar ilgili Release metninde izlenir.
+Bu bölüm 0.10.1 kaynak kodundaki telefon değişikliklerini ve code 20 güvenlik düzeltme adayını açıklar. Önceki code 19 paketi ve kanıtları tarihsel aday olarak korunur; yeni adaya aktarılmış kabul sayılmaz. Code 20 paketleri, bağımsız Test, güvenlik değerlendirmesi, koordinatör kabulü ve yayın henüz tamamlanmamıştır.
+
+- Telefon paketi yeni, kontrollü bir imzalama hattına taşınır. Mevcut kullanıcı verisini koruyan yerinde güncelleme ve eski imzalı paketlere karşı sürüm düşürme/yanlış imza reddi, yalnız aynı nihai paketlerde doğrulandıktan sonra kabul edilir.
+- Kişisel kullanım için sağlayıcı ayarlı ve herkese açık dağıtım için sağlayıcı alanları boş iki ayrı release profili hazırlanır. Herkese açık pakete kişisel yapılandırma, anahtar veya kullanıcı verisi girmez; iki profil ayrı paket kimliği, yapılandırma ve dosya özeti kanıtıyla izlenir.
+- Grup servisi, kimlik doğrulama ve kota kontrolünden sonra istek gövdesini mutlak 5 saniyelik süre içinde okur. Mevcut 16 KiB gerçek bayt sınırı, güvenli hata yanıtları, iptal ve kaynak temizleme davranışı korunur. Yavaş, yarım kalan, iptal edilen ve eşzamanlı istek kontrollerinin code 20 adayı için sonuçları beklenmektedir.
+- Bu güncelleme yalnız telefon uygulaması ve grup servisi kapsamındadır. Wear OS **0.6.0 / code 10** ve iletişim **v5** değişmez; değişmeyen saat uygulaması için yeni paket veya güncelleme planlanmaz. Mevcut telefon-saat uyumluluğu nihai aday üzerinde ayrıca doğrulanacaktır.
 
 - Yer aramada ilk sayfa 1–9 geçerli sonuç ve en az bir OSM referansı içeriyorsa en fazla bir devam isteği yapılır. İlk sayfa boşsa, tam 10 sonuç içeriyorsa veya referans yoksa devam edilmez. Sayfa başına en fazla 10, birleşik listede en fazla 20 sonuç işlenir; bütün yerlerin bulunması garanti edilmez.
 - Sayfalar mevcut v2 ham JSON önbelleğinde ayrı anahtarlarla saklanır. İkinci sayfa başarısızsa ilk sayfa korunur; mevcut istek hızı, bekleme ve iptal sınırları sürer. Sorgu değişince eski sonuç, hata ve boş durum yeni sorguya taşınmaz.
@@ -13,8 +18,8 @@ Bu bölüm 0.10.1 kaynak kodundaki telefon değişikliklerini açıklar. Adayın
 - Kart veya İşlemler mevcut paneli açar; yolculuğu bitirmez ve ikinci kart oluşturmaz. Ses düğmesi yalnız ses durumunu değiştirir. Simülasyon, GPS/konum, bağlantı, hata, varış ve varışta kaydın sürmesi uyarıları korunur.
 - Kartın 8 bileşen ve 1 ana ekran testi geçti; normal yazıdaki kompakt yerleşim UI/UX kabulünü aldı. Dar ekranda kontroller alt satıra geçer. İncelenen sentetik 320 dp senaryolarında B harita işaretçisi uzun talimatta kısmen, uyarı görünümünde büyük ölçüde örtüldü; kamera davranışı değişmedi. Bu sonuç kart kapsamındadır; nihai sürüm veya kişisel cihaz kabulü değildir.
 - OSM arama penceresi klavye üstündeki kullanılabilir yüksekliğe sınırlandırıldı; başlık ve **Kapat** sabit kalırken sonuç gövdesi kaydırılır.
-- Grup servisi istek gövdesi okumasında 16KiB gerçek bayt sınırı uygulanır; sınır aşımında okuma iptal edilir ve kilit bırakılır; kimlik doğrulama, kota ve güvenli hata yanıtları davranışı korunur.
-- Telefon sürümü **0.10.1 / code 19**’dur; Wear OS **0.6.0 / code 10**, iletişim **v5**, günlük ve yedek veri biçimleri değişmez. Dağıtım niteliği önizleme (prerelease) olarak kalır.
+- Grup servisi istek gövdesi okumasında 16 KiB gerçek bayt sınırı uygulanır; code 20 adayı bu okumaya kimlik doğrulama ve kota kontrolünden sonra başlayan mutlak 5 saniyelik süre sınırı ekler.
+- Hedef telefon sürümü **0.10.1 / code 20**’dir; Wear OS **0.6.0 / code 10**, iletişim **v5**, günlük ve yedek veri biçimleri değişmez. Dağıtım niteliği önizleme (prerelease) olarak kalır.
 
 ## Yeni uygulama sürümlerinde güvenlik kabulü — 2026-09-14
 

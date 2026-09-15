@@ -6,20 +6,30 @@ Bu dosyayı Sürüm Belgeleri her İz güncellemesinde günceller; GitHub teslim
 
 | Bileşen | versionName | versionCode | Durum |
 |---|---|---|---|
-| Telefon | 0.10.1 | 19 | Önizleme (prerelease) |
-| Wear OS | 0.6.0 | 10 | Değişmedi; telefon 0.10.1 iletişim biçimini korur |
+| Telefon | 0.10.1 | 20 | Önizleme adayı; paket, Test, güvenlik ve kabul bekleniyor |
+| Wear OS | 0.6.0 | 10 | Değişmedi; yeni saat paketi veya güncellemesi yok |
 | Ortak iletişim | v5 | — | Eski v1–v4 desteği korunuyor |
 
-## 0.10.1 — Telefon önizleme sürümü
+## 0.10.1 / code 20 — Telefon önizleme adayı
 
-Bu bölüm 0.10.1 kaynak kodundaki telefon değişikliklerini açıklar. Adayın paket, Test, UI/UX, güvenlik ve kabul aşamaları yerel teslim kaydında; yayında doğrulanmış sonuçlar ilgili Release metninde izlenir.
+Bu bölüm 0.10.1 kaynak kodundaki telefon değişikliklerini ve code 20 güvenlik düzeltme adayını açıklar. Önceki code 19 paketi ve kanıtları değişmeden tarihsel aday olarak saklanır; code 20 için sonuç sayılmaz.
+
+### Code 20 güvenlik ve dağıtım kapsamı
+
+**Durum:** Uygulama ve servis düzeltmeleri hazırlanıyor. Nihai kaynak, iki release paketi, bağımsız Test, telefon-saat uyumluluğu, güvenlik değerlendirmesi, koordinatör kabulü ve yayın henüz tamamlanmadı.
+
+- **İmzalama geçişi:** Telefon paketi yeni ve kontrollü bir imzalama hattına taşınır. Yerinde güncelleme, mevcut uygulama verisinin korunması, imza geçmişinin sistem tarafından tanınması ve eski/yanlış imzalı paketlerin reddi nihai paket üzerinde doğrulanır. Bu kontroller geçmeden kullanıcı cihazına kurulum uygun sayılmaz.
+- **İki release profili:** Kişisel kullanım için sağlayıcı ayarlı release ile herkese açık dağıtım için sağlayıcı alanları boş release aynı sabit kaynaktan ayrı hazırlanır. Her profil paket kimliği, sürüm, yapılandırma, imza hattı ve SHA-256 ile yerel teslim kaydında eşleştirilir. Herkese açık pakete kişisel yapılandırma, anahtar veya kullanıcı verisi eklenmez.
+- **Grup servisi:** Kimlik doğrulama ve kota kontrolünden sonra başlayan mutlak 5 saniyelik istek gövdesi okuma süresi uygulanır. Mevcut 16 KiB gerçek bayt sınırı, durum kodları, güvenli hata yanıtları, iptal ve kaynak temizleme davranışı korunur. Boş, tam sınırlı, EOF gelmeyen, yavaş, iptal edilen ve eşzamanlı istek senaryolarının sonuçları beklenmektedir.
+- **Telefon-only kapsam:** Telefon hedefi **0.10.1 / code 20**’dir. Wear OS **0.6.0 / code 10** ve iletişim **v5** değişmez; yeni saat paketi veya saat güncellemesi yapılmaz. Değişmeyen saat uygulamasıyla iletişim ve temel köprü davranışı nihai telefon adayı üzerinde doğrulanır.
+- **Kabul sınırı:** Hazırlık veya önceki adayın sonuçları code 20 kabulü değildir. Yeni adayın kaynak, paket, yapılandırma ve imza hattı aynı teslimde eşleştirilir; bağımsız Test ve aynı adaya ait açık olumlu güvenlik kararı tamamlandıktan sonra koordinatör ayrıca sürüm/yayın/kurulum kararı verir.
 
 - Yer aramada ilk sayfa 1–9 geçerli sonuç ve en az bir OSM referansı içeriyorsa en fazla bir devam isteği yapılır. İlk sayfa boşsa, tam 10 sonuç içeriyorsa veya referans yoksa devam edilmez. Sayfa başına en fazla 10, birleşik listede en fazla 20 sonuç işlenir; bütün yerlerin bulunması garanti edilmez.
 - Sayfalar mevcut v2 ham JSON önbelleğinde ayrı anahtarlarla saklanır. İkinci sayfa başarısızsa ilk sayfa korunur; mevcut istek hızı, bekleme ve iptal sınırları sürer. Sorgu değişince eski sonuç, hata ve boş durum yeni sorguya taşınmaz.
 - Sonuçta yer adının altında mevcut `display_name` adres metni doğal biçimde sarılır. Boş veya yalnız adı tekrarlayan açıklamada “Adres bilgisi yok” gösterilir. Mahalle/sokak bilgisi tahmin edilmez; koordinat adres yerine kullanılmaz. Büyük yazıda sonuçlar ve tam OpenStreetMap atfı erişilebilir kalır.
 - Aktif yol tarifi kartı, mevcut “Nereye?” panelini planlama durumunu sıfırlamadan açar. “Yol tarifini bitir” ve “Yolculuk kaydını bitir” ayrı teyitlerle yalnız ilgili işi sonlandırır; diğer açık iş ve grup paylaşımı korunur. “Yolculuğu tamamen bitir” en altta, kapanacak işleri belirten teyitle sunulur.
 - Aktif yol tarifinde İz ön plandayken ekran açık tutulur. Uygulama içi menüler bu davranışı kesmez; elle kilitleme korunur. Yol tarifi bitince veya uygulama arka plana geçince normal ekran zaman aşımı geçerli olur. Yalnız kayıt veya rota önizleme ekranı açık tutmaz.
-- Telefon sürümü **0.10.1 / code 19**’dur; Wear OS **0.6.0 / code 10**, iletişim **v5**, günlük ve yedek veri biçimleri değişmez. Dağıtım niteliği önizleme (prerelease) olarak kalır.
+- Hedef telefon sürümü **0.10.1 / code 20**’dir; Wear OS **0.6.0 / code 10**, iletişim **v5**, günlük ve yedek veri biçimleri değişmez. Dağıtım niteliği önizleme (prerelease) olarak kalır.
 
 ### UI/UX r2 — sol üst aktif kartın küçültülmesi
 
@@ -30,16 +40,16 @@ Bu bölüm 0.10.1 kaynak kodundaki telefon değişikliklerini açıklar. Adayın
 - **Bağımsız Test:** Normal yazı ölçeğinde (font1), sentetik çevrimdışı verilerle 8 bileşen ve 1 gerçek ana ekran testi tek turda geçti; hata veya atlama yok. Kart, ses ve panel davranışları ile oturum/planlama bilgilerinin korunması doğrulandı. Ana ekranın panel açılışları semantik tıklamayla sınandı; bu bölüm fiziksel dokunma veya TalkBack kabulü değildir.
 - **Ölçümler:** Kısa kart 360 ve 411,43 dp içerik genişliğinde 107,81 dp yüksekliğindedir. 320 dp genişlikte kontrollerin alt satıra geçmesiyle yükseklik 155,81 dp olur. Normal genişlikte kısa manevra için 104–136 dp tasarım hedefi karşılandı; bu hedef dar ekran, uzun talimat ve uyarılara uygulanan bir yükseklik tavanı değildir. Genişlikler içerik kısıtıdır; cihaz ekran boyutu değiştirilmedi.
 - **UI/UX ve görünürlük sınırı:** Atanan normal yazı görünümlerinde kompakt yerleşim kabul edildi. İncelenen sentetik 320 dp senaryolarında B harita işaretçisi uzun talimatta kısmen, uyarı görünümünde büyük ölçüde örtüldü; bütün işaretçilerin her durumda görünür olduğu iddia edilmez. Kamera davranışı değişmedi. Yeni büyütülmüş yazı testi yapılmadı; mevcut metin ölçekleme desteği korundu.
-- **Uyumluluk ve sınır:** Telefon 0.10.1 / code 19, Wear OS 0.6.0 / code 10, iletişim v5 ve günlük/yedek biçimleri korunur. Bu kart düzenlemesi yeni API, izin, kamera veya servis kapsamı eklemez. Güvenlik, sürüm kabulü, cihaz kurulumu ve yayın tamamlandı olarak gösterilmez.
+- **Uyumluluk ve sınır:** Hedef telefon 0.10.1 / code 20, Wear OS 0.6.0 / code 10, iletişim v5 ve günlük/yedek biçimleri korunur. Bu kart düzenlemesi yeni API, izin, kamera veya servis kapsamı eklemez. Code 19 kart kanıtı tarihsel olarak korunur; code 20 nihai paket kabulü yerine geçmez. Güvenlik, sürüm kabulü, cihaz kurulumu ve yayın tamamlandı olarak gösterilmez.
 
 ### OSM araması ve grup servisi düzeltmeleri
 
 - OSM arama penceresi klavye üstündeki kullanılabilir yüksekliğe sınırlandırıldı; başlık ve **Kapat** sabit kalırken sonuç gövdesi kaydırılır.
-- Grup servisi istek gövdesi okumasında 16 KiB gerçek bayt sınırı uygular; aşımda okumayı iptal edip kilidi bırakır. Kimlik doğrulama, kota ve güvenli hata yanıtları korunur.
-- Sunucu tarafında 16 odaklı test ve bunları içeren toplam 24 test geçti. İlgili kaynak canlıya uygulanıp yeniden okunarak doğrulandı; kimliği doğrulanmış canlı işlem veya büyük gövde yük testi yapılmadı.
+- Grup servisi istek gövdesi okumasında 16 KiB gerçek bayt sınırını korur; code 20 adayı kimlik doğrulama ve kota kontrolünden sonra başlayan mutlak 5 saniyelik okuma süresi ekler. Aşım veya iptalde okuma durdurulur ve kaynaklar temizlenir.
+- Önceki code 19 servis testleri tarihsel kanıttır. Code 20 için hedefli servis testleri, eşzamanlılık kontrolleri ve gerekli çalışma ortamı doğrulaması henüz sonuçlanmamıştır; canlı hizmete uygulama veya canlı kabul bu belgeyle yapılmaz.
 - Arama penceresinin ekran/dokunma kanıtı, güvenlik kararı ve son sürüm kabulü ayrı izlenir.
 
-Paketler ve yayında doğrulanmış sonuçlar ilgili [GitHub Release](https://github.com/osmanatayozturk/iz-android/releases) kaydında sunulur. Her özel ve herkese açık paket kaynak ve ilgili yapılandırmayla ayrı doğrulanır. Teknik Test ve UI/UX kanıtı, aynı adaya ait açık olumlu Siber Güvenlik raporu ve koordinatörün son kabulü yerel aday kaydında ayrı tutulur. GitHub ve kullanıcı cihazı işlemleri somut onaylarına bağlıdır.
+Paketler ve yayında doğrulanmış sonuçlar, gerekli kabuller tamamlandıktan sonra ilgili [GitHub Release](https://github.com/osmanatayozturk/iz-android/releases) kaydında sunulur. Kişisel sağlayıcı ayarlı ve herkese açık sağlayıcı-boş paketler kaynak ve ilgili yapılandırmayla ayrı doğrulanır. Teknik Test ve UI/UX kanıtı, aynı adaya ait açık olumlu Siber Güvenlik raporu ve koordinatörün son kabulü yerel aday kaydında ayrı tutulur. GitHub ve kullanıcı cihazı işlemleri somut onaylarına bağlıdır.
 
 ## 2026-09-14: Yeni uygulama sürümleri için güvenlik kabul şartı
 
