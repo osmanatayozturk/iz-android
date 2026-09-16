@@ -1,25 +1,22 @@
 # Değişiklik geçmişi
 
-## 0.10.1 / code 20 — Telefon önizleme adayı
+## 0.10.1 / code 20 — 2026-09-16
 
-Bu bölüm 0.10.1 kaynak kodundaki telefon değişikliklerini ve code 20 güvenlik düzeltme adayını açıklar. Önceki code 19 paketi ve kanıtları tarihsel aday olarak korunur; yeni adaya aktarılmış kabul sayılmaz. Code 20 paketleri, bağımsız Test, güvenlik değerlendirmesi, koordinatör kabulü ve yayın henüz tamamlanmamıştır.
+Telefon sürümü [GitHub'da yayımlandı](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.10.1). Kaynak kodu `v0.10.1` etiketinde, APK, kaynak arşivi, bağımlılık kaynakları, lisanslar ve SHA-256 listesi aynı yayında bulunur. Sürüm normal Release / Latest olarak sunulur.
 
-- Telefon paketi yeni, kontrollü bir imzalama hattına taşınır. Mevcut kullanıcı verisini koruyan yerinde güncelleme ve eski imzalı paketlere karşı sürüm düşürme/yanlış imza reddi, yalnız aynı nihai paketlerde doğrulandıktan sonra kabul edilir.
-- Kişisel kullanım için sağlayıcı ayarlı ve herkese açık dağıtım için sağlayıcı alanları boş iki ayrı release profili hazırlanır. Herkese açık pakete kişisel yapılandırma, anahtar veya kullanıcı verisi girmez; iki profil ayrı paket kimliği, yapılandırma ve dosya özeti kanıtıyla izlenir.
-- Grup servisi, kimlik doğrulama ve kota kontrolünden sonra istek gövdesini mutlak 5 saniyelik süre içinde okur. Mevcut 16 KiB gerçek bayt sınırı, güvenli hata yanıtları, iptal ve kaynak temizleme davranışı korunur. Yavaş, yarım kalan, iptal edilen ve eşzamanlı istek kontrollerinin code 20 adayı için sonuçları beklenmektedir.
-- Bu güncelleme yalnız telefon uygulaması ve grup servisi kapsamındadır. Wear OS **0.6.0 / code 10** ve iletişim **v5** değişmez; değişmeyen saat uygulaması için yeni paket veya güncelleme planlanmaz. Mevcut telefon-saat uyumluluğu nihai aday üzerinde ayrıca doğrulanacaktır.
+- Yer aramada ilk sayfa 1–9 geçerli sonuç ve en az bir OSM referansı içeriyorsa en fazla bir devam isteği yapılır. İlk sayfa boşsa, tam 10 sonuç içeriyorsa veya referans yoksa devam edilmez. Birleşik listede en fazla 20 sonuç işlenir; bütün yerlerin bulunması garanti edilmez.
+- Arama sayfaları ayrı önbellek anahtarları kullanır. İkinci sayfa başarısızsa ilk sonuçlar korunur; sorgu değişince önceki sonuç ve hata yeni sorguya taşınmaz.
+- Yer adının altında mevcut adres metni gösterilir. Eksik mahalle/sokak bilgisi tahmin edilmez; koordinat adres yerine yazılmaz.
+- OSM arama penceresi klavyenin üstündeki alana sığar. Başlık ve **Kapat** sabit kalırken sonuç listesi kaydırılır.
+- Sol üst navigasyon kartı küçültüldü. Manevra, ses, **İşlemler** ve gerekli uyarılar korunur; toplam mesafe ve süre mevcut Yol tarifi panelindedir.
+- Kart mevcut **Nereye?** panelini planlama durumunu koruyarak açar. Yol tarifini, yolculuk kaydını veya tüm oturumu bitirme eylemleri ayrı teyitlerle çalışır.
+- Aktif yol tarifinde İz ön plandayken ekran açık kalır. Elle kilitleme korunur; arka planda veya yol tarifi bitince normal ekran zaman aşımı geçerli olur.
+- Grup servisi, kimlik doğrulama ve kota kontrolünden sonra istek gövdesini en fazla 16 KiB ve mutlak 5 saniye sınırıyla okur.
+- Telefon paketi yeni yayın anahtarına ve imza geçmişine taşındı. Release paketinde kullanılmayan eski dinamik alıcı izni kaldırıldı; debug davranışı korunur.
+- Herkese açık APK kişisel servis yapılandırması içermez. Kişisel paket yayımlanmaz.
+- Wear OS **0.6.0 / code 10**, iletişim **v5**, günlük ve yedek veri biçimleri değişmedi. Bu yayında yeni saat APK'sı yoktur.
 
-- Yer aramada ilk sayfa 1–9 geçerli sonuç ve en az bir OSM referansı içeriyorsa en fazla bir devam isteği yapılır. İlk sayfa boşsa, tam 10 sonuç içeriyorsa veya referans yoksa devam edilmez. Sayfa başına en fazla 10, birleşik listede en fazla 20 sonuç işlenir; bütün yerlerin bulunması garanti edilmez.
-- Sayfalar mevcut v2 ham JSON önbelleğinde ayrı anahtarlarla saklanır. İkinci sayfa başarısızsa ilk sayfa korunur; mevcut istek hızı, bekleme ve iptal sınırları sürer. Sorgu değişince eski sonuç, hata ve boş durum yeni sorguya taşınmaz.
-- Sonuçta yer adının altında mevcut `display_name` adres metni doğal biçimde sarılır. Boş veya yalnız adı tekrarlayan açıklamada “Adres bilgisi yok” gösterilir. Mahalle/sokak bilgisi tahmin edilmez; koordinat adres yerine kullanılmaz. Büyük yazıda sonuçlar ve tam OpenStreetMap atfı erişilebilir kalır.
-- Aktif yol tarifi kartı, mevcut “Nereye?” panelini planlama durumunu sıfırlamadan açar. “Yol tarifini bitir” ve “Yolculuk kaydını bitir” ayrı teyitlerle yalnız ilgili işi sonlandırır; diğer açık iş ve grup paylaşımı korunur. “Yolculuğu tamamen bitir” en altta, kapanacak işleri belirten teyitle sunulur.
-- Aktif yol tarifinde İz ön plandayken ekran açık tutulur. Uygulama içi menüler bu davranışı kesmez; elle kilitleme korunur. Yol tarifi bitince veya uygulama arka plana geçince normal ekran zaman aşımı geçerli olur. Yalnız kayıt veya rota önizleme ekranı açık tutmaz.
-- Onaylı UI/UX r2 kapsamında sol üst aktif kart küçültüldü: manevraya mesafe, talimat, bağımsız ses düğmesi ve **İşlemler** korundu. Kalan toplam mesafe, süre ve tahmini varış mevcut Yol tarifi panelinde kalır.
-- Kart veya İşlemler mevcut paneli açar; yolculuğu bitirmez ve ikinci kart oluşturmaz. Ses düğmesi yalnız ses durumunu değiştirir. Simülasyon, GPS/konum, bağlantı, hata, varış ve varışta kaydın sürmesi uyarıları korunur.
-- Kartın 8 bileşen ve 1 ana ekran testi geçti; normal yazıdaki kompakt yerleşim UI/UX kabulünü aldı. Dar ekranda kontroller alt satıra geçer. İncelenen sentetik 320 dp senaryolarında B harita işaretçisi uzun talimatta kısmen, uyarı görünümünde büyük ölçüde örtüldü; kamera davranışı değişmedi. Bu sonuç kart kapsamındadır; nihai sürüm veya kişisel cihaz kabulü değildir.
-- OSM arama penceresi klavye üstündeki kullanılabilir yüksekliğe sınırlandırıldı; başlık ve **Kapat** sabit kalırken sonuç gövdesi kaydırılır.
-- Grup servisi istek gövdesi okumasında 16 KiB gerçek bayt sınırı uygulanır; code 20 adayı bu okumaya kimlik doğrulama ve kota kontrolünden sonra başlayan mutlak 5 saniyelik süre sınırı ekler.
-- Hedef telefon sürümü **0.10.1 / code 20**’dir; Wear OS **0.6.0 / code 10**, iletişim **v5**, günlük ve yedek veri biçimleri değişmez. Dağıtım niteliği önizleme (prerelease) olarak kalır.
+Mevcut derleme, birim testi ve lint sonuçları kullanıldı. Android 16/API 36 emülatöründe veri koruyan güncelleme, 19 fotoğraf/URI gizliliği senaryosu ve gerçek OSM girişinin güncelleme sonrası korunması doğrulandı. Telefon–saat kontrollerindeki başlatma ve eski önbellek başarısızlıkları ile tamamlanamayan bağlantı kontrolü sürüm notlarında açıklanır. Kalan testler durduruldu; fiziksel donanım ve gerçek araç kabulü tamamlanmış değildir. Nihai güvenlik onayı veya tüm testlerin geçtiği iddia edilmez. Önceki code 19 sonuçları tarihsel kapsamlarında kalır.
 
 ## Yeni uygulama sürümlerinde güvenlik kabulü — 2026-09-14
 
