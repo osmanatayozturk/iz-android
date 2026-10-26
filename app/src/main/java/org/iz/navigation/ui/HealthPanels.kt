@@ -150,7 +150,16 @@ internal fun HealthSettingsPanel(onMessage: (String) -> Unit) {
     if (clearing) AlertDialog(onDismissRequest = { clearing = false },
         title = { Text("Sağlık verilerini temizle") },
         text = { Text("İz'deki sağlık ölçümleri silinir. Yolculukların ve Samsung Health kayıtların korunur. Bağlantı açıksa sonradan gelen ölçümler yeniden eklenebilir.") },
-        confirmButton = { TextButton(onClick = { clearing = false; scope.launch { manager.clearLocalData(); onMessage("Yerel sağlık verileri temizlendi.") } }) { Text("Temizle") } },
+        confirmButton = { TextButton(onClick = {
+            clearing = false
+            scope.launch {
+                try {
+                    manager.clearLocalData()
+                    onMessage("Yerel sağlık verileri temizlendi.")
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) { onMessage("Sağlık verileri temizlenemedi. Yeniden deneyebilirsin.") }
+            }
+        }) { Text("Temizle") } },
         dismissButton = { TextButton(onClick = { clearing = false }) { Text("Vazgeç") } })
 }
 

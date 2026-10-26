@@ -176,6 +176,126 @@ internal class AnalysisCache(private val directory: File, private val onReadFail
                 name.removePrefix("trail-").removePrefix("heart-").removeSuffix(".json") !in assets) AtomicFile(file).delete()
         }
     }
+    /** Privacy deletion is synchronous and independent of the expensive-analysis battery gate.
+     * The caller invalidates/quiesces writers and invokes this before its raw transaction commits.
+     * health + no ids means global health; health + ids means scoped health; ids alone delete journeys.
+     */
+    @Synchronized fun purge(journeyIds: Set<String> = emptySet(), health: Boolean = false,
+        all: Boolean = false): Set<String> {
+        if (!all && !health && journeyIds.isEmpty()) return emptySet()
+        try {
+            val files = if (!directory.exists()) emptyList() else {
+                if (!directory.isDirectory) throw java.io.IOException("Prepared cache is not a directory")
+                directory.listFiles()?.toList() ?: throw java.io.IOException("Prepared cache cannot be listed")
+            }
+            val affected = journeyIds.mapTo(linkedSetOf(), ::key)
+            val globalHealth = health && journeyIds.isEmpty()
+            val entryPattern = Regex("entry-([a-f0-9]{64})[.]json")
+            val assetPattern = Regex("(heart|trail)-([a-f0-9]{64})-([a-f0-9]{64})[.]json")
+            fun keyFor(name: String): String? = entryPattern.matchEntire(name)?.groupValues?.get(1)
+                ?: assetPattern.matchEntire(name)?.groupValues?.get(2)
+            // Read every representation independently: openRead() would recover/rename a backup
+            // and could hide sensitive values present only in an older .bak or interrupted .new.
+            val indexCopies = files.filter { purgeBaseName(it.name) == index.name }.associate { file ->
+                file.name to if (all) runCatching { purgeJson(file) }.getOrNull() else purgeJson(file)
+            }
+            indexCopies.values.filterNotNull().forEach { root ->
+                val rows = root.optJSONArray("entries")
+                    ?: if (all) JSONArray() else throw java.io.IOException("Invalid prepared cache index")
+                for (i in 0 until rows.length()) {
+                    val row = rows.optJSONObject(i)
+                        ?: if (all) continue else throw java.io.IOException("Invalid prepared cache entry")
+                    val id = row.optString("id").takeIf { it.isNotBlank() }
+                        ?: if (all) continue else throw java.io.IOException("Missing prepared cache identity")
+                    if (all || globalHealth && purgeHasHealth(row)) affected.add(key(id))
+                }
+            }
+            for (file in files) {
+                val name = purgeBaseName(file.name)
+                val journeyKey = keyFor(name) ?: continue
+                if (all) affected.add(journeyKey)
+                else if (globalHealth) {
+                    val containsHealth = when {
+                        entryPattern.matches(name) -> runCatching { purgeHasHealth(purgeJson(file)) }.getOrDefault(true)
+                        name.startsWith("heart-") -> runCatching {
+                            val root = purgeJson(file)
+                            require(root.length() == 2 && root.getString("fingerprint") ==
+                                assetPattern.matchEntire(name)!!.groupValues[3])
+                            root.getJSONArray("samples").length() > 0
+                        }.getOrDefault(true)
+                        else -> false
+                    }
+                    if (containsHealth) affected.add(journeyKey)
+                }
+            }
+            // Preserve only the same index version AtomicFile would expose, never promote .new.
+            val current = indexCopies[index.name + ".bak"] ?: indexCopies[index.name]
+            val retained = JSONArray()
+            if (!all && current != null) {
+                if (current.optInt("schema") != 2) throw java.io.IOException("Unsupported prepared cache index")
+                val rows = current.getJSONArray("entries")
+                for (i in 0 until rows.length()) {
+                    val row = rows.getJSONObject(i)
+                    if (key(row.getString("id")) !in affected) retained.put(row)
+                }
+            }
+            val revisionInput = (0 until retained.length()).map { i ->
+                retained.getJSONObject(i).let { it.getString("id") + ":" + it.getString("fingerprint") }
+            }.sorted().joinToString()
+            val sanitized = JSONObject().put("schema", 2).put("revision", digest(revisionInput))
+                .put("changed", System.currentTimeMillis()).put("daily", JSONObject.NULL).put("entries", retained).toString()
+            // Durable pending first; a crash may lose disposable results but must not expose old ones.
+            purgeWrite(File(directory, "pending"), "1")
+            for (file in files) {
+                val name = purgeBaseName(file.name)
+                if (name == "pending" || name == index.name) continue
+                val journeyKey = keyFor(name)
+                val remove = all || name.startsWith("heatmap-") || journeyKey != null && journeyKey in affected &&
+                    (name.startsWith("entry-") || name.startsWith("heart-") || !health && name.startsWith("trail-"))
+                if (remove) purgeDelete(File(directory, name))
+            }
+            // Removing old siblings BEFORE writing prevents AtomicFile recovery from resurrecting
+            // a deleted health entry. No callback/raw read/recomputation occurs under this monitor.
+            purgeWrite(index, sanitized)
+            return affected
+        } catch (error: java.io.IOException) { throw error }
+        catch (error: Exception) { throw java.io.IOException("Prepared cache privacy cleanup failed", error) }
+    }
+
+    private fun purgeBaseName(name: String): String = when {
+        name.endsWith(".bak") -> name.removeSuffix(".bak")
+        name.endsWith(".new") -> name.removeSuffix(".new")
+        else -> name
+    }
+    private fun purgeJson(file: File): JSONObject = try {
+        JSONObject(file.readText(Charsets.UTF_8))
+    } catch (error: Exception) { throw java.io.IOException("Prepared cache cannot be decoded", error) }
+    private fun purgeHasHealth(entry: JSONObject): Boolean {
+        fun contains(summary: JSONObject?): Boolean {
+            if (summary == null) return true
+            if (listOf("mean", "min", "max", "latest", "latestAt", "calories", "steps", "start", "end")
+                    .any { !summary.isNull(it) }) return true
+            if (summary.optInt("count", -1) != 0 || summary.optLong("calorieCoverage", -1) != 0L ||
+                summary.optLong("stepCoverage", -1) != 0L) return true
+            return summary.optJSONObject("checked")?.length() != 0
+        }
+        return contains(entry.optJSONObject("health")) || contains(entry.optJSONObject("watch"))
+    }
+    private fun purgeDelete(base: File) {
+        val family = listOf(base, File(base.path + ".bak"), File(base.path + ".new"))
+        family.forEach { file ->
+            if (file.exists() && (file.isDirectory || !file.delete()))
+                throw java.io.IOException("Prepared cache file could not be deleted")
+        }
+        if (family.any { it.exists() }) throw java.io.IOException("Prepared cache file remains after deletion")
+    }
+    private fun purgeWrite(file: File, text: String) {
+        purgeDelete(file)
+        write(file, text)
+        if (!file.isFile || file.readText(Charsets.UTF_8) != text || File(file.path + ".bak").exists() ||
+            File(file.path + ".new").exists()) throw java.io.IOException("Prepared cache privacy write was not committed")
+    }
+
     private fun write(file: File, text: String, checkActive: () -> Unit = {}) {
         directory.mkdirs()
         val atomic = AtomicFile(file)

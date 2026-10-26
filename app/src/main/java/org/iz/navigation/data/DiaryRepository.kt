@@ -58,6 +58,10 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
         val watch = dao.analysisWatchSamples(); checkActive()
         AnalysisInput(trips, points, samples, syncs, watch)
     }
+    private suspend fun <T> privacyChange(block: suspend (PostJourneyAnalysis) -> T): T {
+        val analysis = PostJourneyAnalysis.get(appContext)
+        return analysis.privacyChange { block(analysis) }
+    }
     private suspend fun <T> recordingChange(block: suspend () -> T): T {
         val analysis = PostJourneyAnalysis.get(appContext)
         analysis.recordingWillChange()
@@ -72,7 +76,7 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
 
     /** Commit only after every requested HC page succeeds. Missing permissions must be excluded from metrics. */
     suspend fun replaceJourneyHealth(journeyIds: Set<String>, samples: List<ImportedHealthSample>,
-        metrics: Set<HealthMetric> = HealthMetric.entries.toSet(), now: Long = System.currentTimeMillis()) = db.withTransaction {
+        metrics: Set<HealthMetric> = HealthMetric.entries.toSet(), now: Long = System.currentTimeMillis()) = privacyChange { analysis -> db.withTransaction {
         require(now > 0)
         if (metrics.isEmpty() || journeyIds.isEmpty()) return@withTransaction
         val trips = dao.allJourneys().filter { it.id in journeyIds && it.status == JourneyStatus.CONFIRMED }
@@ -81,11 +85,12 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
         val associated = trips.flatMap { trip -> candidates.filter { HealthRules.belongsTo(it, trip, now) }.map { it.forJourney(trip.id) } }
         dao.saveHealthSamples(associated)
         dao.saveHealthSyncs(trips.flatMap { trip -> metrics.map { JourneyHealthSync(trip.id, it, now) } })
-    }
+        analysis.purgeHealth(trips.map { it.id }.toSet())
+    } }
 
     /** A changed parent record replaces all its old samples, including an update that now has no eligible samples. */
     suspend fun applyHealthChanges(upserted: List<ImportedHealthSample>, deletedSourceIds: Set<String>,
-        now: Long = System.currentTimeMillis(), journeyIds: Set<String>? = null) = db.withTransaction {
+        now: Long = System.currentTimeMillis(), journeyIds: Set<String>? = null) = privacyChange { analysis -> db.withTransaction {
         require(now > 0)
         val sourceIds = deletedSourceIds + upserted.map { it.sourceId }
         val previous = sourceIds.toList().chunked(400).flatMap { dao.healthSamplesBySources(it) }
@@ -97,14 +102,17 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
         val existingIds = trips.map { it.id }.toSet()
         dao.saveHealthSyncs((previous + associated).filter { it.journeyId in existingIds }
             .map { JourneyHealthSync(it.journeyId, it.metric, now) }.distinctBy { it.journeyId to it.metric })
-    }
+        analysis.purgeHealth((previous + associated).map { it.journeyId }.toSet())
+    } }
 
-    suspend fun clearHealthData() = db.withTransaction {
+    suspend fun clearHealthData() = privacyChange { analysis -> db.withTransaction {
         dao.clearHealthSamples()
         dao.clearHealthSyncs()
         watchDao.clearSamples()
         watchDao.clearSessions()
-    }
+        // Purge before Room commits. A checked file error rolls back raw deletion too.
+        analysis.purgeHealth()
+    } }
 
     suspend fun createJourney(transport: Transport, temporary: Boolean, now: Long = System.currentTimeMillis()): Journey = recordingChange { db.withTransaction {
         dao.activeJourney(now) ?: Journey(
@@ -122,17 +130,18 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
         dao.save(DiaryRules.confirmed(journey, transport))
     }
 
-    suspend fun finishJourney(id: String, now: Long = System.currentTimeMillis()) = db.withTransaction {
+    suspend fun finishJourney(id: String, now: Long = System.currentTimeMillis()) = privacyChange { analysis -> db.withTransaction {
         dao.journey(id)?.let { if (it.endedAt == null) {
             val finished = it.copy(endedAt = now.coerceAtLeast(it.startedAt))
             dao.save(finished)
             dao.pruneHealthOutsideJourney(id, finished.startedAt, finished.endedAt!!)
             watchDao.pruneOutsideJourney(id, finished.startedAt, finished.endedAt)
+            analysis.purgeJourneys(setOf(id))
         } }
-    }
+    } }
 
     /** Resolves against the latest row in one transaction so a stale timeout cannot erase a saved memory. */
-    suspend fun resolveAutomaticCandidate(id: String, now: Long = System.currentTimeMillis(), restart: Boolean = true): Journey? = deleteWithFiles {
+    suspend fun resolveAutomaticCandidate(id: String, now: Long = System.currentTimeMillis(), restart: Boolean = true): Journey? = deleteWithFiles(purgeJourneys = true) {
         val current = dao.journey(id) ?: return@deleteWithFiles null
         when (TrackingPolicy.automaticCandidateDecision(current, dao.journeyPoints(id), now)) {
             AutomaticCandidateDecision.KEEP -> current
@@ -147,7 +156,7 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
     }
 
     suspend fun rejectJourney(id: String) {
-        deleteWithFiles {
+        deleteWithFiles(purgeJourneys = true) {
             val journey = dao.journey(id)
             // A delayed notification must not discard an already confirmed journey.
             if (journey?.status == JourneyStatus.TEMPORARY) {
@@ -157,7 +166,7 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
         }
     }
 
-    suspend fun markInterrupted(id: String) = db.withTransaction {
+    suspend fun markInterrupted(id: String) = privacyChange { analysis -> db.withTransaction {
         dao.journey(id)?.let {
             if (it.endedAt == null) {
                 val interrupted = it.copy(
@@ -167,11 +176,12 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
                 dao.save(interrupted)
                 dao.pruneHealthOutsideJourney(id, interrupted.startedAt, interrupted.endedAt!!)
                 watchDao.pruneOutsideJourney(id, interrupted.startedAt, interrupted.endedAt)
+                analysis.purgeJourneys(setOf(id))
             }
         }
-    }
+    } }
 
-    suspend fun cleanupExpired(now: Long = System.currentTimeMillis()) = deleteWithFiles {
+    suspend fun cleanupExpired(now: Long = System.currentTimeMillis()) = deleteWithFiles(purgeJourneys = true) {
         dao.allJourneys().filter { DiaryRules.isExpired(it, now) }.forEach {
             dao.deleteDirectPhotos(it.id)
             dao.deleteJourney(it.id)
@@ -217,7 +227,7 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
         true
     }
 
-    suspend fun saveJourney(entity: Journey) = recordingChange { db.withTransaction {
+    suspend fun saveJourney(entity: Journey) = recordingChange { privacyChange { analysis -> db.withTransaction {
         require(entity.endedAt == null || entity.endedAt >= entity.startedAt)
         require(entity.stepCount == null || entity.stepCount >= 0)
         val active = dao.activeJourney(System.currentTimeMillis())
@@ -231,7 +241,11 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
         libraryDao.pruneIneligibleMemberships()
         dao.pruneHealthOutsideJourney(entity.id, entity.startedAt, entity.endedAt ?: System.currentTimeMillis())
         watchDao.pruneOutsideJourney(entity.id, entity.startedAt, entity.endedAt ?: System.currentTimeMillis())
-    } }
+        if (current != null && (current.startedAt != entity.startedAt || current.endedAt != entity.endedAt ||
+                current.transport != entity.transport || current.status != entity.status)) {
+            analysis.purgeJourneys(setOf(entity.id))
+        }
+    } } }
 
     suspend fun savePlace(entity: Place) = db.withTransaction {
         require(entity.name.isNotBlank()) { "Yer adı gerekli." }
@@ -396,7 +410,7 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
         true
     }
 
-    suspend fun deleteJourney(id: String) = deleteWithFiles { dao.deleteDirectPhotos(id); dao.deleteJourney(id) }
+    suspend fun deleteJourney(id: String) = deleteWithFiles(purgeJourneys = true) { dao.deleteDirectPhotos(id); dao.deleteJourney(id) }
     suspend fun deleteVisit(id: String) = deleteWithFiles { dao.deleteVisit(id) }
     suspend fun deletePlace(id: String) = deleteWithFiles { dao.deletePlace(id) }
     suspend fun deletePhoto(id: String) = deleteWithFiles {
@@ -432,7 +446,7 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
         }
         DiaryRules.validate(snapshot.copy(journeys = restoredJourneys, healthSamples = restoredHealth,
             watchHealthSessions = restoredWatchSessions, watchHealthSamples = restoredWatchSamples))
-        deleteWithFiles {
+        deleteWithFiles(replaceAll = true) {
             libraryDao.clearCollections(); libraryDao.clearTracks(); libraryDao.clearPlans()
             dao.clearHealthSamples(); dao.clearHealthSyncs()
             watchDao.clearSamples(); watchDao.clearSessions(); mapDao.clear()
@@ -471,15 +485,23 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
         }
     }
 
-    private suspend fun <T> deleteWithFiles(block: suspend () -> T): T {
-        val (result, removed) = db.withTransaction {
-            val before = dao.allPhotos().map { it.relativePath }.toSet()
-            val result = block()
-            result to (before - dao.allPhotos().map { it.relativePath }.toSet())
+    private suspend fun <T> deleteWithFiles(purgeJourneys: Boolean = false, replaceAll: Boolean = false,
+        block: suspend () -> T): T {
+        suspend fun execute(analysis: PostJourneyAnalysis?): T {
+            val (result, removed) = db.withTransaction {
+                val before = dao.allPhotos().map { it.relativePath }.toSet()
+                val beforeIds = if (purgeJourneys) dao.allJourneys().map { it.id }.toSet() else emptySet()
+                val result = block()
+                if (replaceAll) requireNotNull(analysis).purgeAll()
+                else if (purgeJourneys) requireNotNull(analysis).purgeJourneys(beforeIds - dao.allJourneys().map { it.id }.toSet())
+                result to (before - dao.allPhotos().map { it.relativePath }.toSet())
+            }
+            // Preserve the existing backup/photo contract: a purge failure happens before DB commit.
+            // Orphan photo cleanup still must not undo an otherwise successful transaction.
+            removed.forEach { runCatching { photoFile(it).delete() } }
+            return result
         }
-        // Failure to delete a private orphan file must never undo an otherwise successful DB transaction.
-        removed.forEach { runCatching { photoFile(it).delete() } }
-        return result
+        return if (purgeJourneys || replaceAll) privacyChange { execute(it) } else execute(null)
     }
 
     private fun requireValidCoordinates(latitude: Double?, longitude: Double?) {

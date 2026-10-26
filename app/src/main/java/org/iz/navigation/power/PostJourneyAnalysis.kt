@@ -37,6 +37,8 @@ internal class PostJourneyAnalysis private constructor(context: Context) {
     internal val cache = AnalysisCache(File(this.context.noBackupFilesDir, "post_journey_analysis")) { scope.launch { request() } }
     private val initialized = CompletableDeferred<Unit>()
     private val workMutex = Mutex()
+    private val privacyMutex = Mutex()
+    private val privacyChanges = AtomicInteger()
     private val scheduleMutex = Mutex()
     private val control = Any()
     private val generation = AtomicLong()
@@ -100,6 +102,58 @@ internal class PostJourneyAnalysis private constructor(context: Context) {
             }
         }
     }
+    /** Privacy writes never wait for workMutex: the worker may already be waiting for the HC mutex. */
+    internal suspend fun <T> privacyChange(block: suspend () -> T): T {
+        initialized.await()
+        return privacyMutex.withLock {
+            privacyChanges.incrementAndGet()
+            generation.incrementAndGet()
+            updateGate()
+            try { block() }
+            finally {
+                generation.incrementAndGet()
+                privacyChanges.decrementAndGet()
+                updateGate()
+                schedule()
+            }
+        }
+    }
+    /** Called inside the raw transaction; a checked cache failure must abort that transaction. */
+    internal fun purgeJourneys(ids: Set<String>) {
+        if (ids.isNotEmpty()) purgePrepared(ids)
+    }
+    internal fun purgeHealth(ids: Set<String>? = null) {
+        if (ids == null) purgePrepared(health = true)
+        else if (ids.isNotEmpty()) purgePrepared(ids, health = true)
+    }
+    internal fun purgeAll() = purgePrepared(all = true)
+    private fun purgePrepared(ids: Set<String> = emptySet(), health: Boolean = false, all: Boolean = false) {
+        check(privacyChanges.get() > 0) { "Privacy purge requires its mutation boundary" }
+        var removed: Set<String>? = null
+        try {
+            // Existing cache monitor serializes AtomicFile completion with this deletion. Every
+            // production writer also checks generation/gate inside that monitor before commit.
+            removed = cache.purge(ids, health, all)
+        } finally {
+            synchronized(control) {
+                generation.incrementAndGet()
+                pending = true
+                daily = null
+                mutableState.update { previous ->
+                    val retained = previous.entries.filter { (id, entry) ->
+                        val liveHealth = health && ids.isEmpty() &&
+                            (entry.health != JourneyHealthSummary(id) || entry.watch != JourneyHealthSummary(id))
+                        val affected = all || id in ids || liveHealth || removed?.contains(AnalysisCache.digest(id)) == true
+                        !affected
+                    }
+                    // A new reader identity disposes decoded chart/map copies and changes the
+                    // tuple observed by Wear publication. A pending pulse alone may be conflated.
+                    previous.copy(entries = retained, cacheRevision = "", pending = true,
+                        phase = phase(), changed = System.currentTimeMillis())
+                }
+            }
+        }
+    }
     fun onRuntimeChanged() { updateGate() }
     fun setForeground(value: Boolean) {
         foreground = value
@@ -107,14 +161,14 @@ internal class PostJourneyAnalysis private constructor(context: Context) {
     }
     fun canProcessNow(): Boolean {
         val nav = (context as IzApplication).navigation.state.value
-        val active = !metadataLoaded || recording || recordingChanges.get() > 0 || TrackingService.isRunning ||
+        val active = !metadataLoaded || recording || recordingChanges.get() > 0 || privacyChanges.get() > 0 || TrackingService.isRunning ||
             nav.guidance || nav.recording || nav.locationActive || nav.loading || nav.sessionId != null
         return analysisPowerEligible(batteryPercent, active)
     }
     private fun phase(): AnalysisPhase {
         val nav = (context as IzApplication).navigation.state.value
         return when {
-            !metadataLoaded || recording || recordingChanges.get() > 0 || TrackingService.isRunning ||
+            !metadataLoaded || recording || recordingChanges.get() > 0 || privacyChanges.get() > 0 || TrackingService.isRunning ||
                 nav.guidance || nav.recording || nav.locationActive || nav.loading || nav.sessionId != null -> AnalysisPhase.WAITING_END
             (batteryPercent ?: -1) < 20 -> AnalysisPhase.WAITING_BATTERY
             processing -> AnalysisPhase.RUNNING
