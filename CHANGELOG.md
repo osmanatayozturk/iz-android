@@ -14,7 +14,7 @@ Bu, 27 Ekim 2026 tarihli yayın öncesi doğrulama kaydıdır ve telefon 0.10.2 
 
 - Telefon `appDebug` ve Wear `wearDebug` derlemeleri geçti. Telefon ve Wear lint kontrolleri 0 hata ile geçti; sırasıyla 108 ve 41 uyarı kaldı. `WearProtocolTest` için 38 geçti, 0 kaldı, 0 atlandı.
 - Önceki ayrı debug QA paketinde atanmış 6/6 odaklı kontrol geçti. Daha sonraki hedefli manager/Room senaryosu 1/1 geçti: aktif yolculukta analiz engellendi, yolculuk bitince hazırlanmış varlıklar kalıcılaştı; sentetik ham veri kullanıldı. Salt okunur Activity.dump çıktısı önceki aşamada geçti.
-- Harici postflight, USB durum sorgusu başarısız olduğu için engellendi ve tekrarlanmadı; türetilmiş indeks doğrulaması kurulmuş değildir.
+- Önceki durdurma kaydından sonra salt okunur postflight geçti: QA ürün/test kimlikleri ile üretim kimliği ve dört APK özeti değişmemişti; etkin enstrümantasyon, QA takip servisi veya sahip olunan geçici fixture dizini yoktu. Telefon değiştirilmedi ve yeni enstrümantasyon çalıştırılmadı. Önceki gerçek entegrasyon kontrolü sentetik kayıt ve noktaların bulunmadığını, başlangıçtaki yolculuk durumuna dönüldüğünü doğrulamıştı. Türetilmiş indeks 0 kayıt ve 0 sentetik kayıt içeriyordu; bekleyen işareti yoktu.
 - Bu sonuçlar gerçek sürüş regresyonunu, WorkManager dağıtımını/işlem yeniden başlamasını veya fiziksel saat kabulünü kapsamaz. Pil tasarrufu miktarı ölçülmedi. Tam sürüm kabulü, güvenlik onayı ve kaynak yayını henüz yoktur.
 
 İlgili çalışma notları: [pil ve tanılama](docs/PIL_OPTIMIZASYONU.md), [motosiklet yol haritası önerileri](docs/MOTOSIKLET_YOL_HARITASI.md).
