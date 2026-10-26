@@ -75,7 +75,12 @@ class CarTemplatesTest {
         assertTrue(CarSearchScreen(context, home).onGetTemplate() is SearchTemplate)
         assertTrue(CarPreviewScreen(context, home, surface, route()).onGetTemplate() is MapWithContentTemplate)
         assertTrue(CarWeatherScreen(context).onGetTemplate() is MessageTemplate)
-        assertTrue(CarStatisticsScreen(context, home).onGetTemplate() is PaneTemplate)
+        home.refresh(NavigationState(journey = Journey(id = "pending-car-statistics", transport = Transport.CAR), recording = true))
+        val pendingStatistics = CarStatisticsScreen(context, home).onGetTemplate()
+        assertTrue("Active recording statistics must be deferred instead of showing live measurements", pendingStatistics is MessageTemplate)
+        val message = (pendingStatistics as MessageTemplate).message.toString()
+        assertTrue("Deferred statistics must explain their pending state", message.isNotBlank())
+        assertFalse("Pending statistics must not invent a speed measurement", message.contains("km/sa"))
         assertTrue(CarFinishScreen(context, "not-a-real-trip").onGetTemplate() is MessageTemplate)
     }
 

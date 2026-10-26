@@ -25,6 +25,8 @@ import org.iz.navigation.data.Transport
 import com.google.android.gms.location.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.withLock
+import org.iz.navigation.power.PostJourneyAnalysis
+import org.iz.navigation.power.PowerDiagnostics
 
 class TrackingService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -48,6 +50,8 @@ class TrackingService : Service() {
 
     private val callback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
+            PowerDiagnostics.count(PowerDiagnostics.Metric.GPS_CALLBACK)
+            PowerDiagnostics.sampleIfDue()
             val id = runningJourneyId
             val session = sessionDemand
             scope.launch {
@@ -134,6 +138,7 @@ class TrackingService : Service() {
             startForeground(TrackingNotifications.RECORDING_ID,
                 TrackingNotifications.recording(this, null), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
             isRunning = true
+            PostJourneyAnalysis.get(this).onRuntimeChanged()
         } catch (_: RuntimeException) {
             settings.lastError = "Konum servisi açılamadı. Konum izinlerini kontrol edip uygulama içinden başlat."
             stopSelf()
@@ -142,6 +147,7 @@ class TrackingService : Service() {
         scope.launch {
             while (isActive) {
                 delay(15_000)
+                PowerDiagnostics.sampleIfDue()
                 TrackingCoordinator.mutex.withLock {
                     val id = runningJourneyId
                     if (id == null) {
@@ -473,6 +479,8 @@ class TrackingService : Service() {
 
     private val dwellCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
+            PowerDiagnostics.count(PowerDiagnostics.Metric.GPS_CALLBACK)
+            PowerDiagnostics.sampleIfDue()
             result.lastLocation?.let { location ->
                 val sample = PositionSample(location.latitude, location.longitude, location.time,
                     if (location.hasAccuracy()) location.accuracy else Float.POSITIVE_INFINITY,
@@ -514,6 +522,7 @@ class TrackingService : Service() {
         stopWalkingSensor()
         if (runningJourneyId == id) runningJourneyId = null
         isRunning = false
+        PostJourneyAnalysis.get(this).onRuntimeChanged()
         locationClient.removeLocationUpdates(callback)
         locationClient.removeLocationUpdates(dwellCallback)
         scope.cancel()

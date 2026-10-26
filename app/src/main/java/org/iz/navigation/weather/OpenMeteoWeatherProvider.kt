@@ -67,7 +67,7 @@ class OpenMeteoWeatherProvider(
                     .addQueryParameter("end_date", utcDate(until))
                     .build()
                 val request = weatherRequest(url.toString()).get().build()
-                val response = executeBounded(client, request, MAX_FORECAST_RESPONSE_BYTES)
+                val response = executeBounded(client, request, MAX_FORECAST_RESPONSE_BYTES, org.iz.navigation.power.PowerDiagnostics.Metric.WEATHER_REQUEST)
                 if (response.code == 429 || response.code == 503) {
                     WeatherHttpGate.setCooldown(storageDirectory, "forecast-http-state.json", clock(), response.retryAfter)
                     throw WeatherServiceException("Hava durumu servisi beklememizi istiyor. Biraz sonra yeniden deneyin.")

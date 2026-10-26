@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
+import org.iz.navigation.power.PowerDiagnostics
 import org.iz.navigation.data.GeoCoordinate
 import org.iz.navigation.data.TrackPoint
 import org.iz.navigation.weather.PlannedRoute
@@ -48,7 +49,6 @@ private const val ROUTE_SOURCE = "weather-planned-route"
 private const val STOP_SOURCE = "weather-planned-stops"
 private const val SAMPLE_SOURCE = "weather-samples"
 private const val SAMPLE_LAYER = "weather-samples-layer"
-private const val RECORDED_SOURCE = "directions-recorded-route"
 private const val FIX_SOURCE = "directions-current-fix"
 
 data class RouteMapMember(val id: String, val name: String, val latitude: Double, val longitude: Double, val delayed: Boolean)
@@ -110,10 +110,9 @@ private fun WeatherRouteMapContent(
     val context = LocalContext.current
     val tileUrl = remember(context) { OsmServiceSettings(context).read().tileUrl }
     val style = remember(tileUrl) {
-        mapStyle(tileUrl, listOf(ROUTE_SOURCE, STOP_SOURCE, SAMPLE_SOURCE, RECORDED_SOURCE, FIX_SOURCE), """
+        mapStyle(tileUrl, listOf(ROUTE_SOURCE, STOP_SOURCE, SAMPLE_SOURCE, FIX_SOURCE), """
             {"id":"weather-route-casing","type":"line","source":"$ROUTE_SOURCE","paint":{"line-color":"#FFFFFF","line-width":9,"line-opacity":0.9}},
             {"id":"weather-route-layer","type":"line","source":"$ROUTE_SOURCE","paint":{"line-color":"#28604D","line-width":5,"line-opacity":0.95}},
-            {"id":"directions-recorded-layer","type":"line","source":"$RECORDED_SOURCE","layout":{"line-cap":"round","line-join":"round"},"paint":{"line-color":["to-color",["get","color"]],"line-width":4,"line-opacity":0.95}},
             {"id":"$SAMPLE_LAYER","type":"circle","source":"$SAMPLE_SOURCE","paint":{"circle-color":["case",["get","complete"],["case",["get","hazard"],"#AD5D3E","#28604D"],"#6E7C73"],"circle-stroke-color":"#F7F7F2","circle-stroke-width":2,"circle-radius":8}},
             {"id":"weather-stops-layer","type":"circle","source":"$STOP_SOURCE","paint":{"circle-color":"#FFFFFF","circle-stroke-color":"#66746D","circle-stroke-width":1,"circle-radius":4}},
             {"id":"directions-fix-halo","type":"circle","source":"$FIX_SOURCE","paint":{"circle-color":"#1976D2","circle-opacity":0.15,"circle-radius":15}},
@@ -121,11 +120,11 @@ private fun WeatherRouteMapContent(
         """.trimIndent())
     }
     var showRoute by remember { mutableStateOf(true) }
-    var showTrail by remember { mutableStateOf(true) }
     var showMembers by remember { mutableStateOf(true) }
     var layersOpen by remember { mutableStateOf(false) }
     var projectedMembers by remember { mutableStateOf(emptyList<Offset>()) }
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
+    var styleRevision by remember { mutableIntStateOf(0) }
     val cameraPolicy = remember(map) { RouteMapCameraPolicy() }
     var following by remember(map) { mutableStateOf(false) }
     // Ready/camera callbacks must keep the same state cell when null map becomes the ready map.
@@ -144,27 +143,21 @@ private fun WeatherRouteMapContent(
         route?.vertices.orEmpty().map { GeoCoordinate(it.coordinate.latitude, it.coordinate.longitude) } +
             stops.map { GeoCoordinate(it.coordinate.latitude, it.coordinate.longitude) }
     }
-    val recorded = rememberRecordedTrail(recordedPoints)
     val fix = liveCoordinate?.let { GeoCoordinate(it.latitude, it.longitude) }
-    val coordinates = if (routeCoordinates.isNotEmpty()) routeCoordinates else
-        recorded.trail.paths.flatten() + listOfNotNull(fix)
+    val coordinates = if (routeCoordinates.isNotEmpty()) routeCoordinates else listOfNotNull(fix)
     // A live session supplies stable identity: rerouting moves its origin but must keep user pan.
     // Explicit previews use route id so newly requested geometry is framed again.
     val dataset = routeMapCameraIdentity(cameraIdentity ?: route?.id, stops)
 
     // Explicit lambda captures keep native callbacks current under Compose strong skipping.
     // A local function reference can hide its changing data from callback memoization.
-    val update by rememberUpdatedState<(MapLibreMap) -> Unit> { target ->
-        target.updateGeoJson(ROUTE_SOURCE, routeGeoJson(route.takeIf { showRoute }))
-        target.updateGeoJson(STOP_SOURCE, routeStopsGeoJson(stops, singleStopLabel))
-        target.updateGeoJson(SAMPLE_SOURCE, sampleGeoJson(assessment?.samples.orEmpty()))
-        target.updateGeoJson(FIX_SOURCE, featureCollection(listOfNotNull(fix?.let {
-            pointFeature(it.latitude, it.longitude, JSONObject().put("stale", gpsStale))
-        })))
-    }
-    val updateTrail by rememberUpdatedState<(MapLibreMap) -> Unit> { target ->
-        target.updateGeoJson(RECORDED_SOURCE, if (showTrail) recorded.json else "{\"type\":\"FeatureCollection\",\"features\":[]}")
-    }
+    val routeJson = remember(route, showRoute) { routeGeoJson(route.takeIf { showRoute }) }
+    val stopJson = remember(stops, singleStopLabel) { routeStopsGeoJson(stops, singleStopLabel) }
+    val samples = assessment?.samples.orEmpty()
+    val samplesJson = remember(samples) { sampleGeoJson(samples) }
+    val fixJson = remember(fix, gpsStale) { featureCollection(listOfNotNull(fix?.let {
+        pointFeature(it.latitude, it.longitude, JSONObject().put("stale", gpsStale))
+    })) }
     val frameRoute by rememberUpdatedState<(MapLibreMap) -> Unit> { target ->
         if (navigationLayout && coordinates.isNotEmpty() && coordinates.all { it == coordinates.first() }) {
             focusRouteCoordinate(target, coordinates.first(), 15.0, cameraPadding)
@@ -188,8 +181,7 @@ private fun WeatherRouteMapContent(
         OsmMapView(styleJson = style, modifier = Modifier.fillMaxSize(),
             onReady = { ready ->
                 map = ready
-                update(ready)
-                updateTrail(ready)
+                styleRevision++
                 projectStops(ready)
             },
             onClick = { target, coordinate ->
@@ -243,7 +235,6 @@ private fun WeatherRouteMapContent(
                         map?.let { frameRoute(it) }
                     }, modifier = Modifier.testTag("directions-fit-route"))
                     DropdownMenuItem(text = { Text(if (showRoute) "✓ Planlanan rota" else "Planlanan rota") }, onClick = { showRoute = !showRoute })
-                    DropdownMenuItem(text = { Text(if (showTrail) "✓ Yolculuk kaydı" else "Yolculuk kaydı") }, onClick = { showTrail = !showTrail })
                     DropdownMenuItem(text = { Text(if (showMembers) "✓ Grup üyeleri" else "Grup üyeleri") }, onClick = { showMembers = !showMembers })
                 }
             }
@@ -265,10 +256,7 @@ private fun WeatherRouteMapContent(
                     }, modifier = Modifier.testTag("directions-recenter")) { Text(if (following) "Konum izleniyor" else "Konumum") }
                 }
             }
-            if (showTrail) RecordedSpeedLegend(recorded.trail)
         }
-        if (navigationLayout && showTrail) RecordedSpeedLegend(recorded.trail,
-            Modifier.align(Alignment.BottomStart).padding(start = 12.dp, bottom = attributionBottomInset + 28.dp))
     }
     DisposableEffect(map, stops, members) {
         val target = map
@@ -292,8 +280,12 @@ private fun WeatherRouteMapContent(
         target?.addOnCameraMoveStartedListener(listener)
         onDispose { target?.removeOnCameraMoveStartedListener(listener) }
     }
-    LaunchedEffect(map, recorded.json, showTrail) { map?.let { updateTrail(it) } }
-    LaunchedEffect(route, stops, assessment, liveCoordinate, gpsStale, singleStopLabel, showRoute, map) { map?.let { update(it) } }
+    // Source identities are independent: position changes never rebuild or re-upload static
+    // geometry. A recreated style deliberately reloads every source.
+    LaunchedEffect(map, styleRevision, routeJson) { map?.updateMeasuredGeoJson(ROUTE_SOURCE, routeJson, PowerDiagnostics.Metric.MAP_ROUTE) }
+    LaunchedEffect(map, styleRevision, stopJson) { map?.updateMeasuredGeoJson(STOP_SOURCE, stopJson, PowerDiagnostics.Metric.MAP_ROUTE) }
+    LaunchedEffect(map, styleRevision, samplesJson) { map?.updateMeasuredGeoJson(SAMPLE_SOURCE, samplesJson, PowerDiagnostics.Metric.MAP_ROUTE) }
+    LaunchedEffect(map, styleRevision, fixJson) { map?.updateMeasuredGeoJson(FIX_SOURCE, fixJson, PowerDiagnostics.Metric.MAP_POSITION) }
     LaunchedEffect(map, dataset, routeCoordinates, coordinates.isNotEmpty(), cameraPadding) {
         map?.let { target ->
             if (cameraPolicy.shouldFrame(dataset, coordinates.isNotEmpty(), cameraPadding)) {

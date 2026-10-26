@@ -5,15 +5,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class WatchSurfaceTimelineTest {
-    @Test fun liveHeartExpiryStillSchedulesRecordingExpiryAndTerminalPlaceholder() {
+    @Test fun deferredRecordingNeverSchedulesFabricatedMetricTimeline() {
         val now = 1_000_000L
-        val snapshot = WearSnapshot(now, journeyId = "j", recording = true, elapsedMillis = 120_000)
-        val heartFrame = WatchSurfacePolicy.frame(snapshot, true, now).copy(validUntil = now + 30_000)
-        val timeline = WatchSurfaceTimeline.segments(snapshot, true, now, heartFrame)
-        assertEquals(3, timeline.size)
-        assertEquals(now + 30_000, timeline[0].end)
-        assertEquals(now + 300_000, timeline[1].end)
-        assertEquals("İz’i aç", timeline[2].frame.compact)
-        assertNull(timeline[2].end)
+        val snapshot = WearSnapshot(now, journeyId = "j", recording = true, statsDeferred = true)
+        val frame = WatchSurfacePolicy.frame(snapshot, true, now)
+        val timeline = WatchSurfaceTimeline.segments(snapshot, true, now, frame)
+        assertEquals(1, timeline.size)
+        assertNull(timeline.single().end)
+        assertEquals("Kayıt", timeline.single().frame.compact)
+        assertTrue(timeline.single().frame.lines.any { it.contains("hazırlanacak") })
+        assertFalse(timeline.single().frame.lines.any { it.contains("0:00") || it.contains("0,0 km") })
     }
 }

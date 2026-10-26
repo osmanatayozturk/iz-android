@@ -11,6 +11,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.iz.navigation.speed.*
 import org.iz.navigation.gpx.*
+import org.iz.navigation.power.PowerDiagnostics
 
 /** Side effects are isolated so concurrent car/phone/watch commands can be tested without a host. */
 interface NavigationRuntime {
@@ -185,6 +186,7 @@ class JourneyNavigationCoordinator(
         scope.launch {
             while (isActive) {
                 delay(1000)
+                PowerDiagnostics.sampleIfDue()
                 if (trackStartPending || finishingSession) continue
                 val before = mutableState.value
                 val fresh = before.fix?.let { fresh(it, clock()) } == true &&
@@ -621,6 +623,7 @@ class JourneyNavigationCoordinator(
         val token = epoch
         publish(before.copy(loading = true))
         rerouteJob = scope.launch {
+            val started = System.nanoTime()
             try {
                 val replacement = runtime.plan(listOf(RouteStop("Mevcut konum", fix.coordinate)) + remaining,
                     route.transport, route.preferences, route.travelSpeedKmh).requireUsablePreferences()
@@ -645,6 +648,8 @@ class JourneyNavigationCoordinator(
                     message = if (trafficRefresh) "Trafik güncellenemedi. Mevcut rota korunuyor; son trafik bilgisi eski olabilir."
                         else "Yeni rota alınamadı. Bağlantı bekleniyor. ${error.message.orEmpty().take(120)}"))
             } finally {
+                PowerDiagnostics.count(if (trafficRefresh) PowerDiagnostics.Metric.TRAFFIC_REFRESH else PowerDiagnostics.Metric.OFF_ROUTE_PLAN,
+                    System.nanoTime() - started)
                 if (mutableState.value.route?.id == route.id) publish(mutableState.value.copy(loading = false))
             }
         }
@@ -715,8 +720,10 @@ class JourneyNavigationCoordinator(
                     a.coordinate.longitude + (b.coordinate.longitude - a.coordinate.longitude) * ratio)
                 val now = clock()
                 val fix = NavigationFix(coordinate, now, 3f, 12f)
-                mutableSimulationPoints.value = (mutableSimulationPoints.value + TrackPoint(journeyId = journey.id,
-                    latitude = coordinate.latitude, longitude = coordinate.longitude, recordedAt = now, accuracy = 3f, speed = 12f)).takeLast(10_000)
+                if (mutableSimulationPoints.subscriptionCount.value > 0) {
+                    mutableSimulationPoints.value = (mutableSimulationPoints.value + TrackPoint(journeyId = journey.id,
+                        latitude = coordinate.latitude, longitude = coordinate.longitude, recordedAt = now, accuracy = 3f, speed = 12f)).takeLast(256)
+                } else if (mutableSimulationPoints.value.isNotEmpty()) mutableSimulationPoints.value = emptyList()
                 fixes.send(AcceptedFix(journey.id, fix, epoch))
                 seconds = (seconds + 1).coerceAtMost(route.durationSeconds)
                 delay(1000)

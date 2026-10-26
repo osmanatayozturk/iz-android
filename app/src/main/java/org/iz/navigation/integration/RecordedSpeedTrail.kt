@@ -23,11 +23,15 @@ private const val BLUE_SPEED_COLOR = "#2563EB"
 private val speedPalette = intArrayOf(0x2563EB, 0x06B6D4, 0xEAB308, 0xDC2626)
 
 /** Shared phone/Auto geometry. Invalid metadata is a break, never a reason to reconnect fixes. */
-internal fun recordedPointPaths(points: List<TrackPoint>): List<List<TrackPoint>> = buildList {
-    points.groupBy { it.journeyId }.values.forEach { journeyPoints ->
+internal fun recordedPointPaths(points: List<TrackPoint>, checkActive: () -> Unit = {}): List<List<TrackPoint>> = buildList {
+    var processed = 0
+    fun checkpoint() { if (++processed % 256 == 0) checkActive() }
+    checkActive()
+    points.groupBy { checkpoint(); it.journeyId }.values.forEach { journeyPoints ->
         var path = mutableListOf<TrackPoint>()
         fun finish() { if (path.isNotEmpty()) add(path.toList()); path = mutableListOf() }
-        journeyPoints.sortedBy { it.recordedAt }.forEach { point ->
+        journeyPoints.sortedWith { a, b -> checkpoint(); a.recordedAt.compareTo(b.recordedAt) }.forEach { point ->
+            checkpoint()
             if (!DiaryRules.isUsablePoint(point)) finish()
             else {
                 if (point.breakBefore || path.lastOrNull()?.let { !DiaryRules.connects(it, point) } == true) finish()
@@ -44,10 +48,13 @@ private fun drawable(a: TrackPoint, b: TrackPoint) = a.latitude != b.latitude ||
 
 internal fun recordedSpeedTrail(points: List<TrackPoint>, ensureActive: () -> Unit = {}): RecordedSpeedTrail {
     ensureActive()
-    val paths = recordedPointPaths(points)
+    val paths = recordedPointPaths(points, ensureActive)
+    var checked = 0
+    fun checkpoint() { if (++checked % 256 == 0) ensureActive() }
     val bounds = linkedMapOf<String, Pair<Double, Double>>()
     paths.forEach { path ->
-        path.zipWithNext().forEach { (a, b) ->
+        path.asSequence().zipWithNext().forEach { (a, b) ->
+            checkpoint()
             val from = a.reportedKmh(); val to = b.reportedKmh()
             if (from != null && to != null && drawable(a, b)) {
                 val old = bounds[a.journeyId]
@@ -80,7 +87,7 @@ internal fun recordedSpeedTrail(points: List<TrackPoint>, ensureActive: () -> Un
                 coordinates += to
             }
         }
-        path.zipWithNext().forEach { (a, b) ->
+        path.asSequence().zipWithNext().forEach { (a, b) ->
             if (++processed % 256 == 0) ensureActive()
             if (!drawable(a, b)) return@forEach
             val from = a.reportedKmh(); val to = b.reportedKmh()
@@ -102,7 +109,7 @@ internal fun recordedSpeedTrail(points: List<TrackPoint>, ensureActive: () -> Un
         finish()
     }
     ensureActive()
-    return RecordedSpeedTrail(paths.map { path -> path.map { it.coordinate() } }, lines, scales)
+    return RecordedSpeedTrail(paths.map { path -> path.map { checkpoint(); it.coordinate() } }, lines, scales)
 }
 
 private fun speedColor(value: Double): String {
@@ -140,9 +147,19 @@ private fun redundantMiddle(a: GeoCoordinate, b: GeoCoordinate, c: GeoCoordinate
     return dx * dx + dy * dy <= 4.0
 }
 
-internal fun RecordedSpeedTrail.geoJson(): String = featureCollection(lines.map { line ->
-    JSONObject().put("type", "Feature").put("properties", JSONObject().put("color", line.color).put("journeyId", line.journeyId))
-        .put("geometry", JSONObject().put("type", "LineString").put("coordinates", JSONArray().apply {
-            line.coordinates.forEach { put(JSONArray().put(it.longitude).put(it.latitude)) }
-        }))
-})
+internal fun RecordedSpeedTrail.geoJson(checkActive: () -> Unit = {}): String {
+    var processed = 0
+    checkActive()
+    val json = featureCollection(lines.map { line ->
+        checkActive()
+        JSONObject().put("type", "Feature").put("properties", JSONObject().put("color", line.color).put("journeyId", line.journeyId))
+            .put("geometry", JSONObject().put("type", "LineString").put("coordinates", JSONArray().apply {
+                line.coordinates.forEach {
+                    if (++processed % 256 == 0) checkActive()
+                    put(JSONArray().put(it.longitude).put(it.latitude))
+                }
+            }))
+    })
+    checkActive()
+    return json
+}

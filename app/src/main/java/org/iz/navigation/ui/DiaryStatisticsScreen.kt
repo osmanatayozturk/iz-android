@@ -13,17 +13,20 @@ import java.util.Locale
 @Composable
 internal fun DiaryStatisticsScreen(state: DiaryState, now: Long, onJourney: (Journey) -> Unit) {
     val journeys = state.journeys.filter { it.status == JourneyStatus.CONFIRMED }.sortedByDescending { it.startedAt }
-    val totals = remember(journeys, state.points, now) {
-        journeys.map { JourneyStatistics.calculate(it, state.points.filter { p -> p.journeyId == it.id }, now) }
-    }
+    val completed = journeys.filter { it.endedAt != null }
+    val totals = remember(completed, state.analysis) { completed.mapNotNull { state.prepared(it)?.stats } }
+    val ready = !state.analysis.pending && totals.size == completed.size &&
+        state.analysis.phase != org.iz.navigation.power.AnalysisPhase.WAITING_END
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { Text("İstatistikler", style = MaterialTheme.typography.headlineMedium) }
         item {
             Text("${journeys.size} yolculuk · ${state.places.size} yer", style = MaterialTheme.typography.titleMedium)
-            Text(String.format(Locale.forLanguageTag("tr-TR"), "%.1f km kaydedildi", totals.sumOf { it.distanceMeters } / 1000),
-                style = MaterialTheme.typography.headlineSmall)
-            Text("${totals.sumOf { it.movingMillis } / 60_000} dk ölçülen hareket · ${totals.sumOf { it.unobservedMillis } / 60_000} dk GPS boşluğu",
-                style = MaterialTheme.typography.bodyMedium)
+            if (ready) {
+                Text(String.format(Locale.forLanguageTag("tr-TR"), "%.1f km kaydedildi", totals.sumOf { it.distanceMeters } / 1000),
+                    style = MaterialTheme.typography.headlineSmall)
+                Text("${totals.sumOf { it.movingMillis } / 60_000} dk ölçülen hareket · ${totals.sumOf { it.unobservedMillis } / 60_000} dk GPS boşluğu",
+                    style = MaterialTheme.typography.bodyMedium)
+            } else Text(state.analysisLabel, style = MaterialTheme.typography.bodyMedium)
             Text("Ayrıntılı hız, süre ve sağlık verileri için bir yolculuğu seç.", style = MaterialTheme.typography.bodySmall)
         }
         if (journeys.isEmpty()) item { Text("İlk yolculuğunu kaydettiğinde istatistiklerin burada görünecek.") }

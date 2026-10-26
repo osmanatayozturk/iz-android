@@ -16,6 +16,7 @@ import org.iz.navigation.IzApplication
 import org.iz.navigation.data.*
 import org.iz.navigation.integration.OsmPlaces
 import org.iz.navigation.navigation.NavigationState
+import org.iz.navigation.power.PostJourneyAnalysis
 import org.iz.navigation.weather.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
@@ -55,7 +56,6 @@ internal abstract class CarScreen(context: CarContext) : Screen(context) {
 
 internal class CarHomeScreen(context: CarContext, private val surface: CarMapSurface) : CarScreen(context) {
     private var state = navigation.state.value
-    private var points = emptyList<TrackPoint>()
     private var error: String? = null
     private var planning = false
     private var starting = false
@@ -64,9 +64,15 @@ internal class CarHomeScreen(context: CarContext, private val surface: CarMapSur
     private var idleLocationJob: Job? = null
     var selectedMode = Transport.CAR
     val mode get() = effectiveCarMode(state, selectedMode)
-    fun statistics(): JourneyStats? = state.journey?.let { JourneyStatistics.calculate(it, points) }
-    fun refresh(value: NavigationState) { state = value; surface.update(state, points); safeInvalidate() }
-    fun trail(value: List<TrackPoint>) { points = value; surface.update(state, points); safeInvalidate() }
+    private val analysis = PostJourneyAnalysis.get(context)
+    fun statistics(): JourneyStats? = state.journey?.let { journey ->
+        analysis.state.value.ready(journey.id)?.takeIf { it.matches(journey) }?.stats
+    }
+    fun analysisLabel(): String = analysis.state.value.let {
+        if (it.phase == org.iz.navigation.power.AnalysisPhase.READY) "Tamamlanan sürüşün ayrıntıları telefonda görülebilir."
+        else it.label
+    }
+    fun refresh(value: NavigationState) { state = value; surface.update(state); safeInvalidate() }
     fun showError(value: String) { error = value; safeInvalidate() }
     private fun showPreview(route: PlannedRoute) { screenManager.push(CarPreviewScreen(carContext, this, surface, route)) }
     fun preview(route: PlannedRoute) { cancelTargetPlanning(); showPreview(route) }
@@ -155,13 +161,12 @@ internal class CarHomeScreen(context: CarContext, private val surface: CarMapSur
             }
             return builder.build()
         }
-        val stats = statistics()
         val temporary = state.journey?.status == JourneyStatus.TEMPORARY
         val currentSpeed = state.fix?.speedMps?.takeIf { !state.gpsStale && it.isFinite() && it in 0f..100f }
             ?.let { "${(it * 3.6).toInt()} km/sa" } ?: "— km/sa"
         val title = when { state.simulation -> "Simülasyon • Günlüğe yazılmaz"; temporary -> "Geçici sürüş • ${modeLabel(mode)}"; state.recording -> "Serbest sürüş • ${modeLabel(mode)}"; else -> "İz • ${modeLabel(mode)}" }
-        val pane = Pane.Builder().addRow(row(if (state.recording) "$currentSpeed • ${km(stats?.distanceMeters ?: 0.0)} km • ${(stats?.elapsedMillis ?: 0) / 60_000} dk" else "Hedef seçmeden sürüşe başlayın",
-            error ?: state.message ?: if (temporary) "Geçici kayıt: 500 m / 15 dk kuralı. Kaydetmek için sürüşü başlatın." else if (state.arrived) "Hedefe ulaştınız. Sürüş kaydı devam ediyor." else if (state.gpsStale) "GPS bekleniyor" else "Yalnızca bu sürüşün izi gösterilir"))
+        val pane = Pane.Builder().addRow(row(if (state.recording) "$currentSpeed • Kayıt sürüyor" else "Hedef seçmeden sürüşe başlayın",
+            error ?: state.message ?: if (temporary) "Geçici kayıt: 500 m / 15 dk kuralı. Kaydetmek için sürüşü başlatın." else if (state.arrived) "Hedefe ulaştınız. Sürüş kaydı devam ediyor." else if (state.gpsStale) "GPS bekleniyor" else if (state.recording) "İstatistikler kayıt ve navigasyon bitince hazırlanacak" else "Hedef seçin veya sürüşe başlayın"))
             .addRow(row("Hava durumu", carWeatherPresentation(app.weatherManager.state.value).summary))
             .addAction(action(if (busy) "Bekleyin…" else if (temporary) "Sürüşü kaydet" else if (state.recording) "Sürüşü bitir" else "Sürüşe başla") {
                 if (state.recording && !temporary) state.journey?.id?.let { id ->
@@ -340,13 +345,20 @@ internal class CarWeatherScreen(
 }
 
 internal class CarStatisticsScreen(context: CarContext, private val home: CarHomeScreen) : CarScreen(context) {
+    init { scope.launch {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            PostJourneyAnalysis.get(carContext).state.collect { safeInvalidate() }
+        }
+    } }
     override fun onGetTemplate(): Template {
         val stats = home.statistics()
+        if (stats == null) return MessageTemplate.Builder(home.analysisLabel())
+            .setTitle("Bu sürüşün istatistikleri").setHeaderAction(Action.BACK).build()
         fun speed(value: Double?) = value?.let { String.format(Locale.forLanguageTag("tr"), "%.1f km/sa", it) } ?: "—"
         return PaneTemplate.Builder(Pane.Builder()
-            .addRow(row("Ortalama hız", speed(stats?.averageSpeedKmh)))
-            .addRow(row("En yüksek örneklenmiş hız", speed(stats?.maxSpeedKmh)))
-            .addRow(row("Gözlenen / GPS boşluğu", "${(stats?.observedMillis ?: 0) / 60_000} / ${(stats?.unobservedMillis ?: 0) / 60_000} dk"))
+            .addRow(row("Ortalama hız", speed(stats.averageSpeedKmh)))
+            .addRow(row("En yüksek örneklenmiş hız", speed(stats.maxSpeedKmh)))
+            .addRow(row("Gözlenen / GPS boşluğu", "${stats.observedMillis / 60_000} / ${stats.unobservedMillis / 60_000} dk"))
             .build()).setTitle("Bu sürüşün istatistikleri").setHeaderAction(Action.BACK).build()
     }
 }

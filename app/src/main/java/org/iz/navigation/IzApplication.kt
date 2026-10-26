@@ -23,6 +23,8 @@ class IzApplication : Application() {
     val weatherManager by lazy { org.iz.navigation.weather.RideWeatherManager(this, navigation = navigation) }
     override fun onCreate() {
         super.onCreate()
+        org.iz.navigation.power.PowerDiagnostics.initialize(this)
+        org.iz.navigation.power.PostJourneyAnalysis.get(this)
         osmReady
         community.initialize()
         healthManager.initialize()

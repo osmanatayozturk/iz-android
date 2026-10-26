@@ -25,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -44,6 +45,8 @@ import org.iz.navigation.data.GeoCoordinate
 import org.iz.navigation.data.Place
 import org.iz.navigation.data.SelectedOsmPlace
 import org.iz.navigation.data.TrackPoint
+import org.iz.navigation.power.AnalysisState
+import org.iz.navigation.power.PowerDiagnostics
 import com.google.android.gms.location.CurrentLocationRequest
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
@@ -70,10 +73,24 @@ fun DiaryMap(
     followRecordedLocation: Boolean = false,
     expandable: Boolean = true,
     fullscreenActions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {},
+    journeyId: String? = null,
+    analysis: AnalysisState = AnalysisState(),
 ) {
     ExpandableMap(modifier, expandable = expandable, actions = fullscreenActions) { mapModifier ->
         DiaryMapContent(points, places, mapModifier, onPlaceClick, onMapLongClick,
-            focusCurrentLocation, onOsmPlaceClick, followRecordedLocation)
+            focusCurrentLocation, onOsmPlaceClick, followRecordedLocation, journeyId, analysis)
+    }
+}
+
+/** Explicit export preview: the caller supplies gated single-color geometry prepared on IO. */
+@Composable
+internal fun GpxPreviewMap(render: RecordedTrailRender?, journeyId: String, analysis: AnalysisState, modifier: Modifier) {
+    val application = LocalContext.current.applicationContext
+    val service = remember(application) { org.iz.navigation.power.PostJourneyAnalysis.get(application) }
+    val visible = render.takeIf { service.canProcessNow() }
+    ExpandableMap(modifier) { mapModifier ->
+        DiaryMapContent(emptyList(), emptyList(), mapModifier, {}, {}, false, null, false,
+            journeyId, analysis, visible, true)
     }
 }
 
@@ -87,17 +104,23 @@ private fun DiaryMapContent(
     focusCurrentLocation: Boolean,
     onOsmPlaceClick: ((SelectedOsmPlace) -> Unit)?,
     followRecordedLocation: Boolean,
+    journeyId: String?,
+    analysis: AnalysisState,
+    preview: RecordedTrailRender? = null,
+    previewMode: Boolean = false,
 ) {
     val context = LocalContext.current
     val service = remember(context) { OsmPlaces(context) }
     val tileUrl = OsmServiceSettings(context).read().tileUrl
     val styleJson = remember(tileUrl) { mapStyle(tileUrl, listOf("routes", "places", "current", "osm-pois"), diaryLayers) }
-    val recorded = rememberRecordedTrail(points)
+    val recorded = if (previewMode) preview ?: RecordedTrailRender() else rememberRecordedTrail(journeyId, analysis)
     val routes = recorded.trail.paths
     val pins = remember(places) { places.filter { validCoordinate(it.latitude, it.longitude) } }
     val coordinates = remember(routes, pins) { routes.flatten() + pins.map { GeoCoordinate(it.latitude!!, it.longitude!!) } }
-    val dataset = remember(points, pins) { points.map { it.journeyId }.distinct().joinToString() + ":" + pins.joinToString { it.id } }
+    val dataset = remember(journeyId, pins) { journeyId.orEmpty() + ":" + pins.joinToString { it.id } }
     var map by remember(tileUrl) { mutableStateOf<MapLibreMap?>(null) }
+    var styleRevision by remember { mutableIntStateOf(0) }
+    var framedDataset by remember(map) { mutableStateOf<String?>(null) }
     var overlayPlaces by remember { mutableStateOf(emptyList<SelectedOsmPlace>()) }
     var choices by remember { mutableStateOf(emptyList<SelectedOsmPlace>()) }
     var loading by remember { mutableStateOf(false) }
@@ -123,29 +146,36 @@ private fun DiaryMapContent(
     LaunchedEffect(map, dataset, recorded.journeyIds, coordinates.isEmpty()) {
         // Pins are ready synchronously; wait for this journey's asynchronous trail before fitting
         // them together. Later fixes in the same journey must not reset the user's camera.
-        val trailReady = points.isEmpty() || recorded.journeyIds.isNotEmpty()
-        if (!focusCurrentLocation && trailReady) map?.let { frameCoordinates(it, coordinates, 80, 15.0) }
-    }
-    LaunchedEffect(map, recorded.json) { map?.updateGeoJson("routes", recorded.json) }
-    LaunchedEffect(map, pins, overlayPlaces, location.coordinate, latestRoutePoint, followRecordedLocation) {
-        map?.let { current ->
-            current.updateGeoJson("places", featureCollection(pins.map { place ->
-                pointFeature(place.latitude!!, place.longitude!!, JSONObject().put("placeId", place.id))
-            }))
-            current.updateGeoJson("osm-pois", featureCollection(overlayPlaces.map { place ->
-                pointFeature(place.latitude, place.longitude, JSONObject().put("name", place.name)
-                    .put("osmType", place.osmRef?.type?.name).put("osmId", place.osmRef?.id))
-            }))
-            val fix = if (followRecordedLocation) latestRoutePoint ?: location.coordinate else location.coordinate
-            current.updateGeoJson("current", featureCollection(listOfNotNull(fix?.let { pointFeature(it.latitude, it.longitude) })))
+        val trailReady = journeyId == null || recorded.journeyIds.isNotEmpty()
+        if (!focusCurrentLocation && trailReady && coordinates.isNotEmpty() && framedDataset != dataset) map?.let {
+            frameCoordinates(it, coordinates, 80, 15.0)
+            framedDataset = dataset
         }
+    }
+    LaunchedEffect(map, styleRevision, recorded.json) {
+        map?.updateMeasuredGeoJson("routes", recorded.json, PowerDiagnostics.Metric.MAP_TRAIL)
+    }
+    val placeJson = remember(pins) { featureCollection(pins.map { place ->
+        pointFeature(place.latitude!!, place.longitude!!, JSONObject().put("placeId", place.id))
+    }) }
+    val poiJson = remember(overlayPlaces) { featureCollection(overlayPlaces.map { place ->
+        pointFeature(place.latitude, place.longitude, JSONObject().put("name", place.name)
+            .put("osmType", place.osmRef?.type?.name).put("osmId", place.osmRef?.id))
+    }) }
+    LaunchedEffect(map, styleRevision, placeJson) { map?.updateMeasuredGeoJson("places", placeJson, PowerDiagnostics.Metric.MAP_ROUTE) }
+    LaunchedEffect(map, styleRevision, poiJson) { map?.updateMeasuredGeoJson("osm-pois", poiJson, PowerDiagnostics.Metric.MAP_ROUTE) }
+    LaunchedEffect(map, styleRevision, location.coordinate, latestRoutePoint, followRecordedLocation) {
+        val fix = if (followRecordedLocation) latestRoutePoint ?: location.coordinate else location.coordinate
+        map?.updateMeasuredGeoJson("current", featureCollection(listOfNotNull(fix?.let {
+            pointFeature(it.latitude, it.longitude)
+        })), PowerDiagnostics.Metric.MAP_POSITION)
     }
     LaunchedEffect(message) { if (message != null) { delay(5_000); message = null } }
     Box(modifier) {
         OsmMapView(
             styleJson = styleJson,
             modifier = Modifier.fillMaxSize(),
-            onReady = { map = it },
+            onReady = { map = it; styleRevision++ },
             onLongClick = onMapLongClick,
             onClick = { current, coordinate ->
                 val screenPoint = current.projection.toScreenLocation(coordinate.mapCoordinate())
@@ -211,6 +241,7 @@ private fun DiaryMapContent(
 
 private const val diaryLayers = """
  {"id":"journey-lines","type":"line","source":"routes","layout":{"line-cap":"round","line-join":"round"},"paint":{"line-color":["to-color",["get","color"]],"line-width":4}},
+ {"id":"journey-isolated-points","type":"circle","source":"routes","filter":["==",["geometry-type"],"Point"],"paint":{"circle-color":["to-color",["get","color"]],"circle-radius":3}},
  {"id":"osm-poi-pins","type":"circle","source":"osm-pois","paint":{"circle-color":"#3989C9","circle-radius":7,"circle-stroke-color":"#FFFFFF","circle-stroke-width":2}},
  {"id":"private-place-pins","type":"circle","source":"places","paint":{"circle-color":"#2A6657","circle-radius":9,"circle-stroke-color":"#FFFFFF","circle-stroke-width":2}},
  {"id":"current-location","type":"circle","source":"current","paint":{"circle-color":"#1976D2","circle-radius":6,"circle-stroke-color":"#FFFFFF","circle-stroke-width":2}}

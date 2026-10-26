@@ -116,13 +116,7 @@ internal class PhoneNavigationViewModel(application: Application) : AndroidViewM
             directions.reportMessage(it.message ?: "İşlem tamamlanamadı.")
             commandErrorVersion.update { version -> version + 1 }
         })
-    val points = navigation.state.flatMapLatest { state ->
-        when {
-            state.simulation -> navigation.simulationPoints
-            state.recording && state.journey != null -> repository.observeJourneyPoints(state.journey.id)
-            else -> flowOf(emptyList())
-        }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
 
     fun enter(entryId: Long, initialStops: List<RouteStop>?, transport: Transport?, initialPlan: SavedWeatherPlan? = null) {
         directions.enter(entryId, initialStops, transport ?: navigation.state.value.sessionTransport ?: navigation.state.value.journey?.transport,
@@ -185,7 +179,8 @@ internal fun NavigationScreen(
     val ui by vm.ui.collectAsStateWithLifecycle()
     androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) { vm.directions.refreshCredentials() }
     val nav by vm.navigation.state.collectAsStateWithLifecycle()
-    val points by vm.points.collectAsStateWithLifecycle()
+    // Live recording and simulation intentionally publish position only, never a colored trail.
+    val points = emptyList<TrackPoint>()
     val places by vm.places.collectAsStateWithLifecycle()
     val commandBusy by vm.commandBusy.collectAsStateWithLifecycle()
     val commandErrorVersion by vm.commandErrorVersion.collectAsStateWithLifecycle()

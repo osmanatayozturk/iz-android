@@ -1,13 +1,15 @@
 package org.iz.navigation.integration
 
 import androidx.compose.runtime.*
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import org.iz.navigation.power.AnalysisState
+import org.iz.navigation.power.AnalysisPhase
+import org.iz.navigation.power.PostJourneyAnalysis
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.iz.navigation.data.GeoCoordinate
 import org.iz.navigation.data.Journey
-import org.iz.navigation.data.JourneyStatus
 import org.iz.navigation.data.TrackPoint
 import org.iz.navigation.data.Transport
 import org.json.JSONArray
@@ -24,45 +26,42 @@ internal val heatmapFrequencyBands = listOf(
 internal data class HeatmapRender(val data: HeatmapData, val json: String, val bounds: List<GeoCoordinate>) {
     val hasGeometry: Boolean get() = bounds.isNotEmpty()
 }
-private class HeatmapInput(
-    val journeys: List<Journey>, val points: List<TrackPoint>, val mode: Transport?, val filterEpoch: Any,
-)
-private class PreparedHeatmap(val request: Any, val render: HeatmapRender)
+private data class CachedHeatmap(val revision: String, val filter: String, val render: HeatmapRender)
 
-/** Wall-clock ticks only invalidate expensive work when journey eligibility changes. */
+/** The worker owns geometry creation; UI selection only decodes a matching ready cache. */
+@Composable
+internal fun rememberHeatmapRender(analysis: AnalysisState, mode: Transport?): HeatmapRender? {
+    val application = LocalContext.current.applicationContext
+    val service = remember(application) { PostJourneyAnalysis.get(application) }
+    val revision = analysis.cacheRevision.takeIf { !analysis.pending && analysis.phase != AnalysisPhase.WAITING_END }
+    val filter = mode?.name ?: "ALL"
+    val prepared by produceState<CachedHeatmap?>(null, revision, filter) {
+        value = null
+        if (revision.isNullOrEmpty()) return@produceState
+        value = withContext(Dispatchers.IO) {
+            service.cache.heatmap(revision, filter)?.let { CachedHeatmap(revision, filter, it) }
+        }
+    }
+    return prepared?.takeIf { it.revision == revision && it.filter == filter }?.render
+}
+
+/** Legacy callers remain cache-only; raw input never opens a second analysis path. */
 @Composable
 internal fun rememberHeatmapRender(
     journeys: List<Journey>, points: List<TrackPoint>, mode: Transport?, now: Long,
 ): HeatmapRender? {
-    val eligible = journeys.filter {
-        it.status == JourneyStatus.CONFIRMED && (it.expiresAt == null || it.expiresAt > now) &&
-            (mode == null || it.transport == mode)
-    }
-    val filterEpoch = remember(mode) { Any() }
-    val request = remember(eligible, points, filterEpoch) { HeatmapInput(eligible, points, mode, filterEpoch) }
-    val prepared by produceState<PreparedHeatmap?>(null, request) {
-        value = withContext(Dispatchers.Default) {
-            val context = currentCoroutineContext()
-            val data = buildHeatmapData(request.journeys, request.points, request.mode, now) { context.ensureActive() }
-            PreparedHeatmap(request, prepareHeatmapRender(data) { context.ensureActive() })
-        }
-    }
-    // Keep the ready map/legend during routine updates. A new filter selection immediately clears
-    // the old display, even when switching A -> loading B -> A before B has finished. Cancelled
-    // workers cannot publish; a completed empty result replaces retained geometry normally.
-    return prepared?.takeIf { (it.request as? HeatmapInput)?.filterEpoch === filterEpoch }?.render
+    val application = LocalContext.current.applicationContext
+    val service = remember(application) { PostJourneyAnalysis.get(application) }
+    val analysis by service.state.collectAsStateWithLifecycle()
+    return rememberHeatmapRender(analysis, mode)
 }
 
 @Composable
-internal fun rememberHeatmapGeometry(data: HeatmapData): HeatmapRender? {
-    val request = remember(data) { Any() }
-    val prepared by produceState<PreparedHeatmap?>(null, request) {
-        value = withContext(Dispatchers.Default) {
-            val context = currentCoroutineContext()
-            PreparedHeatmap(request, prepareHeatmapRender(data) { context.ensureActive() })
-        }
-    }
-    return prepared?.takeIf { it.request === request }?.render
+internal fun rememberHeatmapGeometry(data: HeatmapData, mode: Transport? = null): HeatmapRender? {
+    val application = LocalContext.current.applicationContext
+    val service = remember(application) { PostJourneyAnalysis.get(application) }
+    val analysis by service.state.collectAsStateWithLifecycle()
+    return rememberHeatmapRender(analysis, mode)
 }
 
 /** Builds geometry, properties and camera bounds off the main thread, without SDK calls. */

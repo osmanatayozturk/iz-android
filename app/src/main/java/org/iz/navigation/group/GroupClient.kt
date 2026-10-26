@@ -4,6 +4,7 @@ import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.iz.navigation.BuildConfig
+import org.iz.navigation.power.PowerDiagnostics
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -26,7 +27,8 @@ internal class GroupClient(
         val builder = Request.Builder().url("$url$path").header("apikey", key)
             .post(body.toString().toRequestBody("application/json".toMediaType()))
         if (token != null) builder.header("Authorization", "Bearer $token")
-        http.newCall(builder.build()).execute().use { response ->
+        val started = System.nanoTime()
+        try { http.newCall(builder.build()).execute().use { response ->
             val text = response.body?.string().orEmpty()
             if (path.startsWith("/functions")) return GroupWire.requireSuccess(response.code, text)
             if (!response.isSuccessful) {
@@ -36,7 +38,7 @@ internal class GroupClient(
                 throw GroupException(if (expired) "identity_expired" else if (response.code == 429) "rate_limited" else "identity_unavailable")
             }
             return runCatching { JSONObject(text) }.getOrElse { throw GroupException("invalid_response") }
-        }
+        } } finally { PowerDiagnostics.count(PowerDiagnostics.Metric.GROUP_REQUEST, System.nanoTime() - started) }
     }
     @Synchronized private fun loadToken(): String {
         if (!configured) throw GroupException("unconfigured")

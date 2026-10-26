@@ -23,11 +23,14 @@ object HealthRules {
     }
 
     fun summarize(journey: Journey, samples: List<JourneyHealthSample>,
-        syncs: List<JourneyHealthSync> = emptyList(), now: Long = System.currentTimeMillis()): JourneyHealthSummary {
-        val valid = samples.filter { it.journeyId == journey.id && belongsTo(it.imported(), journey, now) }
-        val heart = observedHeartRateSamples(journey, valid, now)
-        val calories = unambiguousIntervals(valid.filter { it.metric == HealthMetric.TOTAL_CALORIES_KCAL })
-        val steps = unambiguousIntervals(valid.filter { it.metric == HealthMetric.STEPS })
+        syncs: List<JourneyHealthSync> = emptyList(), now: Long = System.currentTimeMillis(), checkActive: () -> Unit = {}): JourneyHealthSummary {
+        checkActive()
+        var processed = 0
+        fun checkpoint() { if (++processed % 256 == 0) checkActive() }
+        val valid = samples.filter { checkpoint(); it.journeyId == journey.id && belongsTo(it.imported(), journey, now) }
+        val heart = observedHeartRateSamples(journey, valid, now, checkActive)
+        val calories = unambiguousIntervals(valid.filter { checkpoint(); it.metric == HealthMetric.TOTAL_CALORIES_KCAL }, checkActive)
+        val steps = unambiguousIntervals(valid.filter { checkpoint(); it.metric == HealthMetric.STEPS }, checkActive)
         val used = heart + calories + steps
         return JourneyHealthSummary(
             journeyId = journey.id,
@@ -40,30 +43,39 @@ object HealthRules {
             watchSteps = steps.takeIf { it.isNotEmpty() }?.sumOf { it.value.toLong() },
             stepCoverageMillis = steps.sumOf { it.endAt - it.startAt },
             measurementStartAt = used.minOfOrNull { it.startAt }, measurementEndAt = used.maxOfOrNull { it.endAt },
-            metricCheckedAt = syncs.filter { it.journeyId == journey.id }.groupBy { it.metric }
+            metricCheckedAt = syncs.filter { checkpoint(); it.journeyId == journey.id }.groupBy { it.metric }
                 .mapValues { (_, values) -> values.maxOf { it.checkedAt } },
         )
     }
 
     /** The same observed series used by summaries and charts: no interpolation or fabricated coverage. */
     fun observedHeartRateSamples(journey: Journey, samples: List<JourneyHealthSample>,
-        now: Long = System.currentTimeMillis()): List<JourneyHealthSample> = samples
-        .filter { it.journeyId == journey.id && it.metric == HealthMetric.HEART_RATE_BPM && belongsTo(it.imported(), journey, now) }
-        .groupBy { it.startAt }.values
-        .mapNotNull { atTime -> atTime.takeIf { it.map { sample -> sample.value }.distinct().size == 1 }?.first() }
-        .sortedBy { it.startAt }
+        now: Long = System.currentTimeMillis(), checkActive: () -> Unit = {}): List<JourneyHealthSample> {
+        var processed = 0
+        fun checkpoint() { if (++processed % 256 == 0) checkActive() }
+        checkActive()
+        return samples.filter { checkpoint(); it.journeyId == journey.id && it.metric == HealthMetric.HEART_RATE_BPM && belongsTo(it.imported(), journey, now) }
+            .groupBy { checkpoint(); it.startAt }.values
+            .mapNotNull { atTime -> checkpoint(); atTime.takeIf { it.map { sample -> checkpoint(); sample.value }.distinct().size == 1 }?.first() }
+            .sortedWith { a, b -> checkpoint(); a.startAt.compareTo(b.startAt) }
+    }
 
     /** Whole records only. Deduplicate exact values, then exclude every interval in an overlapping group. */
-    private fun unambiguousIntervals(samples: List<JourneyHealthSample>): List<JourneyHealthSample> {
-        val sorted = samples.distinctBy { Triple(it.startAt, it.endAt, it.value) }
-            .sortedWith(compareBy({ it.startAt }, { it.endAt }))
+    private fun unambiguousIntervals(samples: List<JourneyHealthSample>, checkActive: () -> Unit): List<JourneyHealthSample> {
+        var processed = 0
+        fun checkpoint() { if (++processed % 256 == 0) checkActive() }
+        val comparator = compareBy<JourneyHealthSample>({ it.startAt }, { it.endAt })
+        val sorted = samples.distinctBy { checkpoint(); Triple(it.startAt, it.endAt, it.value) }
+            .sortedWith { a, b -> checkpoint(); comparator.compare(a, b) }
         val result = mutableListOf<JourneyHealthSample>()
         var index = 0
         while (index < sorted.size) {
+            checkpoint()
             val first = sorted[index]
             var end = first.endAt
             var next = index + 1
             while (next < sorted.size && sorted[next].startAt < end) {
+                checkpoint()
                 end = maxOf(end, sorted[next].endAt)
                 next++
             }

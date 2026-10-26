@@ -12,7 +12,13 @@ class WatchComplicationService : SuspendingTimelineComplicationDataSourceService
         val data = WatchSurfaceReader.read(this)
         val now = System.currentTimeMillis()
         val frame = WatchSurfacePolicy.complication(data.snapshot, data.connected, now)
-        val fallback = complication(request.complicationType, "İz’i aç", "İz", frame.route, "Güncel ayrıntılar için İz’i aç")
+        val fallback = when {
+            WatchSurfacePolicy.statisticsDeferred(data.snapshot) && frame.route != WatchSurfaceRoute.NAVIGATION ->
+                complication(request.complicationType, frame.compact, "Durum", frame.route, frame.lines.joinToString(". "))
+            frame.route == WatchSurfaceRoute.SUMMARY ->
+                complication(request.complicationType, "Hazır", "Özet", frame.route, "İstatistikler hazır. Yolculuk özetini aç")
+            else -> complication(request.complicationType, "İz’i aç", "İz", frame.route, "Güncel ayrıntılar için İz’i aç")
+        }
         val until = frame.compactUntil
         val sourceAt = if (frame.route == WatchSurfaceRoute.DAILY) data.snapshot?.daily?.healthCheckedAt else data.snapshot?.generatedAt
         val sourceLabel = if (frame.route == WatchSurfaceRoute.DAILY) "Samsung Health" else "Son bildirilen ölçüm"

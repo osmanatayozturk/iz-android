@@ -109,7 +109,7 @@ class WatchHealthService : Service() {
     private var sending: Job? = null
     private var pendingBatch: Pair<String, Long>? = null
     private var inflightBatch: HealthBatch? = null
-    private var stepsTotal: Long? = null
+    @Volatile private var stateVersion = 4
     private val prefs by lazy { WatchHealthRuntime.prefs(this) }
     private val watchId by lazy { prefs.getString("watchId", null) ?: UUID.randomUUID().toString().also { prefs.edit().putString("watchId", it).commit() } }
     private val dataClient by lazy { Wearable.getDataClient(this) }
@@ -117,7 +117,7 @@ class WatchHealthService : Service() {
     private val capabilityClient by lazy { Wearable.getCapabilityClient(this) }
     private val dataListener = DataClient.OnDataChangedListener { events -> events.filter { it.type == DataEvent.TYPE_CHANGED }.forEach { event ->
         val item = event.dataItem
-        if (item.uri.path == WearProtocol.V4_STATE_PATH) {
+        if (item.uri.path == WearProtocol.statePath(stateVersion)) {
             val bytes = runCatching { DataMapItem.fromDataItem(item).dataMap.getByteArray(WearProtocol.STATE_KEY) }.getOrNull()
             val source = item.uri.host
             if (bytes != null && source != null) scope.launch { receiveState(source, bytes) }
@@ -194,20 +194,30 @@ class WatchHealthService : Service() {
         withTimeout(10_000) {
             if (!dataListening) { dataClient.addListener(dataListener).await(); dataListening = true }
             if (!messageListening) { messageClient.addListener(messageListener).await(); messageListening = true }
-            if (!capabilityListening) { capabilityClient.addListener(capabilityListener, WearProtocol.V4_PHONE_CAPABILITY).await(); capabilityListening = true }
+            if (!capabilityListening) {
+                capabilityClient.addListener(capabilityListener, WearProtocol.V4_PHONE_CAPABILITY).await()
+                capabilityClient.addListener(capabilityListener, WearProtocol.V6_PHONE_CAPABILITY).await()
+                capabilityListening = true
+            }
         }
     }
 
     private suspend fun discover() {
         try {
             ensureListeners()
-            val nodes = withTimeout(10_000) { capabilityClient.getCapability(WearProtocol.V4_PHONE_CAPABILITY, CapabilityClient.FILTER_REACHABLE).await().nodes }
+            val caps = withTimeout(10_000) { capabilityClient.getAllCapabilities(CapabilityClient.FILTER_REACHABLE).await() }
+            val nodes = (4..WearProtocol.CURRENT_VERSION).flatMap { version ->
+                caps[WearProtocol.phoneCapability(version)]?.nodes.orEmpty().map { it to version }
+            }
             val boundPhone = prefs.getString("phoneId", null)
             // Pending measurements belong to one phone installation. Never redirect its queue to a different phone.
-            val selected = if (boundPhone != null) nodes.firstOrNull { it.id == boundPhone }
-                else nodes.sortedWith(compareByDescending<Node> { it.isNearby }.thenBy { it.id }).firstOrNull()
-            if (boundPhone == null && selected != null) prefs.edit().putString("phoneId", selected.id).commit()
-            if (phone != selected?.id) { detach(); phone = selected?.id; pendingHello = null; stateKey = null; lastStateTime = 0 }
+            val selected = nodes.filter { boundPhone == null || it.first.id == boundPhone }
+                .sortedWith(compareByDescending<Pair<Node, Int>> { it.first.isNearby }.thenByDescending { it.second }.thenBy { it.first.id }).firstOrNull()
+            if (boundPhone == null && selected != null) prefs.edit().putString("phoneId", selected.first.id).commit()
+            if (phone != selected?.first?.id || selected?.second != stateVersion) {
+                detach(); phone = selected?.first?.id; pendingHello = null; stateKey = null; lastStateTime = 0
+            }
+            stateVersion = selected?.second ?: 4
             if (phone == null) { status("Güncel telefon bağlantısı bekleniyor"); return }
             hello(force = true); sendNext()
         } catch (_: Exception) { status("Telefon bağlantısı bekleniyor") }
@@ -257,7 +267,7 @@ class WatchHealthService : Service() {
                     prefs.edit().remove("sessionId").commit(); detach(); hello(force = true); return
                 }
                 val stored = old ?: WatchHealthOutbox.Session(sessionId, value.journeyId!!, value.createdAt!!, clock, WatchHealthRuntime.boot(this), 0).also(outbox::saveSession)
-                if (capture.sessionId != stored.id) { detach(); stepsTotal = null; WatchHealthRuntime.mutableState.value = WatchHealthRuntime.mutableState.value.copy(phoneId = null, sessionId = null, latestHeartRate = null, latestHeartAt = null, steps = null) }
+                if (capture.sessionId != stored.id) { detach(); WatchHealthRuntime.mutableState.value = WatchHealthRuntime.mutableState.value.copy(phoneId = null, sessionId = null, latestHeartRate = null, latestHeartAt = null, steps = null) }
                 anchor = stored.anchor; prefs.edit().putString("sessionId", stored.id).commit()
                 capture.attach(stored.id, stored.journeyId, stored.createdAt, SystemClock.elapsedRealtime() + WatchHealthProtocol.LEASE_MILLIS, stored.sequence)
                 updateCollection(); startHeartbeat(); sendNext()
@@ -316,14 +326,12 @@ class WatchHealthService : Service() {
     }
     private fun updateState() {
         WatchHealthRuntime.mutableState.value = WatchHealthRuntime.mutableState.value.copy(armed = observing,
-            phoneId = phone, sessionId = capture.sessionId, onBody = capture.worn, journeyId = capture.journeyId, capturing = collecting, steps = stepsTotal, buffered = outbox.count(),
-            latestHeartRate = WatchHealthRuntime.mutableState.value.latestHeartRate.takeIf { collecting && capture.worn == true },
-            latestHeartAt = WatchHealthRuntime.mutableState.value.latestHeartAt.takeIf { collecting && capture.worn == true })
-        if (collecting) WatchSurfaceUpdates.request(this)
+            phoneId = phone, sessionId = capture.sessionId, onBody = capture.worn, journeyId = capture.journeyId, capturing = collecting,
+            steps = null, buffered = outbox.count(), latestHeartRate = null, latestHeartAt = null)
     }
     private fun clearSessionState() {
         val hadHeart = WatchHealthRuntime.mutableState.value.latestHeartAt != null
-        pendingHello = null; anchor = null; stepsTotal = null
+        pendingHello = null; anchor = null
         prefs.edit().remove("sessionId").commit()
         WatchHealthRuntime.mutableState.value = WatchHealthRuntime.mutableState.value.copy(phoneId = null, sessionId = null, latestHeartRate = null, latestHeartAt = null, steps = null)
         if (hadHeart) WatchSurfaceUpdates.request(this, forceTile = true)
@@ -353,10 +361,8 @@ class WatchHealthService : Service() {
         try {
             outbox.add(capture.sessionId ?: return, reading, System.currentTimeMillis())
             if (reading.sequence % 100L == 0L) outbox.prune(System.currentTimeMillis())
-            if (reading.type == HealthReadingType.HEART_RATE) WatchHealthRuntime.mutableState.value = WatchHealthRuntime.mutableState.value.copy(
-                latestHeartRate = reading.value, latestHeartAt = reading.startAt)
-            else stepsTotal = (stepsTotal ?: 0) + reading.value.toLong()
-            updateState()
+            // Preserve the raw reading and its sequence; summaries are prepared by the phone after the trip.
+            // Heart/step totals and surface refreshes are deliberately absent from this sensor callback.
         } catch (_: Exception) { detach(); status("Saat depolamasına yazılamadı; ölçüm durduruldu") }
     }
     private fun sendNext() {
@@ -379,6 +385,7 @@ class WatchHealthService : Service() {
         observing = false; capture.detach(); sensorController.update(false, SystemClock.elapsedRealtimeNanos()); if (lock?.isHeld == true) lock?.release()
         dataClient.removeListener(dataListener); messageClient.removeListener(messageListener)
         capabilityClient.removeListener(capabilityListener, WearProtocol.V4_PHONE_CAPABILITY)
+        capabilityClient.removeListener(capabilityListener, WearProtocol.V6_PHONE_CAPABILITY)
         scope.cancel(); outbox.close()
         val wasRunning = WatchHealthRuntime.running
         WatchHealthRuntime.running = false

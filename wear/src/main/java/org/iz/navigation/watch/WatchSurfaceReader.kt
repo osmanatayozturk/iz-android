@@ -23,7 +23,7 @@ internal object WatchSurfaceReader {
         require(storage.baseFile.length() in 1..70_000)
         DataInputStream(storage.openRead()).use { input ->
             val phone = input.readUTF(); val version = input.readInt(); val length = input.readInt()
-            require(phone.length <= 300 && version in 1..5 && length in 1..65_536)
+            require(phone.length <= 300 && version in 1..WearProtocol.CURRENT_VERSION && length in 1..65_536)
             val bytes = ByteArray(length); input.readFully(bytes); require(input.read() == -1)
             require(WearProtocol.frameVersion(bytes) == version)
             WatchSurfaceData(phone, version, requireNotNull(WearProtocol.decodeSnapshot(bytes)))
@@ -53,7 +53,7 @@ internal object WatchSurfaceReader {
             try {
                 withTimeout(4_000) {
                     val caps = Wearable.getCapabilityClient(context).getAllCapabilities(CapabilityClient.FILTER_REACHABLE).await()
-                    val candidates = (1..5).flatMap { version -> caps[WearProtocol.phoneCapability(version)]?.nodes.orEmpty().map { it to version } }
+                    val candidates = (1..WearProtocol.CURRENT_VERSION).flatMap { version -> caps[WearProtocol.phoneCapability(version)]?.nodes.orEmpty().map { it to version } }
                     val selected = candidates.sortedWith(compareByDescending<Pair<Node, Int>> { it.first.id == prior.phoneId }
                         .thenByDescending { it.first.isNearby }.thenByDescending { it.second }.thenBy { it.first.id }).firstOrNull()
                         ?: return@withTimeout prior
@@ -92,7 +92,7 @@ class WatchSurfaceListener : WearableListenerService() {
             for (request in requests) {
                 val data = WatchSurfaceReader.read(this@WatchSurfaceListener)
                 val s = data.snapshot
-                val transition = "${data.phoneId}:${s?.journeyId}:${s?.recording}:${s?.temporary}:${s?.navigation?.sessionId}:${s?.navigation?.guidance}:${s?.navigation?.gpsStale}:${s?.navigation?.arrived}:${s?.navigation?.offRoute}:${s?.daily?.localDate}"
+                val transition = "${data.phoneId}:${s?.journeyId}:${s?.recording}:${s?.temporary}:${s?.navigation?.sessionId}:${s?.navigation?.guidance}:${s?.navigation?.gpsStale}:${s?.navigation?.arrived}:${s?.navigation?.offRoute}:${s?.daily?.localDate}:${s?.statsDeferred}:${s?.statisticsStatus}:${s?.completed?.journeyId}"
                 WatchSurfaceUpdates.request(this@WatchSurfaceListener, transition)
             }
         }
@@ -103,7 +103,7 @@ class WatchSurfaceListener : WearableListenerService() {
         if (deleted.isNotEmpty()) scope.launch {
             deleted.forEach { (source, path) -> WatchSurfaceReader.deleted(this@WatchSurfaceListener, source, path) }
             refresh()
-        } else if (events.any { it.dataItem.uri.path?.matches(Regex("/iz/v[1-5]/state")) == true }) refresh()
+        } else if (events.any { event -> (1..WearProtocol.CURRENT_VERSION).any { event.dataItem.uri.path == WearProtocol.statePath(it) } }) refresh()
     }
     override fun onCapabilityChanged(capabilityInfo: CapabilityInfo) = refresh()
     override fun onDestroy() { scope.cancel(); super.onDestroy() }
@@ -113,7 +113,7 @@ class WatchSurfaceListener : WearableListenerService() {
 internal fun watchSurfaceFrame(context: Context, data: WatchSurfaceData, now: Long): WatchSurfaceFrame {
     val frame = WatchSurfacePolicy.frame(data.snapshot, data.connected, now)
     val snapshot = data.snapshot ?: return frame
-    if (frame.route != WatchSurfaceRoute.RECORDING || !data.connected || !WearProtocol.isFreshSnapshot(snapshot, now)) return frame
+    if (WatchSurfacePolicy.statisticsDeferred(snapshot) || frame.route != WatchSurfaceRoute.RECORDING || !data.connected || !WearProtocol.isFreshSnapshot(snapshot, now)) return frame
     val health = WatchHealthRuntime.state.value
     val heart = safeLiveHeart(context, data, now) ?: return frame
     return frame.copy(lines = frame.lines.map { it.replace("Nabız —", "Nabız ${heart.toInt()} canlı") },
@@ -122,7 +122,7 @@ internal fun watchSurfaceFrame(context: Context, data: WatchSurfaceData, now: Lo
 
 internal fun safeLiveHeart(context: Context, data: WatchSurfaceData, now: Long): Double? {
     val snapshot = data.snapshot ?: return null
-    if (!data.connected || !snapshot.recording || snapshot.temporary ||
+    if (WatchSurfacePolicy.statisticsDeferred(snapshot) || !data.connected || !snapshot.recording || snapshot.temporary ||
         !WearProtocol.isFreshSnapshot(snapshot, now) || !WatchHealthRuntime.permissions(context)) return null
     return WatchLiveHealthPolicy.heart(WatchHealthRuntime.state.value, data.phoneId, snapshot.journeyId,
         WatchHealthRuntime.prefs(context).getString("sessionId", null), now)

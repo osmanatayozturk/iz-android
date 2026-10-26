@@ -14,7 +14,7 @@ fun HeatmapMap(
     fullscreenActions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {},
     expandable: Boolean = true,
 ) {
-    val render = rememberHeatmapGeometry(data)
+    val render = rememberHeatmapGeometry(data, org.iz.navigation.data.Transport.entries.firstOrNull { it.name == filterKey })
     ExpandableMap(modifier, title = "Isı haritası", expandable = expandable, actions = fullscreenActions) { mapModifier ->
         HeatmapMapContent(render, filterKey, mapModifier)
     }
@@ -27,19 +27,20 @@ internal fun HeatmapMapContent(render: HeatmapRender?, filterKey: String, modifi
     val tileUrl = OsmServiceSettings(context).read().tileUrl
     val style = remember(tileUrl) { mapStyle(tileUrl, listOf("heatmap"), heatmapLayer) }
     var map by remember(tileUrl) { mutableStateOf<MapLibreMap?>(null) }
+    var styleRevision by remember { mutableIntStateOf(0) }
     var hasFramed by remember(map, filterKey) { mutableStateOf(false) }
     val padding = with(LocalDensity.current) { 32.dp.roundToPx() }
-    LaunchedEffect(map, render, filterKey) {
+    LaunchedEffect(map, styleRevision, render, filterKey) {
         map?.let { current ->
             // Clear old features even while a new filter is still being prepared.
-            current.updateGeoJson("heatmap", render?.json ?: emptyGeoJson)
+            current.updateMeasuredGeoJson("heatmap", render?.json ?: emptyGeoJson, org.iz.navigation.power.PowerDiagnostics.Metric.MAP_TRAIL)
             if (render != null && render.bounds.isNotEmpty() && !hasFramed) {
                 frameCoordinates(current, render.bounds, padding, 16.0)
                 hasFramed = true
             }
         }
     }
-    OsmMapView(style, modifier.testTag("heatmap_map"), onReady = { map = it })
+    OsmMapView(style, modifier.testTag("heatmap_map"), onReady = { map = it; styleRevision++ })
 }
 
 // Fully opaque lines avoid manufacturing extra density from repeated geometry.

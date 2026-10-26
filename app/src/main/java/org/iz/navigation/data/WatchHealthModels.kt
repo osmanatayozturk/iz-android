@@ -38,17 +38,23 @@ object WatchHealthRules {
             session != null && session.journeyId == s.journeyId && s.startAt >= session.createdAt &&
                 trip != null && belongsTo(s, trip, Long.MAX_VALUE) }) { "Invalid direct watch health data" }
     }
-    fun summarize(journey: Journey, samples: List<WatchHealthSample>, now: Long = System.currentTimeMillis()): JourneyHealthSummary {
-        val valid = samples.distinctBy { it.sessionId to it.sequence }.filter { belongsTo(it, journey, now) }
-        val heart = valid.filter { it.metric == HealthMetric.HEART_RATE_BPM }.sortedBy { it.startAt }
-        val steps = valid.filter { it.metric == HealthMetric.STEPS }.sortedBy { it.startAt }
+    fun summarize(journey: Journey, samples: List<WatchHealthSample>, now: Long = System.currentTimeMillis(), checkActive: () -> Unit = {}): JourneyHealthSummary {
+        var processed = 0
+        fun checkpoint() { if (++processed % 256 == 0) checkActive() }
+        checkActive()
+        val valid = samples.distinctBy { checkpoint(); it.sessionId to it.sequence }.filter { checkpoint(); belongsTo(it, journey, now) }
+        val comparator = Comparator<WatchHealthSample> { a, b -> checkpoint(); a.startAt.compareTo(b.startAt) }
+        val heart = valid.filter { checkpoint(); it.metric == HealthMetric.HEART_RATE_BPM }.sortedWith(comparator)
+        val steps = valid.filter { checkpoint(); it.metric == HealthMetric.STEPS }.sortedWith(comparator)
         // A single physical watch session owns each captured period. Exclude overlapping intervals.
         val unambiguous = mutableListOf<WatchHealthSample>()
         var first = 0
         while (first < steps.size) {
+            checkpoint()
             var end = first + 1
             var boundary = steps[first].endAt
             while (end < steps.size && steps[end].startAt < boundary) {
+                checkpoint()
                 boundary = maxOf(boundary, steps[end].endAt); end++
             }
             if (end == first + 1) unambiguous += steps[first]

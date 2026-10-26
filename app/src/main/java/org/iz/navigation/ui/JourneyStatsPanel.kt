@@ -4,7 +4,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import org.iz.navigation.power.PostJourneyAnalysis
+import org.iz.navigation.power.AnalysisPhase
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -13,9 +18,27 @@ import org.iz.navigation.integration.averagePaceMinutesPerKm
 import java.util.Locale
 import kotlin.math.roundToLong
 
+/** Legacy raw-input call sites also consume only prepared results; they cannot bypass the gate. */
 @Composable
 internal fun JourneyStatsPanel(journey: Journey, points: List<TrackPoint>, now: Long) {
-    val stats = remember(journey, points, now) { JourneyStatistics.calculate(journey, points, now) }
+    val application = LocalContext.current.applicationContext
+    val service = remember(application) { PostJourneyAnalysis.get(application) }
+    val analysis by service.state.collectAsStateWithLifecycle()
+    val label = if (analysis.phase == AnalysisPhase.READY) "Ayrıntılar hazırlanıyor" else analysis.label
+    JourneyStatsPanel(journey, analysis.ready(journey.id)?.takeIf { it.matches(journey) }?.stats, label)
+}
+
+@Composable
+internal fun JourneyStatsPanel(journey: Journey, stats: JourneyStats?, waitingLabel: String) {
+    if (stats == null) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Yolculuk istatistikleri", style = MaterialTheme.typography.titleLarge)
+            Text(waitingLabel, color = Muted)
+            Text("Konum kayıtların korunuyor. Ayrıntılar kayıt ve navigasyon bittikten sonra pil en az %20 olduğunda hazırlanır.",
+                style = MaterialTheme.typography.bodySmall, color = Muted)
+        }
+        return
+    }
     fun speed(value: Double?) = value?.let { String.format(Locale.forLanguageTag("tr-TR"), "%.1f km/sa", it) } ?: "—"
     fun time(value: Long): String {
         val seconds = value.coerceAtLeast(0) / 1000

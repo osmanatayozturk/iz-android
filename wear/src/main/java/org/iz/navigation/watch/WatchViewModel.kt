@@ -47,6 +47,7 @@ internal class WatchViewModel(application: Application) : AndroidViewModel(appli
             capabilityClient.addListener(capabilityListener, WearProtocol.V3_PHONE_CAPABILITY).await()
             capabilityClient.addListener(capabilityListener, WearProtocol.V4_PHONE_CAPABILITY).await()
             capabilityClient.addListener(capabilityListener, WearProtocol.V5_PHONE_CAPABILITY).await()
+            capabilityClient.addListener(capabilityListener, WearProtocol.V6_PHONE_CAPABILITY).await()
             launch {
                 while (isActive) {
                     refreshNow()
@@ -71,6 +72,7 @@ internal class WatchViewModel(application: Application) : AndroidViewModel(appli
                 runCatching { capabilityClient.removeListener(capabilityListener, WearProtocol.V3_PHONE_CAPABILITY).await() }
                 runCatching { capabilityClient.removeListener(capabilityListener, WearProtocol.V4_PHONE_CAPABILITY).await() }
                 runCatching { capabilityClient.removeListener(capabilityListener, WearProtocol.V5_PHONE_CAPABILITY).await() }
+                runCatching { capabilityClient.removeListener(capabilityListener, WearProtocol.V6_PHONE_CAPABILITY).await() }
             }
         }
     }
@@ -129,12 +131,14 @@ internal class WatchViewModel(application: Application) : AndroidViewModel(appli
     }
 
     private fun choosePhone(capabilities: Map<String, CapabilityInfo>) {
+        val v6 = capabilities[WearProtocol.V6_PHONE_CAPABILITY]?.nodes.orEmpty()
         val v5 = capabilities[WearProtocol.V5_PHONE_CAPABILITY]?.nodes.orEmpty()
         val v4 = capabilities[WearProtocol.V4_PHONE_CAPABILITY]?.nodes.orEmpty()
         val v3 = capabilities[WearProtocol.V3_PHONE_CAPABILITY]?.nodes.orEmpty()
         val v2 = capabilities[WearProtocol.V2_PHONE_CAPABILITY]?.nodes.orEmpty()
-        val nodes = (capabilities[WearProtocol.PHONE_CAPABILITY]?.nodes.orEmpty() + v2 + v3 + v4 + v5).distinctBy { it.id }
+        val nodes = (capabilities[WearProtocol.PHONE_CAPABILITY]?.nodes.orEmpty() + v2 + v3 + v4 + v5 + v6).distinctBy { it.id }
         fun version(id: String?): Int = when {
+            v6.any { it.id == id } -> 6
             v5.any { it.id == id } -> 5
             v4.any { it.id == id } -> 4
             v3.any { it.id == id } -> 3

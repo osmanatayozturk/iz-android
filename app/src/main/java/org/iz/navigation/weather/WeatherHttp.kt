@@ -21,6 +21,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import org.json.JSONObject
+import org.iz.navigation.power.PowerDiagnostics
 
 const val DEFAULT_ROUTE_ENDPOINT = "https://valhalla1.openstreetmap.de/route"
 const val DEFAULT_WEATHER_ENDPOINT = "https://api.open-meteo.com/v1/forecast"
@@ -71,7 +72,10 @@ internal suspend fun executeBounded(
     client: OkHttpClient,
     request: Request,
     maxBytes: Int,
-): BoundedHttpResponse = suspendCancellableCoroutine { continuation ->
+    metric: PowerDiagnostics.Metric = PowerDiagnostics.Metric.ROUTE_PLAN,
+): BoundedHttpResponse {
+    val started = System.nanoTime()
+    return try { suspendCancellableCoroutine { continuation ->
     val call = client.newCall(request)
     continuation.invokeOnCancellation { call.cancel() }
     call.enqueue(object : Callback {
@@ -95,6 +99,7 @@ internal suspend fun executeBounded(
             }
         }
     })
+    } } finally { PowerDiagnostics.count(metric, System.nanoTime() - started) }
 }
 
 internal fun readBoundedBody(response: Response, maxBytes: Int): String {

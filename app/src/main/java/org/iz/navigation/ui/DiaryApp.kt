@@ -74,9 +74,10 @@ import java.util.Locale
 private fun date(value: Long) = SimpleDateFormat("d MMM yyyy · HH:mm", Locale.forLanguageTag("tr-TR")).format(Date(value))
 private fun duration(value: Long): String { val m = value.coerceAtLeast(0) / 60_000; return if (m >= 60) "${m / 60} sa ${m % 60} dk" else "$m dk" }
 private fun countdown(value: Long): String { val seconds = (value.coerceIn(0L, TrackingPolicy.AUTOMATIC_WINDOW_MS) + 999) / 1000; return String.format(Locale.forLanguageTag("tr-TR"), "%02d:%02d", seconds / 60, seconds % 60) }
-private fun distance(points: List<TrackPoint>) = String.format(Locale.forLanguageTag("tr-TR"), "%.1f", DiaryRules.distanceMeters(points) / 1000) + " km"
-private fun journeyDistance(journey: Journey, points: List<TrackPoint>): String =
-    TrackingPolicy.automaticCandidateProgress(journey, points)?.let { "${it.toInt()} / 500 m" } ?: distance(points)
+private fun journeyDistance(journey: Journey, state: DiaryState): String =
+    state.prepared(journey)?.stats?.distanceMeters?.let {
+        String.format(Locale.forLanguageTag("tr-TR"), "%.1f km", it / 1000)
+    } ?: if (journey.status == JourneyStatus.TEMPORARY) "500 metre için ölçülüyor" else state.analysisLabel
 private data class PhotoTarget(val journeyId: String? = null, val visitId: String? = null)
 private data class TransportAction(val journeyId: String? = null, val split: Boolean = false, val suggestion: Transport = Transport.WALK)
 private data class Deletion(val text: String, val action: suspend () -> Unit)
@@ -513,7 +514,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                 plan.transport, plan.preferences, plan.originUsesCurrentLocation, plan.travelSpeedKmh))
         }, onOpenTrack = ::openGpx)
     if (collectionsOpen) JourneyCollectionsScreen(repository = library,
-        snapshot = DiarySnapshot(journeys = state.journeys, points = state.points),
+        snapshot = DiarySnapshot(journeys = state.journeys), analysis = state.analysis,
         onDismiss = { collectionsOpen = false }, onOpenJourney = {
             collectionsOpen = false; selectedJourney = it.id; tab = 1
         })
@@ -632,15 +633,27 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
         } },
         authError = authState.error,
     ) }
-    gpxJourney?.let { journey -> GpxExportSheet(journey, state.points.filter { it.journeyId == journey.id }, { gpxJourney = null }) { xml ->
-        if (!preparingGpx) {
-            preparingGpx = true
-            vm.execute {
-                try {
-                    pendingGpxId = withContext(Dispatchers.IO) { gpxStore.prepare(xml) }
-                    gpxJourney = null
-                    exportGpx.launch("iz-rota-${journey.startedAt}.gpx")
-                } finally { preparingGpx = false }
+    gpxJourney?.let { journey -> key(journey.id) {
+        val loaded by produceState<Result<List<TrackPoint>>?>(null, journey.id) {
+            value = try { Result.success(withContext(Dispatchers.IO) { vm.repository.journeyPoints(journey.id) }) }
+                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (error: Exception) { Result.failure(error) }
+        }
+        val points = loaded?.getOrNull()
+        if (points == null) AlertDialog(onDismissRequest = { gpxJourney = null },
+            title = { Text("GPX dışa aktarımı") },
+            text = { Text(if (loaded == null) "Yolculuğun konum kayıtları okunuyor…" else "Konum kayıtları okunamadı. Yeniden deneyebilirsin.") },
+            confirmButton = { TextButton(onClick = { gpxJourney = null }) { Text("Kapat") } })
+        else GpxExportSheet(journey, points, { gpxJourney = null }) { xml ->
+            if (!preparingGpx) {
+                preparingGpx = true
+                vm.execute {
+                    try {
+                        pendingGpxId = withContext(Dispatchers.IO) { gpxStore.prepare(xml) }
+                        gpxJourney = null
+                        exportGpx.launch("iz-rota-${journey.startedAt}.gpx")
+                    } finally { preparingGpx = false }
+                }
             }
         }
     } }
@@ -701,7 +714,7 @@ private fun HomeScreen(state: DiaryState, active: Journey?, now: Long, onStart: 
             Text("${state.journeys.count { it.status == JourneyStatus.CONFIRMED }} yolculuk  ·  ${state.places.size} yer  ·  ${state.photos.size} fotoğraf", color = Muted, style = MaterialTheme.typography.bodyMedium)
         }
         Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).clip(RoundedCornerShape(28.dp))) {
-            DiaryMap(points = state.currentRoute(now), places = state.places, modifier = Modifier.fillMaxSize(), onPlaceClick = onPlace, onMapLongClick = onPin, focusCurrentLocation = true, onOsmPlaceClick = onOsmPlace, followRecordedLocation = active != null && followRoute,
+            DiaryMap(points = emptyList(), places = state.places, modifier = Modifier.fillMaxSize(), onPlaceClick = onPlace, onMapLongClick = onPin, focusCurrentLocation = true, onOsmPlaceClick = onOsmPlace, followRecordedLocation = active != null && followRoute,
                 fullscreenActions = {
                     if (active != null) IconButton(onClick = { followRoute = !followRoute }) {
                         Icon(if (followRoute) Icons.Outlined.GpsFixed else Icons.Outlined.GpsNotFixed,
@@ -720,7 +733,7 @@ private fun HomeScreen(state: DiaryState, active: Journey?, now: Long, onStart: 
                     Icon(active.transport.icon(), null, tint = active.transport.accentColor(), modifier = Modifier.size(30.dp)); Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
                         Text(if (active.status == JourneyStatus.TEMPORARY) "500 metre için mesafe ölçülüyor" else "Yolculuğun devam ediyor", style = MaterialTheme.typography.titleMedium)
-                        Text("${journeyDistance(active, state.points.filter { it.journeyId == active.id })} · ${duration(now - active.startedAt)}", color = Muted)
+                        Text("${journeyDistance(active, state)} · ${duration(now - active.startedAt)}", color = Muted)
                         TrackingPolicy.automaticCandidateDeadline(active)?.let { deadline -> Text("Sıfırlanmaya ${countdown(deadline - now)}", style = MaterialTheme.typography.bodySmall, color = Muted) }
                     }
                     Icon(Icons.Outlined.ChevronRight, "Yolculuğu aç")
@@ -784,7 +797,7 @@ private fun JourneysScreen(state: DiaryState, now: Long, onJourney: (Journey) ->
             Surface(shape = RoundedCornerShape(22.dp), color = if (journey.status == JourneyStatus.TEMPORARY) Leaf else Color.White, onClick = { onJourney(journey) }) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) { ModeBadge(journey.transport); Spacer(Modifier.width(12.dp)); Column(Modifier.weight(1f)) { Text(journey.title.ifBlank { journey.transport.label() }, style = MaterialTheme.typography.titleMedium); Text(date(journey.startedAt), style = MaterialTheme.typography.bodySmall, color = Muted) }; Icon(Icons.Outlined.ChevronRight, null) }
-                    Text("${journeyDistance(journey, state.points.filter { it.journeyId == journey.id })}  ·  ${duration((journey.endedAt ?: now) - journey.startedAt)}${if (journey.interrupted) "  ·  Kesinti var" else ""}", color = Muted)
+                    Text("${journeyDistance(journey, state)}  ·  ${duration((journey.endedAt ?: now) - journey.startedAt)}${if (journey.interrupted) "  ·  Kesinti var" else ""}", color = Muted)
                     if (journey.status == JourneyStatus.TEMPORARY) {
                         val deadline = TrackingPolicy.automaticCandidateDeadline(journey)
                         Text(if (deadline != null) "500 metre bekleniyor · Sıfırlanmaya ${countdown(deadline - now)}" else "Geçici kayıt · ${duration((journey.expiresAt ?: now) - now)} sonra silinir", style = MaterialTheme.typography.bodySmall)
@@ -799,18 +812,18 @@ private fun JourneysScreen(state: DiaryState, now: Long, onJourney: (Journey) ->
 
 @Composable
 private fun JourneyDetail(journey: Journey, state: DiaryState, now: Long, onEdit: () -> Unit, onConfirm: () -> Unit, onFinish: () -> Unit, onSwitch: () -> Unit, onAddPlace: () -> Unit, onPhoto: () -> Unit, onVisit: (Visit) -> Unit, onDelete: () -> Unit, onDeletePhoto: (Photo) -> Unit, onEditPhoto: (Photo) -> Unit, onExportGpx: () -> Unit, onSharePhotos: () -> Unit) {
-    val points = state.points.filter { it.journeyId == journey.id }
+    val prepared = state.prepared(journey)
     val visits = state.visits.filter { it.journeyId == journey.id }.sortedBy { it.visitedAt }
     LazyColumn(contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item { PageHeading(journey.title.ifBlank { journey.transport.label() }, date(journey.startedAt)) }
         item { Row(verticalAlignment = Alignment.CenterVertically) { ModeBadge(journey.transport); Spacer(Modifier.width(12.dp)); Text(journey.transport.label(), Modifier.weight(1f)); IconButton(onClick = onEdit) { Icon(Icons.Outlined.Edit, "Yolculuğu düzenle") } } }
         if (journey.interrupted) item { Notice("Konum kaydında kesinti var. Eksik bölüm rotaya eklenmedi.") }
-        item { DiaryMap(points, state.places.filter { p -> visits.any { it.placeId == p.id } }, Modifier.fillMaxWidth().height(240.dp).clip(RoundedCornerShape(24.dp))) }
+        item { DiaryMap(emptyList(), state.places.filter { p -> visits.any { it.placeId == p.id } }, Modifier.fillMaxWidth().height(240.dp).clip(RoundedCornerShape(24.dp)), journeyId = journey.id, analysis = if (prepared == null) state.analysis.copy(pending = true) else state.analysis) }
         if (journey.status == JourneyStatus.TEMPORARY) item { Button(onClick = onConfirm, modifier = Modifier.fillMaxWidth()) { Text("Bu yolculuğu sakla") } }
         if (journey.endedAt == null) item { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton(onClick = onSwitch, Modifier.weight(1f)) { Text("Tür değiştir") }; Button(onClick = onFinish, Modifier.weight(1f)) { Icon(Icons.Outlined.Stop, null); Text("Bitir") } } }
-        item { JourneyStatsPanel(journey, points, now) }
-        TrackingPolicy.automaticCandidateProgress(journey, points)?.let { progress ->
-            item { Notice("Otomatik kayıt için ${progress.toInt()} / 500 m · Sıfırlanmaya ${countdown(requireNotNull(TrackingPolicy.automaticCandidateDeadline(journey)) - now)}") }
+        item { JourneyStatsPanel(journey, prepared?.stats, state.analysisLabel) }
+        TrackingPolicy.automaticCandidateDeadline(journey)?.let { deadline ->
+            item { Notice("Otomatik kayıt için 500 metre bekleniyor · Sıfırlanmaya ${countdown(deadline - now)}") }
         }
         item { JourneyHealthPanel(journey, state, now) }
         if (journey.endedAt != null && journey.status == JourneyStatus.CONFIRMED) item { OutlinedButton(onClick = onExportGpx, modifier = Modifier.fillMaxWidth()) { Text("GPX rotasını dışa aktar") } }

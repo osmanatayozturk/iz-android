@@ -32,6 +32,15 @@ import org.iz.navigation.data.*
 import org.iz.navigation.integration.*
 import org.iz.navigation.integration.osm.OsmAuthManager
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import org.iz.navigation.power.PostJourneyAnalysis
+import org.iz.navigation.power.AnalysisPhase
+import org.json.JSONArray
+import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -316,35 +325,117 @@ private fun OsmServiceEditor(onDismiss: () -> Unit, onSaved: () -> Unit) {
     }) { Text("Kaydet") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Vazgeç") } })
 }
 
+private data class GpxExportSource(val request: Any, val segments: List<List<TrackPoint>>, val count: Int, val error: String? = null)
+private data class GpxExportPreview(val request: Any, val start: Int, val end: Int, val render: RecordedTrailRender)
+
 @Composable
 internal fun GpxExportSheet(journey: Journey, points: List<TrackPoint>, onDismiss: () -> Unit, onExport: (String) -> Unit) {
-    val all = remember(journey, points) { runCatching { gpxSegments(journey, points).flatMap { segment -> segment.mapIndexed { index, point -> if (index == 0) point.copy(breakBefore = true) else point } } }.getOrDefault(emptyList()) }
+    val application = LocalContext.current.applicationContext
+    val service = remember(application) { PostJourneyAnalysis.get(application) }
+    val analysis by service.state.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
+    val request = remember(journey, points) { Any() }
     var start by remember(journey.id) { mutableIntStateOf(0) }
     var end by remember(journey.id) { mutableIntStateOf(0) }
     var includeTimestamps by remember(journey.id) { mutableStateOf(false) }
-    val prepared = remember(journey, points, start, end) { runCatching { gpxSegments(journey, points, start, end) } }
-    val previewPoints = prepared.getOrNull()?.flatMap { segment -> segment.mapIndexed { index, point -> if (index == 0) point.copy(breakBefore = true) else point } }.orEmpty()
+    var exporting by remember(journey.id) { mutableStateOf(false) }
+    var exportError by remember(journey.id) { mutableStateOf<String?>(null) }
+    // Validation/segmentation is necessary only for this explicit export, never a live subscription.
+    val loaded by produceState<GpxExportSource?>(null, request) {
+        value = withContext(Dispatchers.IO) {
+            try {
+                val segments = gpxSegments(journey, points)
+                GpxExportSource(request, segments, segments.sumOf { it.size })
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) { GpxExportSource(request, emptyList(), 0, error.message ?: "Dışa aktarılabilir rota bulunamadı.") }
+        }
+    }
+    val source = loaded?.takeIf { it.request === request }
+    val allowed = service.canProcessNow()
+    val requestedStart = start
+    val requestedEnd = end
+    val preview by produceState<GpxExportPreview?>(null, source, requestedStart, requestedEnd, allowed, analysis.phase) {
+        value = null
+        if (source == null || source.error != null || !allowed) return@produceState
+        value = withContext(Dispatchers.IO) {
+            val coroutine = currentCoroutineContext()
+            fun permitted(): Boolean { coroutine.ensureActive(); return service.canProcessNow() }
+            if (!permitted()) return@withContext null
+            val paths = mutableListOf<List<GeoCoordinate>>()
+            val features = mutableListOf<JSONObject>()
+            var index = 0
+            for (segment in source.segments) {
+                val path = mutableListOf<GeoCoordinate>()
+                val coordinates = JSONArray()
+                for (point in segment) {
+                    if (index % 256 == 0 && !permitted()) return@withContext null
+                    if (index++ in requestedStart until source.count - requestedEnd) {
+                        path.add(GeoCoordinate(point.latitude, point.longitude))
+                        coordinates.put(JSONArray().put(point.longitude).put(point.latitude))
+                    }
+                }
+                if (path.isNotEmpty()) {
+                    paths.add(path)
+                    features.add(JSONObject().put("type", "Feature").put("properties", JSONObject().put("color", "#3989C9"))
+                        .put("geometry", JSONObject().put("type", if (path.size == 1) "Point" else "LineString")
+                            .put("coordinates", if (path.size == 1) coordinates.getJSONArray(0) else coordinates)))
+                }
+            }
+            val json = featureCollection(features)
+            if (!permitted()) return@withContext null
+            GpxExportPreview(request, requestedStart, requestedEnd, RecordedTrailRender(RecordedSpeedTrail(paths = paths), json, setOf(journey.id)))
+        }
+    }
+    val render = preview?.takeIf { it.request === request && it.start == start && it.end == end && allowed }?.render
+    val count = source?.count ?: 0
+    val selectedCount = (count - start - end).coerceAtLeast(0)
+    val segmentCount = remember(source, start, end) {
+        var offset = 0
+        source?.segments?.count { segment ->
+            val first = offset
+            offset += segment.size
+            first < count - end && offset > start
+        } ?: 0
+    }
+    val waitingLabel = if (analysis.phase == AnalysisPhase.READY) "Önizleme hazırlanıyor… GPX dosyasını kaydedebilirsin."
+        else "Önizleme bekliyor; GPX dosyasını kaydedebilirsin.\n${analysis.label}"
     OsmPopup(onDismiss = onDismiss) {
-            Text("Rotayı GPX olarak dışa aktar", style = MaterialTheme.typography.headlineSmall)
-            Text("Başlangıcı ve bitişi kısaltabilirsin. Notlar ve fotoğraflar dosyaya eklenmez. Dosya otomatik yayımlanmaz.", color = Muted)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                Text("Kayıt tarih ve saatlerini ekle", modifier = Modifier.weight(1f))
-                Checkbox(checked = includeTimestamps, onCheckedChange = { includeTimestamps = it },
-                    modifier = Modifier.testTag("gpx_include_timestamps").semantics { contentDescription = "Kayıt tarih ve saatlerini ekle" })
+        Text("Rotayı GPX olarak dışa aktar", style = MaterialTheme.typography.headlineSmall)
+        Text("Başlangıcı ve bitişi kısaltabilirsin. Notlar ve fotoğraflar dosyaya eklenmez. Dosya otomatik yayımlanmaz.", color = Muted)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("Kayıt tarih ve saatlerini ekle", modifier = Modifier.weight(1f))
+            Checkbox(checked = includeTimestamps, onCheckedChange = { includeTimestamps = it }, enabled = !exporting,
+                modifier = Modifier.testTag("gpx_include_timestamps").semantics { contentDescription = "Kayıt tarih ve saatlerini ekle" })
+        }
+        Text(if (includeTimestamps) "Dosyada konumlar, varsa rakım ve kayıt tarih/saatleri bulunacak."
+            else "Dosyada konumlar ve varsa rakım bulunacak; tarih ve saatler eklenmeyecek.", style = MaterialTheme.typography.bodySmall)
+        if (source == null) Text("Konum kayıtları hazırlanıyor…")
+        if (count >= 2) {
+            Box(Modifier.fillMaxWidth().height(230.dp)) {
+                GpxPreviewMap(render, journey.id, analysis, Modifier.fillMaxSize())
+                if (render == null) Surface(Modifier.fillMaxSize()) {
+                    Box(contentAlignment = Alignment.Center) { Text(waitingLabel, Modifier.padding(18.dp)) }
+                }
             }
-            Text(if (includeTimestamps) "Dosyada konumlar, varsa rakım ve kayıt tarih/saatleri bulunacak."
-                else "Dosyada konumlar ve varsa rakım bulunacak; tarih ve saatler eklenmeyecek.", style = MaterialTheme.typography.bodySmall)
-            if (all.size >= 2) {
-                DiaryMap(previewPoints, emptyList(), Modifier.fillMaxWidth().height(230.dp))
-                Text("Başlangıçtan çıkarılan: ${DiaryRules.distanceMeters(all.take(start + 1)).toInt()} m")
-                Slider(start.toFloat(), { start = it.toInt().coerceIn(0, all.size - end - 2) }, valueRange = 0f..(all.size - end - 2).coerceAtLeast(1).toFloat(), enabled = all.size - end > 2)
-                Text("Bitişten çıkarılan: ${DiaryRules.distanceMeters(all.takeLast(end + 1)).toInt()} m")
-                Slider(end.toFloat(), { end = it.toInt().coerceIn(0, all.size - start - 2) }, valueRange = 0f..(all.size - start - 2).coerceAtLeast(1).toFloat(), enabled = all.size - start > 2)
-                Text("${previewPoints.size} konum · ${prepared.getOrNull()?.size ?: 0} rota bölümü", style = MaterialTheme.typography.bodySmall)
+            Text("Başlangıçtan çıkarılan: $start konum")
+            Slider(start.toFloat(), { start = it.toInt().coerceIn(0, count - end - 2) }, valueRange = 0f..(count - end - 2).coerceAtLeast(1).toFloat(), enabled = !exporting && count - end > 2)
+            Text("Bitişten çıkarılan: $end konum")
+            Slider(end.toFloat(), { end = it.toInt().coerceIn(0, count - start - 2) }, valueRange = 0f..(count - start - 2).coerceAtLeast(1).toFloat(), enabled = !exporting && count - start > 2)
+            Text("$selectedCount konum · $segmentCount rota bölümü", style = MaterialTheme.typography.bodySmall)
+        }
+        (exportError ?: source?.error)?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        Button(enabled = source != null && source.error == null && selectedCount >= 2 && !exporting, onClick = {
+            val exportStart = start; val exportEnd = end; val timestamps = includeTimestamps
+            exporting = true; exportError = null
+            scope.launch {
+                try {
+                    val xml = withContext(Dispatchers.IO) { buildGpx(journey, points, exportStart, exportEnd, timestamps) }
+                    onExport(xml)
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (error: Exception) { exportError = error.message ?: "GPX dosyası hazırlanamadı." }
+                finally { exporting = false }
             }
-            prepared.exceptionOrNull()?.let { Text(it.message ?: "Dışa aktarılabilir rota bulunamadı.", color = MaterialTheme.colorScheme.error) }
-            Button(enabled = prepared.isSuccess, onClick = { onExport(buildGpx(journey, points, start, end, includeTimestamps)) }, modifier = Modifier.fillMaxWidth()) { Text("GPX dosyasını kaydet") }
-            TextButton(onClick = onDismiss) { Text("Kapat") }
+        }, modifier = Modifier.fillMaxWidth()) { Text(if (exporting) "GPX hazırlanıyor…" else "GPX dosyasını kaydet") }
+        TextButton(onClick = onDismiss) { Text("Kapat") }
     }
 }

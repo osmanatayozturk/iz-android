@@ -7,6 +7,9 @@ import org.iz.navigation.tracking.TrackingPolicy
 import java.io.File
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
+import org.iz.navigation.power.AnalysisInput
+import org.iz.navigation.power.PostJourneyAnalysis
+import org.iz.navigation.power.PowerDiagnostics
 
 class DiaryRepository internal constructor(context: Context, private val db: DiaryDatabase) {
     constructor(context: Context) : this(context, DiaryDatabase.get(context.applicationContext))
@@ -39,11 +42,27 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
         val ids = trips.map { it.id }.toSet()
         values.filter { it.journeyId in ids }
     }.distinctUntilChanged()
-    val healthSummaries: Flow<List<JourneyHealthSummary>> = combine(journeys, healthSamples, healthSyncs) { trips, samples, syncs ->
-        val byJourney = samples.groupBy { it.journeyId }
-        val checksByJourney = syncs.groupBy { it.journeyId }
-        trips.map { HealthRules.summarize(it, byJourney[it.id].orEmpty(), checksByJourney[it.id].orEmpty()) }
+    val healthSummaries: Flow<List<JourneyHealthSummary>> = flow {
+        emitAll(PostJourneyAnalysis.get(appContext).state.map { analysis ->
+            if (analysis.pending) emptyList() else analysis.entries.values.map { it.health }
+        })
     }.distinctUntilChanged()
+
+    /** A coherent raw snapshot, read only by the gated post-journey worker. No derived DB fields. */
+    internal suspend fun analysisInput(checkActive: () -> Unit = {}): AnalysisInput = db.withTransaction {
+        checkActive()
+        val trips = dao.allJourneys(); checkActive()
+        val points = dao.allPoints(); checkActive()
+        val samples = dao.allHealthSamples(); checkActive()
+        val syncs = dao.allHealthSyncs(); checkActive()
+        val watch = dao.analysisWatchSamples(); checkActive()
+        AnalysisInput(trips, points, samples, syncs, watch)
+    }
+    private suspend fun <T> recordingChange(block: suspend () -> T): T {
+        val analysis = PostJourneyAnalysis.get(appContext)
+        analysis.recordingWillChange()
+        return try { block() } finally { analysis.recordingDidChange() }
+    }
 
     suspend fun activeJourney(): Journey? = dao.activeJourney(System.currentTimeMillis())
     suspend fun getJourney(id: String): Journey? = dao.journey(id)
@@ -87,14 +106,14 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
         watchDao.clearSessions()
     }
 
-    suspend fun createJourney(transport: Transport, temporary: Boolean, now: Long = System.currentTimeMillis()): Journey = db.withTransaction {
+    suspend fun createJourney(transport: Transport, temporary: Boolean, now: Long = System.currentTimeMillis()): Journey = recordingChange { db.withTransaction {
         dao.activeJourney(now) ?: Journey(
             transport = transport,
             status = if (temporary) JourneyStatus.TEMPORARY else JourneyStatus.CONFIRMED,
             startedAt = now,
             expiresAt = if (temporary) now + DiaryRules.TEMPORARY_LIFETIME_MILLIS else null,
         ).also { dao.save(it) }
-    }
+    } }
 
     suspend fun confirmJourney(id: String, transport: Transport) = db.withTransaction {
         val journey = dao.journey(id) ?: return@withTransaction
@@ -159,14 +178,18 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
         }
     }
 
-    suspend fun addPoint(point: TrackPoint) = db.withTransaction {
-        if (!DiaryRules.isUsablePoint(point)) return@withTransaction
-        val journey = dao.journey(point.journeyId) ?: return@withTransaction
-        val candidateDeadline = TrackingPolicy.automaticCandidateDeadline(journey)
-        if (candidateDeadline != null && point.recordedAt >= candidateDeadline) return@withTransaction
-        if (journey.endedAt == null && !DiaryRules.isExpired(journey, System.currentTimeMillis()) && point.recordedAt >= journey.startedAt) {
-            dao.save(point)
+    suspend fun addPoint(point: TrackPoint) {
+        val saved = db.withTransaction {
+            if (!DiaryRules.isUsablePoint(point)) return@withTransaction false
+            val journey = dao.journey(point.journeyId) ?: return@withTransaction false
+            val candidateDeadline = TrackingPolicy.automaticCandidateDeadline(journey)
+            if (candidateDeadline != null && point.recordedAt >= candidateDeadline) return@withTransaction false
+            if (journey.endedAt == null && !DiaryRules.isExpired(journey, System.currentTimeMillis()) && point.recordedAt >= journey.startedAt) {
+                dao.save(point)
+                true
+            } else false
         }
+        if (saved) PowerDiagnostics.count(PowerDiagnostics.Metric.GPS_POINT_SAVED)
     }
 
     /** Absolute session totals make duplicate or reordered callbacks harmless. */
@@ -194,7 +217,7 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
         true
     }
 
-    suspend fun saveJourney(entity: Journey) = db.withTransaction {
+    suspend fun saveJourney(entity: Journey) = recordingChange { db.withTransaction {
         require(entity.endedAt == null || entity.endedAt >= entity.startedAt)
         require(entity.stepCount == null || entity.stepCount >= 0)
         val active = dao.activeJourney(System.currentTimeMillis())
@@ -208,7 +231,7 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
         libraryDao.pruneIneligibleMemberships()
         dao.pruneHealthOutsideJourney(entity.id, entity.startedAt, entity.endedAt ?: System.currentTimeMillis())
         watchDao.pruneOutsideJourney(entity.id, entity.startedAt, entity.endedAt ?: System.currentTimeMillis())
-    }
+    } }
 
     suspend fun savePlace(entity: Place) = db.withTransaction {
         require(entity.name.isNotBlank()) { "Yer adı gerekli." }

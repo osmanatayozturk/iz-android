@@ -31,10 +31,15 @@ object JourneyStatistics {
         journey: Journey,
         points: List<TrackPoint>,
         now: Long = System.currentTimeMillis(),
+        checkActive: () -> Unit = {},
     ): JourneyStats {
+        checkActive()
+        var processed = 0
+        fun checkpoint() { if (++processed % 256 == 0) checkActive() }
         val end = (journey.endedAt ?: now).coerceAtLeast(journey.startedAt)
         val elapsedMillis = (end - journey.startedAt).coerceAtLeast(0)
         val route = points.asSequence()
+            .onEach { checkpoint() }
             .filter { it.journeyId == journey.id && it.recordedAt in journey.startedAt..end }
             // Keep invalid fixes in place: dropping them could join their valid neighbours.
             .map { point ->
@@ -42,7 +47,7 @@ object JourneyStatistics {
                     point.copy(speed = null)
                 } else point
             }
-            .sortedBy { it.recordedAt }
+            .sortedWith { a, b -> checkpoint(); a.recordedAt.compareTo(b.recordedAt) }
             .toList()
 
         var distanceMeters = 0.0
@@ -52,6 +57,7 @@ object JourneyStatistics {
         var maxSpeedKmh = 0.0
 
         for (index in 1 until route.size) {
+            checkpoint()
             val previous = route[index - 1]
             val current = route[index]
             if (!DiaryRules.connects(previous, current)) continue
@@ -67,6 +73,7 @@ object JourneyStatistics {
             maxSpeedKmh = maxOf(maxSpeedKmh, intervalDistance * 3_600.0 / intervalMillis)
         }
 
+        checkActive()
         val movingMillis = observedMillis - stoppedMillis
         return JourneyStats(
             distanceMeters = distanceMeters,

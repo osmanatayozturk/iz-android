@@ -30,7 +30,7 @@ fun HeatmapScreen(state: DiaryState, now: Long = System.currentTimeMillis()) {
     var showMapFilters by remember { mutableStateOf(false) }
     var mapShown by remember { mutableStateOf(false) }
     val selected = Transport.entries.firstOrNull { it.name == filter }
-    val render = rememberHeatmapRender(state.journeys, state.points, selected, now)
+    val render = rememberHeatmapRender(state.analysis, selected)
     LaunchedEffect(render) { if (render?.hasGeometry == true) mapShown = true }
     Column(Modifier.fillMaxSize().testTag("heatmap_screen")) {
         Column(Modifier.padding(horizontal = 24.dp, vertical = 12.dp)) {
@@ -81,9 +81,10 @@ fun HeatmapScreen(state: DiaryState, now: Long = System.currentTimeMillis()) {
                             Surface(Modifier.fillMaxSize().testTag("heatmap_loading")) {
                                 Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center,
                                     horizontalAlignment = Alignment.CenterHorizontally) {
-                                    CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
+                                    if (state.analysis.phase == org.iz.navigation.power.AnalysisPhase.RUNNING)
+                                        CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
                                     Spacer(Modifier.height(12.dp))
-                                    Text("İzler hazırlanıyor…", color = Muted)
+                                    Text(if (state.analysis.pending || state.analysis.phase == org.iz.navigation.power.AnalysisPhase.WAITING_END) state.analysis.label else "İzler hazırlanıyor…", color = Muted)
                                 }
                             }
                         } else if (!render.hasGeometry) {

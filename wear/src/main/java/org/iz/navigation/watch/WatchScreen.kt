@@ -14,7 +14,6 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.rotary.onRotaryScrollEvent
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
@@ -51,8 +50,6 @@ internal fun WatchScreen(
     surfaceData: WatchSurfaceData? = null,
     onSurface: (WatchSurfaceRoute) -> Unit = {},
 ) {
-    val context = LocalContext.current
-    val currentHeart = safeLiveHeart(context, WatchSurfaceData(state.phoneId, state.phoneVersion, state.snapshot, state.phoneId != null), now)
     val list = rememberScalingLazyListState()
     val focusRequester = remember { FocusRequester() }
     val scope = rememberCoroutineScope()
@@ -136,70 +133,27 @@ internal fun WatchScreen(
                 } else if (snapshot?.journeyId != null) {
                     item { Text(snapshot.mode?.label() ?: "Yolculuk", fontSize = 20.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center) }
                     if (!snapshot.recording) item { Note("Telefonun kaydı etkin değil. Telefonda İz'i kontrol et.") }
-                    item {
-                        Metric("Mesafe", String.format(Locale.forLanguageTag("tr"), "%.2f km", snapshot.distanceMeters / 1000.0), large = true)
-                    }
-                    item {
-                        val elapsed = snapshot.elapsedMillis + if (snapshot.recording && fresh)
-                            (now - snapshot.generatedAt).coerceIn(0, WearProtocol.STATE_TTL_MS) else 0
-                        Metric("Süre", duration(elapsed))
-                    }
+                    item { Note(if (!snapshot.recording) "Kayıt durumu doğrulanıyor · İstatistikler yolculuk sonunda hazırlanacak"
+                        else if (!fresh) "Son kayıt durumu · Güncel bilgi için bağlantıyı yenile"
+                        else if (snapshot.temporary) "Algılama sürüyor · İstatistikler yolculuk sonunda hazırlanacak"
+                        else "Kayıt sürüyor · İstatistikler yolculuk sonunda hazırlanacak", highlighted = true) }
                     snapshot.weather?.let { weather -> item { WeatherCard(weather, now, fresh) } }
-                    if (snapshot.temporary) {
-                        item {
-                            val remaining = (snapshot.deadlineAt?.minus(now) ?: 0L).coerceAtLeast(0)
-                            Column(Modifier.fillMaxWidth().background(Surface, RoundedCornerShape(20.dp)).padding(12.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally) {
-                                val progressMeters = snapshot.candidateProgressMeters ?: snapshot.distanceMeters
-                                CircularProgressIndicator(progress = (progressMeters / 500.0).toFloat().coerceIn(0f, 1f),
-                                    modifier = Modifier.size(48.dp), indicatorColor = Leaf, trackColor = Pine, strokeWidth = 4.dp)
-                                Spacer(Modifier.height(6.dp))
-                                Text("${progressMeters.toInt().coerceIn(0, 500)} / 500 m", fontWeight = FontWeight.Bold)
-                                Text("Kalan ${duration(remaining)}", fontSize = 12.sp, color = Quiet)
-                                Text("15 dakikada tamamlanmazsa sıfırlanır", fontSize = 11.sp, textAlign = TextAlign.Center, color = Quiet)
-                            }
-                        }
-                    }
-                    item { Metric("Anlık hız", speed(snapshot.currentSpeedKmh)) }
-                    item { Metric("Ortalama hız", speed(snapshot.averageSpeedKmh)) }
-                    item { Metric("En yüksek hız", speed(snapshot.maxSpeedKmh)) }
-                    if (snapshot.mode == WearMode.RUN) item {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Metric("Ortalama tempo", pace(snapshot.averagePaceSecondsPerKm))
-                            Text("Duraklamalar dahil", fontSize = 10.sp, color = Quiet)
-                        }
-                    }
-                    if (snapshot.mode == WearMode.WALK || snapshot.mode == WearMode.RUN) item {
-                        Metric("Telefonda ölçülen adımlar", snapshot.stepCount?.let { String.format(Locale.forLanguageTag("tr"), "%,d", it) } ?: "Ölçüm yok")
-                    }
+                    if (snapshot.temporary) item { Note("Kesinleşen yolculukta ham ölçümler korunur. Algılama durumunu telefonda görebilirsin.") }
                     item {
                         Chip(onClick = { confirmingId = activeId }, label = { Text("Yolculuğu bitir") },
                             enabled = activeId?.let { state.canStop(it, now) } == true,
                             colors = ChipDefaults.primaryChipColors(), modifier = Modifier.fillMaxWidth().testTag("stop"))
                     }
-                    if (state.phoneVersion >= 2 && !snapshot.temporary) {
-                        val health = snapshot.health
-                        item { Text("Samsung Health · Saat", textAlign = TextAlign.Center, fontWeight = FontWeight.Bold) }
-                        if (health == null) item { Note("Bu yolculuk için saat sağlık verisi henüz yok. Telefonda bağlantıyı kontrol et.") }
-                        else {
-                            item {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Metric("Son ölçülen nabız", bpm(health.latestHeartRateBpm))
-                                    Text("Ölçüm: ${measurementTime(health.latestHeartRateAt)}", fontSize = 10.sp, color = Quiet, textAlign = TextAlign.Center)
-                                }
-                            }
-                            item { Metric("Ortalama nabız", bpm(health.heartRateMeanBpm)) }
-                            item { Note("En düşük ${bpm(health.heartRateMinBpm)}\nEn yüksek ${bpm(health.heartRateMaxBpm)}") }
-                            item { Metric("Saatte ölçülen adımlar", health.watchSteps?.let { String.format(Locale.forLanguageTag("tr"), "%,d", it) } ?: "Ölçüm yok") }
-                            item { Metric("Toplam enerji · gecikmeli", health.totalCaloriesKcal?.let { String.format(Locale.forLanguageTag("tr"), "%.0f kcal", it) } ?: "Ölçüm yok") }
-                            item { Note("Toplam enerji, dinlenme enerjisini de içerir.") }
-                            item { Note("Ölçüm aralığı\n${measurementTime(health.measurementStartAt)}\n${measurementTime(health.measurementEndAt)}") }
-                            item { Note("Adım kapsamı: ${duration(health.stepCoverageMillis)}\nEnerji kapsamı: ${duration(health.calorieCoverageMillis)}") }
-                            if (health.partial) item { Note("Kısmi sağlık verisi. Eksik ölçümler sıfır sayılmaz.") }
-                            item { Note("Son aktarım kontrolü\n${measurementTime(health.lastCheckedAt)}\nSaat verisi gecikmeli gelebilir.") }
-                        }
-                    }
                 } else {
+                    if (WatchSurfacePolicy.statisticsDeferred(snapshot)) item {
+                        Note(snapshot?.statisticsStatus?.ifBlank { "İstatistikler hazırlanacak" } ?: "İstatistikler hazırlanacak", highlighted = true)
+                    }
+                    snapshot?.completed?.takeUnless { WatchSurfacePolicy.statisticsDeferred(snapshot) }?.let { summary ->
+                        item { Text("İstatistikler hazır", color = Leaf, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center) }
+                        item { Metric("Tamamlanan yolculuk", "${duration(summary.elapsedMillis)} · ${WatchSurfacePolicy.km(summary.distanceMeters)}") }
+                        item { Chip(onClick = { onSurface(WatchSurfaceRoute.SUMMARY) }, label = { Text("Yolculuk özetini aç") },
+                            modifier = Modifier.fillMaxWidth().testTag("completed-summary")) }
+                    }
                     item { Text("Nasıl gidiyorsun?", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center) }
                     WearMode.entries.forEach { mode ->
                         item {
@@ -223,12 +177,7 @@ internal fun WatchScreen(
                 item { Note(liveHealth.status, highlighted = liveHealth.capturing) }
                 if (liveHealth.armed) {
                     item { Note("Nabız ve adım yalnızca kesinleşen yolculuklarda ölçülür. Kayıt dışında bilek sensörü de kapalıdır. Sessiz bildirim, sonraki kayda hazır olduğunu gösterir.") }
-                    if (liveHealth.latestHeartAt != null && snapshot?.recording == true && !snapshot.temporary && liveHealth.journeyId == snapshot.journeyId) item {
-                        Metric(if (currentHeart != null) "Canlı nabız" else "Son nabız · eski ölçüm",
-                            bpm(currentHeart))
-                        Note(measurementTime(liveHealth.latestHeartAt))
-                    }
-                    liveHealth.steps?.takeIf { snapshot?.recording == true && !snapshot.temporary && liveHealth.journeyId == snapshot.journeyId && liveHealth.phoneId == state.phoneId }?.let { item { Metric("İz saatte ölçülen adımlar", "$it") } }
+                    if (snapshot?.recording == true) item { Note("Ham saat ölçümleri saklanıyor. Nabız ve adım özeti yolculuk sonunda hazırlanacak.") }
                     if (liveHealth.buffered > 0) item { Note("Telefona aktarılmayı bekleyen ${liveHealth.buffered} ölçüm") }
                     item { Chip(onClick = onDisarmHealth, label = { Text("Otomatik ölçümü kapat") },
                         colors = ChipDefaults.secondaryChipColors(), modifier = Modifier.fillMaxWidth().testTag("disarm-health")) }

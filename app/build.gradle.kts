@@ -32,12 +32,13 @@ fun groupBuildString(value: String) = "\"" + value.replace("\\", "\\\\").replace
 android {
     namespace = "org.iz.navigation"
     compileSdk = 36
+    testBuildType = providers.gradleProperty("izTestBuildType").orElse("debug").get()
     defaultConfig {
         applicationId = "org.iz.navigation"
         minSdk = 29
-        targetSdk = 35
-        versionCode = 20
-        versionName = "0.10.1"
+        targetSdk = 36
+        versionCode = 21
+        versionName = "0.10.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "GROUP_SUPABASE_URL", groupBuildString(groupSupabaseUrl))
         buildConfigField("String", "GROUP_SUPABASE_KEY", groupBuildString(groupSupabaseKey))
@@ -46,6 +47,14 @@ android {
     }
     buildFeatures { compose = true; buildConfig = true }
     buildTypes {
+        // Device-only verification package; never replaces or reads the user's Play installation.
+        create("batteryCheck") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".batterycheck"
+            versionNameSuffix = "-batterycheck"
+            matchingFallbacks += listOf("debug")
+            manifestPlaceholders["appAuthRedirectScheme"] = "org.iz.navigation.batterycheck"
+        }
         getByName("release") {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

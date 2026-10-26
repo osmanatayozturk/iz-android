@@ -2,6 +2,8 @@
 
 **Telefon sürümü: 0.10.1 / code 20.** Konum araması, navigasyon kartı ve oturum bitirme akışları iyileştirildi; kaydedilen rotalar, GPX çizgi takibi ve Geziler korunur. [0.10 kullanım rehberi](docs/IZ_010_KULLANIM.md).
 
+Bu dalda telefon **0.10.2 / code 21**, Wear OS **0.6.1 / code 11** ve iletişim **v6** için bir geliştirme adayı bulunuyor. Henüz yayımlanmış veya test kabulü verilmiş değildir; aşağıdaki indirme bağlantısı yayımlanmış 0.10.1 sürümüne aittir. [Aday değişiklik kaydı](CHANGELOG.md) · [Pil ve tanılama kapsamı](docs/PIL_OPTIMIZASYONU.md) · [Motosiklet yol haritası önerileri](docs/MOTOSIKLET_YOL_HARITASI.md).
+
 [Değişiklik geçmişi](CHANGELOG.md) · [Sürüm değişikliği planı](docs/SURUM_PLANI.md)
 
 Araba, motosiklet, bisiklet, yürüyüş, koşu ve yolcu için haritayla açılan Kotlin / Jetpack Compose uygulaması. Üstte **Nereye?**, yanda konum ve katmanlar, altta **Kaydet / Grup / Menü** bulunur. Yol tarifi günlük kaydı olmadan da çalışır; yeni başlangıçta **Yolculuğu kaydet** seçimi açıktır. Yolculuklar, ziyaretler, özel notlar ve fotoğraflar telefonda saklanır. Geçmiş, istatistikler, yerler, ısı haritası, OSM Topluluğu ve ayarlara Menüden ulaşılır.

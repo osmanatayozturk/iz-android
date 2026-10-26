@@ -18,7 +18,6 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.iz.navigation.IzApplication
 import org.iz.navigation.data.Journey
-import org.iz.navigation.data.TrackPoint
 import org.iz.navigation.data.Transport
 import org.iz.navigation.navigation.NavigationFix
 import org.iz.navigation.navigation.NavigationState
@@ -29,6 +28,7 @@ import org.iz.navigation.weather.RouteVertex
 import org.iz.navigation.speed.RoadSpeedState
 import org.iz.navigation.speed.RoadSpeedLimit
 import org.iz.navigation.speed.RoadSpeedSource
+import org.maplibre.android.maps.MapLibreMap
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -41,7 +41,7 @@ import java.io.File
 /** Isolated real GL/View -> VirtualDisplay -> host Surface test. It does not impersonate DHU. */
 @RunWith(AndroidJUnit4::class)
 class CarMapSurfaceTest {
-    @Test fun mapMarkerReachesHostSurfaceAndSurvivesReplacement() {
+    @Test fun routeAndMarkerReachHostSurfaceWithoutLiveTrailAndSurviveReplacement() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val app = ApplicationProvider.getApplicationContext<IzApplication>()
         val thread = HandlerThread("car-surface-test").apply { start() }
@@ -50,19 +50,21 @@ class CarMapSurfaceTest {
         val captureFailure = AtomicReference<Throwable?>(null)
         val lastFrameCounts = AtomicReference("")
         var renderer: CarMapSurface? = null
-        fun assertLegendVisible(safe: Rect) {
+        fun assertDeferredTrailAndAttribution(safe: Rect) {
             instrumentation.runOnMainSync {
                 val field = CarMapSurface::class.java.getDeclaredField("trailLegend").apply { isAccessible = true }
                 val label = field.get(renderer) as TextView
-                val xy = IntArray(2).also { label.getLocationInWindow(it) }
-                val bounds = Rect(xy[0], xy[1], xy[0] + label.width, xy[1] + label.height)
-                assertTrue("Speed scale must remain inside host safe area: $bounds in $safe", label.isShown &&
-                    bounds.width() > 0 && bounds.height() > 0 && safe.contains(bounds))
+                assertTrue("Live trail speed scale must remain deferred during recording",
+                    label.visibility == View.GONE && !label.isShown)
+                val map = CarMapSurface::class.java.getDeclaredField("map").apply { isAccessible = true }
+                    .get(renderer) as MapLibreMap
+                val style = checkNotNull(map.style)
+                assertNull("Live recorded trail geometry must not be uploaded during recording", style.getSource("car-trail"))
                 val source = CarMapSurface::class.java.getDeclaredField("attribution").apply { isAccessible = true }.get(renderer) as TextView
                 val sourceXy = IntArray(2).also { source.getLocationInWindow(it) }
                 val sourceBounds = Rect(sourceXy[0], sourceXy[1], sourceXy[0] + source.width, sourceXy[1] + source.height)
-                assertTrue("Attribution must remain in safe area: $sourceBounds in $safe", safe.contains(sourceBounds))
-                assertTrue("Speed scale overlaps attribution: $bounds and $sourceBounds", !Rect.intersects(bounds, sourceBounds))
+                assertTrue("Attribution must remain visible in safe area: $sourceBounds in $safe", source.isShown &&
+                    sourceBounds.width() > 0 && sourceBounds.height() > 0 && safe.contains(sourceBounds))
             }
         }
         fun viewDiagnostics(): String {
@@ -96,7 +98,6 @@ class CarMapSurfaceTest {
                         val buffer = plane.buffer
                         var markerPixels = 0
                         var routePixels = 0
-                        var trailPixels = 0
                         var attributionPixels = 0
                         for (y in 0 until image.height step 2) for (x in 0 until image.width step 2) {
                             val offset = y * plane.rowStride + x * plane.pixelStride
@@ -107,8 +108,6 @@ class CarMapSurfaceTest {
                                 // Production marker fill #00cbaa; attribution/background cannot satisfy this.
                                 if (red < 35 && green in 175..225 && blue in 145..195) markerPixels++
                                 if (red in 35..75 && green in 95..145 && blue in 210..255) routePixels++
-                                // Warm end of the speed gradient (distinct from the planned blue route).
-                                if (red in 195..240 && green in 25..105 && blue in 20..65) trailPixels++
                                 if (x > image.width - 300 && y in image.height - 90 until image.height - 40) {
                                     val dayAttribution = red > 210 && green > 210 && blue > 210
                                     val nightAttribution = red in 23..38 && green in 27..43 && blue in 33..52 && blue > red + 3
@@ -116,8 +115,8 @@ class CarMapSurfaceTest {
                                 }
                             }
                         }
-                        lastFrameCounts.set("${image.width}: marker=$markerPixels route=$routePixels trail=$trailPixels attribution=$attributionPixels")
-                        if (markerPixels >= 8 && routePixels >= 20 && trailPixels >= 5 && attributionPixels >= 30 && marker.count > 0) {
+                        lastFrameCounts.set("${image.width}: marker=$markerPixels route=$routePixels attribution=$attributionPixels")
+                        if (markerPixels >= 8 && routePixels >= 20 && attributionPixels >= 30 && marker.count > 0) {
                             try {
                                 // Read each actual pixel: row padding and channel order must not leak into PNG.
                                 val pixels = IntArray(image.width * image.height)
@@ -153,16 +152,12 @@ class CarMapSurfaceTest {
                 listOf(RouteStop("Konum", current), RouteStop("Örnek hedef", destination)),
                 listOf(RouteVertex(current, 0.0), RouteVertex(ahead, 20.0), RouteVertex(turn, 40.0),
                     RouteVertex(destination, 60.0)), 370.0, 60.0, now, transport = Transport.CAR)
-            val trail = listOf(
-                TrackPoint(journeyId = journey.id, latitude = 40.999, longitude = 28.9985, recordedAt = now - 60_000, accuracy = 5f, speed = 0f),
-                TrackPoint(journeyId = journey.id, latitude = 40.9998, longitude = 28.9994, recordedAt = now - 30_000, accuracy = 5f, speed = 8f),
-                TrackPoint(journeyId = journey.id, latitude = 40.9998, longitude = current.longitude, recordedAt = now, accuracy = 5f, speed = 16f))
             instrumentation.runOnMainSync {
                 renderer = CarMapSurface(TestCarContext.createCarContext(app)).also {
                     it.update(NavigationState(journey = journey, recording = true, route = route,
                         gpsStale = false, fix = NavigationFix(current, now, 5f),
                         roadSpeed = RoadSpeedState(57.6, RoadSpeedLimit(90.0, RoadSpeedSource.TOMTOM_POSTED,
-                            true, now, current, Transport.CAR, "test-road"), true)), trail)
+                            true, now, current, Transport.CAR, "test-road"), true)))
                     it.onSurfaceAvailable(first)
                     it.onStableAreaChanged(Rect(160, 0, 640, 360))
                     it.onVisibleAreaChanged(Rect(160, 0, 640, 400))
@@ -171,7 +166,7 @@ class CarMapSurfaceTest {
             val firstReady = firstMarker.await(20, TimeUnit.SECONDS)
             assertTrue("First surface layers/attribution incomplete: ${lastFrameCounts.get()}\n${if (!firstReady) viewDiagnostics() else ""}", firstReady)
             assertNull("First rendered PNG capture failed", captureFailure.get())
-            assertLegendVisible(Rect(160, 0, 640, 360))
+            assertDeferredTrailAndAttribution(Rect(160, 0, 640, 360))
             assertTrue("Own speed and generic source must reach the host views", viewDiagnostics().let {
                 it.contains("Hızım") && it.contains("58 km/sa") && it.contains("Genel yol sınırı · TomTom")
             })
@@ -188,7 +183,7 @@ class CarMapSurfaceTest {
             val replacementReady = replacementMarker.await(20, TimeUnit.SECONDS)
             assertTrue("Replacement surface layers/attribution incomplete: ${lastFrameCounts.get()}\n${if (!replacementReady) viewDiagnostics() else ""}", replacementReady)
             assertNull("Replacement rendered PNG capture failed", captureFailure.get())
-            assertLegendVisible(Rect(200, 0, 800, 440))
+            assertDeferredTrailAndAttribution(Rect(200, 0, 800, 440))
         } finally {
             instrumentation.runOnMainSync { renderer?.close() }
             readers.forEach { it.setOnImageAvailableListener(null, null) }

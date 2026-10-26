@@ -69,7 +69,8 @@ internal fun TravelLibraryContent(plans: List<SavedRoutePlan>, tracks: List<Impo
 
 @Composable
 fun JourneyCollectionsScreen(repository: TravelLibraryRepository, snapshot: DiarySnapshot,
-    onOpenJourney: (Journey) -> Unit, onDismiss: () -> Unit) {
+    onOpenJourney: (Journey) -> Unit, onDismiss: () -> Unit,
+    analysis: org.iz.navigation.power.AnalysisState = org.iz.navigation.power.AnalysisState()) {
     val collections by repository.collections.collectAsStateWithLifecycle(emptyList())
     val memberships by repository.memberships.collectAsStateWithLifecycle(emptyList())
     val actions = rememberLibraryActions()
@@ -77,14 +78,15 @@ fun JourneyCollectionsScreen(repository: TravelLibraryRepository, snapshot: Diar
         { name -> actions.run { repository.saveCollection(JourneyCollection(name = name)) } },
         { collection, name -> actions.run { repository.saveCollection(collection.copy(name = name, updatedAt = System.currentTimeMillis().coerceAtLeast(collection.createdAt))) } },
         { collection -> actions.run { repository.deleteCollection(collection.id) } },
-        { id, ids -> actions.run { repository.setCollectionJourneys(id, ids) } }, onOpenJourney, onDismiss, actions.error, actions.busy)
+        { id, ids -> actions.run { repository.setCollectionJourneys(id, ids) } }, onOpenJourney, onDismiss, actions.error, actions.busy, analysis)
 }
 
 @Composable
 internal fun JourneyCollectionsContent(collections: List<JourneyCollection>, memberships: List<CollectionMembership>,
     snapshot: DiarySnapshot, onCreate: (String) -> Unit, onRename: (JourneyCollection, String) -> Unit,
     onDelete: (JourneyCollection) -> Unit, onSetJourneys: (String, List<String>) -> Unit,
-    onOpenJourney: (Journey) -> Unit, onDismiss: () -> Unit, error: String? = null, busy: Boolean = false) {
+    onOpenJourney: (Journey) -> Unit, onDismiss: () -> Unit, error: String? = null, busy: Boolean = false,
+    analysis: org.iz.navigation.power.AnalysisState = org.iz.navigation.power.AnalysisState()) {
     var selectedId by remember { mutableStateOf<String?>(null) }
     var creating by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<JourneyCollection?>(null) }
@@ -100,11 +102,11 @@ internal fun JourneyCollectionsContent(collections: List<JourneyCollection>, mem
             LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (collections.isEmpty()) item { Text("Henüz gezi yok.") }
                 items(collections, key = { it.id }) { collection ->
-                    val summary = remember(collection.id, state) { TravelLibraryRules.collectionSummary(collection.id, state) }
+                    val summary = remember(collection.id, state, analysis) { preparedCollectionSummary(collection.id, state, analysis) }
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(collection.name, style = MaterialTheme.typography.titleMedium)
-                            CollectionTotals(summary)
+                            CollectionTotals(summary, if (analysis.phase == org.iz.navigation.power.AnalysisPhase.READY) "Ayrıntılar hazırlanıyor" else analysis.label)
                             OutlinedButton(onClick = { selectedId = collection.id }, modifier = Modifier.testTag("open-collection-${collection.id}")) { Text("Geziyi aç") }
                         }
                     }
@@ -112,9 +114,9 @@ internal fun JourneyCollectionsContent(collections: List<JourneyCollection>, mem
             }
         } else {
             val journeys = remember(selected.id, state) { TravelLibraryRules.collectionJourneys(selected.id, state) }
-            val summary = remember(selected.id, state) { TravelLibraryRules.collectionSummary(selected.id, state) }
+            val summary = remember(selected.id, state, analysis) { preparedCollectionSummary(selected.id, state, analysis) }
             TextButton(onClick = { selectedId = null }) { Text("Tüm geziler") }
-            CollectionTotals(summary)
+            CollectionTotals(summary, if (analysis.phase == org.iz.navigation.power.AnalysisPhase.READY) "Ayrıntılar hazırlanıyor" else analysis.label)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { selecting = selected }, enabled = !busy) { Text("Yolculuk seç") }
                 TextButton(onClick = { renaming = selected }, enabled = !busy) { Text("Adı değiştir") }
@@ -192,8 +194,20 @@ private fun CollectionJourneyPicker(collection: JourneyCollection, eligible: Lis
     }
 }
 
+private fun preparedCollectionSummary(id: String, snapshot: DiarySnapshot,
+    analysis: org.iz.navigation.power.AnalysisState): CollectionSummary? {
+    val journeys = TravelLibraryRules.collectionJourneys(id, snapshot)
+    if (analysis.pending || analysis.phase == org.iz.navigation.power.AnalysisPhase.WAITING_END) return null
+    val stats = journeys.map { journey ->
+        analysis.ready(journey.id)?.takeIf { it.matches(journey) }?.stats ?: return null
+    }
+    return CollectionSummary(journeys.size, stats.sumOf { it.distanceMeters }, stats.sumOf { it.elapsedMillis },
+        stats.sumOf { it.movingMillis }, stats.sumOf { it.stoppedMillis })
+}
+
 @Composable
-private fun CollectionTotals(summary: CollectionSummary) {
+private fun CollectionTotals(summary: CollectionSummary?, waitingLabel: String) {
+    if (summary == null) { Text(waitingLabel); return }
     Text(String.format(Locale.getDefault(), "%d yolculuk · %.1f km · %d dk toplam", summary.journeyCount, summary.distanceMeters / 1000.0, summary.elapsedMillis / 60_000))
     Text("Hareket ${summary.movingMillis / 60_000} dk · Duraklama ${summary.stoppedMillis / 60_000} dk", style = MaterialTheme.typography.bodySmall)
 }

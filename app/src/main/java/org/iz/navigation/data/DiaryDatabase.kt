@@ -44,10 +44,12 @@ internal interface DiaryDao {
     @Query("SELECT * FROM contribution_drafts ORDER BY observedAt DESC") fun contributions(): Flow<List<ContributionDraft>>
     @Query("SELECT * FROM journey_health_samples ORDER BY startAt, sourceId") fun healthSamples(): Flow<List<JourneyHealthSample>>
     @Query("SELECT * FROM journey_health_sync") fun healthSyncs(): Flow<List<JourneyHealthSync>>
-    @Query("SELECT * FROM journey_health_samples ORDER BY startAt, sourceId") suspend fun allHealthSamples(): List<JourneyHealthSample>
+    @Query("SELECT * FROM journey_health_samples ORDER BY journeyId, startAt, endAt, metric, sourceId") suspend fun allHealthSamples(): List<JourneyHealthSample>
+    @Query("SELECT * FROM journey_health_sync ORDER BY journeyId, metric") suspend fun allHealthSyncs(): List<JourneyHealthSync>
+    @Query("SELECT * FROM watch_health_samples ORDER BY journeyId, startAt, sessionId, sequence") suspend fun analysisWatchSamples(): List<WatchHealthSample>
     @Query("SELECT * FROM journey_health_samples WHERE sourceId IN (:ids)") suspend fun healthSamplesBySources(ids: List<String>): List<JourneyHealthSample>
     @Query("SELECT * FROM journeys ORDER BY startedAt DESC") suspend fun allJourneys(): List<Journey>
-    @Query("SELECT * FROM track_points ORDER BY recordedAt") suspend fun allPoints(): List<TrackPoint>
+    @Query("SELECT * FROM track_points ORDER BY recordedAt, id") suspend fun allPoints(): List<TrackPoint>
     @Query("SELECT * FROM track_points WHERE journeyId = :id ORDER BY recordedAt") suspend fun journeyPoints(id: String): List<TrackPoint>
     @Query("SELECT * FROM places ORDER BY sortOrder, name COLLATE NOCASE, id") suspend fun allPlaces(): List<Place>
     @Query("SELECT * FROM places WHERE id = :id") suspend fun place(id: String): Place?

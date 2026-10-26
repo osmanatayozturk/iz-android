@@ -10,6 +10,14 @@ Güncel yayın durumu bu dosyada, tamamlanan değişiklikler [değişiklik geçm
 | Wear OS | 0.6.0 | 10 | Değişmedi; bu yayında yeni saat paketi yok |
 | Ortak iletişim | v5 | — | Eski v1–v4 desteği korunuyor |
 
+## Geliştirme adayı — 0.10.2 / code 21 ve Wear OS 0.6.1 / code 11
+
+Bu çalışma kopyasında telefon 0.10.2 / code 21, Wear OS 0.6.1 / code 11 ve iletişim v6 adayı hazırlanıyor. Bunlar GitHub'daki yayımlanmış 0.10.1 sürümünü değiştirmez ve indirme için sunulmaz. Adayın bağımsız Test raporu ve diğer kabul adımları henüz eklenmemiştir.
+
+Önerilen davranışta sürüşün gerekli canlı işlevleri ve ham kayıtlar korunur. Ağır iz/ısı haritası/istatistik ve saat özetleri aktif kayıt/navigasyon bittikten ve telefon pili %20 veya üzerindeyken ertelenmiş kuyruktan işlenir. Yerel tanılama verisi yedek dışı tutulur, en fazla 7 gün/2 MiB saklanır ve hassas yol/sağlık içeriği içermez. Ayrıntı için [pil optimizasyonu notuna](PIL_OPTIMIZASYONU.md) bakın.
+
+Motosiklet görünümü, enerji profilleri, mola süreleri ve yol tercihi fikirleri [ayrı yol haritası taslağında](MOTOSIKLET_YOL_HARITASI.md) yer alır. Bu fikirler bu adayın kapsamı veya sürüm taahhüdü değildir.
+
 ## 0.10.1 / code 20 — Yayımlandı
 
 **Yayın tarihi:** 16 Eylül 2026. [Sürüm ve indirme dosyaları](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.10.1) · [Yayımlanan uygulama kaynakları](https://github.com/osmanatayozturk/iz-android/tree/v0.10.1).

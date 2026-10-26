@@ -1,5 +1,17 @@
 # Değişiklik geçmişi
 
+## Geliştirme adayı — telefon 0.10.2 / code 21, Wear OS 0.6.1 / code 11, iletişim v6
+
+Bu kayıt yayımlanmamış çalışma kopyasındaki kapsamı açıklar; indirilebilir paket veya tamamlanmış sürüm duyurusu değildir. Uygulama testleri henüz raporlanmadı.
+
+- Sürüş sırasında yönlendirme, ses, periyodik rota/trafik yenilemesi, hava durumu, grup takibi, hız ve ekranın açık kalması korunur. Ham GPS ve saat sensör kayıtları devam eder.
+- Ağır iz/ısı haritası/ayrıntı ve saat özetleri aktif kayıt ya da navigasyon sırasında hesaplanmak yerine, ikisi de sona erince ve pil en az %20 iken kuyruğa alınır. Şarj şartı yoktur; Android başlatma zamanını geciktirebilir.
+- Görünmeyen yerel pil tanılaması için yedek dışı alanda 7 gün ve toplam 2 MiB sınırı hedeflenir. Koordinat, adres, mesaj ve sağlık ölçüm değerleri bu kayda alınmaz; ADB çıktısı salt okunur tasarlanmıştır.
+- Mevcut günlük ve yedek verisini koruma hedefi sürer. Pil kazancı ölçülmüş değildir; bu kayıt bir test, cihaz kabulü, güvenlik onayı veya yayın beyanı değildir.
+- Tam ertelenmiş-istatistik davranışı eşleşen Wear OS 0.6.1 / iletişim v6 gerektirir. Erişilebilen eski saatler ve eski komutlarda gerçek metrikler ek canlı işlemle korunur; ölçülmemiş değerler sıfır gibi sunulmaz.
+
+İlgili çalışma notları: [pil ve tanılama](docs/PIL_OPTIMIZASYONU.md), [motosiklet yol haritası önerileri](docs/MOTOSIKLET_YOL_HARITASI.md).
+
 ## 0.10.1 / code 20 — 2026-09-16
 
 Telefon sürümü [GitHub'da yayımlandı](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.10.1). Kaynak kodu `v0.10.1` etiketinde, APK, kaynak arşivi, bağımlılık kaynakları, lisanslar ve SHA-256 listesi aynı yayında bulunur. Sürüm normal Release / Latest olarak sunulur.

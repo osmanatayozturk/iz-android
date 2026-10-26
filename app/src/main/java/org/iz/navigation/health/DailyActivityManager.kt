@@ -12,8 +12,6 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.iz.navigation.data.*
@@ -21,11 +19,14 @@ import org.iz.navigation.wearprotocol.*
 import org.iz.navigation.wearprotocol.WearDailyHealthStatus.*
 import java.io.File
 import java.util.concurrent.TimeUnit
+import org.iz.navigation.power.PostJourneyAnalysis
+
+private class DailyReadDeferred : CancellationException()
 
 /** Independent daily reader; no sensors, journey health samples, database schema or backup writes. */
 class DailyActivityManager private constructor(context: Context) {
     private val context = context.applicationContext
-    private val repository = DiaryRepository(this.context)
+    private val analysis get() = PostJourneyAnalysis.get(context)
     private val connectionPrefs = this.context.getSharedPreferences("health_connect_sync_v1", Context.MODE_PRIVATE)
     private val cache = DailyActivityCache(File(this.context.noBackupFilesDir, "daily_activity_v1.bin"))
     private val mutex = Mutex()
@@ -40,16 +41,6 @@ class DailyActivityManager private constructor(context: Context) {
     private var lastAttemptAt = 0L
     private var lastAttemptDay: DailyActivityDay? = null
     private var lastReadPermissions: Set<String> = emptySet()
-    @Volatile private var localData: Pair<List<Journey>, List<TrackPoint>>? = null
-
-    init {
-        // Room invalidation refreshes this input cache when journeys or GPS points change.
-        scope.launch {
-            combine(repository.journeys, repository.points) { journeys, points -> journeys to points }
-                .collect { localData = it }
-        }
-    }
-
     fun setForeground(value: Boolean) {
         foreground = value
         polling?.cancel()
@@ -93,6 +84,7 @@ class DailyActivityManager private constructor(context: Context) {
         val day = DailyActivityRules.day(now)
         val stored = health?.takeIf { it.localDate == day.localDate && it.zoneId == day.zoneId && it.dayStartAt == day.startAt && it.checkedAt <= now }
             ?: cache.read(day, now)
+        if (stored != null) health = stored
         val access = knownAccess ?: accessOrUnknown()
         val projection = DailyActivityAccessPolicy.project(stored ?: empty(day, now), access.knowledge,
             stepsAllowed = stepsPermission in access.permissions, exerciseAllowed = exercisePermission in access.permissions,
@@ -103,12 +95,9 @@ class DailyActivityManager private constructor(context: Context) {
             health = replacement
             runCatching { cache.write(replacement) }
         }
-        val data = localData ?: run {
-            val journeys = repository.allHealthJourneys()
-            journeys to journeys.flatMap { repository.journeyPoints(it.id) }
-        }
-        val totals = DailyActivityRules.totals(data.first, data.second, day, now)
-        return safe.copy(checkedAt = now, vehicle = totals.vehicle, recordedWalkingRunning = totals.walkingRunning, cycling = totals.cycling)
+        val totals = analysis.dailyTotals(day)
+        return safe.copy(checkedAt = now, vehicle = totals?.vehicle ?: WearDailyJourneyTotal(),
+            recordedWalkingRunning = totals?.walkingRunning ?: WearDailyJourneyTotal(), cycling = totals?.cycling)
     }
 
     // Force re-evaluates state but never bypasses the provider read throttle.
@@ -122,18 +111,21 @@ class DailyActivityManager private constructor(context: Context) {
             val epoch = generation
             val permissionSet = access.permissions.intersect(requestedPermissions)
             val readDue = lastAttemptDay != day || permissionSet != lastReadPermissions || now - lastAttemptAt !in 0 until 60_000
-            if (access.enabled && access.client != null && (stepsPermission in permissionSet || exercisePermission in permissionSet) && (foreground || access.background) &&
+            if (analysis.canProcessNow() && access.enabled && access.client != null && (stepsPermission in permissionSet || exercisePermission in permissionSet) && (foreground || access.background) &&
                 readDue) {
                 lastAttemptAt = now
                 lastAttemptDay = day
                 lastReadPermissions = permissionSet
                 val source = DailyActivitySource(access.client) {
-                    check(epoch == generation && connectionPrefs.getBoolean("enabled", false) && (foreground || access.background)) { "Daily read stopped" }
+                    if (epoch != generation || !connectionPrefs.getBoolean("enabled", false) ||
+                        !(foreground || access.background) || !analysis.canProcessNow()) throw DailyReadDeferred()
                 }
-                val reading = if (now > day.startAt) readDailyHealth(source, DailyRange(day.startAt, now),
-                    stepsPermission in access.permissions, exercisePermission in access.permissions, distancePermission in access.permissions) else DailyHealthReading()
+                val reading = try {
+                    if (now > day.startAt) readDailyHealth(source, DailyRange(day.startAt, now),
+                        stepsPermission in access.permissions, exercisePermission in access.permissions, distancePermission in access.permissions) else DailyHealthReading()
+                } catch (_: DailyReadDeferred) { null }
                 mutex.withLock {
-                    if (epoch == generation && connectionPrefs.getBoolean("enabled", false)) {
+                    if (reading != null && epoch == generation && connectionPrefs.getBoolean("enabled", false) && analysis.canProcessNow()) {
                         health = empty(day, now).copy(healthCheckedAt = now, samsungSteps = reading.steps, samsungExerciseMillis = reading.exerciseMillis,
                             samsungExerciseMeters = reading.exerciseMeters, stepsStatus = reading.stepsStatus, exerciseStatus = reading.exerciseStatus, distanceStatus = reading.distanceStatus)
                         // Filesystem failures cannot disrupt the existing journey health sync.

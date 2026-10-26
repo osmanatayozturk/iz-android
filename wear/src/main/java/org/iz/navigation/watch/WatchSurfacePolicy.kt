@@ -6,7 +6,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-internal enum class WatchSurfaceRoute { NAVIGATION, RECORDING, DAILY }
+internal enum class WatchSurfaceRoute { NAVIGATION, RECORDING, DAILY, SUMMARY }
 internal data class WatchSurfaceFrame(val route: WatchSurfaceRoute = WatchSurfaceRoute.DAILY,
     val title: String = "İz", val lines: List<String> = emptyList(), val compact: String = "İz’i aç",
     val validUntil: Long? = null, val compactUntil: Long? = null)
@@ -14,7 +14,10 @@ internal data class WatchSurfaceFrame(val route: WatchSurfaceRoute = WatchSurfac
 /** Pure presentation policy. All durations are measured values, never disconnected extrapolations. */
 internal object WatchSurfacePolicy {
     const val ACTIVE_EXPIRY = 300_000L
-    fun day(snapshot: WearSnapshot?, now: Long): WearDailySummary? = snapshot?.daily?.takeIf {
+    fun statisticsDeferred(snapshot: WearSnapshot?): Boolean = snapshot?.let { value ->
+        value.statsDeferred || value.recording || value.navigation?.let { it.guidance || it.loading } == true
+    } == true
+    fun day(snapshot: WearSnapshot?, now: Long): WearDailySummary? = snapshot?.takeUnless(::statisticsDeferred)?.daily?.takeIf {
         now >= it.dayStartAt && now < it.dayEndAt && runCatching {
             Instant.ofEpochMilli(now).atZone(ZoneId.of(it.zoneId)).toLocalDate().toString() == it.localDate
         }.getOrDefault(false)
@@ -44,18 +47,24 @@ internal object WatchSurfacePolicy {
                 if (live) minOf(nav.fixAt!! + 30_000, s.generatedAt + WearProtocol.STATE_TTL_MS + 1) else null,
                 if (live && eta != null) s.generatedAt + ACTIVE_EXPIRY else null)
         }
-        if (s.recording && s.journeyId != null && !s.temporary) {
-            val valid = now - s.generatedAt in 0 until ACTIVE_EXPIRY
-            val health = s.health
-            return WatchSurfaceFrame(WatchSurfaceRoute.RECORDING, s.mode?.label() ?: "Kayıt",
-                if (valid) listOf("${duration(s.elapsedMillis)} · ${km(s.distanceMeters)}",
-                    "Nabız — · Adım ${health?.watchSteps ?: s.stepCount ?: "—"}",
-                    "Enerji ${health?.totalCaloriesKcal?.let { "${it.toInt()} kcal" } ?: "—"} · gecikmeli",
-                    if (connected) "Son kayıt ölçümü" else "Telefon bağlı değil · son ölçüm")
-                else listOf("Kayıt verisi güncel değil", "İz’i aç"),
-                if (valid) duration(s.elapsedMillis) else "İz’i aç",
-                if (valid) s.generatedAt + ACTIVE_EXPIRY else null,
-                if (valid) s.generatedAt + ACTIVE_EXPIRY else null)
+        if (statisticsDeferred(s)) {
+            val current = now - s.generatedAt in 0 until ACTIVE_EXPIRY
+            val recording = s.journeyId != null
+            val lines = if (recording) listOf(
+                if (!current || !connected) "Son durum · kayıt" else if (!s.recording) "Kayıt doğrulanıyor" else if (s.temporary) "Algılama sürüyor" else "Kayıt sürüyor",
+                "İstatistikler yolculuk", "sonunda hazırlanacak",
+                if (connected && current) "Kontroller için dokun" else "Telefon bağlantısını kontrol et")
+                else listOf(s.statisticsStatus.ifBlank { "İstatistikler hazırlanacak" }, "Hazır olunca burada gösterilecek")
+            return WatchSurfaceFrame(if (recording) WatchSurfaceRoute.RECORDING else WatchSurfaceRoute.DAILY,
+                if (recording) s.mode?.label() ?: "Kayıt" else "İstatistikler", lines,
+                if (recording && connected && current) "Kayıt" else if (recording) "Son durum" else "Bekliyor")
+        }
+        s.completed?.let { summary ->
+            return WatchSurfaceFrame(WatchSurfaceRoute.SUMMARY, "Yolculuk özeti",
+                listOf("İstatistikler hazır", "${duration(summary.elapsedMillis)} · ${km(summary.distanceMeters)}",
+                    "Ortalama ${summary.averageSpeedKmh?.let { String.format(Locale.forLanguageTag("tr"), "%.1f km/sa", it) } ?: "—"}",
+                    "Adım ${summary.watch?.watchSteps ?: summary.health?.watchSteps ?: summary.stepCount ?: "—"}",
+                    "Bitiş ${clock(summary.endedAt)}"), "Hazır")
         }
         val daily = day(s, now)
         val lines = buildList {

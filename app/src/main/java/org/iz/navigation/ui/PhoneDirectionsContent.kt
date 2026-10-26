@@ -143,7 +143,7 @@ internal fun PhoneDirectionsContent(
                             shownRoute?.let { route ->
                                 RouteTimingText(route, nav.takeIf { live }, preview = !live)
                                 RouteTrafficText(route)
-                            } ?: Text(if (live) "Serbest sürüş · ${points.size} kayıtlı konum" else "A başlangıç · B varış",
+                            } ?: Text(if (live) if (nav.recording) "Serbest sürüş · Konumlar kaydediliyor" else "Serbest sürüş" else "A başlangıç · B varış",
                                 style = MaterialTheme.typography.labelLarge)
                         }
                     }

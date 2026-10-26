@@ -27,6 +27,9 @@ import org.iz.navigation.health.*
 import org.iz.navigation.wear.WatchHealthConnection
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.iz.navigation.power.PostJourneyAnalysis
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -156,11 +159,27 @@ internal fun JourneyHealthPanel(journey: Journey, state: DiaryState, now: Long) 
     if (journey.status != JourneyStatus.CONFIRMED) return
     val manager = (LocalContext.current.applicationContext as? IzApplication)?.healthManager
     val connection = manager?.state?.collectAsStateWithLifecycle()?.value ?: HealthConnectionState()
-    val context = LocalContext.current
-    val watchRepository = remember(context.applicationContext) { WatchHealthRepository(context.applicationContext) }
-    val directFlow = remember(watchRepository, journey.id) { watchRepository.samplesForJourney(journey.id) }
-    val direct by directFlow.collectAsStateWithLifecycle(initialValue = emptyList())
-    val summary = remember(journey, direct) { WatchHealthRules.summarize(journey, direct, now) }
+    val application = LocalContext.current.applicationContext
+    val analysis = remember(application) { PostJourneyAnalysis.get(application) }
+    val prepared = state.prepared(journey)
+    if (prepared == null) {
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Sağlık", style = MaterialTheme.typography.titleLarge)
+                Text(state.analysisLabel)
+                Text("Saat ve sağlık ölçümlerin korunuyor. Ayrıntılar kayıt ve navigasyon bittikten sonra pil en az %20 olduğunda hazırlanır.",
+                    style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        return
+    }
+    val cachedSamples by produceState<Pair<String, List<JourneyHealthSample>>?>(null, journey.id, prepared.fingerprint) {
+        value = withContext(Dispatchers.IO) {
+            prepared.fingerprint to analysis.cache.healthSamples(journey.id, prepared.fingerprint)
+        }
+    }
+    val samples = cachedSamples?.takeIf { it.first == prepared.fingerprint }?.second.orEmpty()
+    val summary = prepared.watch
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("İz · Saat ölçümleri", style = MaterialTheme.typography.titleLarge)
@@ -179,8 +198,7 @@ internal fun JourneyHealthPanel(journey: Journey, state: DiaryState, now: Long) 
             Text("Samsung Health ve telefon adımlarıyla toplanmaz. Kalori aşağıdaki Samsung Health bölümünden gelir.", style = MaterialTheme.typography.bodySmall)
         }
     }
-    HealthSummaryCard(journey, state.healthSummaries.firstOrNull { it.journeyId == journey.id },
-        state.healthSamples.filter { it.journeyId == journey.id }, connection, now)
+    HealthSummaryCard(journey, prepared.health, samples, connection, now)
 }
 
 @Composable
@@ -189,7 +207,8 @@ internal fun HealthSummaryCard(journey: Journey, summary: JourneyHealthSummary?,
 ) {
     var expanded by remember(journey.id) { mutableStateOf(false) }
     val duration = ((journey.endedAt ?: now) - journey.startedAt).coerceAtLeast(0)
-    val hr = remember(journey, samples, now) { HealthRules.observedHeartRateSamples(journey, samples, now) }
+    // The backend cache already contains only observed, valid heart-rate samples.
+    val hr = samples
     fun missing(metric: HealthMetric) = when {
         !connection.enabled -> "Bağlantıyı Ayarlar'dan açabilirsin."
         metric !in connection.grantedMetrics -> "Okuma izni verilmedi."
@@ -213,8 +232,8 @@ internal fun HealthSummaryCard(journey: Journey, summary: JourneyHealthSummary?,
                     val color = MaterialTheme.colorScheme.primary
                     val first = journey.startedAt
                     val span = duration.coerceAtLeast(1).toDouble()
-                    val low = (hr.minOf { it.value } - 5)
-                    val high = (hr.maxOf { it.value } + 5)
+                    val low = (summary.heartRateMinBpm!! - 5)
+                    val high = (summary.heartRateMaxBpm!! + 5)
                     Canvas(Modifier.fillMaxWidth().height(110.dp).semantics { contentDescription = "Nabız grafiği: ${hr.size} ölçüm noktası" }) {
                         hr.forEach { point ->
                             drawCircle(color, radius = 3.dp.toPx(), center = Offset(

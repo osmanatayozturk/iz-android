@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.TimeUnit
+import org.iz.navigation.power.PostJourneyAnalysis
 
 data class HealthConnectionState(
     val sdkStatus: Int = HealthConnectClient.SDK_UNAVAILABLE,
@@ -160,6 +161,8 @@ class HealthConnectManager(context: Context, private val repository: DiaryReposi
 
     /** Background reads are gated even when invoked by a foreground location service. */
     suspend fun sync(background: Boolean): Boolean = mutex.withLock {
+        val analysis = PostJourneyAnalysis.get(context)
+        if (!analysis.canProcessNow()) { analysis.request(); return@withLock true }
         val status = refresh()
         if (!status.enabled || status.sdkStatus != HealthConnectClient.SDK_AVAILABLE ||
             status.grantedMetrics.isEmpty() || (background && !status.backgroundAllowed)) return@withLock true
@@ -246,6 +249,7 @@ class HealthConnectManager(context: Context, private val repository: DiaryReposi
         editor.commit()
     }
     private fun checkReadAllowed(epoch: Long, background: Boolean) {
+        if (!PostJourneyAnalysis.get(context).canProcessNow()) throw HealthReadAborted()
         if (epoch != generation || !prefs.getBoolean("enabled", false)) throw HealthReadAborted()
         if (background && !state.value.backgroundAllowed) throw HealthReadAborted()
         if (!background && !foreground && !state.value.backgroundAllowed) throw HealthReadAborted()

@@ -5,6 +5,57 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class WearProtocolTest {
+    @Test fun v6DeferredRecordingRetainsControlStateAndRejectsFalseMeasurements() {
+        val value = WearSnapshot(100_000L, journeyId = "trip", mode = WearMode.WALK,
+            startedAt = 1_000L, recording = true, statsDeferred = true,
+            statisticsStatus = "İstatistikler yolculuk sonunda hazırlanacak")
+        assertEquals(value, WearProtocol.decodeSnapshot(WearProtocol.encodeSnapshot(value, 6)))
+        assertEquals("/iz/v6/command", WearProtocol.commandPath(6))
+        assertEquals("/iz/v6/state", WearProtocol.statePath(6))
+        assertEquals(6, WearProtocol.commandVersion("/iz/v6/command"))
+        // Even a zero step count would claim a measurement that has not been prepared.
+        for (invalid in listOf(value.copy(distanceMeters = 1.0), value.copy(elapsedMillis = 1L),
+            value.copy(stepCount = 0L), value.copy(health = WearHealthSummary()))) {
+            assertThrows(IllegalArgumentException::class.java) { WearProtocol.encodeSnapshot(invalid, 6) }
+        }
+        for (version in 1..5) {
+            assertThrows(IllegalArgumentException::class.java) { WearProtocol.encodeSnapshot(value, version) }
+        }
+    }
+
+    @Test fun v6PreparedSummaryPreservesMeasuredZeroMissingAndSeparateSources() {
+        val health = WearHealthSummary(totalCaloriesKcal = 0.0, partial = true)
+        val watch = WearHealthSummary(watchSteps = 0L, partial = true)
+        val summary = WearCompletedSummary("finished", WearMode.WALK, 1_000L, 100_000L,
+            distanceMeters = 0.0, elapsedMillis = 99_000L, stepCount = null, health = health, watch = watch)
+        val value = WearSnapshot(100_000L, statisticsStatus = "İstatistikler hazır", completed = summary)
+        val decoded = WearProtocol.decodeSnapshot(WearProtocol.encodeSnapshot(value, 6))
+        assertEquals(value, decoded)
+        assertNull(decoded!!.completed!!.stepCount)
+        assertEquals(0L, decoded.completed!!.watch!!.watchSteps)
+        assertNull(decoded.completed!!.health!!.watchSteps)
+        assertEquals(0.0, decoded.completed!!.health!!.totalCaloriesKcal!!, 0.0)
+        assertNull(decoded.completed!!.watch!!.totalCaloriesKcal)
+    }
+
+    @Test fun v6MalformedSuffixAndIncompleteFramesAreRejected() {
+        val value = WearSnapshot(100_000L, statsDeferred = true)
+        val frame = WearProtocol.encodeSnapshot(value, 6)
+        // v6 idle suffix: deferred flag, two-byte text length, completed flag.
+        assertNull(WearProtocol.decodeSnapshot(frame.copyOf().also { it[it.size - 4] = 2 }))
+        assertNull(WearProtocol.decodeSnapshot(frame.copyOf().also { it[it.lastIndex] = 2 }))
+        rejectIncomplete(frame, WearProtocol::decodeSnapshot)
+        val summary = WearCompletedSummary("finished", WearMode.WALK, 1_000L, 100_000L, 10.0, 99_000L)
+        for (invalid in listOf(summary.copy(distanceMeters = Double.NaN), summary.copy(elapsedMillis = 1L),
+            summary.copy(stepCount = -1L), summary.copy(endedAt = 105_001L, elapsedMillis = 104_001L))) {
+            assertThrows(IllegalArgumentException::class.java) {
+                WearProtocol.encodeSnapshot(WearSnapshot(100_000L, completed = invalid), 6)
+            }
+        }
+        rejectIncomplete(WearProtocol.encodeSnapshot(WearSnapshot(100_000L, completed = summary), 6),
+            WearProtocol::decodeSnapshot)
+    }
+
     @Test fun v5NavigationAndDailySummaryRoundTripWithTurkishUtf8() {
         val navigation = WearNavigationSummary(
             sessionId = "rota-1", guidance = true, fixAt = 60_000L, gpsStale = false,
@@ -145,8 +196,8 @@ class WearProtocolTest {
         rejectIncomplete(frame, WearProtocol::decodeSnapshot)
     }
 
-    @Test fun versionFiveCanNegotiateWithoutChangingLegacyCommandPayloads() {
-        assertEquals(5, WearProtocol.CURRENT_VERSION)
+    @Test fun versionSixCanNegotiateWithoutChangingLegacyCommandPayloads() {
+        assertEquals(6, WearProtocol.CURRENT_VERSION)
         val command = WearCommand("request", WearAction.REFRESH, 1000L)
         assertEquals(command, WearProtocol.decodeCommand(WearProtocol.encodeCommand(command, 4)))
         assertEquals(command, WearProtocol.decodeCommand(WearProtocol.encodeCommand(command, 1)))

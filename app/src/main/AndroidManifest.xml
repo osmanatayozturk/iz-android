@@ -88,6 +88,7 @@
                 <data android:scheme="wear" android:host="*" android:path="/iz/v3/command" />
                 <data android:scheme="wear" android:host="*" android:path="/iz/v4/command" />
                 <data android:scheme="wear" android:host="*" android:path="/iz/v5/command" />
+                <data android:scheme="wear" android:host="*" android:path="/iz/v6/command" />
                 <data android:scheme="wear" android:host="*" android:path="/iz/v4/health" />
             </intent-filter>
         </service>

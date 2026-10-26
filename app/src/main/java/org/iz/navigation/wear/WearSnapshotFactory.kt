@@ -5,6 +5,39 @@ import org.iz.navigation.tracking.TrackingPolicy
 import org.iz.navigation.wearprotocol.*
 
 internal object WearSnapshotFactory {
+    /** No points, health samples or aggregate readers are touched by the active v6 path. */
+    fun deferred(journey: Journey?, now: Long, runningId: String?, status: String,
+        weather: WearRouteWeather? = null, navigation: WearNavigationSummary? = null): WearSnapshot {
+        val active = journey?.takeIf { it.endedAt == null }
+        return WearSnapshot(generatedAt = now, journeyId = active?.id,
+            mode = active?.let { trip -> WearMode.entries.firstOrNull { it.name == trip.transport.name } },
+            startedAt = active?.startedAt, temporary = active?.status == JourneyStatus.TEMPORARY,
+            deadlineAt = active?.let(TrackingPolicy::automaticCandidateDeadline),
+            recording = active != null && active.id == runningId,
+            weather = weather.takeIf { active != null && active.id == runningId }, navigation = navigation,
+            statsDeferred = true, statisticsStatus = status)
+    }
+
+    fun completed(journey: Journey, stats: JourneyStats, health: JourneyHealthSummary?, watch: JourneyHealthSummary?): WearCompletedSummary =
+        WearCompletedSummary(journey.id, WearMode.entries.firstOrNull { it.name == journey.transport.name },
+            journey.startedAt, requireNotNull(journey.endedAt), stats.distanceMeters, stats.elapsedMillis,
+            stats.averageSpeedKmh, stats.maxSpeedKmh, journey.stepCount.takeIf { journey.transport.supportsSteps },
+            if (journey.transport == Transport.RUN && stats.distanceMeters > 0 && stats.elapsedMillis > 0)
+                stats.elapsedMillis.toDouble() / stats.distanceMeters else null,
+            health?.takeIf { it.journeyId == journey.id }?.let { wearHealth(it, stats.elapsedMillis) },
+            watch?.takeIf { it.journeyId == journey.id }?.let { wearHealth(it, stats.elapsedMillis) })
+
+    private fun wearHealth(summary: JourneyHealthSummary, elapsedMillis: Long) = WearHealthSummary(
+        heartRateMeanBpm = summary.heartRateMeanBpm, heartRateMinBpm = summary.heartRateMinBpm,
+        heartRateMaxBpm = summary.heartRateMaxBpm, latestHeartRateBpm = summary.latestHeartRateBpm,
+        latestHeartRateAt = summary.latestHeartRateAt, heartRateSampleCount = summary.heartRateSampleCount,
+        totalCaloriesKcal = summary.totalCaloriesKcal, calorieCoverageMillis = summary.calorieCoverageMillis,
+        watchSteps = summary.watchSteps, stepCoverageMillis = summary.stepCoverageMillis,
+        measurementStartAt = summary.measurementStartAt, measurementEndAt = summary.measurementEndAt,
+        lastCheckedAt = summary.lastCheckedAt,
+        partial = summary.heartRateSampleCount == 0 || summary.totalCaloriesKcal == null || summary.watchSteps == null ||
+            summary.calorieCoverageMillis < elapsedMillis || summary.stepCoverageMillis < elapsedMillis)
+
     fun create(journey: Journey?, points: List<TrackPoint>, now: Long, runningId: String?,
         health: JourneyHealthSummary? = null, weather: WearRouteWeather? = null): WearSnapshot {
         if (journey == null || journey.endedAt != null) return WearSnapshot(generatedAt = now)

@@ -108,9 +108,29 @@ data class WearSnapshot(
     val candidateProgressMeters: Double? = null,
     val navigation: WearNavigationSummary? = null,
     val daily: WearDailySummary? = null,
+    /** v6: metric fields are placeholders while true and must never be displayed as measurements. */
+    val statsDeferred: Boolean = false,
+    val statisticsStatus: String = "",
+    val completed: WearCompletedSummary? = null,
 )
 
-/** Samsung Health WATCH measurements only. Null means missing, and times are measurement times. */
+/** Prepared once on the phone after both recording and navigation end; never an active estimate. */
+data class WearCompletedSummary(
+    val journeyId: String,
+    val mode: WearMode?,
+    val startedAt: Long,
+    val endedAt: Long,
+    val distanceMeters: Double,
+    val elapsedMillis: Long,
+    val averageSpeedKmh: Double? = null,
+    val maxSpeedKmh: Double? = null,
+    val stepCount: Long? = null,
+    val averagePaceSecondsPerKm: Double? = null,
+    val health: WearHealthSummary? = null,
+    val watch: WearHealthSummary? = null,
+)
+
+/** Watch measurements only. Completed Samsung Health and direct-watch sources remain separate. Null means missing. */
 data class WearHealthSummary(
     val heartRateMeanBpm: Double? = null,
     val heartRateMinBpm: Double? = null,
@@ -163,7 +183,12 @@ object WearProtocol {
     const val V5_STATE_PATH = "/iz/v5/state"
     const val V5_PHONE_CAPABILITY = "iz_phone_v5"
     const val V5_WATCH_CAPABILITY = "iz_watch_v5"
-    const val CURRENT_VERSION = 5
+    const val V6_COMMAND_PATH = "/iz/v6/command"
+    const val V6_RESULT_PATH = "/iz/v6/result"
+    const val V6_STATE_PATH = "/iz/v6/state"
+    const val V6_PHONE_CAPABILITY = "iz_phone_v6"
+    const val V6_WATCH_CAPABILITY = "iz_watch_v6"
+    const val CURRENT_VERSION = 6
     const val COMMAND_TTL_MS = 120_000L
     const val STATE_TTL_MS = 30_000L
 
@@ -180,19 +205,19 @@ object WearProtocol {
     private const val MAX_CLOCK_SKEW_MS = 5_000L
 
     fun commandPath(version: Int): String = when (version) {
-        1 -> COMMAND_PATH; 2 -> V2_COMMAND_PATH; 3 -> V3_COMMAND_PATH; 4 -> V4_COMMAND_PATH; 5 -> V5_COMMAND_PATH; else -> error("Unsupported version")
+        1 -> COMMAND_PATH; 2 -> V2_COMMAND_PATH; 3 -> V3_COMMAND_PATH; 4 -> V4_COMMAND_PATH; 5 -> V5_COMMAND_PATH; 6 -> V6_COMMAND_PATH; else -> error("Unsupported version")
     }
     fun resultPath(version: Int): String = when (version) {
-        1 -> RESULT_PATH; 2 -> V2_RESULT_PATH; 3 -> V3_RESULT_PATH; 4 -> V4_RESULT_PATH; 5 -> V5_RESULT_PATH; else -> error("Unsupported version")
+        1 -> RESULT_PATH; 2 -> V2_RESULT_PATH; 3 -> V3_RESULT_PATH; 4 -> V4_RESULT_PATH; 5 -> V5_RESULT_PATH; 6 -> V6_RESULT_PATH; else -> error("Unsupported version")
     }
     fun statePath(version: Int): String = when (version) {
-        1 -> STATE_PATH; 2 -> V2_STATE_PATH; 3 -> V3_STATE_PATH; 4 -> V4_STATE_PATH; 5 -> V5_STATE_PATH; else -> error("Unsupported version")
+        1 -> STATE_PATH; 2 -> V2_STATE_PATH; 3 -> V3_STATE_PATH; 4 -> V4_STATE_PATH; 5 -> V5_STATE_PATH; 6 -> V6_STATE_PATH; else -> error("Unsupported version")
     }
     fun phoneCapability(version: Int): String = when (version) {
-        1 -> PHONE_CAPABILITY; 2 -> V2_PHONE_CAPABILITY; 3 -> V3_PHONE_CAPABILITY; 4 -> V4_PHONE_CAPABILITY; 5 -> V5_PHONE_CAPABILITY; else -> error("Unsupported version")
+        1 -> PHONE_CAPABILITY; 2 -> V2_PHONE_CAPABILITY; 3 -> V3_PHONE_CAPABILITY; 4 -> V4_PHONE_CAPABILITY; 5 -> V5_PHONE_CAPABILITY; 6 -> V6_PHONE_CAPABILITY; else -> error("Unsupported version")
     }
     fun commandVersion(path: String): Int? = when (path) {
-        COMMAND_PATH -> 1; V2_COMMAND_PATH -> 2; V3_COMMAND_PATH -> 3; V4_COMMAND_PATH -> 4; V5_COMMAND_PATH -> 5; else -> null
+        COMMAND_PATH -> 1; V2_COMMAND_PATH -> 2; V3_COMMAND_PATH -> 3; V4_COMMAND_PATH -> 4; V5_COMMAND_PATH -> 5; V6_COMMAND_PATH -> 6; else -> null
     }
     fun frameVersion(bytes: ByteArray): Int? {
         if (bytes.size !in HEADER_BYTES..MAX_PAYLOAD_BYTES || ByteBuffer.wrap(bytes).int != MAGIC) return null
@@ -242,6 +267,7 @@ object WearProtocol {
 
     fun encodeSnapshot(value: WearSnapshot, version: Int = CURRENT_VERSION): ByteArray {
         validate(value)
+        require(version >= 6 || !value.statsDeferred) { "Deferred placeholders require wire version 6" }
         return encode(SNAPSHOT, version) {
             writeLong(value.generatedAt)
             writeOptional(value.journeyId) { writeText(it, MAX_ID_BYTES) }
@@ -265,6 +291,11 @@ object WearProtocol {
             if (version >= 5) {
                 writeOptional(value.navigation) { writeNavigation(it) }
                 writeOptional(value.daily) { writeDaily(it) }
+            }
+            if (version >= 6) {
+                writeBoolean(value.statsDeferred)
+                writeText(value.statisticsStatus, MAX_WEATHER_DETAIL_BYTES)
+                writeOptional(value.completed) { writeCompleted(it) }
             }
         }
     }
@@ -290,6 +321,9 @@ object WearProtocol {
             candidateProgressMeters = if (version >= 4) readOptional { readDouble() } else null,
             navigation = if (version >= 5) readOptional { readNavigation() } else null,
             daily = if (version >= 5) readOptional { readDaily() } else null,
+            statsDeferred = if (version >= 6) readFlag() else false,
+            statisticsStatus = if (version >= 6) readText(MAX_WEATHER_DETAIL_BYTES) else "",
+            completed = if (version >= 6) readOptional { readCompleted() } else null,
         ).also(::validate)
     }
 
@@ -338,6 +372,15 @@ object WearProtocol {
         value.weather?.let { validate(it, value.generatedAt) }
         value.navigation?.let { validate(it, value.generatedAt) }
         value.daily?.let { validate(it, value.generatedAt) }
+        validateWireText(value.statisticsStatus, MAX_WEATHER_DETAIL_BYTES)
+        value.completed?.let { validate(it, value.generatedAt) }
+        if (value.statsDeferred) require(value.distanceMeters == 0.0 && value.elapsedMillis == 0L &&
+            value.averageSpeedKmh == null && value.maxSpeedKmh == null && value.currentSpeedKmh == null &&
+            value.stepCount == null && value.averagePaceSecondsPerKm == null && value.health == null &&
+            value.daily == null && value.completed == null && value.candidateProgressMeters == null) {
+            "Deferred snapshot contains unprepared statistics"
+        }
+        require(value.completed == null || !value.recording && value.journeyId == null) { "Completed summary overlaps recording" }
         if (value.journeyId == null) {
             require(value.mode == null && value.startedAt == null && !value.temporary && value.deadlineAt == null &&
                 !value.recording && value.distanceMeters == 0.0 && value.elapsedMillis == 0L &&
@@ -447,6 +490,28 @@ object WearProtocol {
         readFlag(), readFlag(), readOptional { readInt() }, readText(MAX_MESSAGE_BYTES),
         readOptional { readDouble() }, readOptional { readDouble() }, readOptional { readLong() }, readText(MAX_MESSAGE_BYTES),
     )
+
+    private fun DataOutputStream.writeCompleted(value: WearCompletedSummary) {
+        writeText(value.journeyId, MAX_ID_BYTES); writeOptional(value.mode) { writeByte(it.ordinal) }
+        writeLong(value.startedAt); writeLong(value.endedAt); writeDouble(value.distanceMeters); writeLong(value.elapsedMillis)
+        writeOptional(value.averageSpeedKmh) { writeDouble(it) }; writeOptional(value.maxSpeedKmh) { writeDouble(it) }
+        writeOptional(value.stepCount) { writeLong(it) }; writeOptional(value.averagePaceSecondsPerKm) { writeDouble(it) }
+        writeOptional(value.health) { writeHealth(it) }; writeOptional(value.watch) { writeHealth(it) }
+    }
+    private fun DataInputStream.readCompleted() = WearCompletedSummary(
+        readText(MAX_ID_BYTES), readOptional { readEnum(WearMode.entries) }, readLong(), readLong(), readDouble(), readLong(),
+        readOptional { readDouble() }, readOptional { readDouble() }, readOptional { readLong() },
+        readOptional { readDouble() }, readOptional { readHealth() }, readOptional { readHealth() },
+    )
+    private fun validate(value: WearCompletedSummary, generatedAt: Long) {
+        validateId(value.journeyId)
+        require(value.startedAt >= 0 && value.endedAt >= value.startedAt &&
+            (value.endedAt <= generatedAt || value.endedAt - generatedAt <= MAX_CLOCK_SKEW_MS))
+        require(value.elapsedMillis == value.endedAt - value.startedAt && nonNegativeFinite(value.distanceMeters))
+        require(listOf(value.averageSpeedKmh, value.maxSpeedKmh, value.averagePaceSecondsPerKm).all { it == null || nonNegativeFinite(it) })
+        require(value.stepCount == null || value.stepCount >= 0)
+        value.health?.let(::validate); value.watch?.let(::validate)
+    }
 
     private fun DataOutputStream.writeJourneyTotal(value: WearDailyJourneyTotal) {
         writeDouble(value.distanceMeters); writeLong(value.elapsedMillis); writeInt(value.journeyCount)

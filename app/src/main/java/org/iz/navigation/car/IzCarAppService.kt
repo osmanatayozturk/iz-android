@@ -55,15 +55,7 @@ internal class IzCarSession : Session() {
                 displayUpdate { home.refresh(state) }
             }
         }
-        scope.launch {
-            coordinator.state.map { it.journey?.id to it.simulation }.distinctUntilChanged().collectLatest { (id, simulation) ->
-                displayUpdate { home.trail(emptyList()) }
-                if (id != null) {
-                    val flow = if (simulation) coordinator.simulationPoints else DiaryRepository(carContext).observeJourneyPoints(id)
-                    flow.collect { points -> displayUpdate { home.trail(points) } }
-                }
-            }
-        }
+        // Auto shares the phone CPU: neither real nor simulated recording subscribes to full tracks.
         scope.launch { app.weatherManager.state.collect { displayUpdate { home.safeInvalidate() } } }
         lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) { displayUpdate { surface.setActive(true); home.requestIdleLocation() } }

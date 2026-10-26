@@ -8,21 +8,30 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.net.Uri
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import org.iz.navigation.R
 import org.iz.navigation.data.DiaryRepository
 import org.iz.navigation.data.Transport
+import org.iz.navigation.power.PostJourneyAnalysis
+import org.iz.navigation.power.PowerDiagnostics
 import org.iz.navigation.tracking.TrackingController
 import org.iz.navigation.tracking.TrackingNotifications
 import org.iz.navigation.tracking.TrackingService
 import org.iz.navigation.wearprotocol.*
 import com.google.android.gms.wearable.PutDataMapRequest
+import com.google.android.gms.wearable.CapabilityClient
 import com.google.android.gms.wearable.Wearable
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
@@ -35,10 +44,41 @@ internal class WearPhoneBridge(private val context: Context) {
     private val watchHealth = WatchHealthPhoneBridge(context)
     private val mutex = Mutex()
     private val publishMutex = Mutex()
+    private data class Peer(val version: Int, val requestedAt: Long)
+    private val peers = ConcurrentHashMap<String, Peer>()
+    private val capabilityGeneration = AtomicLong()
+    private val capabilityNodes = ConcurrentHashMap<String, Set<String>>()
+    private var capabilityCheckedAt: Long? = null
+    private var capabilityCheckedGeneration = -1L
+    private var advertisedWatchVersions: Map<String, Int> = emptyMap()
+    private val capabilityClient by lazy { Wearable.getCapabilityClient(context) }
+    private val capabilityListener = CapabilityClient.OnCapabilityChangedListener { info ->
+        if (info.name in WATCH_CAPABILITIES) {
+            val nodes = info.nodes.asSequence().take(MAX_PEERS + 1).map { it.id }.toSet()
+            if (capabilityNodes.put(info.name, nodes) != nodes) {
+                capabilityGeneration.incrementAndGet()
+                scope.launch { publish() }
+            }
+        }
+    }
+    @Volatile private var publishRequested = false
+    private val analysis get() = PostJourneyAnalysis.get(context)
     @Volatile private var resumed = 0
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     fun initialize(application: Application) {
+        scope.launch {
+            // App-lifetime listener; no additional service or polling timer.
+            // https://developers.google.com/android/reference/com/google/android/gms/wearable/CapabilityClient
+            try {
+                capabilityClient.addListener(capabilityListener, Uri.parse("wear://*/iz_watch_v"), CapabilityClient.FILTER_PREFIX).await()
+                awaitCancellation()
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { /* Timed capability refresh remains available. */ }
+            finally { withContext(NonCancellable) { runCatching { withTimeout(2_000) {
+                capabilityClient.removeListener(capabilityListener).await()
+            } } } }
+        }
         application.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
             override fun onActivityResumed(activity: Activity) { resumed++ }
             override fun onActivityPaused(activity: Activity) { resumed = (resumed - 1).coerceAtLeast(0) }
@@ -63,14 +103,31 @@ internal class WearPhoneBridge(private val context: Context) {
         scope.launch {
             org.iz.navigation.health.DailyActivityManager.get(context).currentDataFlow.filterNotNull().collect { publish() }
         }
+        scope.launch {
+            // Project before distinct: GPS invalidations do not become per-point Data Layer publications.
+            analysis.state.map { Triple(it.phase, it.pending, it.cacheRevision) }.distinctUntilChanged().collect { publish() }
+        }
     }
 
     suspend fun receive(source: String, bytes: ByteArray) {
+        val start = SystemClock.elapsedRealtimeNanos()
+        try { receiveCommand(source, bytes) }
+        finally { PowerDiagnostics.count(PowerDiagnostics.Metric.WATCH_RECEIVE, SystemClock.elapsedRealtimeNanos() - start) }
+    }
+
+    private suspend fun receiveCommand(source: String, bytes: ByteArray) {
         val protocolVersion = WearProtocol.frameVersion(bytes) ?: return
         val command = WearProtocol.decodeCommand(bytes) ?: return
         if (source.isBlank() || source.length > 256) return
-        if (command.action == WearAction.REFRESH && WearProtocol.isFreshCommand(command, System.currentTimeMillis())) {
-            scope.launch { runCatching { org.iz.navigation.health.DailyActivityManager.get(context).refresh() } }
+        val now = System.currentTimeMillis()
+        if (WearProtocol.isFreshCommand(command, now)) {
+            synchronized(peers) {
+                peers.entries.removeAll { now - it.value.requestedAt !in 0 until LEGACY_PEER_TTL_MS }
+                if (peers.containsKey(source) || peers.size < MAX_PEERS) peers[source] = Peer(protocolVersion, now)
+            }
+            if (command.action == WearAction.REFRESH && analysis.canProcessNow() && !analysis.state.value.pending) {
+                scope.launch { runCatching { org.iz.navigation.health.DailyActivityManager.get(context).refresh() } }
+            }
         }
         val result = try { handle(source, command, protocolVersion = protocolVersion) } catch (_: Exception) {
             WearResult(command.id, WearResultCode.ERROR, "İstek işlenemedi. Telefonda İz’i kontrol et.")
@@ -79,7 +136,11 @@ internal class WearPhoneBridge(private val context: Context) {
         publish()
     }
 
-    suspend fun receiveHealth(source: String, bytes: ByteArray) { watchHealth.receive(source, bytes) }
+    suspend fun receiveHealth(source: String, bytes: ByteArray) {
+        val start = SystemClock.elapsedRealtimeNanos()
+        try { watchHealth.receive(source, bytes) }
+        finally { PowerDiagnostics.count(PowerDiagnostics.Metric.WATCH_RECEIVE, SystemClock.elapsedRealtimeNanos() - start) }
+    }
 
     internal suspend fun handle(source: String, command: WearCommand, foreground: Boolean = resumed > 0, protocolVersion: Int = WearProtocol.CURRENT_VERSION): WearResult = withContext(NonCancellable) { mutex.withLock {
         val now = System.currentTimeMillis()
@@ -174,39 +235,125 @@ internal class WearPhoneBridge(private val context: Context) {
 
     internal suspend fun snapshot(): WearSnapshot {
         val active = repository.activeJourney()
+        val now = System.currentTimeMillis()
+        val app = context.applicationContext as org.iz.navigation.IzApplication
+        val navigation = WearNavigationFactory.create(app.navigation.state.value, now)
+        val state = analysis.state.value
+        val busy = active != null || TrackingService.isRunning || app.navigation.state.value.let {
+            it.guidance || it.loading || it.locationActive || it.recording
+        }
+        if (busy || state.pending) {
+            val status = when {
+                active != null && (!TrackingService.isRunning || TrackingService.runningJourneyId != active.id) ->
+                    "Kayıt durumu doğrulanıyor · İstatistikler yolculuk sonunda hazırlanacak"
+                active != null -> if (active.status == org.iz.navigation.data.JourneyStatus.TEMPORARY)
+                    "Algılama sürüyor · İstatistikler yolculuk sonunda hazırlanacak"
+                    else "Kayıt sürüyor · İstatistikler yolculuk sonunda hazırlanacak"
+                busy -> "Navigasyon bitince istatistikler hazırlanacak"
+                else -> state.label
+            }
+            return WearSnapshotFactory.deferred(active, now, TrackingService.runningJourneyId.takeIf { TrackingService.isRunning },
+                status, active?.let { app.weatherManager.wearWeather(it.id) }, navigation)
+        }
+        val entry = state.entries.values.filter { it.journey.endedAt != null }.maxByOrNull { it.journey.endedAt!! }
+        // These values are already prepared. Never call snapshot()/journeyPoints()/healthSummaries here.
+        return WearSnapshot(generatedAt = now, navigation = navigation,
+            daily = org.iz.navigation.health.DailyActivityManager.get(context).currentDataFlow.value,
+            statisticsStatus = if (entry != null) "İstatistikler hazır" else "",
+            completed = entry?.let { WearSnapshotFactory.completed(it.journey, it.stats, it.health, it.watch) })
+    }
+
+    /** True legacy metrics only for reachable legacy nodes or fresh legacy commands; v6 never pays this cost. */
+    private suspend fun legacySnapshot(): WearSnapshot {
+        val active = repository.activeJourney()
         val points = active?.let { repository.journeyPoints(it.id) }.orEmpty()
         val current = active?.let { repository.getJourney(it.id) }
-        val health = current?.let { journey -> repository.healthSummaries.first().firstOrNull { it.journeyId == journey.id } }
+        val prepared = !analysis.state.value.pending
+        val health = current?.takeIf { prepared }?.let { journey -> repository.healthSummaries.first().firstOrNull { it.journeyId == journey.id } }
         val weather = current?.let { journey ->
             (context.applicationContext as org.iz.navigation.IzApplication).weatherManager.wearWeather(journey.id)
         }
         val now = System.currentTimeMillis()
         val app = context.applicationContext as org.iz.navigation.IzApplication
-        // A slow daily cache/provider permission check must not suppress current navigation.
-        val daily = try { withTimeoutOrNull(1_000) {
-            org.iz.navigation.health.DailyActivityManager.get(context).snapshot(now)
-        } } catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { null }
+        val daily = org.iz.navigation.health.DailyActivityManager.get(context).currentDataFlow.value.takeIf { prepared }
         return WearSnapshotFactory.create(current, points, now,
             TrackingService.runningJourneyId.takeIf { TrackingService.isRunning }, health, weather).copy(
                 navigation = WearNavigationFactory.create(app.navigation.state.value, now), daily = daily)
     }
 
     suspend fun publish() {
-        // GMS availability or a disconnected watch must never interrupt GPS recording.
+        // Conflate work, retaining a ready transition that arrives during a slow transport call.
+        publishRequested = true
         if (!publishMutex.tryLock()) return
         try {
-            val state = withTimeout(3_000) { snapshot() }
-            for (version in 1..WearProtocol.CURRENT_VERSION) {
-                try { withTimeout(3_000) {
-                    val request = PutDataMapRequest.create(WearProtocol.statePath(version)).apply {
-                        dataMap.putByteArray(WearProtocol.STATE_KEY, WearProtocol.encodeSnapshot(state, version))
-                    }.asPutDataRequest().setUrgent()
-                    Wearable.getDataClient(context).putDataItem(request).await()
-                } } catch (_: Exception) { /* Each compatibility channel is independent. */ }
-            }
-        } catch (_: Exception) { /* Watch will mark a missed snapshot stale. */ }
-        finally { publishMutex.unlock() }
+            do {
+                publishRequested = false
+                val start = SystemClock.elapsedRealtimeNanos()
+                try {
+                    val state = withTimeout(3_000) { snapshot() }
+                    publishVersion(state, WearProtocol.CURRENT_VERSION)
+                    val legacyVersions = legacyVersions()
+                    if (legacyVersions.isNotEmpty()) {
+                        val legacy = withTimeout(3_000) { legacySnapshot() }
+                        legacyVersions.forEach { publishVersion(legacy, it) }
+                    }
+                } catch (cancelled: CancellationException) {
+                    if (cancelled !is TimeoutCancellationException) throw cancelled
+                } catch (_: Exception) { /* Watch marks a missed snapshot stale; recording continues. */ }
+                finally { PowerDiagnostics.count(PowerDiagnostics.Metric.WATCH_PUBLISH, SystemClock.elapsedRealtimeNanos() - start) }
+            } while (publishRequested)
+        } finally {
+            publishMutex.unlock()
+            if (publishRequested) scope.launch { publish() }
+        }
+    }
+
+    /** Under publishMutex: one lookup/minute, except a real capability/node change. */
+    private suspend fun legacyVersions(): List<Int> {
+        val elapsed = SystemClock.elapsedRealtime()
+        val generation = capabilityGeneration.get()
+        val checkedAt = capabilityCheckedAt
+        if (checkedAt == null || elapsed - checkedAt !in 0 until CAPABILITY_CACHE_MS || generation != capabilityCheckedGeneration) {
+            capabilityCheckedAt = elapsed
+            capabilityCheckedGeneration = generation
+            advertisedWatchVersions = try {
+                withTimeout(2_000) {
+                    val capabilities = capabilityClient.getAllCapabilities(CapabilityClient.FILTER_REACHABLE).await()
+                    val versions = linkedMapOf<String, Int>()
+                    var overflow = false
+                    for ((index, capability) in WATCH_CAPABILITIES.withIndex()) {
+                        for (node in capabilities[capability]?.nodes.orEmpty()) {
+                            if (node.id !in versions && versions.size >= MAX_PEERS) { overflow = true; break }
+                            versions[node.id] = index + 1
+                        }
+                        if (overflow) break
+                    }
+                    if (overflow) emptyMap() else versions
+                }
+            } catch (cancelled: CancellationException) {
+                if (cancelled !is TimeoutCancellationException) throw cancelled
+                emptyMap()
+            } catch (_: Exception) { emptyMap() }
+        }
+        val versions = advertisedWatchVersions.toMutableMap()
+        val now = System.currentTimeMillis()
+        synchronized(peers) {
+            peers.entries.removeAll { now - it.value.requestedAt !in 0 until LEGACY_PEER_TTL_MS }
+            peers.forEach { (node, peer) -> versions[node] = maxOf(versions[node] ?: 0, peer.version) }
+        }
+        // v6 nodes also advertise older capabilities; never treat them as legacy peers.
+        return versions.values.filter { it in 1..5 }.distinct().sorted()
+    }
+
+    private suspend fun publishVersion(state: WearSnapshot, version: Int) {
+        try { withTimeout(3_000) {
+            val request = PutDataMapRequest.create(WearProtocol.statePath(version)).apply {
+                dataMap.putByteArray(WearProtocol.STATE_KEY, WearProtocol.encodeSnapshot(state, version))
+            }.asPutDataRequest().setUrgent()
+            Wearable.getDataClient(context).putDataItem(request).await()
+        } } catch (cancelled: CancellationException) {
+            if (cancelled !is TimeoutCancellationException) throw cancelled
+        } catch (_: Exception) { /* Each compatibility channel is independent. */ }
     }
 
     private suspend fun sendResult(source: String, result: WearResult, protocolVersion: Int) {
@@ -234,6 +381,12 @@ internal class WearPhoneBridge(private val context: Context) {
 
     private fun rejected(command: WearCommand, text: String) = WearResult(command.id, WearResultCode.REJECTED, text)
     companion object {
+        private const val LEGACY_PEER_TTL_MS = 60_000L
+        private const val CAPABILITY_CACHE_MS = 60_000L
+        private const val MAX_PEERS = 32
+        private val WATCH_CAPABILITIES = listOf(WearProtocol.WATCH_CAPABILITY, WearProtocol.V2_WATCH_CAPABILITY,
+            WearProtocol.V3_WATCH_CAPABILITY, WearProtocol.V4_WATCH_CAPABILITY, WearProtocol.V5_WATCH_CAPABILITY,
+            WearProtocol.V6_WATCH_CAPABILITY)
         private const val CHANNEL = "watch_start"
         private const val NOTIFICATION_ID = 4050
         fun get(context: Context): WearPhoneBridge = (context.applicationContext as org.iz.navigation.IzApplication).wearBridge

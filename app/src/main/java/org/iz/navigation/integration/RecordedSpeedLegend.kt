@@ -12,29 +12,43 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
-import org.iz.navigation.data.TrackPoint
+import org.iz.navigation.power.AnalysisState
+import org.iz.navigation.power.AnalysisPhase
+import org.iz.navigation.power.PostJourneyAnalysis
+import org.iz.navigation.power.PowerDiagnostics
+import androidx.compose.ui.platform.LocalContext
+import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.style.sources.GeoJsonSource
 import kotlin.math.roundToInt
 
 internal data class RecordedTrailRender(val trail: RecordedSpeedTrail = RecordedSpeedTrail(), val json: String = "{\"type\":\"FeatureCollection\",\"features\":[]}", val journeyIds: Set<String> = emptySet())
 
-/** Heavy sorting, coloring, simplification and JSON construction never run on the UI thread. */
+private data class CachedTrail(val id: String, val fingerprint: String, val render: RecordedTrailRender)
+
+/** Decode the backend's prepared private cache on IO. Opening a map never builds a trail. */
 @Composable
-internal fun rememberRecordedTrail(points: List<TrackPoint>): RecordedTrailRender {
-    val identity = remember(points) { points.map { it.journeyId }.distinct() }
-    val result by produceState(RecordedTrailRender(), identity, points) {
-        if (points.isEmpty()) { value = RecordedTrailRender(); return@produceState }
-        value = withContext(Dispatchers.Default) {
-            val context = currentCoroutineContext()
-            val trail = recordedSpeedTrail(points) { context.ensureActive() }
-            RecordedTrailRender(trail, trail.geoJson(), identity.toSet())
+internal fun rememberRecordedTrail(journeyId: String?, analysis: AnalysisState): RecordedTrailRender {
+    val application = LocalContext.current.applicationContext
+    val service = remember(application) { PostJourneyAnalysis.get(application) }
+    val entry = journeyId?.let(analysis::ready).takeUnless { analysis.phase == AnalysisPhase.WAITING_END }
+    val fingerprint = entry?.fingerprint
+    val prepared by produceState<CachedTrail?>(null, journeyId, fingerprint) {
+        value = null
+        if (journeyId == null || fingerprint == null) return@produceState
+        value = withContext(Dispatchers.IO) {
+            service.cache.trail(journeyId, fingerprint)?.let { CachedTrail(journeyId, fingerprint, it) }
         }
     }
-    // produceState retains its previous value until the new effect starts: don't expose a previous
-    // journey even for one frame while a different identity is being computed.
-    return result.takeIf { it.journeyIds == identity.toSet() } ?: RecordedTrailRender()
+    return prepared?.takeIf { it.id == journeyId && it.fingerprint == fingerprint }?.render ?: RecordedTrailRender()
+}
+
+/** Count only successful native source uploads, at the point the SDK actually receives data. */
+internal fun MapLibreMap.updateMeasuredGeoJson(sourceId: String, json: String, metric: PowerDiagnostics.Metric) {
+    val source = style?.getSourceAs<GeoJsonSource>(sourceId) ?: return
+    val started = System.nanoTime()
+    source.setGeoJson(json)
+    PowerDiagnostics.count(metric, System.nanoTime() - started)
 }
 
 internal fun speedScaleLabel(trail: RecordedSpeedTrail): String = when {

@@ -12,7 +12,6 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.rotary.onRotaryScrollEvent
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
@@ -30,16 +29,16 @@ internal fun WatchSurfaceDetail(data: WatchSurfaceData, route: WatchSurfaceRoute
     val focus = remember { FocusRequester() }
     val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) { focus.requestFocus() }
+    val deferred = WatchSurfacePolicy.statisticsDeferred(data.snapshot)
     val snapshot = when (route) {
-        WatchSurfaceRoute.DAILY -> data.snapshot?.copy(navigation = null, journeyId = null, recording = false)
-        WatchSurfaceRoute.RECORDING -> data.snapshot?.copy(navigation = null)
+        WatchSurfaceRoute.DAILY -> data.snapshot?.copy(navigation = null, journeyId = null, recording = false,
+            statsDeferred = deferred, completed = null)
+        WatchSurfaceRoute.RECORDING -> data.snapshot?.copy(navigation = null, statsDeferred = deferred)
+        WatchSurfaceRoute.SUMMARY -> data.snapshot?.copy(navigation = null, daily = null, statsDeferred = deferred)
         else -> data.snapshot
     }
     val frame = WatchSurfacePolicy.frame(snapshot, data.connected, now)
     val day = WatchSurfacePolicy.day(snapshot, now)
-    val health by WatchHealthRuntime.state.collectAsState()
-    val context = LocalContext.current
-    val heart = remember(health, data, now) { safeLiveHeart(context, data, now) }
     MaterialTheme(colors = Colors(primary = Color(0xFFB0D998), onPrimary = Color(0xFF091B15),
         background = Color(0xFF091B15), surface = Color(0xFF163328), onSurface = Color(0xFFF0F4DF))) {
         Scaffold(modifier = Modifier.fillMaxSize().background(Color(0xFF091B15)),
@@ -55,10 +54,24 @@ internal fun WatchSurfaceDetail(data: WatchSurfaceData, route: WatchSurfaceRoute
                     item { Text("Adım: ${status(day.stepsStatus)}\nEgzersiz: ${status(day.exerciseStatus)}\nMesafe: ${status(day.distanceStatus)}", textAlign = TextAlign.Center, fontSize = 12.sp) }
                     item { Text("Sağlık kontrolü: ${day.healthCheckedAt?.let { WatchSurfacePolicy.clock(it, day.zoneId) } ?: "yok"}\n${day.localDate}", textAlign = TextAlign.Center, fontSize = 12.sp) }
                 }
-                if (route == WatchSurfaceRoute.RECORDING && snapshot?.recording == true && !snapshot.temporary) {
-
-                    if (heart != null) item { Text("Canlı nabız · ${heart.toInt()} atım/dk", color = Color(0xFFB0D998), textAlign = TextAlign.Center) }
-                    item { Text("Toplam enerji dinlenmeyi içerir; Samsung Health aktarımı gecikebilir.", fontSize = 12.sp, textAlign = TextAlign.Center) }
+                if (route == WatchSurfaceRoute.SUMMARY && !deferred) snapshot?.completed?.let { summary ->
+                    item { Text(summary.mode?.label() ?: "Yolculuk", textAlign = TextAlign.Center) }
+                    item { Text("En yüksek hız ${summary.maxSpeedKmh?.let { String.format(java.util.Locale.forLanguageTag("tr"), "%.1f km/sa", it) } ?: "Ölçüm yok"}", textAlign = TextAlign.Center) }
+                    summary.averagePaceSecondsPerKm?.let { item { Text("Ortalama tempo ${pace(it)}", textAlign = TextAlign.Center) } }
+                    summary.stepCount?.let { item { Text("Telefon adımları $it", textAlign = TextAlign.Center) } }
+                    summary.watch?.let { watch ->
+                        item { Text("İz · Saat kaydı", textAlign = TextAlign.Center, fontWeight = FontWeight.Bold) }
+                        item { Text("Ortalama nabız ${watch.heartRateMeanBpm?.let { "${it.toInt()} atım/dk" } ?: "Ölçüm yok"}", textAlign = TextAlign.Center) }
+                        item { Text("Adım ${watch.watchSteps ?: "Ölçüm yok"}", textAlign = TextAlign.Center) }
+                    }
+                    summary.health?.let { health ->
+                        item { Text("Samsung Health · Saat", textAlign = TextAlign.Center, fontWeight = FontWeight.Bold) }
+                        item { Text("Ortalama nabız ${health.heartRateMeanBpm?.let { "${it.toInt()} atım/dk" } ?: "Ölçüm yok"}", textAlign = TextAlign.Center) }
+                        item { Text("Adım ${health.watchSteps ?: "Ölçüm yok"}", textAlign = TextAlign.Center) }
+                        item { Text("Toplam enerji ${health.totalCaloriesKcal?.let { "${it.toInt()} kcal" } ?: "Ölçüm yok"}", textAlign = TextAlign.Center) }
+                        if (health.partial) item { Text("Kısmi sağlık verisi · eksik ölçümler sıfır sayılmaz", textAlign = TextAlign.Center, fontSize = 12.sp) }
+                        item { Text("Toplam enerji dinlenmeyi içerir; Samsung Health aktarımı gecikebilir.", fontSize = 12.sp, textAlign = TextAlign.Center) }
+                    }
                 }
                 if (!data.connected) item { Text("Telefon bağlı değil · son alınan veri", textAlign = TextAlign.Center, fontSize = 12.sp) }
                 item { Chip(onClick = onControls, label = { Text("Kayıt ve ayarlar") }, modifier = Modifier.fillMaxWidth().testTag("surface-controls")) }

@@ -29,10 +29,11 @@ class WatchSurfaceFreshnessTest {
     }
     @Test fun disconnectedRecordingNeverExtrapolates() {
         val state = WearSnapshot(now, journeyId = "j", recording = true, elapsedMillis = 120_000)
-        assertEquals("2:00", WatchSurfacePolicy.frame(state, false, now + 60_000).compact)
+        assertEquals("Son durum", WatchSurfacePolicy.frame(state, false, now + 60_000).compact)
     }
     @Test fun staleActiveNeverFallsBackToPlausibleDailyStepCount() {
         val state = WearSnapshot(now, journeyId = "j", recording = true, elapsedMillis = 120_000, daily = day())
-        assertEquals("İz’i aç", WatchSurfacePolicy.frame(state, false, now + 300_001).compact)
+        assertEquals("Son durum", WatchSurfacePolicy.frame(state, false, now + 300_001).compact)
+        assertFalse(WatchSurfacePolicy.frame(state, false, now + 300_001).lines.any { it.contains("4200") })
     }
 }
