@@ -8,7 +8,7 @@ Bu kayıt yayımlanmamış çalışma kopyasındaki kapsamı açıklar; indirile
 - Ağır iz/ısı haritası/ayrıntı ve saat özetleri aktif kayıt ya da navigasyon sırasında hesaplanmak yerine, ikisi de sona erince ve pil en az %20 iken kuyruğa alınır. Şarj şartı yoktur; Android başlatma zamanını geciktirebilir.
 - Görünmeyen yerel pil tanılaması için yedek dışı alanda 7 gün ve toplam 2 MiB sınırı hedeflenir. Koordinat, adres, mesaj ve sağlık ölçüm değerleri bu kayda alınmaz; ADB çıktısı salt okunur tasarlanmıştır.
 - Mevcut günlük ve yedek verisini koruma hedefi sürer. Pil kazancı ölçülmüş değildir; bu kayıt bir test, cihaz kabulü, güvenlik onayı veya yayın beyanı değildir.
-- Tam ertelenmiş-istatistik davranışı eşleşen Wear OS 0.6.1 / iletişim v6 gerektirir. Erişilebilen eski saatler ve eski komutlarda gerçek metrikler ek canlı işlemle korunur; ölçülmemiş değerler sıfır gibi sunulmaz.
+- Tam ertelenmiş-istatistik davranışı eşleşen Wear OS 0.6.1 / iletişim v6 gerektirir. Eski saat yolu yalnız gerçek eski eş saptanınca kullanılır; eski eşin yetenek bilgisi 60 saniye önbelleklenir, v6 düğümleri hariç tutulur. Bekleyen eski günlük/sağlık özetleri gösterilmez; ham kayıt ve gönderim kuyruğu korunur. Ölçülmemiş değerler sıfır gibi sunulmaz; fiziksel saat kabulü yapılmış değildir.
 
 İlgili çalışma notları: [pil ve tanılama](docs/PIL_OPTIMIZASYONU.md), [motosiklet yol haritası önerileri](docs/MOTOSIKLET_YOL_HARITASI.md).
 
