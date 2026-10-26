@@ -1,5 +1,22 @@
 package org.iz.navigation.power
 
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.lifecycle.Lifecycle
+import androidx.test.core.app.ActivityScenario
+import androidx.test.platform.app.InstrumentationRegistry
+import org.iz.navigation.MainActivity
+import org.iz.navigation.ui.DiaryState
+import org.iz.navigation.ui.DiaryStatisticsScreen
+import org.iz.navigation.ui.IzTheme
+import org.iz.navigation.ui.JourneyStatsPanel
+import org.junit.Rule
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.ContextWrapper
@@ -240,5 +257,139 @@ class BatteryDeviceChecks {
         private val DIAGNOSTIC_FIELDS = setOf("schema", "sequence", "at", "elapsedMs", "version", "code", "event", "foreground",
             "screenInteractive", "recording", "guidance", "processing", "pending", "analysisPhase", "batteryPercent", "charging",
             "temperatureC", "currentMicroAmps", "chargeMicroAmpHours", "processCpuMs", "counterMode", "counters")
+    }
+}
+
+
+/**
+ * One isolated COMPONENT flow, using real Compose card input and the production statistics views.
+ * This does not exercise MainActivity navigation, raw journeys, battery transitions or worker integration.
+ */
+@OptIn(ExperimentalTestApi::class)
+@RunWith(AndroidJUnit4::class)
+class BatteryDeferredUiCheck {
+    @get:Rule val compose = createEmptyComposeRule()
+    private val context: Context get() = ApplicationProvider.getApplicationContext()
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test fun pendingStatisticsCardOpensDeferredDetailsWithoutShowingStaleTotals() {
+        assertEquals("org.iz.navigation.batterycheck", context.packageName)
+        assertEquals("org.iz.navigation.batterycheck",
+            InstrumentationRegistry.getInstrumentation().targetContext.packageName)
+        val base = context.cacheDir.canonicalFile
+        val directory = Files.createTempDirectory(base.toPath(), "battery-ui-fixture-").toFile().canonicalFile
+        check(directory.parentFile == base)
+        val selected = mutableStateOf<Journey?>(null)
+        var taps = 0
+        var activity: MainActivity? = null
+        var scenario: ActivityScenario<MainActivity>? = null
+        var contentMounted = false
+        val evidence = Files.createTempDirectory(base.toPath(), "battery-ui-evidence-").toFile().canonicalFile
+        check(evidence.parentFile == base)
+        // Capture only the verified QA Compose root, never a whole-device/system screenshot.
+        fun foreground() {
+            assertEquals("QA foreground required for input/capture", context.packageName,
+                InstrumentationRegistry.getInstrumentation().uiAutomation.rootInActiveWindow?.packageName?.toString())
+            compose.runOnIdle {
+                assertTrue(activity?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.RESUMED) == true)
+                assertTrue(activity?.hasWindowFocus() == true)
+            }
+        }
+        fun capture(name: String) {
+            foreground()
+            val image = compose.onRoot().captureToImage().asAndroidBitmap()
+            val file = File(evidence, "$name.png")
+            check(file.canonicalFile.parentFile == evidence && file.createNewFile())
+            file.outputStream().use { check(image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)) }
+            println("IZ_BATTERY_UI_EVIDENCE=" + file.absolutePath)
+        }
+        try {
+            val journey = Journey(id = "battery-ui-synthetic", title = "Pil QA sentetik yolculuk",
+                transport = Transport.WALK, startedAt = 1_000, endedAt = 61_000)
+            val fingerprint = "d".repeat(64)
+            val entry = AnalysisEntry(fingerprint,
+                JourneyStats(200.0, 60_000, 60_000, 50_000, 10_000, 0, 12.0, 14.4, 18.0),
+                JourneyHealthSummary(journey.id), JourneyHealthSummary(journey.id), journey)
+            val cache = AnalysisCache(directory)
+            cache.saveEntry(journey.id, entry)
+            cache.save(mapOf(journey.id to entry), "e".repeat(64), daily = null, changed = 123)
+            cache.pending(true)
+            assertNotNull("Prepared values must actually exist behind the pending gate", cache.entry(journey.id, fingerprint))
+            // WAITING_BATTERY is a UI fixture state, not an assertion about the real battery.
+            val state = DiaryState(journeys = listOf(journey),
+                analysis = cache.load().first.copy(phase = AnalysisPhase.WAITING_BATTERY))
+            assertTrue(state.analysis.pending)
+            assertNull(state.prepared(journey))
+            val before = directory.listFiles().orEmpty().associate { it.name to it.readBytes().toList() }
+            val launched = ActivityScenario.launch<MainActivity>(Intent(context, MainActivity::class.java))
+            scenario = launched
+            launched.onActivity { host ->
+                activity = host
+                host.setContent { IzTheme {
+                    val detail = selected.value
+                    if (detail == null) DiaryStatisticsScreen(state, now = 61_000,
+                        onJourney = { selected.value = it; taps++ })
+                    else Column(Modifier.fillMaxSize()) {
+                        JourneyStatsPanel(detail, state.prepared(detail)?.stats, state.analysisLabel)
+                    }
+                } }
+            }
+            contentMounted = true
+            compose.waitUntil(5_000) {
+                InstrumentationRegistry.getInstrumentation().uiAutomation.rootInActiveWindow?.packageName?.toString() == context.packageName
+            }
+            foreground()
+            compose.onNodeWithText(state.analysisLabel).assertIsDisplayed()
+            compose.onNodeWithText("0,2 km kaydedildi").assertDoesNotExist()
+            // Existing semantics resolve current bounds; touch injection is not performClick's semantic action.
+            // https://developer.android.com/develop/ui/compose/testing/apis
+            val card = compose.onNode(hasText(journey.title) and hasClickAction()).assertIsDisplayed()
+            val firstBounds = card.fetchSemanticsNode().boundsInRoot
+            compose.waitForIdle()
+            val secondBounds = card.fetchSemanticsNode().boundsInRoot
+            assertEquals("Stop instead of tapping a moving target", firstBounds, secondBounds)
+            foreground()
+            card.performTouchInput { click() }
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithText("Yolculuk istatistikleri").fetchSemanticsNodes().size == 1
+            }
+            foreground()
+            compose.onNodeWithText("Yolculuk istatistikleri").assertIsDisplayed()
+            compose.onNodeWithText(state.analysisLabel).assertIsDisplayed()
+            compose.onNodeWithText("Konum kayıtların korunuyor. Ayrıntılar kayıt ve navigasyon bittikten sonra pil en az %20 olduğunda hazırlanır.")
+                .assertIsDisplayed()
+            compose.onNodeWithText("Mesafe").assertDoesNotExist()
+            compose.onNodeWithText("0,20 km").assertDoesNotExist()
+            compose.runOnIdle { assertEquals(1, taps); assertEquals(journey, selected.value) }
+            val after = directory.listFiles().orEmpty().associate { it.name to it.readBytes().toList() }
+            assertEquals("Opening a pending detail must preserve the exact synthetic persisted fixture", before, after)
+            assertTrue(cache.load().first.pending)
+            assertNotNull(cache.entry(journey.id, fingerprint))
+            assertNull(cache.load().first.ready(journey.id))
+            val writer = StringWriter()
+            PowerDiagnostics.dump(PrintWriter(writer))
+            val dump = writer.toString()
+            assertTrue(dump.startsWith("IZ_BATTERY_DIAGNOSTICS_V1"))
+            assertTrue(dump.trimEnd().endsWith("IZ_BATTERY_DIAGNOSTICS_END"))
+            assertFalse(dump.contains(journey.id))
+            assertFalse(dump.contains(journey.title))
+            capture("success")
+        } catch (failure: Throwable) {
+            if (contentMounted) runCatching { capture("failure") }
+            throw failure
+        } finally {
+            try {
+                if (contentMounted) compose.runOnIdle { selected.value = null }
+            } finally {
+                try { scenario?.close() } finally {
+                    // Only our newly created flat fixture; retained images are evidence, not app data.
+                    directory.listFiles().orEmpty().forEach { file ->
+                        check(file.canonicalFile.parentFile == directory && file.isFile)
+                        check(file.delete())
+                    }
+                    check(directory.delete())
+                }
+            }
+        }
     }
 }
