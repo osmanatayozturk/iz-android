@@ -58,6 +58,8 @@ class BatteryPrivacyRegressionChecks {
             assertNull(f.repository.getJourney(f.affected.id))
             assertTrue(f.repository.journeyPoints(f.affected.id).isEmpty())
             assertTrue(f.repository.snapshot().healthSamples.none { it.journeyId == f.affected.id })
+            assertTrue(f.repository.snapshot().watchHealthSamples.none { it.journeyId == f.affected.id })
+            assertTrue(f.repository.snapshot().watchHealthSessions.none { it.journeyId == f.affected.id })
             f.assertOtherPreserved(kept)
             f.assertNoStaleRepublishWhileIneligible(healthOnly = false)
         }
@@ -176,6 +178,17 @@ class BatteryPrivacyRegressionChecks {
                 recordedAt = start + 1_000, accuracy = 5f))
             repository.addPoint(TrackPoint(id = "$prefix-p2", journeyId = affected.id, latitude = 0.0001, longitude = 0.0,
                 recordedAt = start + 11_000, accuracy = 5f))
+            // Seed real Room watch rows while A is open; no physical bridge/sensor/provider.
+            val watchRepository = WatchHealthRepository(context)
+            val watchSession = WatchHealthSession(UUID.randomUUID().toString(), affected.id,
+                "$prefix-watch", "Synthetic QA watch", createdAt = start)
+            val watchSample = WatchHealthSample(watchSession.id, 1, affected.id, HealthMetric.HEART_RATE_BPM,
+                start + 6_000, start + 6_000, 129.0)
+            assertTrue(watchRepository.register(watchSession))
+            assertTrue(watchRepository.import(watchSession.watchId, watchSession.id, listOf(watchSample),
+                now = System.currentTimeMillis()))
+            assertEquals(watchSession, watchRepository.session(watchSession.id))
+            assertTrue(repository.snapshot().watchHealthSamples.contains(watchSample))
             repository.finishJourney(affected.id, start + 20_000)
             repository.saveJourney(unaffected)
             val marker = "$prefix-health-source"
@@ -192,6 +205,10 @@ class BatteryPrivacyRegressionChecks {
             val entry = requireNotNull(prepared.entries[affected.id])
             val other = requireNotNull(prepared.entries[unaffected.id])
             assertEquals(137.0, entry.health.heartRateMeanBpm!!, 0.0)
+            assertEquals(129.0, entry.watch.heartRateMeanBpm!!, 0.0)
+            assertEquals(1, entry.watch.heartRateSampleCount)
+            assertTrue(repository.snapshot().watchHealthSamples.contains(watchSample))
+            assertEquals(watchSession, watchRepository.session(watchSession.id))
             assertEquals(marker, manager.cache.healthSamples(affected.id, entry.fingerprint).single().sourceId)
             val root = File(context.noBackupFilesDir, "post_journey_analysis").canonicalFile
             check(root.parentFile == context.noBackupFilesDir.canonicalFile)
