@@ -150,63 +150,90 @@ class BatteryDeviceChecks {
     }
 
     @Test fun diagnosticsExportIsReadOnlyAndRejectsLocationKeyAndHealthFields() {
-        val directory = File(context.noBackupFilesDir, "power_diagnostics").apply { mkdirs() }
-        val fixtureAt = System.currentTimeMillis() - 60_000
-        val day = java.time.Instant.ofEpochMilli(fixtureAt).atZone(java.time.ZoneOffset.UTC).toLocalDate()
-        val fixture = File(directory, "battery-$day-$fixtureAt.jsonl")
-        val validSequence = Long.MAX_VALUE - 10
-        val valid = diagnosticFixture(validSequence)
-        val privateMarker = "SYNTHETIC_FORBIDDEN_PRIVATE_VALUE"
-        val invalid = listOf(
-            diagnosticFixture(validSequence + 1).put("latitude", 0.0),
-            diagnosticFixture(validSequence + 2).put("longitude", 0.0),
-            diagnosticFixture(validSequence + 3).put("apiKey", privateMarker),
-            diagnosticFixture(validSequence + 4).put("heartRateBpm", 0.0),
-            diagnosticFixture(validSequence + 5).put("address", privateMarker),
-            diagnosticFixture(validSequence + 6).put("message", privateMarker),
-            diagnosticFixture(validSequence + 7).put("token", privateMarker),
-            // Allowed measurement keys must not become a channel for private strings either.
-            diagnosticFixture(validSequence + 8).put("currentMicroAmps", privateMarker),
-            // A fresh file's timestamp must not make a seven-day-old row exportable.
-            diagnosticFixture(validSequence + 9, at = System.currentTimeMillis() - 8L * 86_400_000),
-        )
-        assertTrue("A unique synthetic file is required; never overwrite an existing chunk", fixture.createNewFile())
-        try {
-            fixture.writeText((listOf(valid) + invalid).joinToString("\n", postfix = "\n"))
-            val bytes = digest(fixture.readBytes())
-            val modified = fixture.lastModified()
-            val size = fixture.length()
-            val writer = StringWriter()
-            PowerDiagnostics.dump(PrintWriter(writer))
-            val exported = writer.toString()
-            assertFalse("No forbidden synthetic value may escape the schema filter", exported.contains(privateMarker))
-            val lines = exported.lineSequence().filter { it.isNotBlank() }.toList()
-            assertEquals("IZ_BATTERY_DIAGNOSTICS_V1", lines.firstOrNull())
-            assertEquals("IZ_BATTERY_DIAGNOSTICS_END", lines.lastOrNull())
-            val rows = lines.drop(1).dropLast(1).map(::JSONObject)
-            assertTrue("Valid fixed-schema fixture must be exported", rows.any { it.getLong("sequence") == validSequence })
-            assertFalse("Sensitive extension fields must never be exported", rows.any { it.getLong("sequence") in (validSequence + 1)..(validSequence + invalid.size) })
-            rows.forEach { row ->
-                assertEquals(DIAGNOSTIC_FIELDS, row.keys().asSequence().toSet())
-                assertEquals(1, row.getInt("schema"))
-                assertEquals("PROCESS_CUMULATIVE", row.getString("counterMode"))
-                assertTrue(row.getString("analysisPhase") in AnalysisPhase.entries.map { it.name })
-                val counters = row.getJSONObject("counters")
-                assertEquals(PowerDiagnostics.Metric.entries.map { it.name }.toSet(), counters.keys().asSequence().toSet())
-                counters.keys().asSequence().forEach { name ->
-                    val metric = counters.getJSONObject(name)
-                    assertEquals(setOf("count", "durationMs"), metric.keys().asSequence().toSet())
-                    assertTrue(metric.getLong("count") >= 0)
-                    assertTrue(metric.getLong("durationMs") >= 0)
+        // Test-only access to the existing producer monitor; no production hook or writer swap.
+        val fileLock = PowerDiagnostics::class.java.getDeclaredField("fileLock").apply {
+            isAccessible = true
+        }.get(null)
+        synchronized(fileLock) {
+            val directory = File(context.noBackupFilesDir, "power_diagnostics").apply { mkdirs() }
+            val fixtureAt = System.currentTimeMillis() - 60_000
+            val day = java.time.Instant.ofEpochMilli(fixtureAt).atZone(java.time.ZoneOffset.UTC).toLocalDate()
+            val fixture = File(directory, "battery-$day-$fixtureAt.jsonl")
+            val validSequence = Long.MAX_VALUE - 10
+            val valid = diagnosticFixture(validSequence)
+            val privateMarker = "SYNTHETIC_FORBIDDEN_PRIVATE_VALUE"
+            val invalid = listOf(
+                diagnosticFixture(validSequence + 1).put("latitude", 0.0),
+                diagnosticFixture(validSequence + 2).put("longitude", 0.0),
+                diagnosticFixture(validSequence + 3).put("apiKey", privateMarker),
+                diagnosticFixture(validSequence + 4).put("heartRateBpm", 0.0),
+                diagnosticFixture(validSequence + 5).put("address", privateMarker),
+                diagnosticFixture(validSequence + 6).put("message", privateMarker),
+                diagnosticFixture(validSequence + 7).put("token", privateMarker),
+                // Allowed measurement keys must not become a channel for private strings either.
+                diagnosticFixture(validSequence + 8).put("currentMicroAmps", privateMarker),
+                // A fresh file's timestamp must not make a seven-day-old row exportable.
+                diagnosticFixture(validSequence + 9, at = System.currentTimeMillis() - 8L * 86_400_000),
+            )
+            assertTrue("A unique synthetic file is required; never overwrite an existing chunk", fixture.createNewFile())
+            var beforeBytes: ByteArray? = null
+            var afterBytes: ByteArray? = null
+            try {
+                fixture.writeText((listOf(valid) + invalid).joinToString("\n", postfix = "\n"))
+                val before = fixture.readBytes()
+                beforeBytes = before
+                val bytes = digest(before)
+                val modified = fixture.lastModified()
+                val size = fixture.length()
+                val writer = StringWriter()
+                PowerDiagnostics.dump(PrintWriter(writer))
+                val after = if (fixture.isFile) fixture.readBytes() else null
+                afterBytes = after
+                val exported = writer.toString()
+                assertFalse("No forbidden synthetic value may escape the schema filter", exported.contains(privateMarker))
+                val lines = exported.lineSequence().filter { it.isNotBlank() }.toList()
+                assertEquals("IZ_BATTERY_DIAGNOSTICS_V1", lines.firstOrNull())
+                assertEquals("IZ_BATTERY_DIAGNOSTICS_END", lines.lastOrNull())
+                val rows = lines.drop(1).dropLast(1).map(::JSONObject)
+                assertTrue("Valid fixed-schema fixture must be exported", rows.any { it.getLong("sequence") == validSequence })
+                assertFalse("Sensitive extension fields must never be exported", rows.any { it.getLong("sequence") in (validSequence + 1)..(validSequence + invalid.size) })
+                rows.forEach { row ->
+                    assertEquals(DIAGNOSTIC_FIELDS, row.keys().asSequence().toSet())
+                    assertEquals(1, row.getInt("schema"))
+                    assertEquals("PROCESS_CUMULATIVE", row.getString("counterMode"))
+                    assertTrue(row.getString("analysisPhase") in AnalysisPhase.entries.map { it.name })
+                    val counters = row.getJSONObject("counters")
+                    assertEquals(PowerDiagnostics.Metric.entries.map { it.name }.toSet(), counters.keys().asSequence().toSet())
+                    counters.keys().asSequence().forEach { name ->
+                        val metric = counters.getJSONObject(name)
+                        assertEquals(setOf("count", "durationMs"), metric.keys().asSequence().toSet())
+                        assertTrue(metric.getLong("count") >= 0)
+                        assertTrue(metric.getLong("durationMs") >= 0)
+                    }
                 }
+                assertTrue("Dump must not remove its source", fixture.isFile)
+                assertEquals("Dump must not rewrite its source", bytes, digest(requireNotNull(after)))
+                assertEquals(modified, fixture.lastModified())
+                assertEquals(size, fixture.length())
+            } catch (failure: AssertionError) {
+                // Preserve exact synthetic bytes only on failure; never select these as app chunks.
+                runCatching {
+                    val evidence = File(context.noBackupFilesDir, "qa_diagnostics_test_failures").canonicalFile
+                    check(evidence.parentFile == context.noBackupFilesDir.canonicalFile)
+                    check(evidence.isDirectory || evidence.mkdirs())
+                    val prefix = "fixture-$fixtureAt-${System.nanoTime()}"
+                    beforeBytes?.let { snapshot ->
+                        File(evidence, "$prefix-before.bin").also { check(it.createNewFile()) }.writeBytes(snapshot)
+                    }
+                    afterBytes?.let { snapshot ->
+                        File(evidence, "$prefix-after.bin").also { check(it.createNewFile()) }.writeBytes(snapshot)
+                    }
+                }.onFailure { failure.addSuppressed(it) }
+                throw failure
+            } finally {
+                // This exact synthetic file only. Existing app diagnostics are preserved.
+                assertTrue(!fixture.exists() || fixture.delete())
             }
-            assertTrue("Dump must not remove its source", fixture.isFile)
-            assertEquals("Dump must not rewrite its source", bytes, digest(fixture.readBytes()))
-            assertEquals(modified, fixture.lastModified())
-            assertEquals(size, fixture.length())
-        } finally {
-            // This exact synthetic file only. Existing app diagnostics are preserved.
-            assertTrue(!fixture.exists() || fixture.delete())
         }
     }
 
