@@ -2,13 +2,20 @@
 
 ## Geliştirme adayı — telefon 0.10.2 / code 21, Wear OS 0.6.1 / code 11, iletişim v6
 
-Bu kayıt yayımlanmamış çalışma kopyasındaki kapsamı açıklar; indirilebilir paket veya tamamlanmış sürüm duyurusu değildir. Uygulama testleri henüz raporlanmadı.
+Bu, 27 Ekim 2026 tarihli yayın öncesi doğrulama kaydıdır ve telefon 0.10.2 / code 21, Wear OS 0.6.1 / code 11, iletişim v6 geliştirme adayının kapsamını ve o tarihe kadarki kanıtları özetler. İndirilebilir paket veya tamamlanmış sürüm duyurusu değildir. Aday için yalnız sınırlı kontroller raporlanmıştır; tam kabul anlamına gelmez.
 
 - Sürüş sırasında yönlendirme, ses, periyodik rota/trafik yenilemesi, hava durumu, grup takibi, hız ve ekranın açık kalması korunur. Ham GPS ve saat sensör kayıtları devam eder.
 - Ağır iz/ısı haritası/ayrıntı ve saat özetleri aktif kayıt ya da navigasyon sırasında hesaplanmak yerine, ikisi de sona erince ve pil en az %20 iken kuyruğa alınır. Şarj şartı yoktur; Android başlatma zamanını geciktirebilir.
 - Görünmeyen yerel pil tanılaması için yedek dışı alanda 7 gün ve toplam 2 MiB sınırı hedeflenir. Koordinat, adres, mesaj ve sağlık ölçüm değerleri bu kayda alınmaz; ADB çıktısı salt okunur tasarlanmıştır.
 - Mevcut günlük ve yedek verisini koruma hedefi sürer. Pil kazancı ölçülmüş değildir; bu kayıt bir test, cihaz kabulü, güvenlik onayı veya yayın beyanı değildir.
 - Tam ertelenmiş-istatistik davranışı eşleşen Wear OS 0.6.1 / iletişim v6 gerektirir. Eski saat yolu yalnız gerçek eski eş saptanınca kullanılır; eski eşin yetenek bilgisi 60 saniye önbelleklenir, v6 düğümleri hariç tutulur. Bekleyen eski günlük/sağlık özetleri gösterilmez; ham kayıt ve gönderim kuyruğu korunur. Ölçülmemiş değerler sıfır gibi sunulmaz; fiziksel saat kabulü yapılmış değildir.
+
+### Sınırlı doğrulama ve kalan kapsam
+
+- Telefon `appDebug` ve Wear `wearDebug` derlemeleri geçti. Telefon ve Wear lint kontrolleri 0 hata ile geçti; sırasıyla 108 ve 41 uyarı kaldı. `WearProtocolTest` için 38 geçti, 0 kaldı, 0 atlandı.
+- Önceki ayrı debug QA paketinde atanmış 6/6 odaklı kontrol geçti. Daha sonraki hedefli manager/Room senaryosu 1/1 geçti: aktif yolculukta analiz engellendi, yolculuk bitince hazırlanmış varlıklar kalıcılaştı; sentetik ham veri kullanıldı. Salt okunur Activity.dump çıktısı önceki aşamada geçti.
+- Harici postflight, USB durum sorgusu başarısız olduğu için engellendi ve tekrarlanmadı; türetilmiş indeks doğrulaması kurulmuş değildir.
+- Bu sonuçlar gerçek sürüş regresyonunu, WorkManager dağıtımını/işlem yeniden başlamasını veya fiziksel saat kabulünü kapsamaz. Pil tasarrufu miktarı ölçülmedi. Tam sürüm kabulü, güvenlik onayı ve kaynak yayını henüz yoktur.
 
 İlgili çalışma notları: [pil ve tanılama](docs/PIL_OPTIMIZASYONU.md), [motosiklet yol haritası önerileri](docs/MOTOSIKLET_YOL_HARITASI.md).
 

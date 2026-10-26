@@ -12,7 +12,7 @@ Güncel yayın durumu bu dosyada, tamamlanan değişiklikler [değişiklik geçm
 
 ## Geliştirme adayı — 0.10.2 / code 21 ve Wear OS 0.6.1 / code 11
 
-Bu çalışma kopyasında telefon 0.10.2 / code 21, Wear OS 0.6.1 / code 11 ve iletişim v6 adayı hazırlanıyor. Bunlar GitHub'daki yayımlanmış 0.10.1 sürümünü değiştirmez ve indirme için sunulmaz. Adayın bağımsız Test raporu ve diğer kabul adımları henüz eklenmemiştir.
+Bu, 27 Ekim 2026 tarihli yayın öncesi doğrulama kaydıdır. O tarihte telefon 0.10.2 / code 21, Wear OS 0.6.1 / code 11 ve iletişim v6 geliştirme adayıydı; yayımlanmış 0.10.1'i değiştirmiyor ve indirme için sunulmuyordu. Sınırlı doğrulamada `appDebug`/`wearDebug` derlemeleri geçti; iki lint kontrolü 0 hata verdi (telefon 108, Wear 41 uyarı) ve `WearProtocolTest` 38/38 geçti. Önceki ayrı QA paketindeki 6/6 odaklı kontrol ile sentetik verili manager/Room senaryosundaki 1/1 kontrol de geçti. Salt okunur Activity.dump çıktısı önceki aşamada geçti. Harici postflight USB durum sorgusu başarısız olduğu için engellendi ve tekrarlanmadı; türetilmiş indeks doğrulanmadı. Bu sonuçlar tam telefon/Wear, gerçek sürüş, WorkManager dağıtım/işlem devamı veya fiziksel saat kabulü değildir; pil tasarrufu ölçülmemiştir. 27 Ekim 2026 itibarıyla tam aday kabulü, güvenlik onayı ve kaynak yayını beklemedeydi. Ayrıntı için [aday değişiklik kaydına](../CHANGELOG.md) bakın.
 
 Önerilen davranışta sürüşün gerekli canlı işlevleri ve ham kayıtlar korunur. Ağır iz/ısı haritası/istatistik ve saat özetleri aktif kayıt/navigasyon bittikten ve telefon pili %20 veya üzerindeyken ertelenmiş kuyruktan işlenir. Yerel tanılama verisi yedek dışı tutulur, en fazla 7 gün/2 MiB saklanır ve hassas yol/sağlık içeriği içermez. Ayrıntı için [pil optimizasyonu notuna](PIL_OPTIMIZASYONU.md) bakın.
 
