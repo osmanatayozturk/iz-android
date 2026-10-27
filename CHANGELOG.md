@@ -12,10 +12,11 @@ Bu, 27 Ekim 2026 tarihli yayın öncesi doğrulama kaydıdır ve telefon 0.10.2 
 
 ### Sınırlı doğrulama ve kalan kapsam
 
-- Telefon `appDebug` ve Wear `wearDebug` derlemeleri geçti. Telefon ve Wear lint kontrolleri 0 hata ile geçti; sırasıyla 108 ve 41 uyarı kaldı. `WearProtocolTest` için 38 geçti, 0 kaldı, 0 atlandı.
-- Önceki ayrı debug QA paketinde atanmış 6/6 odaklı kontrol geçti. Daha sonraki hedefli manager/Room senaryosu 1/1 geçti: aktif yolculukta analiz engellendi, yolculuk bitince hazırlanmış varlıklar kalıcılaştı; sentetik ham veri kullanıldı. Salt okunur Activity.dump çıktısı önceki aşamada geçti.
-- Önceki durdurma kaydından sonra salt okunur postflight geçti: QA ürün/test kimlikleri ile üretim kimliği ve dört APK özeti değişmemişti; etkin enstrümantasyon, QA takip servisi veya sahip olunan geçici fixture dizini yoktu. Telefon değiştirilmedi ve yeni enstrümantasyon çalıştırılmadı. Önceki gerçek entegrasyon kontrolü sentetik kayıt ve noktaların bulunmadığını, başlangıçtaki yolculuk durumuna dönüldüğünü doğrulamıştı. Türetilmiş indeks 0 kayıt ve 0 sentetik kayıt içeriyordu; bekleyen işareti yoktu.
-- Bu sonuçlar gerçek sürüş regresyonunu, WorkManager dağıtımını/işlem yeniden başlamasını veya fiziksel saat kabulünü kapsamaz. Pil tasarrufu miktarı ölçülmedi. Tam sürüm kabulü, güvenlik onayı ve kaynak yayını henüz yoktur.
+- Telefon `appDebug` derlemesi geçti; telefon lint 0 hata ve 108 uyarı verdi. İlk odaklı QA koşusu 8 geçti, 1 tanılama kontrolü başarısız oldu ve 1 kontrol pilin %20 eşiğinin altındaki doğal koşul nedeniyle atlandı. Dört gizlilik kontrolü ilk koşuda geçti.
+- Test-only düzeltmesinden sonra aynı QA ürünü üzerinde yalnız değişen tanılama kontrolü bir kez çalıştırıldı ve geçti. Bu dar tekrar tam koşuyu baştan yürütmedi; ilk 8/1/1 sonucu ve başarısızlık kaydı tarihsel olarak korunuyor. Dört gizlilik kontrolü bu tekrar koşusunda yeniden çalıştırılmadı; önceki geçiş kanıtları aynı ürün kimliği altında ayrı kalır.
+- Sınırlı salt okunur postflight sırasında alınan tek anlık görüntü, türetilmiş indeks ve ısı haritasının boş ve yerleşmiş olduğunu gösterdi. Boş durum için günlük toplamlar sıfırdı; bekleyen işaret veya atomik `new`/`bak` yan dosyaları yoktu. Play uygulamasına dokunulmadı. Ham veritabanı veya tüm kişisel veriler denetlenmedi; bu sonuç tüm kuyruk işlerinin tamamlandığı anlamına gelmez.
+- Wear OS ve iletişim protokolü bu adayda değişmedi. Önceki Wear lint sonucu (0 hata, 41 uyarı) ve 38 protokol testi değişmeyen kaynak kanıtıyla tarihsel olarak yeniden kullanıldı; yeni adayda tekrar çalıştırılmadı.
+- Bu sonuçlar genel sürüm kabulü değildir; gerçek sürüş regresyonu, WorkManager dağıtımı/işlem devamı, fiziksel saat kabulü veya ölçülmüş pil tasarrufu kanıtı sağlamaz. Bu kayıt güvenlik kararı ya da yayın onayı değildir.
 
 İlgili çalışma notları: [pil ve tanılama](docs/PIL_OPTIMIZASYONU.md), [motosiklet yol haritası önerileri](docs/MOTOSIKLET_YOL_HARITASI.md).
 
