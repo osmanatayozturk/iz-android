@@ -1,6 +1,8 @@
 package org.iz.navigation.moto
 
 import android.app.Activity
+import android.content.ComponentName
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -12,7 +14,7 @@ import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
-import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,7 +30,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
@@ -38,11 +41,13 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.Lifecycle
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
 import org.iz.navigation.IzApplication
 import org.iz.navigation.data.Transport
+import org.iz.navigation.health.HealthPrivacyActivity
 import org.iz.navigation.integration.OsmServiceSettings
 import org.iz.navigation.navigation.NavigationFix
 import org.iz.navigation.navigation.NavigationState
@@ -89,14 +94,16 @@ import kotlin.math.max
 /**
  * ONE synthetic native PHONE component scene, normal font only. Not MainActivity, a real
  * recorder/GNSS session, a ride, full-app navigation, real Auto/DHU or accuracy/energy evidence.
+ * Fresh test-owned existing QA HealthPrivacyActivity rehosts the scene; no health reads.
  * Actual NavigationHomeContent + PhoneDirectionsContent remain mounted around one actual MapView.
  * Public MapLibre13.6.1 contracts: android-v13.6.1/.../ModuleProvider.java,
  * http/{HttpRequest,HttpResponder,NativeHttpRequest}.java. No native-pointer/JNI access.
  * Module transport isolation applies only to this SDK path, not all application networking.
  */
+@OptIn(ExperimentalTestApi::class)
 @RunWith(AndroidJUnit4::class)
 class Moto0110PhoneDrivingScene {
-    @get:Rule val compose = createComposeRule()
+    @get:Rule val compose = createEmptyComposeRule()
     private val showScene = mutableStateOf(true)
     private val planning = mutableStateOf(false)
     private val containerHeight = mutableStateOf<Dp?>(null)
@@ -106,6 +113,7 @@ class Moto0110PhoneDrivingScene {
     private val nav = mutableStateOf(NavigationState())
     private val disposed = AtomicBoolean(false)
     private val mounts = AtomicInteger(0)
+    private val ownedHost = AtomicReference<HealthPrivacyActivity?>()
     private val mapRef = AtomicReference<MapLibreMap?>()
     private val requestedView = AtomicReference<MapView?>()
     private val poses = JSONArray()
@@ -127,23 +135,43 @@ class Moto0110PhoneDrivingScene {
             "qa/moto-0110-phone-scene/${SystemClock.uptimeMillis()}").apply { check(mkdirs()) }
         val evidence = JSONObject().put("status", "STARTED").put("evidenceClass", "SYNTHETIC_NATIVE_PHONE_COMPONENT")
             .put("fullAppOrRealGnssOrAutoHost", false).put("enlargedFont", false)
+            .put("hostClass", HealthPrivacyActivity::class.java.name).put("hostPackage", context.packageName)
+            .put("hostOwnership", "FRESH_TEST_OWNED_EXISTING_QA_PRIVACY_ACTIVITY_REHOST")
         var savedProvider: ModuleProvider? = null
-        var shell: ComponentActivity? = null
+        var shell: HealthPrivacyActivity? = null
+        var ownedScenario: ActivityScenario<HealthPrivacyActivity>? = null
+        var hostScenarioClosed = false
         var primaryFailure: Throwable? = null
         var providerRestored = false
         var nativeViewsRemoved = false
         sceneDeadline = SystemClock.elapsedRealtime() + 65_000
         try {
-            shell = onMain {
+            onMain {
                 val monitor = ActivityLifecycleMonitorRegistry.getInstance()
-                val activity = monitor.getActivitiesInStage(Stage.RESUMED).single()
-                check(activity.javaClass == ComponentActivity::class.java) { "Only the blank Compose ComponentActivity is supported" }
                 val existing = listOf(Stage.CREATED, Stage.STARTED, Stage.RESUMED, Stage.PAUSED, Stage.STOPPED)
                     .flatMap { monitor.getActivitiesInStage(it) }.distinct()
+                check(existing.none { it.packageName == context.packageName && !it.isDestroyed }) {
+                    "Do not replace or clear another pre-existing QA Activity"
+                }
                 check(existing.all { it.window?.decorView?.maps().orEmpty().isEmpty() }) {
                     "Existing native map: do not replace another component's global transport"
                 }
-                activity as ComponentActivity
+            }
+            val launched = ActivityScenario.launch<HealthPrivacyActivity>(Intent().setComponent(
+                ComponentName(context.packageName, HealthPrivacyActivity::class.java.name)))
+            ownedScenario = launched
+            launched.onActivity { activity ->
+                check(ownedHost.compareAndSet(null, activity))
+                shell = activity
+            }
+            val activity = checkNotNull(shell)
+            onMain {
+                check(activity.javaClass == HealthPrivacyActivity::class.java && ownedHost.get() === activity)
+                check(activity.componentName == ComponentName(context.packageName, HealthPrivacyActivity::class.java.name))
+                check(activity.packageName == context.packageName && activity.application === context.applicationContext)
+                check(activity.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+                check(ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).single() === activity)
+                check(activity.window.decorView.maps().isEmpty())
             }
             savedProvider = onMain { MapLibre.getModuleProvider() }
             val tiles = MemoryTiles(checkNotNull(savedProvider), OsmServiceSettings(context).read().tileUrl)
@@ -164,7 +192,7 @@ class Moto0110PhoneDrivingScene {
                 simulation = false, sessionId = "qa-moto-native-phone-scene", sessionTransport = Transport.MOTORCYCLE,
                 gpsStale = false, locationActive = true, fix = fix(a))
             lastFixAt = SystemClock.elapsedRealtime()
-            compose.setContent {
+            onMain { activity.setContent {
                 val observedDensity = LocalDensity.current
                 SideEffect { density = observedDensity.density; fontScale = observedDensity.fontScale }
                 IzTheme {
@@ -191,10 +219,9 @@ class Moto0110PhoneDrivingScene {
                         }
                     }
                 }
-            }
+            } }
             compose.waitForIdle()
             assertEquals("Observe normal font; never override it", 1f, fontScale, .01f)
-            val activity = checkNotNull(shell)
             val readyStarted = SystemClock.elapsedRealtime()
             await("one resumed, nonzero, style-ready native map and adaptive camera", 20_000) {
                 onMain {
@@ -302,45 +329,75 @@ class Moto0110PhoneDrivingScene {
         } finally {
             val cleanupErrors = mutableListOf<Throwable>()
             val wasInterrupted = Thread.interrupted()
-            transport?.closeAdmission()
-            fun cleanup(action: () -> Unit) { try { action() } catch (error: Throwable) { cleanupErrors += error } }
-            cleanup { onMain { showScene.value = false }; compose.waitForIdle() }
-            cleanup {
-                val deadline = SystemClock.elapsedRealtime() + 3_000
-                var empty = false
-                while (!empty && SystemClock.elapsedRealtime() < deadline) {
-                    empty = onMain { shell?.window?.decorView?.maps().orEmpty().isEmpty() }
-                    if (!empty) SystemClock.sleep(25)
-                }
-                nativeViewsRemoved = empty
-                check(empty && (mounts.get() == 0 || disposed.get())) { "Actual map composition disposal unproven; stop before any later map" }
-            }
-            // Never block UI/native cancellation on a worker join. Restore identity even on failures.
-            try { cleanup { transport?.cancelAndDrain() } }
-            finally {
+            var cleanupFailure: Throwable? = null
+            try {
+                transport?.closeAdmission()
+                fun cleanup(action: () -> Unit) { try { action() } catch (error: Throwable) { cleanupErrors += error } }
+                cleanup { onMain { showScene.value = false }; compose.waitForIdle() }
                 cleanup {
-                    savedProvider?.let { previous -> onMain {
-                        MapLibre.setModuleProvider(previous)
-                        check(MapLibre.getModuleProvider() === previous) { "Original provider identity was not restored" }
-                        providerRestored = true
-                    } }
+                    val deadline = SystemClock.elapsedRealtime() + 3_000
+                    var empty = false
+                    while (!empty && SystemClock.elapsedRealtime() < deadline) {
+                        empty = onMain { shell?.window?.decorView?.maps().orEmpty().isEmpty() }
+                        if (!empty) SystemClock.sleep(25)
+                    }
+                    nativeViewsRemoved = empty
+                    check(empty && (mounts.get() == 0 || disposed.get())) { "Actual map composition disposal unproven; stop before any later map" }
                 }
-            }
-            cleanup { transport?.assertHealthy() }
-            evidence.put("captureRequests", captures).put("poses", poses).put("mapCompositionMounts", mounts.get())
-                .put("mapCompositionDisposed", disposed.get()).put("nativeViewsRemoved", nativeViewsRemoved)
-                .put("providerIdentityRestored", providerRestored).put("transport", transport?.stats())
-                .put("cleanupFailureCount", cleanupErrors.size).put("interruptedAtCleanup", wasInterrupted)
-                .put("wholeApplicationNetworkSilenceProven", false)
-                .put("scope", "Synthetic native Phone component only; no real app/GNSS/ride/Auto/physical lean/energy acceptance")
-            if (cleanupErrors.isNotEmpty()) evidence.put("status", "CLEANUP_NONPASS_STOP_NO_FURTHER_MAPS")
-            else if (primaryFailure == null) evidence.put("status", "SCENE_AND_TRANSPORT_CLEANUP_PASS")
-            cleanup { File(directory, "scene.json").writeText(evidence.toString(2)) }
-            if (wasInterrupted) Thread.currentThread().interrupt()
-            if (cleanupErrors.isNotEmpty()) {
-                val error = AssertionError("Scene cleanup/evidence failed; stop, do not run further maps", cleanupErrors.first())
-                cleanupErrors.drop(1).forEach(error::addSuppressed)
-                if (primaryFailure != null) primaryFailure.addSuppressed(error) else throw error
+                // Never block UI/native cancellation on a worker join. Restore identity even on failures.
+                try { cleanup { transport?.cancelAndDrain() } }
+                finally {
+                    cleanup {
+                        savedProvider?.let { previous -> onMain {
+                            MapLibre.setModuleProvider(previous)
+                            check(MapLibre.getModuleProvider() === previous) { "Original provider identity was not restored" }
+                            providerRestored = true
+                        } }
+                    }
+                }
+                cleanup { transport?.assertHealthy() }
+                evidence.put("captureRequests", captures).put("poses", poses).put("mapCompositionMounts", mounts.get())
+                    .put("mapCompositionDisposed", disposed.get()).put("nativeViewsRemoved", nativeViewsRemoved)
+                    .put("providerIdentityRestored", providerRestored).put("transport", transport?.stats())
+                    .put("cleanupFailureCount", cleanupErrors.size).put("interruptedAtCleanup", wasInterrupted)
+                    .put("wholeApplicationNetworkSilenceProven", false)
+                    .put("scope", "Synthetic native Phone component only; no real app/GNSS/ride/Auto/physical lean/energy acceptance")
+                if (cleanupErrors.isNotEmpty()) evidence.put("status", "CLEANUP_NONPASS_STOP_NO_FURTHER_MAPS")
+                else if (primaryFailure == null) evidence.put("status", "SCENE_AND_TRANSPORT_CLEANUP_PASS")
+                if (cleanupErrors.isNotEmpty()) {
+                    val error = AssertionError("Scene cleanup failed; stop, do not run further maps", cleanupErrors.first())
+                    cleanupErrors.drop(1).forEach(error::addSuppressed)
+                    if (primaryFailure != null) primaryFailure.addSuppressed(error) else throw error
+                }
+            } catch (error: Throwable) {
+                cleanupFailure = error
+                throw error
+            } finally {
+                val closeErrors = mutableListOf<Throwable>()
+                try {
+                    ownedScenario?.let { scenario ->
+                        check(ownedHost.get() === shell)
+                        scenario.close()
+                        check(scenario.state == Lifecycle.State.DESTROYED)
+                        onMain { check(checkNotNull(shell).isDestroyed) }
+                        hostScenarioClosed = true
+                        ownedHost.set(null)
+                    }
+                } catch (error: Throwable) { closeErrors += error }
+                evidence.put("hostScenarioAcquired", ownedScenario != null)
+                    .put("hostScenarioClosed", if (ownedScenario == null) JSONObject.NULL else hostScenarioClosed)
+                    .put("hostClosureFailureCount", closeErrors.size)
+                    .put("privacyContentRestoration", "Only fresh owned instance replaced; closing disposes it. Next ordinary onCreate restores unchanged static privacy UI.")
+                if (closeErrors.isNotEmpty()) evidence.put("status", "HOST_CLOSURE_NONPASS_STOP_NO_FURTHER_MAPS")
+                try { File(directory, "scene.json").writeText(evidence.toString(2)) }
+                catch (error: Throwable) { closeErrors += error }
+                if (wasInterrupted) Thread.currentThread().interrupt()
+                if (closeErrors.isNotEmpty()) {
+                    val error = AssertionError("Owned host closure/evidence failed; stop, no further maps", closeErrors.first())
+                    closeErrors.drop(1).forEach(error::addSuppressed)
+                    val previousFailure = cleanupFailure ?: primaryFailure
+                    if (previousFailure != null) previousFailure.addSuppressed(error) else throw error
+                }
             }
         }
     }
@@ -489,15 +546,17 @@ class Moto0110PhoneDrivingScene {
         visit(this, 0)
         return result
     }
-    /** Native GPU screenshot, guarded owned foreground scene, at most two one-shot captures. */
+    /** Native GPU screenshot, guarded owned QA rehost, at most two one-shot captures. */
     private fun capture(activity: Activity, directory: File, name: String) {
         check(captures < 2)
         fun ownedFocusedScene(): IntArray = onMain {
-            check(activity.javaClass == ComponentActivity::class.java && activity.packageName == "org.iz.navigation.batterycheck")
+            check(activity.javaClass == HealthPrivacyActivity::class.java && activity.packageName == "org.iz.navigation.batterycheck")
+            check(ownedHost.get() === activity)
+            check(activity.componentName == ComponentName("org.iz.navigation.batterycheck", HealthPrivacyActivity::class.java.name))
             check(!activity.isFinishing && !activity.isDestroyed)
-            check((activity as ComponentActivity).lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+            check((activity as HealthPrivacyActivity).lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
             check(ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).single() === activity)
-            check(activity.hasWindowFocus() && activity.window.decorView.hasWindowFocus()) { "Owned blank scene must have foreground window focus" }
+            check(activity.hasWindowFocus() && activity.window.decorView.hasWindowFocus()) { "Owned QA privacy rehost must have foreground window focus" }
             val view = checkNotNull(requestedView.get())
             val map = checkNotNull(mapRef.get())
             sameMap(activity, view, map)
@@ -547,7 +606,8 @@ class Moto0110PhoneDrivingScene {
                 .put("method", "UiAutomation.takeScreenshot").put("elapsedRealtime", SystemClock.elapsedRealtime())
                 .put("displayPixels", JSONArray(listOf(captured.width, captured.height)))
                 .put("ownedDecorCropScreenPixels", JSONArray(cropBefore.toList()))
-                .put("ownedBlankResumedFocusedBeforeAndAfter", true)
+                .put("ownedRehostResumedFocusedBeforeAndAfter", true)
+                .put("hostClass", activity.javaClass.name).put("hostComponent", activity.componentName.flattenToString())
                 .put("sameMapViewIdentity", System.identityHashCode(requestedView.get()))
                 .put("sameMapIdentity", System.identityHashCode(mapRef.get())).toString(2))
         } finally {
