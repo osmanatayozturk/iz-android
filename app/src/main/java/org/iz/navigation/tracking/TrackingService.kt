@@ -27,6 +27,10 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.withLock
 import org.iz.navigation.power.PostJourneyAnalysis
 import org.iz.navigation.power.PowerDiagnostics
+import org.iz.navigation.lean.LeanCaptureController
+import org.iz.navigation.lean.LeanSettingsStore
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collect
 
 class TrackingService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -41,6 +45,7 @@ class TrackingService : Service() {
     private var sessionFilter = PositionFilter()
     private var filteredSessionId: String? = null
     private var sensorManager: SensorManager? = null
+    private lateinit var leanCapture: LeanCaptureController
     private var walkingListener: SensorEventListener? = null
     private var walkingCounter: WalkingStepCounter? = null
     private var walkingJourneyId: String? = null
@@ -83,6 +88,7 @@ class TrackingService : Service() {
                         return@withLock
                     }
                     for (location in result.locations.sortedBy { it.time }) {
+                        leanCapture.onLocation(journey.id, location)
                         if (location.time < journey.startedAt) continue
                         if (TrackingPolicy.automaticCandidateDeadline(journey)?.let { location.time >= it } == true) continue
                         val sample = PositionSample(
@@ -109,6 +115,8 @@ class TrackingService : Service() {
                         if (journey.status == JourneyStatus.TEMPORARY && automaticDistance.qualified) {
                             journey = repository.resolveAutomaticCandidate(journey.id, now, restart = settings.enabled) ?: return@withLock
                             if (journey.status != JourneyStatus.CONFIRMED) continue
+                            leanCapture.sync(journey)
+                            syncLocationDemand(journey)
                             settings.lastDetectionDecision = "500 metre tamamlandı; yolculuk başlangıcından itibaren kaydedildi."
                             updateNotification(journey)
                             TrackingNotifications.prompt(this@TrackingService, journey.id, "journey", "Yolculuğun kaydediliyor",
@@ -133,6 +141,7 @@ class TrackingService : Service() {
         diagnostics = LocationDiagnostics(java.io.File(noBackupFilesDir, "diagnostics"))
         locationClient = LocationServices.getFusedLocationProviderClient(this)
         sensorManager = getSystemService(SensorManager::class.java)
+        leanCapture = LeanCaptureController(this) { if (!destroyed) refresh(this) }
         TrackingNotifications.channels(this)
         try {
             startForeground(TrackingNotifications.RECORDING_ID,
@@ -143,6 +152,18 @@ class TrackingService : Service() {
             settings.lastError = "Konum servisi açılamadı. Konum izinlerini kontrol edip uygulama içinden başlat."
             stopSelf()
             return
+        }
+        scope.launch {
+            LeanSettingsStore.get(this@TrackingService).state.combine(repository.journeys) { _, trips -> trips }
+                .collect {
+                    TrackingCoordinator.mutex.withLock {
+                        if (!destroyed) {
+                            val current = runningJourneyId?.let { repository.getJourney(it) }
+                            leanCapture.sync(current)
+                            if (current != null || sessionDemand != null) syncLocationDemand(current)
+                        }
+                    }
+                }
         }
         scope.launch {
             while (isActive) {
@@ -171,6 +192,7 @@ class TrackingService : Service() {
                         return@withLock
                     }
                     syncWalkingSensor(journey)
+                    leanCapture.sync(journey)
                     syncLocationDemand(journey)
                     updateNotification(journey)
                     if (journey.status == JourneyStatus.CONFIRMED && dwell.shouldPrompt(now, settings.stopMinutes)) {
@@ -239,6 +261,7 @@ class TrackingService : Service() {
                             repository.getJourney(id)?.let { current ->
                                 val journey = refreshAutomaticWindow(current, System.currentTimeMillis()) ?: return@let
                                 syncWalkingSensor(journey)
+                                leanCapture.sync(journey)
                                 syncLocationDemand(journey)
                                 updateNotification(journey)
                             }
@@ -262,6 +285,7 @@ class TrackingService : Service() {
                                 return@withLock
                             }
                             if (journey != null && journey.endedAt == null) {
+                                leanCapture.stop()
                                 repository.finishJourney(journey.id)
                                 settings.suppressedActivity = settings.currentActivity
                             }
@@ -293,6 +317,7 @@ class TrackingService : Service() {
         if (runningJourneyId != journey.id) {
             val points = repository.journeyPoints(journey.id)
             if (destroyed) { repository.markInterrupted(journey.id); return@withContext }
+            leanCapture.stop()
             stopWalkingSensor()
             // Session and diary use one callback. Only the evidence filter changes with the diary identity.
             locationClient.removeLocationUpdates(dwellCallback)
@@ -303,14 +328,16 @@ class TrackingService : Service() {
             runningJourneyId = journey.id
         }
         syncWalkingSensor(journey)
+        leanCapture.sync(journey)
         updateNotification(journey)
         (TrackingPolicy.automaticCandidateDeadline(journey) ?: journey.expiresAt)?.let { ExpirationWorker.at(this@TrackingService, it) }
         ExpirationWorker.schedule(this@TrackingService)
         syncLocationDemand(journey)
     }
 
-    private fun detachDiary(id: String) {
+    private suspend fun detachDiary(id: String) {
         if (runningJourneyId != id) return
+        leanCapture.stop()
         stopWalkingSensor()
         runningJourneyId = null
         attachedJourneyId = null
@@ -334,7 +361,7 @@ class TrackingService : Service() {
             stopSelf()
             return
         }
-        val high = session?.highFrequency == true || navigationJourneyId == journey?.id && journey != null && journey.status == JourneyStatus.CONFIRMED
+        val high = leanCapture.captures(journey?.id) || session?.highFrequency == true || navigationJourneyId == journey?.id && journey != null && journey.status == JourneyStatus.CONFIRMED
         val interval = if (high) 1000L else 5000L
         // Notification ownership changes even when cadence does not.
         if (journey == null) updateSessionNotification()
@@ -509,6 +536,7 @@ class TrackingService : Service() {
 
     override fun onDestroy() {
         destroyed = true
+        if (::leanCapture.isInitialized) leanCapture.close()
         delivery.stop()
         publishDelivery()
         diagnostics.record(LocationDiagnostics.Event.STOPPED, null, null)

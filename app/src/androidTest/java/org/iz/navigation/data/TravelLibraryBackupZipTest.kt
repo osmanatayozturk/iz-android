@@ -51,7 +51,7 @@ class TravelLibraryBackupZipTest {
         backup.exportTo(uri(archive))
         ZipFile(archive).use { zip ->
             val json = JSONObject(zip.getInputStream(zip.getEntry("manifest.json")).bufferedReader().use { it.readText() })
-            assertEquals(7, json.getInt("version"))
+            assertEquals(8, json.getInt("version"))
             listOf("savedPlans", "importedTracks", "collections", "memberships").forEach { assertEquals(1, json.getJSONArray(it).length()) }
             listOf("healthSamples", "watchHealthSessions", "watchHealthSamples").forEach { assertEquals(0, json.getJSONArray(it).length()) }
             assertArrayEquals(photoBytes, zip.getInputStream(zip.getEntry(before.photos.single().relativePath)).use { it.readBytes() })

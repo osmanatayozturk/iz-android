@@ -2,6 +2,17 @@
 
 [İz 0.10.0 telefon APK'sını indirin](https://github.com/osmanatayozturk/iz-android/releases/download/v0.10.0/iz-0.10.0-android.apk). Paket Android 10 veya üzerini ve Google Play hizmetlerini gerektirir. [Sürüm notları ve doğrulama sonuçları](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.10.0).
 
+## 0.11.0 geliştirme adayı
+
+**Durum:** 27 Ekim 2026 itibarıyla geliştirme sürüyor. Aşağıdakiler planlanan davranıştır; yayımlanmış uygulamada kullanılabilecek bir kullanım kılavuzu değildir. Yayımlanmış telefon sürümü 0.10.1 / code 20'dir.
+
+- **Motosiklet rotası ve hedefleri:** Mevcut Motosiklet türü korunur; ayrı işe gidiş modu veya profili eklenmez. En hızlı rota ve bilinen kaplamasız yollardan kaçınma varsayılanı planlanır; otoyol ve ücretli yol açık kalır, kaydedilmiş tercihler korunur. Ev ve İş hedefi yalnız kullanıcının kayıtlı yerlerinden açıkça atanır. Kısayol türü veya kaydı değiştirmez; rota önizlemesi ve başlatma kullanıcı eylemidir. Yol verisinin eksikliği asfalt veya güvenlik garantisi değildir; desteklenmeyen tercih açıklanır ve sessizce otomobil rotasına geçilmez.
+- **Sürüş kamerası:** Araba/motosiklette kesinleşmiş kayıt veya yönlendirme sırasında telefon ve Android Auto haritasının hız ve yaklaşan manevraya göre kadrajı uyarlaması planlanır. Planlama, boşta bekleme ve geçici kayıt adayı kapsam dışıdır. Elle kaydırma/yakınlaştırma takip görünümünü durdurur; konuma dönme takibi açar. Düz görünüm ve genel bakış seçenekleri korunur; Android Auto alanı bilinmiyor veya küçükse düz görünüm kullanılır. Telefonda mevcut ekran yönü tercihi korunur.
+- **Yolculuk sonrası yatış tahmini:** İsteğe bağlı ve deneysel özellik yalnız tamamlanmış motosiklet yolculuğundan sonra hesaplanır. Açık tercih, gövdeye sabitlenmiş telefon, uygun kalibrasyon ve yeterli sensör/GPS örnekleri gerekir. Gidon veya bilinmeyen montaj, eksik kalibrasyon ya da yetersiz örnek sayısal sonuç vermez. Saatin bilek hareketi gövde açısını temsil etmez; tehlikeli manevra istenmez. Canlı açı göstergesi planlanmaz. Kayıt ve navigasyon kalmadığında, pil en az %20 ise analiz çalışabilir; yeni kayıt veya düşük pilde bekler. Yatış yakalama açık Motosiklet kaydında 1 saniyelik GPS hedefi planlanır; diğer kayıtların sıklığı değişmez.
+- **Veri ve sınırlar:** Ham sensör örnekleri uygulamanın özel yerel verisi olarak, Android otomatik yedekleme ve paylaşımından ayrı tutulur. Sürümlü manuel ZIP yedeği analiz bekleyen kapatılmış ham örnekleri ve kalıcı sonuçları içerebilir. Yatış değeri grup paylaşımına, otomatik yüklemeye veya gizli güç tanılamasına eklenmez. Eski yolculuklara geriye dönük tahmin üretilmez; uygulama temel kayıt ve navigasyonu özellik kullanılamadığında da sürdürür. Fiziksel doğruluk, güven yüzdesi, enerji kazancı veya sürüş güvenliği iddiası yoktur.
+
+Wear OS 0.6.1 / code 11 ve telefon-saat iletişimi v6'nın değişmeden kalması planlanır. Bu özellikler tamamlanmış, test edilmiş veya kabul edilmiş değildir. Gerçek sonuçlar ve kullanım adımları ancak aday doğrulanıp yayıma hazırlandığında güncellenir.
+
 ## 0.10.1 — Yer arama ve yolculuk işlemleri
 
 Bu bölüm 0.10.1 kullanımını açıklar. Yukarıdaki indirme bağlantısı 0.10.0 paketine aittir; her sürümün paket ve doğrulanmış sonuçları kendi [Release kaydında](https://github.com/osmanatayozturk/iz-android/releases) bulunur.

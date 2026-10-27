@@ -109,17 +109,27 @@ private fun joinApproachToSelection(approach: PlannedRoute, suffix: PlannedRoute
     ).requireUsablePreferences()
 }
 
-internal fun RoutePreferences.json() = JSONObject().put("avoidHighways", avoidHighways).put("avoidTolls", avoidTolls).put("avoidFerries", avoidFerries)
+internal fun RoutePreferences.json() = JSONObject().put("avoidHighways", avoidHighways).put("avoidTolls", avoidTolls).put("avoidFerries", avoidFerries).put("avoidUnpaved", avoidUnpaved)
 
 internal fun routePreferences(json: JSONObject?, defaults: RoutePreferences): RoutePreferences {
     if (json == null) return defaults
     fun choice(name: String, default: Boolean): Boolean = if (!json.has(name)) default else
         (json.get(name) as? Boolean ?: throw IllegalArgumentException("Geçersiz rota tercihi."))
-    return RoutePreferences(choice("avoidHighways", defaults.avoidHighways), choice("avoidTolls", defaults.avoidTolls), choice("avoidFerries", defaults.avoidFerries))
+    return RoutePreferences(choice("avoidHighways", defaults.avoidHighways), choice("avoidTolls", defaults.avoidTolls), choice("avoidFerries", defaults.avoidFerries), choice("avoidUnpaved", defaults.avoidUnpaved))
 }
 
 fun RoutePreferences.matrixUnavailableReason(transport: Transport): String? = when {
     transport !in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE) -> "Bu ulaşım türünde durak sırası önerisi kullanılamıyor."
-    avoidHighways || avoidFerries -> "Matrix otoyol veya feribot tercihini uygulayamıyor. Bu tercihler açıkken durak sırası önerilmez."
+    avoidHighways || avoidFerries || avoidUnpaved -> "Matrix otoyol, feribot veya toprak yol tercihini uygulayamıyor. Bu tercihler açıkken durak sırası önerilmez."
     else -> null
 }
+
+/** Requested avoidance is not a certificate that an unknown/misclassified road is paved. */
+internal fun surfacePreferenceWarnings(preferences: RoutePreferences, provider: RouteProvider, transport: Transport): List<String> =
+    if (!preferences.avoidUnpaved) emptyList()
+    else if (transport !in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE))
+        listOf("Bu ulaşım türünde toprak yoldan kaçınma isteği sağlayıcıya uygulanamadı.")
+    else listOf(when (provider) {
+        RouteProvider.VALHALLA -> "Bilinen toprak yollardan kaçınma istendi. Sunucu desteği ve yol yüzeyi doğrulanamadı; başlangıç/bitişte istisna olabilir."
+        RouteProvider.TOMTOM -> "Bilinen toprak yollardan kaçınma istendi. Haritadaki eksik veya bilinmeyen yüzeyler için asfalt garantisi verilemez."
+    })

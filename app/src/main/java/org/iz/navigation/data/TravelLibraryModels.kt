@@ -30,3 +30,7 @@ data class CollectionMembership(
     val sortOrder: Long,
 )
 
+
+enum class DestinationShortcutKind { HOME, WORK }
+data class DestinationShortcutRef(val kind: DestinationShortcutKind, val placeId: String)
+data class DestinationShortcut(val kind: DestinationShortcutKind, val place: Place)

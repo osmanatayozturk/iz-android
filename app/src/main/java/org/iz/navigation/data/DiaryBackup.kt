@@ -12,97 +12,169 @@ import java.util.zip.ZipOutputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
+import org.iz.navigation.lean.LeanArchive
+import org.iz.navigation.lean.LeanBackupCodec
+import org.iz.navigation.lean.LeanStore
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** User-initiated, versioned ZIP backup; journal content is never uploaded automatically. */
+/** User-initiated versioned ZIP; journal and motion content are never uploaded automatically. */
 class DiaryBackup(context: Context, private val repository: DiaryRepository) {
     private val context = context.applicationContext
 
     suspend fun exportTo(uri: Uri, includeHealth: Boolean = false) = withContext(Dispatchers.IO) {
-        val snapshot = exportable(repository.snapshot(), includeHealth)
-        DiaryRules.validate(snapshot)
-        validateMapSnapshot(snapshot)
-        val paths = snapshot.photos.map { it.relativePath }.distinct()
-        require(paths.size <= MAX_FILES) { "Yedekte çok fazla fotoğraf var." }
-        val totalBytes = paths.sumOf { path ->
-            val file = repository.photoFile(path)
-            require(file.isFile && file.length() <= MAX_PHOTO_BYTES) { "Fotoğraf eksik veya 50 MB sınırından büyük: $path" }
-            file.length()
-        }
-        require(totalBytes <= MAX_TOTAL_BYTES) { "Yedek 512 MB sınırını aşıyor." }
-        val manifest = BackupJson.encode(snapshot, includeHealth).toString().toByteArray(Charsets.UTF_8)
-        require(manifest.size <= MAX_MANIFEST_BYTES) { "Günlük verisi 32 MB sınırını aşıyor." }
-        require(totalBytes + manifest.size <= MAX_TOTAL_BYTES) { "Yedek 512 MB sınırını aşıyor." }
-        val output = context.contentResolver.openOutputStream(uri, "wt")
-            ?: error("Yedek dosyası açılamadı.")
-        ZipOutputStream(output.buffered()).use { zip ->
-            zip.putNextEntry(ZipEntry(MANIFEST))
-            zip.write(manifest)
-            zip.closeEntry()
-            paths.forEach { path ->
-                zip.putNextEntry(ZipEntry(path))
-                repository.photoFile(path).inputStream().use { it.copyTo(zip) }
+        LeanStore.withSnapshotLease {
+            val snapshot = exportable(repository.snapshot(), includeHealth)
+            DiaryRules.validate(snapshot)
+            validateMapSnapshot(snapshot)
+            LeanBackupCodec.validateSnapshot(snapshot)
+            val paths = snapshot.photos.map { it.relativePath }.distinct()
+            val rawSessions = snapshot.leanSessions.filter { it.chunks.isNotEmpty() }
+            require(paths.size + rawSessions.size + 1 <= MAX_FILES) { "Yedekte çok fazla dosya var." }
+            val photoBytes = paths.sumOf { path ->
+                val file = repository.photoFile(path)
+                require(file.isFile && file.length() <= MAX_PHOTO_BYTES) { "Fotoğraf eksik veya 50 MB sınırından büyük." }
+                file.length()
+            }
+            val manifest = BackupJson.encode(snapshot, includeHealth).toString().toByteArray(Charsets.UTF_8)
+            require(manifest.size <= MAX_MANIFEST_BYTES) { "Günlük verisi 32 MB sınırını aşıyor." }
+            require(photoBytes + manifest.size + LeanArchive.framedBytes(rawSessions) <= MAX_TOTAL_BYTES) {
+                "Yedek 512 MB sınırını aşıyor."
+            }
+            val output = context.contentResolver.openOutputStream(uri, "wt") ?: error("Yedek dosyası açılamadı.")
+            val store = repository.leanStore
+            ZipOutputStream(output.buffered()).use { zip ->
+                zip.putNextEntry(ZipEntry(MANIFEST))
+                zip.write(manifest)
                 zip.closeEntry()
+                var written = manifest.size.toLong()
+                paths.forEach { path ->
+                    zip.putNextEntry(ZipEntry(path))
+                    written += repository.photoFile(path).inputStream().use {
+                        copyLimited(it, zip, MAX_PHOTO_BYTES, MAX_TOTAL_BYTES - written)
+                    }
+                    zip.closeEntry()
+                }
+                for (session in rawSessions) {
+                    zip.putNextEntry(ZipEntry(LeanArchive.rawName(session.input.token.id)))
+                    val remaining = MAX_TOTAL_BYTES - written
+                    var entryBytes = 0L
+                    val bounded = object : OutputStream() {
+                        override fun write(value: Int) {
+                            require(entryBytes < remaining) { "Yedek 512 MB sınırını aşıyor." }
+                            zip.write(value); entryBytes++
+                        }
+                        override fun write(bytes: ByteArray, offset: Int, length: Int) {
+                            require(length.toLong() <= remaining - entryBytes) { "Yedek 512 MB sınırını aşıyor." }
+                            zip.write(bytes, offset, length); entryBytes += length
+                        }
+                    }
+                    store.writeRaw(session, bounded)
+                    require(entryBytes == LeanArchive.framedBytes(listOf(session))) { "Sensör yedeği boyutu eşleşmedi." }
+                    written += entryBytes
+                    zip.closeEntry()
+                }
             }
         }
     }
 
     suspend fun importFrom(uri: Uri, afterReplace: suspend () -> Unit = {}) = withContext(Dispatchers.IO) {
-        val staging = File(context.cacheDir, "diary-import-${UUID.randomUUID()}")
-        check(staging.mkdirs()) { "Yedek için geçici alan oluşturulamadı." }
-        val installed = mutableListOf<File>()
-        var committed = false
-        try {
-            val extracted = linkedMapOf<String, File>()
-            var expandedBytes = 0L
-            val input = context.contentResolver.openInputStream(uri) ?: error("Yedek dosyası açılamadı.")
-            ZipInputStream(input.buffered()).use { zip ->
-                while (true) {
-                    val entry = zip.nextEntry ?: break
-                    require(!entry.isDirectory) { "Yedekte beklenmeyen klasör var." }
-                    val name = entry.name
-                    require(name == MANIFEST || DiaryRules.isSafePhotoPath(name)) { "Güvenli olmayan yedek yolu." }
-                    require(name !in extracted && extracted.size <= MAX_FILES) { "Yinelenen dosya veya çok fazla dosya." }
-                    // Untrusted ZIP paths are never used as filesystem paths.
-                    val file = File(staging, "entry-${extracted.size}")
-                    val limit = if (name == MANIFEST) MAX_MANIFEST_BYTES.toLong() else MAX_PHOTO_BYTES
-                    val copied = file.outputStream().use { copyLimited(zip, it, limit, MAX_TOTAL_BYTES - expandedBytes) }
-                    expandedBytes += copied
-                    extracted[name] = file
-                    zip.closeEntry()
+        // Invalidate/cancel analysis before acquiring raw lease, preserving Raw -> Privacy -> Room order.
+        repository.withRawMutationLease {
+            val staging = File(context.cacheDir, "diary-import-" + UUID.randomUUID())
+            check(staging.mkdirs()) { "Yedek için geçici alan oluşturulamadı." }
+            val installed = mutableListOf<File>()
+            var committed = false
+            try {
+                val extracted = linkedMapOf<String, File>()
+                val rawSources = linkedMapOf<String, List<File>>()
+                val names = linkedSetOf<String>()
+                var expandedBytes = 0L
+                var stagedBytes = 0L
+                var chunks = 0
+                val store = repository.leanStore
+                val input = context.contentResolver.openInputStream(uri) ?: error("Yedek dosyası açılamadı.")
+                ZipInputStream(input.buffered()).use { zip ->
+                    while (true) {
+                        val entry = zip.nextEntry ?: break
+                        require(!entry.isDirectory) { "Yedekte beklenmeyen klasör var." }
+                        val name = entry.name
+                        require(name == MANIFEST || DiaryRules.isSafePhotoPath(name) || LeanArchive.isRawName(name)) {
+                            "Güvenli olmayan yedek yolu."
+                        }
+                        require(names.size < MAX_FILES && names.add(name)) { "Yinelenen dosya veya çok fazla dosya." }
+                        val isRaw = LeanArchive.isRawName(name)
+                        val limit = when {
+                            name == MANIFEST -> MAX_MANIFEST_BYTES.toLong()
+                            isRaw -> LeanStore.MAX_RAW_BYTES + 4L * LeanStore.MAX_CHUNKS
+                            else -> MAX_PHOTO_BYTES
+                        }
+                        var entryBytes = 0L
+                        val bounded = object : InputStream() {
+                            private fun count(size: Int): Int {
+                                if (size > 0) {
+                                    entryBytes += size; expandedBytes += size
+                                    require(entryBytes <= limit && expandedBytes <= MAX_TOTAL_BYTES) {
+                                        "Yedek açıldığında izin verilen boyutu aşıyor."
+                                    }
+                                }
+                                return size
+                            }
+                            override fun read(): Int = zip.read().also { if (it >= 0) count(1) }
+                            override fun read(bytes: ByteArray, offset: Int, length: Int): Int =
+                                count(zip.read(bytes, offset, length))
+                        }
+                        if (isRaw) {
+                            rawSources[name] = LeanArchive.stage(bounded, staging) { bytes ->
+                                require(++chunks <= LeanStore.MAX_CHUNKS)
+                                val next = stagedBytes + bytes
+                                require(next <= LeanStore.MAX_RAW_BYTES)
+                                store.checkIncomingBudget(next)
+                                stagedBytes = next
+                            }
+                        } else {
+                            // Generated names only, never ZIP path -> filesystem path.
+                            val file = File(staging, "entry-" + names.size)
+                            file.outputStream().use { bounded.copyTo(it) }
+                            extracted[name] = file
+                        }
+                        zip.closeEntry()
+                    }
                 }
+                val manifest = extracted[MANIFEST] ?: error("Yedek içeriği bulunamadı.")
+                val snapshot = BackupJson.decode(JSONObject(manifest.readText(Charsets.UTF_8)))
+                DiaryRules.validate(snapshot)
+                validateMapSnapshot(snapshot)
+                LeanBackupCodec.validateSnapshot(snapshot)
+                require(snapshot.journeys.none { it.status == JourneyStatus.TEMPORARY }) { "Yedek geçici yolculuk içeriyor." }
+                val photoPaths = snapshot.photos.map { it.relativePath }.toSet()
+                LeanArchive.validateEntryNames(names, photoPaths, snapshot.leanSessions)
+                snapshot.leanSessions.forEach { session ->
+                    LeanArchive.validate(session, rawSources[LeanArchive.rawName(session.input.token.id)].orEmpty())
+                }
+                // Install under fresh names, preserving every old photo if the transaction fails.
+                val remapped = photoPaths.associateWith { original ->
+                    val extension = original.substringAfterLast('.', "jpg").lowercase()
+                        .takeIf { it.matches(Regex("[a-z0-9]{1,8}")) } ?: "jpg"
+                    val relativePath = "photos/" + UUID.randomUUID() + "." + extension
+                    val target = repository.photoFile(relativePath)
+                    check(target.parentFile?.mkdirs() == true || target.parentFile?.isDirectory == true)
+                    installed += target
+                    extracted.getValue(original).inputStream().use { source -> target.outputStream().use { source.copyTo(it) } }
+                    relativePath
+                }
+                withContext(NonCancellable) {
+                    repository.restore(snapshot.copy(photos = snapshot.photos.map {
+                        it.copy(relativePath = remapped.getValue(it.relativePath))
+                    }), rawSources)
+                    committed = true
+                    afterReplace()
+                }
+            } finally {
+                if (!committed) installed.forEach { runCatching { it.delete() } }
+                staging.listFiles()?.forEach { it.delete() }
+                staging.delete()
             }
-            val manifest = extracted[MANIFEST] ?: error("Yedek içeriği bulunamadı.")
-            val snapshot = BackupJson.decode(JSONObject(manifest.readText(Charsets.UTF_8)))
-            DiaryRules.validate(snapshot)
-            validateMapSnapshot(snapshot)
-            require(snapshot.journeys.none { it.status == JourneyStatus.TEMPORARY }) { "Yedek geçici yolculuk içeriyor." }
-            val photoPaths = snapshot.photos.map { it.relativePath }.toSet()
-            require(extracted.keys == photoPaths + MANIFEST) { "Yedek fotoğrafları eksik veya beklenmeyen dosyalar içeriyor." }
-            // Install under fresh names before the transaction, preserving every old photo on failure.
-            val remapped = photoPaths.associateWith { original ->
-                val extension = original.substringAfterLast('.', "jpg").lowercase()
-                    .takeIf { it.matches(Regex("[a-z0-9]{1,8}")) } ?: "jpg"
-                val relativePath = "photos/${UUID.randomUUID()}.$extension"
-                val target = repository.photoFile(relativePath)
-                check(target.parentFile?.mkdirs() == true || target.parentFile?.isDirectory == true)
-                installed += target
-                extracted.getValue(original).inputStream().use { source -> target.outputStream().use { source.copyTo(it) } }
-                relativePath
-            }
-            // A cancellation after the DB commits must not make finally remove its newly installed photos.
-            withContext(NonCancellable) {
-                repository.restore(snapshot.copy(photos = snapshot.photos.map { it.copy(relativePath = remapped.getValue(it.relativePath)) }))
-                committed = true
-                // Recording teardown must never change the old diary if the transaction fails.
-                afterReplace()
-            }
-        } finally {
-            if (!committed) installed.forEach { runCatching { it.delete() } }
-            // Staging was created by this method under our private cache, never from a ZIP path.
-            staging.listFiles()?.forEach { it.delete() }
-            staging.delete()
         }
     }
 
@@ -123,6 +195,7 @@ class DiaryBackup(context: Context, private val repository: DiaryRepository) {
             watchHealthSessions = if (includeHealth) snapshot.watchHealthSessions.filter { it.journeyId in ids } else emptyList(),
             watchHealthSamples = if (includeHealth) snapshot.watchHealthSamples.filter { it.journeyId in ids } else emptyList(),
             memberships = snapshot.memberships.filter { it.journeyId in ids },
+            leanSessions = snapshot.leanSessions.filter { it.input.token.journeyId in ids },
         )
     }
 
@@ -147,9 +220,8 @@ class DiaryBackup(context: Context, private val repository: DiaryRepository) {
         private const val MAX_TOTAL_BYTES = 512 * 1024 * 1024L
     }
 }
-
 internal object BackupJson {
-    private const val VERSION = 7
+    private const val VERSION = 8
     private const val FORMAT = "org.iz.navigation.backup"
     // Read compatibility for user-created backups from the former application identity.
     private const val LEGACY_FORMAT = "com.atay.iz.backup"
@@ -201,7 +273,10 @@ internal object BackupJson {
         "importedTracks" to array(value.importedTracks, TravelLibraryJson::track),
         "collections" to array(value.collections, TravelLibraryJson::collection),
         "memberships" to array(value.memberships, TravelLibraryJson::membership),
+        "destinationShortcuts" to array(value.destinationShortcuts) { json("kind" to it.kind.name, "placeId" to it.placeId) },
+        "leanSessions" to LeanBackupCodec.encode(value.leanSessions),
     ).also {
+        LeanBackupCodec.validateSnapshot(value)
         TravelLibraryRules.validate(value)
         PlaceOrderRules.validate(value.places)
         validateMapSnapshot(value)
@@ -292,9 +367,12 @@ internal object BackupJson {
             },
             collections = libraryRecords("collections", parse = TravelLibraryJson::readCollection),
             memberships = libraryRecords("memberships", TravelLibraryRules.MAX_MEMBERSHIPS, TravelLibraryJson::readMembership),
+            destinationShortcuts = if (version < 8 || !value.has("destinationShortcuts")) emptyList() else
+                libraryRecords("destinationShortcuts", 2) { DestinationShortcutRef(DestinationShortcutKind.valueOf(it.strictString("kind")), it.strictString("placeId")) },
+            leanSessions = if (version < 8 || !value.has("leanSessions")) emptyList() else LeanBackupCodec.decode(value.getJSONArray("leanSessions")),
         ).let { snapshot ->
             if (version < 6) snapshot.copy(places = PlaceOrderRules.legacy(snapshot.places, snapshot.visits)) else snapshot
-        }.also { DiaryRules.validate(it); validateMapSnapshot(it) }.let { snapshot ->
+        }.also { DiaryRules.validate(it); validateMapSnapshot(it); LeanBackupCodec.validateSnapshot(it) }.let { snapshot ->
             snapshot.copy(contributions = snapshot.contributions.map { if (it.status == ContributionStatus.SENDING) it.copy(status = ContributionStatus.UNKNOWN) else it },
                 mapEdits = snapshot.mapEdits.map { if (it.status == MapEditStatus.SENDING) it.copy(status = MapEditStatus.UNKNOWN) else it })
         }

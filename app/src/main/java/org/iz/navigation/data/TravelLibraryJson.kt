@@ -21,17 +21,20 @@ internal object TravelLibraryJson {
 
     fun plan(value: SavedRoutePlan): JSONObject = TravelLibraryRules.normalizePlan(value).let {
         obj("id" to it.id, "name" to it.name, "stops" to stops(it.stops), "transport" to it.transport.name,
-            "preferences" to obj("avoidHighways" to it.preferences.avoidHighways, "avoidTolls" to it.preferences.avoidTolls, "avoidFerries" to it.preferences.avoidFerries),
+            "preferences" to obj("avoidHighways" to it.preferences.avoidHighways, "avoidTolls" to it.preferences.avoidTolls, "avoidFerries" to it.preferences.avoidFerries, "avoidUnpaved" to it.preferences.avoidUnpaved),
             "travelSpeedKmh" to it.travelSpeedKmh, "originUsesCurrentLocation" to it.originUsesCurrentLocation, "createdAt" to it.createdAt, "updatedAt" to it.updatedAt)
     }
 
     fun readPlan(value: JSONObject): SavedRoutePlan {
         val preferences = value.getJSONObject("preferences")
         return TravelLibraryRules.normalizePlan(SavedRoutePlan(value.text("id"), value.text("name"), readStops(value.getJSONArray("stops")),
-            Transport.valueOf(value.text("transport")), RoutePreferences(preferences.boolean("avoidHighways"), preferences.boolean("avoidTolls"), preferences.boolean("avoidFerries")),
+            Transport.valueOf(value.text("transport")), RoutePreferences(preferences.boolean("avoidHighways"), preferences.boolean("avoidTolls"), preferences.boolean("avoidFerries"),
+                if (preferences.has("avoidUnpaved")) preferences.boolean("avoidUnpaved") else value.text("transport") == Transport.MOTORCYCLE.name),
             if (value.isNull("travelSpeedKmh")) null else value.number("travelSpeedKmh"), value.boolean("originUsesCurrentLocation"), value.integer("createdAt"), value.integer("updatedAt")))
     }
 
+    fun shortcut(value: DestinationShortcutRef): JSONObject = obj("kind" to value.kind.name, "placeId" to value.placeId)
+    fun readShortcut(value: JSONObject) = DestinationShortcutRef(DestinationShortcutKind.valueOf(value.text("kind")), value.text("placeId"))
     fun track(value: ImportedTrack): JSONObject = TravelLibraryRules.normalizeTrack(value).let {
         obj("id" to it.id, "name" to it.name, "createdAt" to it.createdAt, "segments" to array(it.segments) { segment ->
             obj("name" to segment.name, "trackName" to segment.trackName, "trackIndex" to segment.trackIndex,

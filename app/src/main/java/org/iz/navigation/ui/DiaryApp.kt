@@ -135,6 +135,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     var gpxPermissionPending by remember { mutableStateOf(false) }
     val gpxPermissionGate = remember { GpxStartPermissionGate() }
     val library = remember { TravelLibraryRepository(context) }
+    val destinationShortcuts by library.destinationShortcuts.collectAsStateWithLifecycle(initialValue = emptyList())
     val gpxImports: GpxImportViewModel = viewModel()
     val importedGpx by gpxImports.state.collectAsStateWithLifecycle()
     val navigation = (context.applicationContext as org.iz.navigation.IzApplication).navigation
@@ -474,7 +475,8 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     onMenu = { menuOpen = true }, onGroup = { groupPage = true }, onWeather = { weatherPage = true },
                     onPin = { openAddPlace(location = it) })
                 tab == 1 -> JourneysScreen(state, now, onJourney = { selectedJourney = it.id }, onStart = { transportAction = TransportAction() }, onConfirm = { transportAction = TransportAction(it.id) }, onReject = { j -> deletion = Deletion("Bu geçici rota silinecek ve açıksa takip duracak.") { vm.tracker.reject(j.id) } })
-                tab == 2 -> PlacesScreen(state, onPlace = { selectedPlace = it.id }, onAdd = { openAddPlace() }, onReorder = vm.repository::reorderPlaces)
+                tab == 2 -> PlacesScreen(state, onPlace = { selectedPlace = it.id }, onAdd = { openAddPlace() }, onReorder = vm.repository::reorderPlaces, shortcuts = destinationShortcuts,
+                    onShortcut = { kind, target -> vm.execute { library.setDestinationShortcut(kind, target?.id) } })
                 tab == 3 -> HeatmapScreen(state)
                 tab == 5 -> DiaryStatisticsScreen(state, now, onJourney = { selectedJourney = it.id })
                 else -> SettingsScreen(settings, refresh, backupBusy,
@@ -826,6 +828,7 @@ private fun JourneyDetail(journey: Journey, state: DiaryState, now: Long, onEdit
             item { Notice("Otomatik kayıt için 500 metre bekleniyor · Sıfırlanmaya ${countdown(deadline - now)}") }
         }
         item { JourneyHealthPanel(journey, state, now) }
+        item { LeanJourneyReportPanel(journey) }
         if (journey.endedAt != null && journey.status == JourneyStatus.CONFIRMED) item { OutlinedButton(onClick = onExportGpx, modifier = Modifier.fillMaxWidth()) { Text("GPX rotasını dışa aktar") } }
         if (journey.note.isNotBlank()) item { Text(journey.note) }
         item { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton(onClick = onAddPlace, Modifier.weight(1f)) { Icon(Icons.Outlined.AddLocationAlt, null); Text("Yer ekle") }; OutlinedButton(onClick = onPhoto, Modifier.weight(1f)) { Icon(Icons.Outlined.AddAPhoto, null); Text("Fotoğraf") } } }
@@ -878,6 +881,7 @@ private fun SettingsScreen(settings: TrackerSettings, refresh: Int, busy: Boolea
         item { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton(onClick = onExport, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.FileDownload, null); Text("Yedek dosyası oluştur") }; OutlinedButton(onClick = onImport, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.FileUpload, null); Text("Yedekten geri yükle") }; if (busy) LinearProgressIndicator(Modifier.fillMaxWidth()) } }
         item { HorizontalDivider() }
         item { HealthSettingsPanel(onMessage) }
+        item { LeanSetupPanel(onMessage) }
         item { OsmSettingsPanel(onContributions, onMessage) }
         item { OutlinedButton(onClick = onCommunity, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Forum, null); Spacer(Modifier.width(8.dp)); Text("OSM Topluluğu") } }
         item { Text("İz · ${BuildConfig.VERSION_NAME}\nKüçük yollar, güzel anılar.", style = MaterialTheme.typography.bodySmall, color = Muted) }

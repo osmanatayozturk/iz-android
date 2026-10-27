@@ -10,14 +10,21 @@ import kotlinx.coroutines.flow.*
 import org.iz.navigation.power.AnalysisInput
 import org.iz.navigation.power.PostJourneyAnalysis
 import org.iz.navigation.power.PowerDiagnostics
+import org.iz.navigation.lean.LeanStore
 
 class DiaryRepository internal constructor(context: Context, private val db: DiaryDatabase) {
     constructor(context: Context) : this(context, DiaryDatabase.get(context.applicationContext))
     private val appContext = context.applicationContext
+    internal val leanStore = LeanStore(appContext, db)
     private val dao = db.diaryDao()
     private val mapDao = db.mapEditDao()
     private val watchDao = db.watchHealthDao()
     private val libraryDao = db.travelLibraryDao()
+    /** Invalidate CPU work before waiting; all raw mutations order Raw lease -> privacy -> Room. */
+    internal suspend fun <T> withRawMutationLease(action: suspend () -> T): T {
+        val analysis = PostJourneyAnalysis.get(appContext)
+        return LeanStore.withReadyRawMutation(analysis::awaitReady, analysis::request, action)
+    }
     private val clock = flow {
         while (true) { emit(System.currentTimeMillis()); delay(1_000) }
     }
@@ -216,8 +223,9 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
     }
 
     /** Editors update only user-editable fields on the latest row, never stale recording state. */
-    suspend fun updateJourneyDetails(id: String, title: String, note: String, transport: Transport): Boolean = db.withTransaction {
+    suspend fun updateJourneyDetails(id: String, title: String, note: String, transport: Transport): Boolean = withRawMutationLease { privacyChange { _ -> db.withTransaction {
         val current = dao.journey(id) ?: return@withTransaction false
+        if (current.transport != transport) db.leanDao().clearJourney(id)
         dao.save(current.copy(
             title = title,
             note = note,
@@ -225,9 +233,9 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
             stepCount = current.stepCount.takeIf { transport.supportsSteps && current.transport.supportsSteps },
         ))
         true
-    }
+    } } }
 
-    suspend fun saveJourney(entity: Journey) = recordingChange { privacyChange { analysis -> db.withTransaction {
+    suspend fun saveJourney(entity: Journey) = recordingChange { withRawMutationLease { privacyChange { analysis -> db.withTransaction {
         require(entity.endedAt == null || entity.endedAt >= entity.startedAt)
         require(entity.stepCount == null || entity.stepCount >= 0)
         val active = dao.activeJourney(System.currentTimeMillis())
@@ -237,6 +245,7 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
         val steps = if (entity.transport.supportsSteps) {
             listOfNotNull(entity.stepCount, current?.takeIf { it.transport.supportsSteps }?.stepCount).maxOrNull()
         } else null
+        if (current != null && (current.transport != entity.transport || entity.status != JourneyStatus.CONFIRMED)) db.leanDao().clearJourney(entity.id)
         dao.save(entity.copy(stepCount = steps))
         libraryDao.pruneIneligibleMemberships()
         dao.pruneHealthOutsideJourney(entity.id, entity.startedAt, entity.endedAt ?: System.currentTimeMillis())
@@ -245,7 +254,7 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
                 current.transport != entity.transport || current.status != entity.status)) {
             analysis.purgeJourneys(setOf(entity.id))
         }
-    } } }
+    } } } }
 
     suspend fun savePlace(entity: Place) = db.withTransaction {
         require(entity.name.isNotBlank()) { "Yer adı gerekli." }
@@ -422,10 +431,12 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
         DiarySnapshot(dao.allJourneys(), dao.allPoints(), dao.allPlaces(), dao.allVisits(), dao.allPhotos(), dao.allDrafts(), dao.allContributions(), dao.allHealthSamples(),
             mapEdits = mapDao.all(), watchHealthSessions = watchDao.allSessions(), watchHealthSamples = watchDao.allSamples(),
             savedPlans = libraryDao.allPlans().map { it.model() }, importedTracks = libraryDao.allTracks().map { it.model() },
-            collections = libraryDao.allCollections().map { it.model() }, memberships = libraryDao.allMemberships().map { it.model() })
+            collections = libraryDao.allCollections().map { it.model() }, memberships = libraryDao.allMemberships().map { it.model() },
+            destinationShortcuts = libraryDao.allShortcuts().map { DestinationShortcutRef(DestinationShortcutKind.valueOf(it.kind), it.placeId) },
+            leanSessions = leanStore.snapshot())
     }
 
-    suspend fun restore(snapshot: DiarySnapshot) {
+    suspend fun restore(snapshot: DiarySnapshot, leanRaw: Map<String, List<File>> = emptyMap()) {
         DiaryRules.validate(snapshot)
         validateMapSnapshot(snapshot)
         require(snapshot.journeys.none { it.status == JourneyStatus.TEMPORARY }) { "Geçici yolculuklar geri yüklenemez." }
@@ -447,7 +458,7 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
         DiaryRules.validate(snapshot.copy(journeys = restoredJourneys, healthSamples = restoredHealth,
             watchHealthSessions = restoredWatchSessions, watchHealthSamples = restoredWatchSamples))
         deleteWithFiles(replaceAll = true) {
-            libraryDao.clearCollections(); libraryDao.clearTracks(); libraryDao.clearPlans()
+            libraryDao.clearShortcuts(); libraryDao.clearCollections(); libraryDao.clearTracks(); libraryDao.clearPlans()
             dao.clearHealthSamples(); dao.clearHealthSyncs()
             watchDao.clearSamples(); watchDao.clearSessions(); mapDao.clear()
             dao.clearContributions(); dao.clearDrafts(); dao.clearPhotos(); dao.clearVisits(); dao.clearPoints(); dao.clearJourneys(); dao.clearPlaces()
@@ -466,6 +477,8 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
             snapshot.importedTracks.forEach { libraryDao.storeTrack(TravelLibraryRules.normalizeTrack(it)) }
             snapshot.collections.forEach { libraryDao.save(JourneyCollectionEntity.from(it)) }
             libraryDao.saveMemberships(snapshot.memberships.map(CollectionMembershipEntity::from))
+            snapshot.destinationShortcuts.forEach { libraryDao.saveShortcut(DestinationShortcutEntity(it.kind.name, it.placeId)) }
+            leanStore.restoreSessions(snapshot.leanSessions, leanRaw)
         }
     }
 
@@ -501,7 +514,7 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
             removed.forEach { runCatching { photoFile(it).delete() } }
             return result
         }
-        return if (purgeJourneys || replaceAll) privacyChange { execute(it) } else execute(null)
+        return if (purgeJourneys || replaceAll) withRawMutationLease { privacyChange { execute(it) } } else execute(null)
     }
 
     private fun requireValidCoordinates(latitude: Double?, longitude: Double?) {

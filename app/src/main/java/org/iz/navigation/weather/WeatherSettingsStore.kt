@@ -89,7 +89,7 @@ internal object WeatherSettingsCodec {
 
     fun encode(value: RideWeatherSettings): String {
         validate(value)
-        return JSONObject().put("version", 3).put("voice", value.voiceEnabled).put("preferences", value.preferences.json())
+        return JSONObject().put("version", 4).put("voice", value.voiceEnabled).put("preferences", value.preferences.json())
             .put("alertsEnabled", value.alertsEnabled).put("travelSpeedKmh", value.travelSpeedKmh ?: JSONObject.NULL)
             .put("routeEndpoint", value.routeEndpoint).put("weatherEndpoint", value.weatherEndpoint)
             .put("probability", value.thresholds.precipitationProbabilityPercent)
@@ -102,7 +102,7 @@ internal object WeatherSettingsCodec {
         require(raw != null && raw.length <= 8192)
         val json = JSONObject(raw)
         val version = json.getInt("version")
-        require(version in 1..3)
+        require(version in 1..4)
         RideWeatherSettings(
             thresholds = WeatherThresholds(
                 json.getDouble("probability"), json.getDouble("precipitation"),

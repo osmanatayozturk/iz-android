@@ -31,6 +31,8 @@ import org.iz.navigation.speed.RoadSpeedSource
 import org.maplibre.android.maps.MapLibreMap
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.concurrent.CountDownLatch
@@ -154,6 +156,7 @@ class CarMapSurfaceTest {
                     RouteVertex(destination, 60.0)), 370.0, 60.0, now, transport = Transport.CAR)
             instrumentation.runOnMainSync {
                 renderer = CarMapSurface(TestCarContext.createCarContext(app)).also {
+                    it.setActive(true)
                     it.update(NavigationState(journey = journey, recording = true, route = route,
                         gpsStale = false, fix = NavigationFix(current, now, 5f),
                         roadSpeed = RoadSpeedState(57.6, RoadSpeedLimit(90.0, RoadSpeedSource.TOMTOM_POSTED,
@@ -170,6 +173,49 @@ class CarMapSurfaceTest {
             assertTrue("Own speed and generic source must reach the host views", viewDiagnostics().let {
                 it.contains("Hızım") && it.contains("58 km/sa") && it.contains("Genel yol sınırı · TomTom")
             })
+            instrumentation.runOnMainSync {
+                val output = renderer!!
+                val nativeMap = CarMapSurface::class.java.getDeclaredField("map").apply { isAccessible = true }
+                    .get(output) as MapLibreMap
+                val controls = CarMapSurface::class.java.getDeclaredField("interaction").apply { isAccessible = true }
+                    .get(output) as CarCameraInteraction
+                val fresh = NavigationState(guidance = true, sessionTransport = Transport.CAR, route = route,
+                    gpsStale = false, fix = NavigationFix(current, now, 5f))
+                for (manual in listOf(false, true)) for (stale in listOf(false, true))
+                    for (lostArea in listOf(Rect(), Rect(500, 0, 640, 360), Rect(160, 330, 640, 360))) {
+                    output.onVisibleAreaChanged(Rect(160, 0, 640, 400))
+                    output.update(fresh)
+                    output.recenter()
+                    assertEquals("Transition must start from an adaptive frame", 45.0, nativeMap.cameraPosition.tilt, .01)
+                    if (manual) { output.panMode(true); output.onScroll(45f, 20f) }
+                    if (stale) output.update(fresh.copy(gpsStale = true,
+                        fix = NavigationFix(WeatherCoordinate(42.0, 30.0), now - 60_000, 5f)))
+                    val held = nativeMap.cameraPosition
+                    output.onVisibleAreaChanged(lostArea)
+                    val flattened = nativeMap.cameraPosition
+                    assertEquals(0.0, flattened.tilt, .01)
+                    assertEquals(0.0, flattened.bearing, .01)
+                    assertEquals(held.target!!.latitude, flattened.target!!.latitude, 1e-7)
+                    assertEquals(held.target!!.longitude, flattened.target!!.longitude, 1e-7)
+                    assertEquals(held.zoom, flattened.zoom, .01)
+                    assertEquals("Area loss must preserve manual hold", !manual, controls.following)
+                }
+                output.onVisibleAreaChanged(Rect(160, 0, 640, 400))
+                output.update(fresh.copy(route = null))
+                output.recenter()
+                val beforeOverview = nativeMap.cameraPosition
+                output.overview()
+                assertTrue("A stale route-menu click must not suspend following", controls.following)
+                assertEquals(beforeOverview, nativeMap.cameraPosition)
+                output.update(fresh)
+                output.overview()
+                assertFalse("An available route overview suspends following", controls.following)
+                output.recenter()
+                output.update(NavigationState(journey = journey, recording = true, route = route,
+                    gpsStale = false, fix = NavigationFix(current, now, 5f),
+                    roadSpeed = RoadSpeedState(57.6, RoadSpeedLimit(90.0, RoadSpeedSource.TOMTOM_POSTED,
+                        true, now, current, Transport.CAR, "test-road"), true)))
+            }
             val (replacement, replacementMarker) = hostFrame(800, 480, 320)
             instrumentation.runOnMainSync {
                 renderer!!.onSurfaceAvailable(replacement)

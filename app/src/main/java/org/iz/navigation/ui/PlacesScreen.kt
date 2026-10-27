@@ -30,7 +30,9 @@ import kotlin.math.abs
 
 @Composable
 internal fun PlacesScreen(state: DiaryState, onPlace: (Place) -> Unit, onAdd: () -> Unit,
-    onReorder: suspend (List<String>, List<String>) -> Unit) {
+    onReorder: suspend (List<String>, List<String>) -> Unit,
+    shortcuts: List<org.iz.navigation.data.DestinationShortcut> = emptyList(),
+    onShortcut: (org.iz.navigation.data.DestinationShortcutKind, Place?) -> Unit = { _, _ -> }) {
     var query by rememberSaveable { mutableStateOf("") }
     var original by rememberSaveable { mutableStateOf<List<String>?>(null) }
     var draft by rememberSaveable { mutableStateOf(emptyList<String>()) }
@@ -103,6 +105,16 @@ internal fun PlacesScreen(state: DiaryState, onPlace: (Place) -> Unit, onAdd: ()
                         Text(place.name, style = MaterialTheme.typography.titleMedium)
                         Text(if (sorting) "${index + 1}. sıra" else "${state.visits.count { it.placeId == place.id }} ziyaret · ${if (place.osmId == null) "Kişisel yer" else "OSM ile eşleşti"}",
                             style = MaterialTheme.typography.bodySmall, color = Muted)
+                        if (!sorting && shortcutRouteStop(place) != null) Row {
+                            org.iz.navigation.data.DestinationShortcutKind.entries.forEach { kind ->
+                                val assigned = shortcuts.any { it.kind == kind && it.place.id == place.id }
+                                TextButton(onClick = { onShortcut(kind, if (assigned) null else place) },
+                                    modifier = Modifier.testTag("assign-${kind.name}-${place.id}")) {
+                                    Text(if (kind == org.iz.navigation.data.DestinationShortcutKind.HOME)
+                                        if (assigned) "Ev'i kaldır" else "Ev yap" else if (assigned) "İş'i kaldır" else "İş yap")
+                                }
+                            }
+                        }
                     }
                     if (sorting) {
                         IconButton(onClick = { move(place.id, -1) }, enabled = !saving && index > 0,

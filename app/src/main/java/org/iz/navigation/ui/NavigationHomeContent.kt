@@ -32,6 +32,16 @@ import org.iz.navigation.navigation.NavigationState
 import org.iz.navigation.speed.roadSpeedPresentation
 import kotlin.math.roundToInt
 
+/** Keep original positional callers and trailing planner lambdas source-compatible. */
+@Composable
+internal fun NavigationHomeContent(ui: PhoneDirectionsState, nav: NavigationState, points: List<TrackPoint>,
+    members: List<RouteMapMember>, showPlanner: Boolean, weatherLabel: String, onSearch: () -> Unit,
+    onRecord: () -> Unit, onGroup: () -> Unit, onMenu: () -> Unit, onWeather: () -> Unit, onMute: () -> Unit,
+    onManageSession: () -> Unit, onLocate: () -> Unit, onPin: (GeoCoordinate) -> Unit,
+    planner: @Composable () -> Unit) {
+    NavigationHomeContent(ui, nav, points, members, showPlanner, weatherLabel, onSearch, onRecord, onGroup,
+        onMenu, onWeather, onMute, onManageSession, onLocate, onPin, emptyList(), {}, planner)
+}
 /** Only the visible cards accept gestures. The map has no scroll or sheet parent. */
 @Composable
 internal fun NavigationHomeContent(
@@ -50,6 +60,8 @@ internal fun NavigationHomeContent(
     onManageSession: () -> Unit,
     onLocate: () -> Unit,
     onPin: (GeoCoordinate) -> Unit,
+    shortcuts: List<org.iz.navigation.data.DestinationShortcut>,
+    onShortcut: (org.iz.navigation.data.DestinationShortcutKind) -> Unit,
     planner: @Composable () -> Unit,
 ) {
     val presentation = navigationMapPresentation(ui, nav, points, showPlanner)
@@ -58,12 +70,17 @@ internal fun NavigationHomeContent(
     val current = presentation.coordinate
     val density = LocalDensity.current
     val textMeasurer = rememberTextMeasurer()
-    val showBrand = !live && !showPlanner
-    var headerHeight by remember(showBrand, density) { mutableStateOf(if (showBrand) 144.dp else 80.dp) }
+    val baseShowBrand = !live && !showPlanner
+    val showShortcuts = !showPlanner && shortcuts.isNotEmpty()
+    var shortcutHeight by remember(density) { mutableStateOf(0.dp) }
+    val shortcutOffset = if (showShortcuts) shortcutHeight + 8.dp else 0.dp
+    var headerHeight by remember(baseShowBrand, density) { mutableStateOf(if (baseShowBrand) 144.dp else 80.dp) }
+    var panelsHeight by remember(baseShowBrand, density) { mutableStateOf(if (baseShowBrand) 144.dp else 260.dp) }
     BoxWithConstraints(Modifier.fillMaxSize().testTag("navigation-home")) {
-        val compact = maxHeight < 640.dp
-        val shortIdle = showBrand && maxHeight < 400.dp
-        val horizontalMapControls = showBrand && headerHeight + 24.dp + 104.dp > maxHeight - 92.dp
+        val showBrand = baseShowBrand && !(showShortcuts && maxHeight < 400.dp)
+        val compact = maxHeight - shortcutOffset < 640.dp
+        val shortIdle = baseShowBrand && maxHeight - shortcutOffset < 400.dp
+        val horizontalMapControls = baseShowBrand && headerHeight + shortcutOffset + 24.dp + 104.dp > maxHeight - 92.dp
         val attributionWidth = with(density) {
             textMeasurer.measure("© OpenStreetMap contributors", style = MaterialTheme.typography.labelSmall).size.width.toDp()
         } + 20.dp
@@ -72,13 +89,18 @@ internal fun NavigationHomeContent(
             expandable = false, stops = presentation.stops, liveCoordinate = current,
             recordedPoints = presentation.trail, gpsStale = live && nav.gpsStale,
             cameraIdentity = presentation.cameraIdentity,
+            drivingCamera = phoneDriveCameraInput(nav, showPlanner, android.os.SystemClock.elapsedRealtime()),
             navigationLayout = true, members = members, onLocate = onLocate, onMapLongClick = onPin,
-            navigationControlsTopInset = headerHeight + 24.dp,
+            navigationControlsTopInset = headerHeight + shortcutOffset + 24.dp,
             navigationControlsHorizontal = horizontalMapControls,
             attributionBottomInset = if (showPlanner) maxHeight * .64f + 4.dp else 92.dp,
-            cameraViewportInsets = PaddingValues(start = 28.dp, top = headerHeight + 60.dp, end = 84.dp,
+            cameraViewportInsets = PaddingValues(start = 28.dp, top = panelsHeight + 24.dp, end = 84.dp,
                 bottom = if (showPlanner) maxHeight * .64f + 24.dp else 112.dp))
-        Column(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(12.dp)
+            .onSizeChanged { panelsHeight = with(density) { it.height.toDp() } }, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (showShortcuts) Box(Modifier.fillMaxWidth().onSizeChanged { shortcutHeight = with(density) { it.height.toDp() } }) {
+                ShortcutDestinationsRow(shortcuts, !ui.busy, onShortcut)
+            }
             Column(Modifier.fillMaxWidth().onSizeChanged { headerHeight = with(density) { it.height.toDp() } },
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (showBrand) HomeBrand()

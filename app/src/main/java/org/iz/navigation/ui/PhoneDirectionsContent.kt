@@ -187,6 +187,9 @@ internal fun PhoneDirectionsContent(
                     enabled = !locked, label = { Text(if (activeMode) "Otoyola girme" else "Otoyoldan kaçın") }, modifier = Modifier.testTag("directions-avoid-highways"))
                 if (!activeMode) FilterChip(ui.preferences.avoidTolls, { setPreferences(ui.preferences.copy(avoidTolls = !ui.preferences.avoidTolls)) },
                     enabled = !locked, label = { Text("Ücretli yoldan kaçın") }, modifier = Modifier.testTag("directions-avoid-tolls"))
+                if (ui.transport in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE))
+                    FilterChip(ui.preferences.avoidUnpaved, { setPreferences(ui.preferences.copy(avoidUnpaved = !ui.preferences.avoidUnpaved)) },
+                        enabled = !locked, label = { Text("Toprak yollardan kaçın") }, modifier = Modifier.testTag("directions-avoid-unpaved"))
                 FilterChip(ui.preferences.avoidFerries, { setPreferences(ui.preferences.copy(avoidFerries = !ui.preferences.avoidFerries)) },
                     enabled = !locked, label = { Text("Feribottan kaçın") }, modifier = Modifier.testTag("directions-avoid-ferries"))
             }

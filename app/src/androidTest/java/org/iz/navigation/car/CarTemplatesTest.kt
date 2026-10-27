@@ -70,6 +70,8 @@ class CarTemplatesTest {
 
     @Test fun menusSearchPreviewWeatherAndFinishMeetHostConstraints() = onCar { context, surface, home ->
         assertTrue(CarMenuScreen(context, home).onGetTemplate() is ListTemplate)
+        assertTrue(CarDrivingOptionsScreen(context, home).onGetTemplate() is ListTemplate)
+        assertTrue(CarCameraScreen(context, home).onGetTemplate() is ListTemplate)
         assertTrue(CarModeScreen(context, home).onGetTemplate() is ListTemplate)
         assertTrue(CarRoutesScreen(context, home).onGetTemplate() is ListTemplate)
         assertTrue(CarSearchScreen(context, home).onGetTemplate() is SearchTemplate)
@@ -82,6 +84,15 @@ class CarTemplatesTest {
         assertTrue("Deferred statistics must explain their pending state", message.isNotBlank())
         assertFalse("Pending statistics must not invent a speed measurement", message.contains("km/sa"))
         assertTrue(CarFinishScreen(context, "not-a-real-trip").onGetTemplate() is MessageTemplate)
+    }
+
+    @Test fun routeOverviewIsAbsentForRouteLessRecordingAndReturnsWithRoute() = onCar { context, _, home ->
+        home.refresh(NavigationState(recording = true, journey = Journey(transport = Transport.CAR)))
+        val withoutRoute = CarCameraScreen(context, home).onGetTemplate() as ListTemplate
+        assertEquals(2, withoutRoute.singleList!!.items.size)
+        home.refresh(NavigationState(recording = true, route = route(), journey = Journey(transport = Transport.CAR)))
+        val withRoute = CarCameraScreen(context, home).onGetTemplate() as ListTemplate
+        assertEquals(3, withRoute.singleList!!.items.size)
     }
 
     @Test fun hostTripContainsDestinationAndSuppressesStaleSteps() = onCar { _, _, _ ->

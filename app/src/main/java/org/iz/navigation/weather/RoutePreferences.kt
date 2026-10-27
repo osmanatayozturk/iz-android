@@ -7,10 +7,12 @@ data class RoutePreferences(
     val avoidHighways: Boolean = false,
     val avoidTolls: Boolean = false,
     val avoidFerries: Boolean = false,
+    val avoidUnpaved: Boolean = false,
 ) {
     companion object {
         fun defaults(transport: Transport) = RoutePreferences(
             avoidHighways = transport in setOf(Transport.WALK, Transport.RUN, Transport.BICYCLE),
+            avoidUnpaved = transport == Transport.MOTORCYCLE,
         )
     }
 }

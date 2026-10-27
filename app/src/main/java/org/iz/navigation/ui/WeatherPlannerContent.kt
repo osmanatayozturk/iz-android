@@ -154,6 +154,9 @@ internal fun WeatherPlannerContent(
                         modifier = Modifier.testTag("route_avoid_highways"))
                     if (!activeMode) FilterChip(preferences.avoidTolls, { actions.setPreferences(preferences.copy(avoidTolls = !preferences.avoidTolls)) },
                         enabled = !interactionLocked, label = { Text("Ücretli yoldan kaçın") }, modifier = Modifier.testTag("route_avoid_tolls"))
+                    if (state.transport in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE))
+                        FilterChip(preferences.avoidUnpaved, { actions.setPreferences(preferences.copy(avoidUnpaved = !preferences.avoidUnpaved)) },
+                            enabled = !interactionLocked, label = { Text("Toprak yollardan kaçın") }, modifier = Modifier.testTag("route_avoid_unpaved"))
                     FilterChip(preferences.avoidFerries, { actions.setPreferences(preferences.copy(avoidFerries = !preferences.avoidFerries)) },
                         enabled = !interactionLocked, label = { Text("Feribottan kaçın") }, modifier = Modifier.testTag("route_avoid_ferries"))
                 }

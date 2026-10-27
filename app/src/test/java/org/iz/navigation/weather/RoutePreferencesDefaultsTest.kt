@@ -13,7 +13,7 @@ class RoutePreferencesDefaultsTest {
         }
     }
     @Test fun motorizedTravelPreservesExistingDefaults() {
-        listOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE).forEach {
+        listOf(Transport.CAR, Transport.PASSENGER).forEach {
             assertEquals(RoutePreferences(), RoutePreferences.defaults(it))
         }
     }

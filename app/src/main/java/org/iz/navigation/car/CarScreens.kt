@@ -16,6 +16,7 @@ import org.iz.navigation.IzApplication
 import org.iz.navigation.data.*
 import org.iz.navigation.integration.OsmPlaces
 import org.iz.navigation.navigation.NavigationState
+import org.iz.navigation.navigation.DriveCameraMode
 import org.iz.navigation.power.PostJourneyAnalysis
 import org.iz.navigation.weather.*
 import kotlinx.coroutines.*
@@ -73,6 +74,10 @@ internal class CarHomeScreen(context: CarContext, private val surface: CarMapSur
         else it.label
     }
     fun refresh(value: NavigationState) { state = value; surface.update(state); safeInvalidate() }
+    val cameraMode get() = surface.cameraMode
+    val overviewAvailable get() = surface.overviewAvailable
+    fun setCameraMode(value: DriveCameraMode) { surface.cameraMode(value) }
+    fun showOverview() { surface.overview() }
     fun showError(value: String) { error = value; safeInvalidate() }
     private fun showPreview(route: PlannedRoute) { screenManager.push(CarPreviewScreen(carContext, this, surface, route)) }
     fun preview(route: PlannedRoute) { cancelTargetPlanning(); showPreview(route) }
@@ -146,7 +151,7 @@ internal class CarHomeScreen(context: CarContext, private val surface: CarMapSur
                     .addAction(action("Menü") { screenManager.push(CarMenuScreen(carContext, this)) })
                     .addAction(action(if (state.muted) "Sesi aç" else "Sessiz") { navigation.setMuted(!state.muted) })
                     .addAction(action("Rotayı bitir") { navigation.stopGuidance() }).build())
-                .setPanModeListener { if (!it) display { surface.recenter() } }
+                .setPanModeListener { display { surface.panMode(it) } }
             if (state.gpsStale || state.loading || progress == null || progress.offRoute || step == null) {
                 builder.setNavigationInfo(MessageInfo.Builder(when {
                     state.gpsStale -> "GPS bekleniyor — yönlendirme duraklatıldı"
@@ -176,7 +181,7 @@ internal class CarHomeScreen(context: CarContext, private val surface: CarMapSur
         return MapWithContentTemplate.Builder().setContentTemplate(PaneTemplate.Builder(pane)
             .setTitle(title).setHeaderAction(Action.APP_ICON).build())
             .setMapController(MapController.Builder().setMapActionStrip(controls)
-                .setPanModeListener { if (!it) display { surface.recenter() } }.build()).build()
+                .setPanModeListener { display { surface.panMode(it) } }.build()).build()
     }
 }
 
@@ -185,8 +190,10 @@ internal class CarMenuScreen(context: CarContext, private val home: CarHomeScree
     override fun onGetTemplate(): Template {
         val rows = mutableListOf(
             row("Hedef ara", "Ad veya adres; arama yalnızca gönderince yapılır") { screenManager.push(CarSearchScreen(carContext, home)) },
-            row("Kayıtlı ve son yerler") { screenManager.push(CarPlacesScreen(carContext, home)) },
-            row("Sürüş türü", modeLabel(home.mode)) { screenManager.push(CarModeScreen(carContext, home)) },
+            row(if (home.mode == Transport.MOTORCYCLE) "Ev / İş ve kayıtlı yerler" else "Kayıtlı ve son yerler") {
+                screenManager.push(CarPlacesScreen(carContext, home))
+            },
+            row("Sürüş ve harita", modeLabel(home.mode)) { screenManager.push(CarDrivingOptionsScreen(carContext, home)) },
         )
         rows.add(row("Hazır rotalar ve telefon planı") { screenManager.push(CarRoutesScreen(carContext, home)) })
         if (navigation.state.value.recording) rows.add(row("Sürüş istatistikleri") {
@@ -198,6 +205,27 @@ internal class CarMenuScreen(context: CarContext, private val home: CarHomeScree
         return ListTemplate.Builder().setTitle("Sürüş menüsü").setHeaderAction(Action.BACK)
             .setSingleList(ItemList.Builder().apply { rows.take(listLimit()).forEach(::addItem) }.build()).build()
     }
+}
+
+internal class CarDrivingOptionsScreen(context: CarContext, private val home: CarHomeScreen) : CarScreen(context) {
+    override fun onGetTemplate(): Template = ListTemplate.Builder().setTitle("Sürüş ve harita").setHeaderAction(Action.BACK)
+        .setSingleList(ItemList.Builder()
+            .addItem(row("Sürüş türü", modeLabel(home.mode)) { screenManager.push(CarModeScreen(carContext, home)) })
+            .addItem(row("Harita görünümü") { screenManager.push(CarCameraScreen(carContext, home)) }).build()).build()
+}
+
+internal class CarCameraScreen(context: CarContext, private val home: CarHomeScreen) : CarScreen(context) {
+    override fun onGetTemplate(): Template = ListTemplate.Builder().setTitle("Harita görünümü").setHeaderAction(Action.BACK)
+        .setSingleList(ItemList.Builder()
+            .addItem(row("Uyarlamalı görünüm", "Hareket yönü ve hıza göre; elle gezdikten sonra Konumum ile izleyin") {
+                home.setCameraMode(DriveCameraMode.ADAPTIVE); screenManager.popToRoot()
+            })
+            .addItem(row("Basit 2D", "Kuzey yukarı; mevcut izleme tercihi korunur") {
+                home.setCameraMode(DriveCameraMode.SIMPLE_2D); screenManager.popToRoot()
+            })
+            .apply { if (home.overviewAvailable) addItem(row("Rota görünümü", "Tam rotayı gör; izlemeye dönmek için Konumum") {
+                home.showOverview(); screenManager.popToRoot()
+            }) }.build()).build()
 }
 
 internal class CarRoutesScreen(context: CarContext, private val home: CarHomeScreen) : CarScreen(context) {
@@ -263,6 +291,14 @@ internal class CarPlacesScreen(context: CarContext, private val home: CarHomeScr
     private var loading = true
     private var destinations = emptyList<RouteStop>()
     private var message = "Telefonda koordinatlı bir yer kaydedin veya hedef arayın"
+    private val library = TravelLibraryRepository(context)
+    private var shortcuts = emptyList<DestinationShortcut>()
+    private var shortcutError: String? = null
+    init { scope.launch {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            library.destinationShortcuts.collect { value -> shortcuts = value; safeInvalidate() }
+        }
+    } }
     init { scope.launch {
         try {
             val repository = DiaryRepository(carContext)
@@ -279,9 +315,32 @@ internal class CarPlacesScreen(context: CarContext, private val home: CarHomeScr
     override fun onGetTemplate(): Template = ListTemplate.Builder().setTitle("Kayıtlı ve son yerler")
         .setHeaderAction(Action.BACK).setLoading(loading).apply {
             if (!loading) setSingleList(ItemList.Builder().setNoItemsMessage(message).apply {
-                destinations.take(listLimit()).forEach { destination -> addItem(row(destination.label) { home.plan(destination) }) }
+                val rows = mutableListOf<Row>()
+                shortcutError?.let { rows.add(row("Hedef kullanılamıyor", it)) }
+                if (home.mode == Transport.MOTORCYCLE) {
+                    DestinationShortcutKind.entries.forEach { kind ->
+                        val target = shortcuts.firstOrNull { it.kind == kind }?.let(::carShortcutStop)
+                        val click: (() -> Unit)? = if (target == null) null else ({ openShortcut(kind) })
+                        rows.add(row(carShortcutLabel(kind), target?.label ?: "Telefonda kayıtlı bir yer seçin",
+                            click))
+                    }
+                }
+                destinations.take((listLimit() - rows.size).coerceAtLeast(0)).forEach { destination ->
+                    rows.add(row(destination.label) { home.plan(destination) })
+                }
+                rows.take(listLimit()).forEach(::addItem)
             }.build())
         }.build()
+
+    private fun openShortcut(kind: DestinationShortcutKind) { scope.launch {
+        try {
+            val target = library.destinationShortcuts.first().firstOrNull { it.kind == kind }?.let(::carShortcutStop)
+                ?: error("Hedef değişmiş veya kaldırılmış. Telefonda yeniden seçin.")
+            shortcutError = null
+            home.plan(target)
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) { shortcutError = failure.message ?: "Hedef okunamadı"; safeInvalidate() }
+    } }
 }
 
 internal class CarPreviewScreen(context: CarContext, private val home: CarHomeScreen,

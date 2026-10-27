@@ -13,6 +13,24 @@ import org.iz.navigation.gpx.ImportedTrack
 class TravelLibraryRepository internal constructor(private val db: DiaryDatabase) {
     constructor(context: Context) : this(DiaryDatabase.get(context.applicationContext))
     private val dao = db.travelLibraryDao()
+    val destinationShortcuts: Flow<List<DestinationShortcut>> = dao.shortcuts().map { rows ->
+        rows.mapNotNull { row -> runCatching {
+            DestinationShortcut(DestinationShortcutKind.valueOf(row.kind), row.place)
+        }.getOrNull() }
+    }.flowOn(Dispatchers.Default)
+
+    suspend fun setDestinationShortcut(kind: DestinationShortcutKind, placeId: String?) = withContext(Dispatchers.IO) {
+        db.withTransaction {
+            if (placeId == null) dao.deleteShortcut(kind.name)
+            else {
+                val place = requireNotNull(db.diaryDao().place(placeId)) { "Kayıtlı hedef artık mevcut değil." }
+                require(place.latitude != null && place.longitude != null &&
+                    place.latitude.isFinite() && place.latitude in -90.0..90.0 &&
+                    place.longitude.isFinite() && place.longitude in -180.0..180.0) { "Hedefin geçerli konumu yok." }
+                dao.saveShortcut(DestinationShortcutEntity(kind.name, place.id))
+            }
+        }
+    }
     val savedPlans: Flow<List<SavedRoutePlan>> = dao.plans().map { rows -> rows.map { it.model() } }.flowOn(Dispatchers.Default)
     val importedTracks: Flow<List<ImportedTrack>> = dao.tracks().map { rows -> rows.map { it.model() } }.flowOn(Dispatchers.Default)
     val collections: Flow<List<JourneyCollection>> = dao.collections().map { rows -> rows.map { it.model() } }

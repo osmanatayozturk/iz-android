@@ -114,4 +114,6 @@ data class DiarySnapshot(
     val importedTracks: List<org.iz.navigation.gpx.ImportedTrack> = emptyList(),
     val collections: List<JourneyCollection> = emptyList(),
     val memberships: List<CollectionMembership> = emptyList(),
+    val destinationShortcuts: List<DestinationShortcutRef> = emptyList(),
+    val leanSessions: List<org.iz.navigation.lean.LeanBackupSession> = emptyList(),
 )

@@ -10,13 +10,25 @@ Güncel yayın durumu bu dosyada, tamamlanan değişiklikler [değişiklik geçm
 | Wear OS | 0.6.0 | 10 | Değişmedi; bu yayında yeni saat paketi yok |
 | Ortak iletişim | v5 | — | Eski v1–v4 desteği korunuyor |
 
-## Geliştirme adayı — 0.10.2 / code 21 ve Wear OS 0.6.1 / code 11
+## Geliştirme adayı — telefon 0.11.0 / code 22
+
+**Durum:** 27 Ekim 2026 itibarıyla geliştirme sürüyor. Bu bölüm planlanan kapsamı kaydeder; tamamlanma, test, cihaz kabulü, güvenlik onayı veya yayın beyanı değildir. Yayımlanmış telefon sürümü **0.10.1 / code 20** olarak kalır.
+
+- **Tek Motosiklet türü:** Ayrı işe gidiş/şehir içi modu veya profili eklenmez. Varsayılan yönlendirme en hızlı rota ve bilinen kaplamasız yollardan kaçınmadır; otoyol/ücretli yol izinli kalır. Kullanıcının açıkça kaydettiği tercihler ve başka ulaşım türlerinin varsayılanları korunur.
+- **Hedef kısayolları:** Kullanıcı, kayıtlı yerlerinden Ev ve İş hedefini açıkça atayabilir. Kısayol mevcut ulaşım türünü veya yolculuk kaydını değiştirmez; rota önizlemesi ve başlatma açık kullanıcı eylemleri olarak kalır.
+- **Sürüş kamerası:** Araba/motosiklette teyitli kayıt veya yönlendirme sırasında telefon ile Android Auto için ortak kamera davranışı planlanır. Hız ve yaklaşan manevra kadrajı etkiler; elle harita kullanımı, mevcut yönlendirme durumu ve telefon yönelimi korunur. Araç ekranının güvenli alanı bilinmiyorsa düz görünüm kullanılır.
+- **Deneysel yatış tahmini:** İsteğe bağlı özellik yalnız tamamlanmış motosiklet yolculuğundan sonra çalışır. Gövdeye sabit telefon, açık tercih, uygun kalibrasyon ve yeterli sensör/GPS örnekleri gerekir. Gidon veya bilinmeyen montaj ya da yetersiz veri sayısal sonuç üretmez; canlı yatış göstergesi planlanmaz. Pil en az %20 değilken ya da kayıt/yönlendirme etkinken ağır analiz çalıştırılmaz.
+- **Veri ve sınırlar:** Günlük ve eski yedeklerle geriye uyumluluk hedeflenir; eski yolculuklara tahmini yatış değeri üretilmez. Yatış sonucu deneysel olarak etiketlenir. Fiziksel doğruluk, pil tasarrufu, sürüş güvenliği veya gerçek araç kabulü henüz kanıtlanmış değildir.
+
+Wear OS **0.6.1 / code 11** ile telefon-saat iletişimi **v6** bu adayın kapsamı dışında ve değişmeden kalır. [Kullanıcıya dönük 0.11 kapsam taslağı](IZ_010_KULLANIM.md). Test, UI/UX incelemesi ve teknik kanıt tamamlandığında bu bölüm gerçek sonuçlarla güncellenecektir.
+
+## Önceki geliştirme adayı kaydı — 0.10.2 / code 21 ve Wear OS 0.6.1 / code 11
 
 Bu, 27 Ekim 2026 tarihli sınırlı doğrulama kaydıdır. O tarihte telefon 0.10.2 / code 21, Wear OS 0.6.1 / code 11 ve iletişim v6 geliştirme adayıydı; yayımlanmış 0.10.1'i değiştirmiyor ve indirme için sunulmuyordu. Telefon `appDebug` derlemesi geçti; lint 0 hata ve 108 uyarı verdi. İlk odaklı QA koşusu 8 geçti, 1 tanılama kontrolü başarısız oldu ve 1 kontrol, pilin doğal olarak %20’nin altında olması koşulu sağlanmadığı için atlandı; dört gizlilik kontrolü bu koşuda geçti. Test-only düzeltmesinden sonra aynı QA ürünü üzerinde yalnız değişen tanılama kontrolü bir kez daha çalıştırıldı ve geçti; bu tam koşunun tekrarı değildir ve ilk başarısızlık kaydını değiştirmez. Dört gizlilik kontrolü bu tekrar koşusunda yeniden çalıştırılmadı. Sınırlı salt okunur postflight sırasında alınan tek anlık görüntü, türetilmiş indeks ve ısı haritasının boş ve yerleşmiş olduğunu gösterdi. Boş durum için günlük toplamlar sıfırdı; bekleyen işaret veya atomik `new`/`bak` yan dosyaları yoktu. Play uygulamasına dokunulmadı. Ham veritabanı veya tüm kişisel veriler denetlenmedi. Wear OS ve iletişim protokolü değişmedi; önceki Wear lint sonucu (0 hata, 41 uyarı) ve 38 protokol testi değişmeyen kaynak kanıtıyla tarihsel olarak yeniden kullanıldı, bu adayda tekrar çalıştırılmadı. Bu sonuçlar genel aday kabulü değildir; tam kişisel veri denetimi, gerçek sürüş, WorkManager dağıtımı/işlem devamı, fiziksel saat kabulü veya ölçülmüş pil tasarrufu kanıtı sağlamaz. Bu kayıt güvenlik kararı ya da yayın onayı değildir. Ayrıntı için [aday değişiklik kaydına](../CHANGELOG.md) bakın.
 
 Önerilen davranışta sürüşün gerekli canlı işlevleri ve ham kayıtlar korunur. Ağır iz/ısı haritası/istatistik ve saat özetleri aktif kayıt/navigasyon bittikten ve telefon pili %20 veya üzerindeyken ertelenmiş kuyruktan işlenir. Yerel tanılama verisi yedek dışı tutulur, en fazla 7 gün/2 MiB saklanır ve hassas yol/sağlık içeriği içermez. Ayrıntı için [pil optimizasyonu notuna](PIL_OPTIMIZASYONU.md) bakın.
 
-Motosiklet görünümü, enerji profilleri, mola süreleri ve yol tercihi fikirleri [ayrı yol haritası taslağında](MOTOSIKLET_YOL_HARITASI.md) yer alır. Bu fikirler bu adayın kapsamı veya sürüm taahhüdü değildir.
+26 Ekim tarihli araştırma önerileri [ayrı yol haritası taslağında](MOTOSIKLET_YOL_HARITASI.md) yer alır. Güncel onaylı aday kapsamı yukarıdaki 0.11.0 bölümünde tanımlıdır; o taslaktaki diğer fikirler bu sürüme eklenmiş sayılmaz.
 
 ## 0.10.1 / code 20 — Yayımlandı
 

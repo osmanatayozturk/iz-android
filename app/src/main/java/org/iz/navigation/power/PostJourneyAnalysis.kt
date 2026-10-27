@@ -15,6 +15,8 @@ import org.iz.navigation.IzApplication
 import org.iz.navigation.data.*
 import org.iz.navigation.integration.*
 import org.iz.navigation.tracking.TrackingService
+import org.iz.navigation.lean.LeanStore
+import org.iz.navigation.lean.LeanEstimatorV1
 import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
@@ -63,6 +65,7 @@ internal class PostJourneyAnalysis private constructor(context: Context) {
                     "journeys", "track_points", "journey_health_samples", "journey_health_sync", "watch_health_samples") {
                     override fun onInvalidated(tables: Set<String>) { request() }
                 })
+                LeanStore.get(context).recoverInterrupted()
                 val loaded = cache.load()
                 // Reconcile once after process death, including a raw transaction whose invalidation
                 // could not be delivered. Matching per-journey fingerprints reuse prepared results.
@@ -102,6 +105,8 @@ internal class PostJourneyAnalysis private constructor(context: Context) {
             }
         }
     }
+    internal suspend fun awaitReady() = initialized.await()
+
     /** Privacy writes never wait for workMutex: the worker may already be waiting for the HC mutex. */
     internal suspend fun <T> privacyChange(block: suspend () -> T): T {
         initialized.await()
@@ -218,7 +223,7 @@ internal class PostJourneyAnalysis private constructor(context: Context) {
     private fun schedule(immediate: Boolean = false) {
         scope.launch { scheduleMutex.withLock {
             val work = WorkManager.getInstance(context)
-            if (!pending) { work.cancelUniqueWork(PERIODIC); return@withLock }
+            if (!pending && !LeanStore.get(context).hasPending()) { work.cancelUniqueWork(PERIODIC); return@withLock }
             // WorkManager's minimum periodic interval is 15 minutes. This check exists only
             // while derived work is pending; the exact >=20 gate is enforced in this worker.
             // https://developer.android.com/develop/background-work/background-tasks/persistent/getting-started/define-work
@@ -238,7 +243,7 @@ internal class PostJourneyAnalysis private constructor(context: Context) {
         initialized.await()
         return workMutex.withLock {
             batteryPercent = PhoneBatteryReader.read(context).percent
-            if (!pending || !canProcessNow() || repository.activeJourney() != null) {
+            if ((!pending && !LeanStore.get(context).hasPending()) || !canProcessNow() || repository.activeJourney() != null) {
                 updateGate(); schedule(); return@withLock true
             }
             val start = System.nanoTime()
@@ -261,6 +266,8 @@ internal class PostJourneyAnalysis private constructor(context: Context) {
                     if (!canProcessNow() || generation.get() != token) throw AnalysisDeferred()
                     PowerDiagnostics.sampleIfDue()
                 }
+                checkAllowed()
+                LeanStore.get(context).processPending(LeanEstimatorV1(), ::checkAllowed)
                 checkAllowed()
                 val now = System.currentTimeMillis()
                 val input = repository.analysisInput(::checkAllowed)
@@ -338,15 +345,16 @@ internal class PostJourneyAnalysis private constructor(context: Context) {
                 checkAllowed()
                 if (repository.activeJourney() != null) throw AnalysisDeferred()
                 cache.cleanup(entries, revision, ::checkAllowed)
+                val leanStillPending = LeanStore.get(context).hasPending()
                 val changed = System.currentTimeMillis()
                 cache.save(entries, revision, dailyResult, changed, ::checkAllowed)
                 checkAllowed()
                 synchronized(control) {
                     checkAllowed()
                     // A late invalidation can only set pending back to true after this commit.
-                    cache.pending(false)
-                    daily = dailyResult; pending = false
-                    mutableState.value = AnalysisState(phase(), false, entries, revision, changed)
+                    cache.pending(leanStillPending)
+                    daily = dailyResult; pending = leanStillPending
+                    mutableState.value = AnalysisState(phase(), leanStillPending, entries, revision, changed)
                 }
                 PowerDiagnostics.event(PowerDiagnostics.Event.ANALYSIS_FINISHED)
                 true

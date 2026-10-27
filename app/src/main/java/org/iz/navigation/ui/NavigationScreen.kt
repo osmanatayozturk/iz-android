@@ -109,6 +109,8 @@ internal class PhoneNavigationViewModel(application: Application) : AndroidViewM
     val ui = directions.state
     val permissionGate = DirectionsPermissionGate()
     val places = repository.places.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    private val shortcutLibrary = TravelLibraryRepository(application)
+    val shortcuts = shortcutLibrary.destinationShortcuts.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val commandBusy = MutableStateFlow(false)
     val commandErrorVersion = MutableStateFlow(0L)
     private val work = PhoneNavigationWork(viewModelScope, { commandBusy.value = it },
@@ -126,6 +128,22 @@ internal class PhoneNavigationViewModel(application: Application) : AndroidViewM
     fun target(value: NavigationTarget) {
         value.coordinate?.let { coordinate ->
             directions.setDestination(RouteStop(value.query.ifBlank { "Hedef" }, coordinate))
+        }
+    }
+    fun shortcut(kind: DestinationShortcutKind) {
+        if (commandBusy.value || ui.value.starting) return
+        work.newTarget()
+        work.read { current ->
+            val place = shortcutLibrary.destinationShortcuts.first().firstOrNull { it.kind == kind }?.place
+            val stop = shortcutRouteStop(place)
+            if (current()) {
+                if (stop == null) directions.reportMessage("Hedef artık kullanılamıyor. Yerler bölümünden Ev/İş atamasını kontrol et.")
+                else {
+                    val mode = navigation.state.value.sessionTransport ?: ui.value.transport
+                    directions.enter(System.nanoTime(), initialTransport = mode, locateOnOpen = false)
+                    directions.setDestination(stop)
+                }
+            }
         }
     }
     fun lastDestination() {
@@ -182,6 +200,7 @@ internal fun NavigationScreen(
     // Live recording and simulation intentionally publish position only, never a colored trail.
     val points = emptyList<TrackPoint>()
     val places by vm.places.collectAsStateWithLifecycle()
+    val shortcuts by vm.shortcuts.collectAsStateWithLifecycle()
     val commandBusy by vm.commandBusy.collectAsStateWithLifecycle()
     val commandErrorVersion by vm.commandErrorVersion.collectAsStateWithLifecycle()
     val app = context.applicationContext as IzApplication
@@ -298,6 +317,7 @@ internal fun NavigationScreen(
     }
 
     NavigationHomeContent(ui = ui, nav = nav, points = points,
+        shortcuts = shortcuts, onShortcut = { kind -> showPlanning = true; vm.shortcut(kind) },
         members = groupState.markers.map { org.iz.navigation.integration.RouteMapMember(it.userId, it.name, it.latitude, it.longitude, it.delayed) },
         showPlanner = showPlanning,
         weatherLabel = weather.assessment?.samples?.firstOrNull()?.reading?.temperatureC?.let { "${it.toInt()}° · Hava" } ?: "Hava durumu",

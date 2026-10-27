@@ -58,12 +58,14 @@ internal fun OsmMapView(
     onLongClick: (GeoCoordinate) -> Unit = {},
     attributionBottomInset: Dp = 4.dp,
     attributionAtStart: Boolean = false,
+    maxFps: Int? = null,
 ) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val registry = LocalSaveableStateRegistry.current
     val savedKey = rememberSaveable { "osm-map-${UUID.randomUUID()}" }
     val ready by rememberUpdatedState(onReady)
+    val fps by rememberUpdatedState(maxFps)
     val click by rememberUpdatedState(onClick)
     val longClick by rememberUpdatedState(onLongClick)
     val mapView = remember(context, styleJson) {
@@ -104,7 +106,12 @@ internal fun OsmMapView(
             map.setMaxZoomPreference(19.0)
             map.addOnMapClickListener { coordinate -> click(map, GeoCoordinate(coordinate.latitude, coordinate.longitude)) }
             map.addOnMapLongClickListener { coordinate -> longClick(GeoCoordinate(coordinate.latitude, coordinate.longitude)); true }
-            map.setStyle(Style.Builder().fromJson(styleJson)) { if (active) ready(map) }
+            map.setStyle(Style.Builder().fromJson(styleJson)) {
+                if (active) {
+                    fps?.let { mapView.setMaximumFps(it.coerceIn(1, 30)) }
+                    ready(map)
+                }
+            }
         }
         onDispose {
             active = false

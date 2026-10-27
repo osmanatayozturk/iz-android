@@ -64,6 +64,11 @@ class ValhallaRoutePlanner(
             else if (preferences.avoidHighways) put("use_highways", 0)
             if (preferences.avoidTolls && transport in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE)) put("use_tolls", 0)
             if (preferences.avoidFerries) put("use_ferry", 0)
+            // Motorcycle inherits auto options. This excludes mapped unpaved middle sections,
+            // not endpoint access; older configured servers may ignore it. Never imply proof.
+            // https://valhalla.github.io/valhalla/api/route/api-reference/#motorcycle-costing-options-beta
+            if (preferences.avoidUnpaved && transport in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE))
+                put("exclude_unpaved", true)
             when (transport) {
                 Transport.MOTORCYCLE -> put("use_trails", 0)
                 Transport.BICYCLE -> put("cycling_speed", effectiveSpeed)
@@ -183,7 +188,7 @@ class ValhallaRoutePlanner(
         val digest = MessageDigest.getInstance("SHA-256").digest("${transport.name}:$requestJson:$json:$createdAt".toByteArray())
         val id = digest.take(12).joinToString("") { "%02x".format(it) }
         return PlannedRoute(id, stops, allVertices, distanceMeters, elapsedOffset, createdAt, stopTimes, transport, travelSpeedKmh, allManeuvers,
-            preferences = preferences, hasHighway = hasHighway, providerWarnings = warnings).requireUsablePreferences()
+            preferences = preferences, hasHighway = hasHighway, providerWarnings = warnings + surfacePreferenceWarnings(preferences, RouteProvider.VALHALLA, transport)).requireUsablePreferences()
     }
 
     companion object {

@@ -115,6 +115,7 @@ object DiaryRules {
         snapshot.mapEdits.forEach(::validateMapEdit)
         WatchHealthRules.validateSnapshot(snapshot.journeys, snapshot.watchHealthSessions, snapshot.watchHealthSamples)
         TravelLibraryRules.validate(snapshot)
+        org.iz.navigation.lean.LeanBackupCodec.validateSnapshot(snapshot)
     }
 
     fun isSafePhotoPath(path: String): Boolean =

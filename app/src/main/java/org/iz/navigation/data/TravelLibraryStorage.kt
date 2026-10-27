@@ -11,13 +11,14 @@ import org.json.JSONArray
 @Entity(tableName = "saved_route_plans")
 internal data class SavedRoutePlanEntity(@PrimaryKey val id: String, val name: String, val stopsJson: String,
     val transport: Transport, val avoidHighways: Boolean, val avoidTolls: Boolean, val avoidFerries: Boolean,
-    val travelSpeedKmh: Double?, val originUsesCurrentLocation: Boolean, val createdAt: Long, val updatedAt: Long) {
+    val travelSpeedKmh: Double?, val originUsesCurrentLocation: Boolean, val createdAt: Long, val updatedAt: Long,
+    @ColumnInfo(defaultValue = "0") val avoidUnpaved: Boolean = false) {
     fun model() = SavedRoutePlan(id, name, TravelLibraryJson.readStops(JSONArray(stopsJson)), transport,
-        RoutePreferences(avoidHighways, avoidTolls, avoidFerries), travelSpeedKmh, originUsesCurrentLocation, createdAt, updatedAt)
+        RoutePreferences(avoidHighways, avoidTolls, avoidFerries, avoidUnpaved), travelSpeedKmh, originUsesCurrentLocation, createdAt, updatedAt)
     companion object {
         fun from(value: SavedRoutePlan) = SavedRoutePlanEntity(value.id, value.name, TravelLibraryJson.stops(value.stops).toString(), value.transport,
             value.preferences.avoidHighways, value.preferences.avoidTolls, value.preferences.avoidFerries,
-            value.travelSpeedKmh, value.originUsesCurrentLocation, value.createdAt, value.updatedAt)
+            value.travelSpeedKmh, value.originUsesCurrentLocation, value.createdAt, value.updatedAt, value.preferences.avoidUnpaved)
     }
 }
 
@@ -62,6 +63,11 @@ internal data class StoredTrack(@Embedded val track: ImportedTrackEntity,
 
 @Dao
 internal interface TravelLibraryDao {
+    @Query("SELECT s.kind, p.* FROM destination_shortcuts s INNER JOIN places p ON p.id = s.placeId ORDER BY s.kind") fun shortcuts(): Flow<List<DestinationShortcutRow>>
+    @Query("SELECT * FROM destination_shortcuts ORDER BY kind") suspend fun allShortcuts(): List<DestinationShortcutEntity>
+    @Upsert suspend fun saveShortcut(value: DestinationShortcutEntity)
+    @Query("DELETE FROM destination_shortcuts WHERE kind = :kind") suspend fun deleteShortcut(kind: String)
+    @Query("DELETE FROM destination_shortcuts") suspend fun clearShortcuts()
     @Query("SELECT * FROM saved_route_plans ORDER BY updatedAt DESC, id") fun plans(): Flow<List<SavedRoutePlanEntity>>
     @Query("SELECT * FROM saved_route_plans ORDER BY updatedAt DESC, id") suspend fun allPlans(): List<SavedRoutePlanEntity>
     @Transaction @Query("SELECT * FROM imported_tracks ORDER BY createdAt DESC, id") fun tracks(): Flow<List<StoredTrack>>

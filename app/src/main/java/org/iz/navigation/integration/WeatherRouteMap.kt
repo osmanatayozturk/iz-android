@@ -16,6 +16,14 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import org.iz.navigation.navigation.DriveCameraInput
+import org.iz.navigation.navigation.DriveCameraMode
+import org.iz.navigation.navigation.DriveCameraPolicy
+import org.iz.navigation.navigation.DriveCameraViewport
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -75,12 +83,13 @@ fun WeatherRouteMap(
     cameraViewportInsets: PaddingValues = PaddingValues(72.dp),
     navigationControlsTopInset: Dp = 96.dp,
     navigationControlsHorizontal: Boolean = false,
+    drivingCamera: DriveCameraInput? = null,
     overlay: @Composable BoxScope.() -> Unit = {},
 ) {
     ExpandableMap(modifier = modifier, title = title, expandable = expandable) { mapModifier ->
         Box(mapModifier) {
             WeatherRouteMapContent(route, assessment, Modifier.fillMaxSize(), onSampleClick,
-                onMapLongClick, stops, liveCoordinate, recordedPoints, gpsStale, singleStopLabel, cameraIdentity, navigationLayout, members, onLocate, attributionBottomInset, cameraViewportInsets, navigationControlsTopInset, navigationControlsHorizontal)
+                onMapLongClick, stops, liveCoordinate, recordedPoints, gpsStale, singleStopLabel, cameraIdentity, navigationLayout, members, onLocate, attributionBottomInset, cameraViewportInsets, navigationControlsTopInset, navigationControlsHorizontal, drivingCamera)
             overlay()
         }
     }
@@ -106,6 +115,7 @@ private fun WeatherRouteMapContent(
     cameraViewportInsets: PaddingValues,
     navigationControlsTopInset: Dp,
     navigationControlsHorizontal: Boolean,
+    drivingCamera: DriveCameraInput?,
 ) {
     val context = LocalContext.current
     val tileUrl = remember(context) { OsmServiceSettings(context).read().tileUrl }
@@ -126,6 +136,16 @@ private fun WeatherRouteMapContent(
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
     var styleRevision by remember { mutableIntStateOf(0) }
     val cameraPolicy = remember(map) { RouteMapCameraPolicy() }
+    val drivePolicy = remember(map) { DriveCameraPolicy() }
+    val driveFollow = remember { DrivingMapFollowPolicy() }
+    var driveViewportBlocked by remember(map) { mutableStateOf(false) }
+    var driveMode by remember { mutableStateOf(DriveCameraMode.ADAPTIVE) }
+    var driveRecenter by remember { mutableIntStateOf(0) }
+    var appliedRecenter by remember(map) { mutableIntStateOf(0) }
+    var wasDriving by remember(map) { mutableStateOf(false) }
+    var mapSize by remember { mutableStateOf(IntSize.Zero) }
+    val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
+    val driveEnabled = drivingCamera?.enabled == true
     var following by remember(map) { mutableStateOf(false) }
     // Ready/camera callbacks must keep the same state cell when null map becomes the ready map.
     var projectedStops by remember { mutableStateOf(emptyList<Offset>()) }
@@ -177,7 +197,7 @@ private fun WeatherRouteMapContent(
             Offset(point.x, point.y)
         }
     }
-    Box(modifier.clipToBounds()) {
+    Box(modifier.clipToBounds().onSizeChanged { mapSize = it }) {
         OsmMapView(styleJson = style, modifier = Modifier.fillMaxSize(),
             onReady = { ready ->
                 map = ready
@@ -192,6 +212,7 @@ private fun WeatherRouteMapContent(
             },
             onLongClick = onMapLongClick,
             attributionBottomInset = attributionBottomInset, attributionAtStart = navigationLayout,
+            maxFps = if (drivingCamera != null) 30 else null,
         )
         // Sprite images can be registered/queryable yet absent from the native GPU atlas.
         // Geographic Compose badges keep endpoint labels visible and accessible above the live fix.
@@ -220,8 +241,9 @@ private fun WeatherRouteMapContent(
             val controls: @Composable () -> Unit = {
             Surface(shape = CircleShape, shadowElevation = 3.dp) {
                 IconButton(onClick = {
-                    cameraPolicy.followCurrent(); following = true
+                    driveFollow.recenter(); cameraPolicy.followCurrent(); following = true
                     if (fix == null) onLocate()
+                    else if (driveEnabled) driveRecenter++
                     else map?.let { focusRouteCoordinate(it, fix, 16.0, cameraPadding) }
                 }, modifier = Modifier.size(48.dp).testTag("directions-recenter")) { Icon(Icons.Outlined.GpsFixed, "Konumum") }
             }
@@ -231,9 +253,14 @@ private fun WeatherRouteMapContent(
                 }
                 DropdownMenu(expanded = layersOpen, onDismissRequest = { layersOpen = false }) {
                     if (route != null) DropdownMenuItem(text = { Text("Rotayı sığdır") }, onClick = {
-                        layersOpen = false; cameraPolicy.userGesture(); following = false
-                        map?.let { frameRoute(it) }
+                        layersOpen = false; cameraPolicy.userGesture(); driveFollow.userGesture(); following = false
+                        map?.let { resetDrivingCamera(it); frameRoute(it) }
                     }, modifier = Modifier.testTag("directions-fit-route"))
+                    if (driveEnabled) DropdownMenuItem(text = { Text(if (driveMode == DriveCameraMode.SIMPLE_2D) "Sürüş görünümü" else "Basit 2D") }, onClick = {
+                        driveMode = if (driveMode == DriveCameraMode.ADAPTIVE) DriveCameraMode.SIMPLE_2D else DriveCameraMode.ADAPTIVE
+                        layersOpen = false; driveRecenter++
+                        if (!following) map?.let(::resetDrivingCamera)
+                    })
                     DropdownMenuItem(text = { Text(if (showRoute) "✓ Planlanan rota" else "Planlanan rota") }, onClick = { showRoute = !showRoute })
                     DropdownMenuItem(text = { Text(if (showMembers) "✓ Grup üyeleri" else "Grup üyeleri") }, onClick = { showMembers = !showMembers })
                 }
@@ -247,11 +274,11 @@ private fun WeatherRouteMapContent(
             Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surface.copy(alpha = .95f)) {
                 Row {
                     TextButton(onClick = {
-                        cameraPolicy.userGesture(); following = false
-                        map?.let { frameRoute(it) }
+                        cameraPolicy.userGesture(); driveFollow.userGesture(); following = false
+                        map?.let { resetDrivingCamera(it); frameRoute(it) }
                     }, modifier = Modifier.testTag("directions-fit-route")) { Text("Rotayı sığdır") }
                     if (fix != null) TextButton(onClick = {
-                        cameraPolicy.followCurrent(); following = true
+                        driveFollow.recenter(); cameraPolicy.followCurrent(); following = true
                         map?.moveCamera(CameraUpdateFactory.newLatLngZoom(fix.mapCoordinate(), 16.0))
                     }, modifier = Modifier.testTag("directions-recenter")) { Text(if (following) "Konum izleniyor" else "Konumum") }
                 }
@@ -274,11 +301,41 @@ private fun WeatherRouteMapContent(
         val target = map
         val listener = MapLibreMap.OnCameraMoveStartedListener { reason ->
             if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
-                cameraPolicy.userGesture(); following = false
+                cameraPolicy.userGesture(); driveFollow.userGesture(); following = false
             }
         }
         target?.addOnCameraMoveStartedListener(listener)
         onDispose { target?.removeOnCameraMoveStartedListener(listener) }
+    }
+    LaunchedEffect(map, dataset, driveEnabled) {
+        if (driveEnabled) {
+            drivePolicy.reset(); following = driveFollow.follows(true)
+            if (following) cameraPolicy.followCurrent()
+            wasDriving = true
+        } else if (wasDriving) {
+            drivePolicy.reset(); map?.let(::resetDrivingCamera); wasDriving = false
+        }
+    }
+    LaunchedEffect(map, drivingCamera, mapSize, cameraPadding, following, driveMode, driveRecenter, lifecycleState) {
+        val target = map ?: return@LaunchedEffect
+        val input = drivingCamera ?: return@LaunchedEffect
+        if (!input.enabled || !following || !lifecycleState.isAtLeast(Lifecycle.State.RESUMED)) return@LaunchedEffect
+        val force = appliedRecenter != driveRecenter
+        appliedRecenter = driveRecenter
+        val viewport = DriveCameraViewport(mapSize.width, mapSize.height, cameraPadding[0], cameraPadding[1],
+            cameraPadding[2], cameraPadding[3], mapSize.width > 0 && mapSize.height > 0)
+        if (!drivingMapHasVisibleViewport(viewport)) {
+            if (!driveViewportBlocked) target.moveCamera(CameraUpdateFactory.newCameraPosition(
+                CameraPosition.Builder(target.cameraPosition).tilt(0.0).bearing(0.0).build()))
+            driveViewportBlocked = true
+            return@LaunchedEffect // Hold target and last padding; never recenter behind fully covering panels.
+        }
+        driveViewportBlocked = false
+        drivePolicy.update(input.copy(mode = driveMode), viewport, force)?.let { position ->
+            target.moveCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder(target.cameraPosition)
+                .target(GeoCoordinate(position.coordinate.latitude, position.coordinate.longitude).mapCoordinate())
+                .zoom(position.zoom).bearing(position.bearing).tilt(position.pitch).padding(position.padding.toDoubleArray()).build()))
+        }
     }
     // Source identities are independent: position changes never rebuild or re-upload static
     // geometry. A recreated style deliberately reloads every source.
@@ -286,7 +343,8 @@ private fun WeatherRouteMapContent(
     LaunchedEffect(map, styleRevision, stopJson) { map?.updateMeasuredGeoJson(STOP_SOURCE, stopJson, PowerDiagnostics.Metric.MAP_ROUTE) }
     LaunchedEffect(map, styleRevision, samplesJson) { map?.updateMeasuredGeoJson(SAMPLE_SOURCE, samplesJson, PowerDiagnostics.Metric.MAP_ROUTE) }
     LaunchedEffect(map, styleRevision, fixJson) { map?.updateMeasuredGeoJson(FIX_SOURCE, fixJson, PowerDiagnostics.Metric.MAP_POSITION) }
-    LaunchedEffect(map, dataset, routeCoordinates, coordinates.isNotEmpty(), cameraPadding) {
+    LaunchedEffect(map, dataset, routeCoordinates, coordinates.isNotEmpty(), cameraPadding, driveEnabled) {
+        if (driveEnabled) return@LaunchedEffect
         map?.let { target ->
             if (cameraPolicy.shouldFrame(dataset, coordinates.isNotEmpty(), cameraPadding)) {
                 following = false
@@ -297,12 +355,32 @@ private fun WeatherRouteMapContent(
             }
         }
     }
-    LaunchedEffect(map, liveCoordinate, following, cameraPadding) {
+    LaunchedEffect(map, liveCoordinate, following, cameraPadding, driveEnabled) {
+        if (driveEnabled) return@LaunchedEffect
         if (following && fix != null) map?.let { target ->
             if (navigationLayout) focusRouteCoordinate(target, fix, target.cameraPosition.zoom.coerceAtLeast(15.0), cameraPadding)
             else target.moveCamera(CameraUpdateFactory.newLatLngZoom(fix.mapCoordinate(), target.cameraPosition.zoom.coerceAtLeast(15.0)))
         }
     }
+}
+
+/** Per-surface manual hold survives planner/Actions transitions and map recreation. */
+internal class DrivingMapFollowPolicy {
+    private var manuallyHeld = false
+    fun userGesture() { manuallyHeld = true }
+    fun recenter() { manuallyHeld = false }
+    fun follows(enabled: Boolean): Boolean = enabled && !manuallyHeld
+}
+
+internal fun drivingMapHasVisibleViewport(viewport: DriveCameraViewport): Boolean = viewport.known &&
+    viewport.widthPx > 0 && viewport.heightPx > 0 && viewport.leftPx >= 0 && viewport.rightPx >= 0 &&
+    viewport.topPx >= 0 && viewport.bottomPx >= 0 &&
+    viewport.leftPx.toLong() + viewport.rightPx < viewport.widthPx &&
+    viewport.topPx.toLong() + viewport.bottomPx < viewport.heightPx
+
+private fun resetDrivingCamera(map: MapLibreMap) {
+    map.moveCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder(map.cameraPosition)
+        .tilt(0.0).bearing(0.0).padding(doubleArrayOf(0.0, 0.0, 0.0, 0.0)).build()))
 }
 
 /** Keep the current point in the exposed viewport, including after an explicit recenter. */

@@ -91,6 +91,8 @@ class TomTomRoutePlanner internal constructor(
                         if (preferences.avoidHighways) addQueryParameter("avoid", "motorways")
                         if (preferences.avoidTolls) addQueryParameter("avoid", "tollRoads")
                         if (preferences.avoidFerries) addQueryParameter("avoid", "ferries")
+                        // https://docs.tomtom.com/routing-api/documentation/tomtom-maps/v1/calculate-route
+                        if (preferences.avoidUnpaved) addQueryParameter("avoid", "unpavedRoads")
                     }.build()
                 val request = weatherRequest(url.toString()).header("Cache-Control", "no-store").build()
                 // A key may have been removed while this request waited for the shared gate.
@@ -103,13 +105,13 @@ class TomTomRoutePlanner internal constructor(
                 }
                 if (!response.successful) throw RouteServiceException("TomTom trafik servisi kullanılamıyor; trafiksiz rota kullanılacak.")
                 coroutineContext.ensureActive()
-                if (!alternatives) RouteAlternatives(listOf(parseTomTomRoute(response.body, stops, transport, clock(), requestDeparture).copy(preferences = preferences)))
+                if (!alternatives) RouteAlternatives(listOf(parseTomTomRoute(response.body, stops, transport, clock(), requestDeparture).copy(preferences = preferences, providerWarnings = surfacePreferenceWarnings(preferences, RouteProvider.TOMTOM, transport))))
                 else {
                     val values = JSONObject(response.body).getJSONArray("routes")
                     require(values.length() in 1..3)
                     val routes = (0 until values.length()).mapNotNull { index -> runCatching {
                         val single = JSONObject().put("routes", JSONArray().put(values.getJSONObject(index)))
-                        parseTomTomRoute(single.toString(), stops, transport, clock(), requestDeparture).copy(preferences = preferences)
+                        parseTomTomRoute(single.toString(), stops, transport, clock(), requestDeparture).copy(preferences = preferences, providerWarnings = surfacePreferenceWarnings(preferences, RouteProvider.TOMTOM, transport))
                     }.getOrNull() }
                     uniqueAlternatives(routes, if (routes.size < values.length()) "Bazı alternatif yollar doğrulanamadı." else null)
                 }
