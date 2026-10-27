@@ -12,10 +12,10 @@
 ### Sınırlı doğrulama ve kalan kabul
 
 - Son hedefli birim testi koşusu 142 geçti, 0 başarısız oldu ve 0 atlandı. Önceki seçili koşuda iki eski beklenti uyuşmazlığı görüldü; test beklentileri dar kapsamda düzeltildikten sonra son koşu çalıştırıldı.
-- Telefon debug uygulaması, QA ürün paketi ve QA instrumentation test paketi üretildi. Telefon lint sonucu 0 hata / 108 uyarıdır. Bu debug/QA paketleri Release değildir ve yayımlanmadı.
+- Telefon debug uygulaması, QA ürün paketi ve QA instrumentation test paketi üretildi. Telefon lint sonucu 0 hata / 108 uyarıdır. Bu debug/QA paketleri 0.11 APK Release veya gündelik cihaza kurulumu kanıtlamaz.
 - UI/UX incelemesinde işaretlenen beş düzeltme kaynak üzerinden doğrulandı; bu, görsel/çalışma zamanı kabulü değildir. Android instrumentation, telefon arayüzü ve Android Auto host çalışma zamanı USB hedefi olmadığından çalıştırılmadı.
 - Wear OS 0.6.1 / code 11 ve iletişim v6 değişmedi ve yeniden test edilmedi. Gerçek araç, fiziksel yatış doğruluğu ve enerji etkisi ölçülmedi.
-- Adayın güvenlik incelemesi ve koordinatör kabulü beklemede. Telefon kurulumu, GitHub yayını, Release ve APK yüklemesi yapılmadı.
+- Bu kaynak ve bu doğrulama özeti 0.11 APK Release, gündelik cihaza kurulum veya çalışma zamanı kabulini kanıtlamaz.
 
 Kullanıcıya dönük aday notu: [kullanım kılavuzundaki 0.11 bölümü](docs/IZ_010_KULLANIM.md). Gerçek cihaz ve yayın durumu doğrulandıkça bu kayıt yeniden güncellenecektir.
 

@@ -13,11 +13,11 @@
 
 ### Aday doğrulaması ve kalan sınırlar
 
-- Hedefli birim testleri: **142 geçti, 0 başarısız, 0 atlandı**. Telefon debug uygulaması ile QA ürün ve Android test paketleri üretildi; lint **0 hata / 108 uyarı** verdi. Bunlar debug/QA çıktılarıdır, Release değildir ve yüklenmedi/yayımlanmadı.
+- Hedefli birim testleri: **142 geçti, 0 başarısız, 0 atlandı**. Telefon debug uygulaması ile QA ürün ve Android test paketleri üretildi; lint **0 hata / 108 uyarı** verdi. Bu debug/QA çıktıları 0.11 APK Release veya gündelik cihaza kurulumu kanıtlamaz.
 - UI/UX incelemesinde işaretlenen beş düzeltme kaynak üzerinden doğrulandı; bu, görsel/çalışma zamanı kabulü değildir. Android instrumentation, telefon UI ve Android Auto host testleri USB hedefi bulunmadığı için çalıştırılmadı.
-- Wear OS 0.6.1 / code 11 ve iletişim v6 değişmedi, yeniden test edilmedi. Fiziksel yatış doğruluğu ile enerji etkisi ölçülmedi. Aday güvenlik incelemesi ve koordinatör kabulü beklemede.
+- Wear OS 0.6.1 / code 11 ve iletişim v6 değişmedi, yeniden test edilmedi. Fiziksel yatış doğruluğu ile enerji etkisi ölçülmedi.
 
-Wear OS 0.6.1 / code 11 ve telefon-saat iletişimi v6 değişmedi ve yeniden test edilmedi. Kaynak derlemesi ve hedefli birim testleri geçti; görsel/cihaz çalışma zamanı kabulü yapılmadı. Aday yayımlanmadı; güvenlik ve koordinatör kabulü beklemede.
+Wear OS 0.6.1 / code 11 ve telefon-saat iletişimi v6 değişmedi ve yeniden test edilmedi. Kaynak derlemesi ve hedefli birim testleri geçti; görsel/cihaz çalışma zamanı kabulü yapılmadı. Bu kaynak ve notlar 0.11 APK Release, gündelik cihaza kurulum veya çalışma zamanı kabulini belgelemez.
 
 ## 0.10.1 — Yer arama ve yolculuk işlemleri
 
