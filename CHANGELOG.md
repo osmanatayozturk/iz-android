@@ -2,14 +2,22 @@
 
 ## Geliştirme adayı — telefon 0.11.0 / code 22
 
-27 Ekim 2026 itibarıyla bu adayın geliştirmesi sürüyor. Aşağıdakiler planlanan kapsamdır; henüz tamamlanmış, test edilmiş veya kullanıma açılmış özellikler olarak değerlendirilmemelidir. Yayımlanmış telefon sürümü 0.10.1 / code 20'dir. Wear OS 0.6.1 / code 11 ve telefon-saat iletişimi v6 bu kapsamda değişmeden kalacaktır.
+27 Ekim 2026 tarihli telefon 0.11.0 / code 22 geliştirme adayı kaynakta uygulanıp derlendi. Aşağıdaki özellikler yayımlanmış uygulamada kullanılabilir kabul edilmemelidir. Yayımlanmış telefon sürümü 0.10.1 / code 20'dir. Wear OS 0.6.1 / code 11 ve telefon-saat iletişimi v6 değişmedi; bu adayda yeniden test edilmedi.
 
-- Mevcut tek **Motosiklet** ulaşım türünde yeni rota tercihi, bilinen kaplamasız yollardan kaçınma varsayılanı ve açıkça atanmış Ev/İş hedef kısayolları planlanıyor. Otoyol ve ücretli yol tercihleri izinli kalır; kullanıcının kaydettiği seçimler korunur. Ayrı işe gidiş amacı, mod veya profil eklenmesi planlanmıyor.
-- Araba ve motosiklette teyitli kayıt veya yönlendirme sırasında telefon ve Android Auto için ortak, sürüş bağlamına uyarlanan harita kamerası planlanıyor. Elle kaydırma/yakınlaştırma ve mevcut harita kontrolleri korunacak; küçük veya ölçülemeyen araç ekranı alanında güvenli düz görünüm kullanılacak.
-- İsteğe bağlı yatış tahmini yalnız motosiklet yolculuğu tamamlandıktan sonra, gövdeye sabitlenmiş telefon ve uygun sensör/GPS kaydı varsa hesaplanacak. Gidon veya bilinmeyen montajda, eksik kalibrasyonda ya da yetersiz örneklerde sayısal sonuç sunulmayacak. Canlı yatış göstergesi veya tehlikeli manevra talimatı planlanmıyor.
-- Yatış verisi deneysel bir tahmin olarak etiketlenecek. Fiziksel ölçümle doğrulanmış doğruluk, güven yüzdesi veya enerji tasarrufu iddiası yoktur. Yalnız planlanan kapsam, gerçek cihaz/araç kabulünün yerine geçmez.
+- Tek **Motosiklet** ulaşım türü korunur; ayrı işe gidiş modu veya profili yoktur. Aday kaynakta motosiklet için varsayılan rota tercihleri ve kullanıcının kayıtlı yerlerinden açıkça atanan Ev/İş hedef kısayolları bulunur; otoyol ve ücretli yol tercihleri izinli kalır, kayıtlı seçimler korunur.
+- Araba/motosiklette teyitli kayıt veya yönlendirme sırasında telefon ve Android Auto için ortak sürüş kamerası bulunur. Elle kaydırma/yakınlaştırma, mevcut harita kontrolleri ve küçük/bilinmeyen Auto görünür alanında düz görünüm desteği kaynakta yer alır.
+- İsteğe bağlı yatış tahmini yalnız tamamlanmış motosiklet yolculuğunda ve gövdeye sabit telefonla kullanılmak üzere geliştirilmiştir. Gidon/bilinmeyen montaj, eksik kalibrasyon veya yetersiz örnekler sayısal sonuç sağlamaz; canlı yatış göstergesi ve tehlikeli manevra istemi yoktur.
+- Yatış sonucu deneysel olarak sunulur. Fiziksel ölçümle doğrulanmış doğruluk, güven yüzdesi veya enerji tasarrufu iddiası yoktur.
 
-Kullanıcıya dönük kapsam taslağı: [kullanım kılavuzundaki 0.11 aday bölümü](docs/IZ_010_KULLANIM.md). Test, görsel kabul ve güvenlik değerlendirmesi tamamlandığında bu kayıt gerçek sonuçlarla güncellenecektir.
+### Sınırlı doğrulama ve kalan kabul
+
+- Son hedefli birim testi koşusu 142 geçti, 0 başarısız oldu ve 0 atlandı. Önceki seçili koşuda iki eski beklenti uyuşmazlığı görüldü; test beklentileri dar kapsamda düzeltildikten sonra son koşu çalıştırıldı.
+- Telefon debug uygulaması, QA ürün paketi ve QA instrumentation test paketi üretildi. Telefon lint sonucu 0 hata / 108 uyarıdır. Bu debug/QA paketleri Release değildir ve yayımlanmadı.
+- UI/UX incelemesinde işaretlenen beş düzeltme kaynak üzerinden doğrulandı; bu, görsel/çalışma zamanı kabulü değildir. Android instrumentation, telefon arayüzü ve Android Auto host çalışma zamanı USB hedefi olmadığından çalıştırılmadı.
+- Wear OS 0.6.1 / code 11 ve iletişim v6 değişmedi ve yeniden test edilmedi. Gerçek araç, fiziksel yatış doğruluğu ve enerji etkisi ölçülmedi.
+- Adayın güvenlik incelemesi ve koordinatör kabulü beklemede. Telefon kurulumu, GitHub yayını, Release ve APK yüklemesi yapılmadı.
+
+Kullanıcıya dönük aday notu: [kullanım kılavuzundaki 0.11 bölümü](docs/IZ_010_KULLANIM.md). Gerçek cihaz ve yayın durumu doğrulandıkça bu kayıt yeniden güncellenecektir.
 
 ## Önceki geliştirme adayı kaydı — telefon 0.10.2 / code 21, Wear OS 0.6.1 / code 11, iletişim v6
 

@@ -12,15 +12,23 @@ Güncel yayın durumu bu dosyada, tamamlanan değişiklikler [değişiklik geçm
 
 ## Geliştirme adayı — telefon 0.11.0 / code 22
 
-**Durum:** 27 Ekim 2026 itibarıyla geliştirme sürüyor. Bu bölüm planlanan kapsamı kaydeder; tamamlanma, test, cihaz kabulü, güvenlik onayı veya yayın beyanı değildir. Yayımlanmış telefon sürümü **0.10.1 / code 20** olarak kalır.
+**Durum:** 27 Ekim 2026'da telefon 0.11.0 / code 22 aday kaynağı derlendi ve hedefli birim testleri geçti. Bu sınırlı kaynak/derleme doğrulaması tam aday kabulü, cihaz kabulü, güvenlik onayı veya yayın beyanı değildir. Yayımlanmış telefon sürümü **0.10.1 / code 20** olarak kalır.
 
-- **Tek Motosiklet türü:** Ayrı işe gidiş/şehir içi modu veya profili eklenmez. Varsayılan yönlendirme en hızlı rota ve bilinen kaplamasız yollardan kaçınmadır; otoyol/ücretli yol izinli kalır. Kullanıcının açıkça kaydettiği tercihler ve başka ulaşım türlerinin varsayılanları korunur.
-- **Hedef kısayolları:** Kullanıcı, kayıtlı yerlerinden Ev ve İş hedefini açıkça atayabilir. Kısayol mevcut ulaşım türünü veya yolculuk kaydını değiştirmez; rota önizlemesi ve başlatma açık kullanıcı eylemleri olarak kalır.
-- **Sürüş kamerası:** Araba/motosiklette teyitli kayıt veya yönlendirme sırasında telefon ile Android Auto için ortak kamera davranışı planlanır. Hız ve yaklaşan manevra kadrajı etkiler; elle harita kullanımı, mevcut yönlendirme durumu ve telefon yönelimi korunur. Araç ekranının güvenli alanı bilinmiyorsa düz görünüm kullanılır.
-- **Deneysel yatış tahmini:** İsteğe bağlı özellik yalnız tamamlanmış motosiklet yolculuğundan sonra çalışır. Gövdeye sabit telefon, açık tercih, uygun kalibrasyon ve yeterli sensör/GPS örnekleri gerekir. Gidon veya bilinmeyen montaj ya da yetersiz veri sayısal sonuç üretmez; canlı yatış göstergesi planlanmaz. Pil en az %20 değilken ya da kayıt/yönlendirme etkinken ağır analiz çalıştırılmaz.
-- **Veri ve sınırlar:** Günlük ve eski yedeklerle geriye uyumluluk hedeflenir; eski yolculuklara tahmini yatış değeri üretilmez. Yatış sonucu deneysel olarak etiketlenir. Fiziksel doğruluk, pil tasarrufu, sürüş güvenliği veya gerçek araç kabulü henüz kanıtlanmış değildir.
+- **Tek Motosiklet türü:** Aday kaynakta ayrı işe gidiş/şehir içi modu veya profili yoktur. Motosiklet için varsayılan rota en hızlı seçenek ve bilinen kaplamasız yollardan kaçınmadır; otoyol ve ücretli yol izinli kalır. Açıkça kaydedilen tercihler korunur.
+- **Hedef kısayolları:** Kayıtlı yerlerden Ev ve İş hedefi açıkça atanabilir. Kısayol ulaşım türünü veya yolculuk kaydını değiştirmez; rota önizlemesi ve başlatma kullanıcı eylemleridir.
+- **Sürüş kamerası:** Araba/motosiklette teyitli kayıt veya yönlendirme sırasında telefon ve Android Auto için ortak kamera bulunur. Hız ve yaklaşan manevra kadrajı etkiler; elle harita kullanımı ve telefon yönelimi korunur. Auto güvenli görünür alanı bilinmiyorsa düz görünüm kullanılır.
+- **Deneysel yatış tahmini:** Özellik yalnız tamamlanmış motosiklet yolculuğu için, açık tercih, gövdeye sabit telefon, uygun kalibrasyon ve yeterli sensör/GPS örnekleriyle kullanılmak üzere uygulanmıştır. Gidon/bilinmeyen montaj veya yetersiz örnek sayısal sonuç vermez; canlı yatış göstergesi yoktur. Ağır analiz etkin/geçici kayıt ve navigasyon kalmayınca, pil en az %20 olduğunda çalışır; yeni kayıt veya düşük pilde bekler.
+- **Veri ve sınırlar:** Eski yedek biçimleri için hedefli uyumluluk testleri kapsamdadır; eski yolculuklara tahmini yatış değeri üretilmez. Yatış sonucu deneysel etiketlenir. Fiziksel doğruluk, enerji tasarrufu veya sürüş güvenliği iddiası yoktur.
 
-Wear OS **0.6.1 / code 11** ile telefon-saat iletişimi **v6** bu adayın kapsamı dışında ve değişmeden kalır. [Kullanıcıya dönük 0.11 kapsam taslağı](IZ_010_KULLANIM.md). Test, UI/UX incelemesi ve teknik kanıt tamamlandığında bu bölüm gerçek sonuçlarla güncellenecektir.
+### Doğrulama ve kalan kabul
+
+- Son hedefli birim testi koşusu 142 geçti, 0 başarısız oldu ve 0 atlandı. Önceki seçili koşuda görülen iki eski beklenti uyuşmazlığından sonra yalnız test beklentileri düzeltilip son koşu çalıştırıldı.
+- Telefon debug uygulaması, QA ürün paketi ve QA Android test paketi üretildi. Telefon lint 0 hata / 108 uyarı verdi. Üretilen debug/QA paketleri Release değildir; Release paketi veya dağıtım varlığı oluşturulmadı.
+- UI/UX incelemesinde işaretlenen beş düzeltme kaynak üzerinden doğrulandı; bu, görsel/çalışma zamanı kabulü değildir. Android instrumentation, telefon UI ve Android Auto host çalışma zamanı USB hedefi olmadığı için çalıştırılmadı.
+- Wear OS **0.6.1 / code 11** ve iletişim **v6** değişmedi ve tekrar test edilmedi. Fiziksel yatış doğruluğu ve enerji etkisi ölçülmedi.
+- Aynı adayın güvenlik incelemesi ve koordinatör kabulü beklemede. Cihaza kurulum veya GitHub yayını yapılmadı.
+
+Wear OS **0.6.1 / code 11** ile telefon-saat iletişimi **v6** bu adayda değişmedi. [Kullanıcıya dönük 0.11 aday bölümü](IZ_010_KULLANIM.md). Yeni cihaz veya yayın kanıtı geldiğinde bu kayıt gerçek sonuçlarla güncellenecektir.
 
 ## Önceki geliştirme adayı kaydı — 0.10.2 / code 21 ve Wear OS 0.6.1 / code 11
 
@@ -113,19 +121,13 @@ Ayrıntılı görev ve teslim kuralları [AGENTS.md](../AGENTS.md) içindedir. �
 
 **Yerel doğrulama:** İki kalıcı talimat dosyası birlikte incelendi; dış iletişim çelişkileri kaldırıldı, mevcut görev kimlikleri ve sorumlulukları korundu. Telefon, saat ve Android Auto görevlerine bildirim teslim edildi. Belge farkları ve biçim kontrolü başarılı; uygulama testi/derlemesi çalıştırılmadı.
 
-## Sonraki uygulama güncellemesinin numarası
+## Sürüm numaralandırma ilkesi
 
-Yayımlanan telefon sürümü **0.10.0 / code 18**'dir. Saat uygulaması değişmediği için **0.6.0 / code 10** korunur. Aşağıdaki tablo ilerideki güncellemelerde kullanılan numaralandırma türlerini gösterir; ayrı sürüm taahhüdü değildir.
+Yayımlanmış telefon sürümü **0.10.1 / code 20**, Wear OS **0.6.0 / code 10**'dur. Etkin telefon adayı **0.11.0 / code 22**; bu adayda değişmeyen Wear sürümü **0.6.1 / code 11** olarak belirlenmiştir. Güncel yayın ve aday hedefi için bu dosyanın üst bölümündeki tablolar geçerlidir; eski sürüm örnekleri yeni hedef yerine kullanılmamalıdır.
 
-| Değişiklik | Telefon için sonraki sürüm | Saat de değişirse sonraki saat sürümü |
-|---|---|---|
-| Hata düzeltmesi veya mevcut ekranın küçük iyileştirmesi | 0.10.1 / code 19 | 0.6.1 / code 11 |
-| Yeni kullanıcı özelliği veya yeni modül | 0.11.0 / code 19 | 0.7.0 / code 11 |
-| Yalnız dokümantasyon veya teslim süreci | 0.10.0 / code 18 korunur | 0.6.0 / code 10 korunur |
-
-- Numara, çalışmaya başlarken gerçek kapsam ve depodaki en son sürüm esas alınarak kesinleştirilir. Yayımlanan/teslim edilen yeni APK için ilgili modülün `versionCode` değeri monoton artar; art arda test derlemeleri ayrı sürüm sayılmaz.
+- Sürüm numarası gerçek kapsam ve son yayımlanmış sürüme göre belirlenir. Yeni uygulama yayını için ilgili modülün `versionCode` değeri artar; ardışık test derlemeleri ayrı sürüm sayılmaz.
 - Telefon ve saat bağımsız numaralandırılır. Değişmeyen modülün sürümü artırılmaz. Değerlerin kaynağı `app/build.gradle.kts` ve `wear/build.gradle.kts` dosyalarıdır.
-- Veri, yedek, uygulama kimliği veya iletişimde uyumsuz değişiklik gerekiyorsa başlamadan önce somut geçiş planı eklenir. 1.0.0 için ayrıca bir kararlı sürüm kapsamı belirlenir.
+- Veri, yedek, uygulama kimliği veya iletişimde uyumsuz değişiklik gerekirse başlamadan önce geçiş planı eklenir. 1.0.0 için ayrıca kararlı sürüm kapsamı belirlenir.
 
 ## Her güncellemede uygulanacak akış
 
