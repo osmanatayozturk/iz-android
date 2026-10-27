@@ -12,7 +12,7 @@ Bu, 27 Ekim 2026 tarihli yayın öncesi doğrulama kaydıdır ve telefon 0.10.2 
 
 ### Sınırlı doğrulama ve kalan kapsam
 
-- Telefon `appDebug` derlemesi geçti; telefon lint 0 hata ve 108 uyarı verdi. İlk odaklı QA koşusu 8 geçti, 1 tanılama kontrolü başarısız oldu ve 1 kontrol pilin %20 eşiğinin altındaki doğal koşul nedeniyle atlandı. Dört gizlilik kontrolü ilk koşuda geçti.
+- Telefon `appDebug` derlemesi geçti; telefon lint 0 hata ve 108 uyarı verdi. İlk odaklı QA koşusu 8 geçti, 1 tanılama kontrolü başarısız oldu ve 1 kontrol, pilin doğal olarak %20’nin altında olması koşulu sağlanmadığı için atlandı. Dört gizlilik kontrolü ilk koşuda geçti.
 - Test-only düzeltmesinden sonra aynı QA ürünü üzerinde yalnız değişen tanılama kontrolü bir kez çalıştırıldı ve geçti. Bu dar tekrar tam koşuyu baştan yürütmedi; ilk 8/1/1 sonucu ve başarısızlık kaydı tarihsel olarak korunuyor. Dört gizlilik kontrolü bu tekrar koşusunda yeniden çalıştırılmadı; önceki geçiş kanıtları aynı ürün kimliği altında ayrı kalır.
 - Sınırlı salt okunur postflight sırasında alınan tek anlık görüntü, türetilmiş indeks ve ısı haritasının boş ve yerleşmiş olduğunu gösterdi. Boş durum için günlük toplamlar sıfırdı; bekleyen işaret veya atomik `new`/`bak` yan dosyaları yoktu. Play uygulamasına dokunulmadı. Ham veritabanı veya tüm kişisel veriler denetlenmedi; bu sonuç tüm kuyruk işlerinin tamamlandığı anlamına gelmez.
 - Wear OS ve iletişim protokolü bu adayda değişmedi. Önceki Wear lint sonucu (0 hata, 41 uyarı) ve 38 protokol testi değişmeyen kaynak kanıtıyla tarihsel olarak yeniden kullanıldı; yeni adayda tekrar çalıştırılmadı.
