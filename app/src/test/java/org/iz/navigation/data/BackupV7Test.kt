@@ -6,7 +6,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class BackupV7Test {
-    @Test fun newBackupHasVersionSevenAndEmptyLibraryLists() {
+    @Test fun newBackupHasVersionEightAndEmptyLibraryLists() {
         val encoded = BackupJson.encode(DiarySnapshot())
         assertEquals(8, encoded.getInt("version"))
         listOf("savedPlans", "importedTracks", "collections", "memberships").forEach {
@@ -21,9 +21,21 @@ class BackupV7Test {
         json.put("importedTracks", JSONArray("""[{"id":"track","name":"Park","createdAt":10,"segments":[{"name":"Section","trackName":"Trail","trackIndex":1,"points":[{"latitude":10,"longitude":20},{"latitude":10.1,"longitude":20.1}]}]}]"""))
         json.put("collections", JSONArray("""[{"id":"collection","name":"Summer","createdAt":10,"updatedAt":20}]"""))
         json.put("memberships", JSONArray("""[{"collectionId":"collection","journeyId":"journey","sortOrder":0}]"""))
-        val restored = BackupJson.encode(BackupJson.decode(json))
+        val legacyPreferences = json.getJSONArray("savedPlans").getJSONObject(0).getJSONObject("preferences")
+        assertFalse("Version 7 input has no surface preference", legacyPreferences.has("avoidUnpaved"))
+        val decoded = BackupJson.decode(json)
+        assertFalse("Absent WALK surface preference defaults to false", decoded.savedPlans.single().preferences.avoidUnpaved)
+        val restored = BackupJson.encode(decoded)
+        val exportedPreferences = restored.getJSONArray("savedPlans").getJSONObject(0).getJSONObject("preferences")
+        assertTrue("New export writes a typed surface preference", exportedPreferences.get("avoidUnpaved") is Boolean)
+        assertFalse("Re-export preserves the decoded false default", exportedPreferences.getBoolean("avoidUnpaved"))
+
+        // Normalize only the additive field in an expected copy; retain every legacy metadata check.
+        val expected = JSONObject(json.toString())
+        expected.getJSONArray("savedPlans").getJSONObject(0).getJSONObject("preferences").put("avoidUnpaved", false)
+        assertFalse("Legacy input remains unchanged", legacyPreferences.has("avoidUnpaved"))
         listOf("savedPlans", "importedTracks", "collections", "memberships").forEach {
-            assertEquals("Round trip $it", canonical(json.getJSONArray(it)), canonical(restored.getJSONArray(it)))
+            assertEquals("Round trip $it", canonical(expected.getJSONArray(it)), canonical(restored.getJSONArray(it)))
         }
     }
 
