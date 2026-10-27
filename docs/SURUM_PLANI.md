@@ -6,13 +6,13 @@ Güncel yayın durumu bu dosyada, tamamlanan değişiklikler [değişiklik geçm
 
 | Bileşen | versionName | versionCode | Durum |
 |---|---|---|---|
-| Telefon | 0.11.0 | 22 | GitHub normal Release / Latest; APK ve doğrulama notları sürüm sayfasında |
+| Telefon | 0.11.0 | 22 | [Release sayfası](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.11.0): APK ve doğrulama notları |
 | Wear OS | 0.6.1 | 11 | Telefon 0.11.0 kaynaklarında değişmedi; yeni Wear APK'sı yok |
 | Ortak iletişim | v6 | — | Telefon 0.11.0 kaynaklarında değişmedi |
 
 ## Telefon 0.11.0 / code 22 — motosiklet sürüşü
 
-Bu sürümün APK indirme dosyası, kaynak arşivi, bağımlılık kaynakları, lisanslar ve SHA-256 listesi [GitHub Release sayfasında](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.11.0) bulunur. Paket özeti ve eşleşen güvenlik/yayın durumu yalnız doğrulandıktan sonra eklenir.
+APK, kaynak arşivi, bağımlılık kaynakları, lisanslar ve doğrulama notları [GitHub Release sayfasında](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.11.0) listelenir.
 
 - **Tek Motosiklet türü:** Ayrı işe gidiş/şehir içi modu veya profili yoktur. Motosiklet için varsayılan rota en hızlı seçenek ve bilinen kaplamasız yollardan kaçınmadır; otoyol ve ücretli yol izinli kalır. Açıkça kaydedilen tercihler korunur.
 - **Hedef kısayolları:** Kayıtlı yerlerden Ev ve İş hedefi açıkça atanabilir. Kısayol ulaşım türünü veya yolculuk kaydını değiştirmez; rota önizlemesi ve başlatma kullanıcı eylemleridir.
@@ -22,8 +22,10 @@ Bu sürümün APK indirme dosyası, kaynak arşivi, bağımlılık kaynakları, 
 
 ### Doğrulama ve kalan kabul
 
-- Değişmeyen ürün kaynağına ait hedefli birim testi kanıtı 142 geçti, 0 başarısız oldu ve 0 atlandı; yalnız test kodunun değiştiği bu çalışma için yeniden çalıştırılmadı. Telefon lint sonucu 0 hata / 108 uyarı olarak korundu.
-- Telefon debug uygulaması, QA ürün paketi ve QA Android test paketi üretildi. Bu debug/QA çıktıları dağıtım APK'sının imzasını, SHA-256 değerini veya gündelik cihaza kurulumunu doğrulamaz.
+- Önceki debug QA bağlamında değişmeyen üretim kaynağına ait 142 hedefli birim testi geçti, 0 başarısız oldu ve 0 atlandı; lint 0 hata / 108 uyarı olarak korundu. Yalnız test kodu değiştiğinden bu kontroller o turda yeniden çalıştırılmadı; bunlar yeni Release APK'sı için R8 sonucu değildir.
+- 0.11.0 herkese açık yapılandırma R8 Release derlemesi 304.443 saniyede geçti; 135 dış bağımlılık artefaktı envanterlendi. Denetim üç sağlayıcı alanının boş olduğunu doğruladı; bu, özel yapılandırma veya kişisel verilerin tam denetimi değildir.
+- Release APK paket doğrulaması geçti: `org.iz.navigation`, 0.11.0 / code 22, min SDK 29 / target SDK 36, hata ayıklama kapalı, v3 imza şeması ve 16 KiB hizalama. Boyut 50.321.150 bayt; SHA-256 `2772781B6DCE98A0A6DBEE07DAD15A06C189C9DE87B936D2F64571CD407FDDB6`.
+- Bu SHA-256 ile eşleşen APK için bağımsız statik paket kontrolü geçti: uygulama kimliği, imza geçmişi ve hizalama, 283 dosya bağı, 135 ikili bileşen, 20 izin, 32 bileşen, yedekleme/FileProvider yapılandırması, üç boş sağlayıcı alanı ve imzalı-imzasız paket içerik eşlemesi incelendi. Bu sonuç çalışma zamanı veya cihaz kabulü değildir.
 - Sınırlı QA AndroidTest turunda R1'de 10 geçti, 1 test beklentisi başarısız oldu. R2'de düzeltilen kısayol testi geçti; telefon sahnesinin açılışı test gövdesine ulaşmadan başarısız oldu ve ekran görüntüsü alınmadı. R3'te telefon sahnesi testi geçti. R1'de geçen 10 kontrol R3'te yeniden çalıştırılmadı.
 - R3'te normal yazı ölçeğinde iki gerçek GPU ekran görüntüsü alındı. UI/UX bu görüntülerle sınırlı kapsamı kabul etti; görsel engel bulunmadı. İkinci görüntüde elle tutulan genel bakışın bir bölümü hava durumu katmanı altında kaldı; bu manuel tutuşu gösterir, uyarlanabilir hedeflemeyi kanıtlamaz.
 - Ev/İş kısayollarını içeren başlık yerleşimi çalışma zamanında kontrol edilmedi. Android Auto bileşeni/hostu, gerçek GNSS/sürüş, fiziksel yatış doğruluğu ve enerji etkisi, tam uygulama ve daha geniş erişilebilirlik kabul edilmedi.

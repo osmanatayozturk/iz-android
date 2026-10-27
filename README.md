@@ -4,8 +4,6 @@
 
 Wear OS **0.6.1 / code 11** ve telefon-saat iletişimi **v6** bu telefon sürümünde değişmez; yeni Wear APK'sı bu sürümün parçası değildir. [Değişiklik geçmişi](CHANGELOG.md) · [Sürüm planı](docs/SURUM_PLANI.md).
 
-[Değişiklik geçmişi](CHANGELOG.md) · [Sürüm değişikliği planı](docs/SURUM_PLANI.md)
-
 Araba, motosiklet, bisiklet, yürüyüş, koşu ve yolcu için haritayla açılan Kotlin / Jetpack Compose uygulaması. Üstte **Nereye?**, yanda konum ve katmanlar, altta **Kaydet / Grup / Menü** bulunur. Yol tarifi günlük kaydı olmadan da çalışır; yeni başlangıçta **Yolculuğu kaydet** seçimi açıktır. Yolculuklar, ziyaretler, özel notlar ve fotoğraflar telefonda saklanır. Geçmiş, istatistikler, yerler, ısı haritası, OSM Topluluğu ve ayarlara Menüden ulaşılır.
 
 Bu depo İz'in kaynak kodunu ve telefon uygulamasını içerir. İz; yolculuk kaydı, rota planlama ve GPX takibini yerel günlükle birleştirir. Wear OS desteği ve telefon-saat iletişimi sürümden bağımsız olarak numaralandırılır. [Kullanım rehberi](docs/IZ_010_KULLANIM.md) · [0.9 yenilikleri ve kullanım](docs/IZ_090_YENILIKLER.md) · [Grup sunucusu kurulumu](docs/GROUP_SETUP.md) · [Saat kartı ve kadran alanı](docs/WATCH_SURFACES.md).
@@ -20,9 +18,9 @@ Genel APK kişisel servis anahtarları, hesaplar veya yolculuk verileri içermez
 
 Release sayfasında yayımlanan APK'nın imza bilgisi, dosya özeti ve doğrulama kapsamı sürüme ait notlarda yer alır. Aynı uygulama kimliği ve uyumlu imza geçmişi olan kurulumlar yerinde güncellenebilir. Android farklı imzalı paketi reddeder; uygulamayı kaldırmadan önce özel günlüğünüzü yedekleyin.
 
-## Uygulamadan görüntüler
+## Önceki sürümlerden uygulama görüntüleri
 
-Emülatörden alınan gerçek ekranlar; konumlar tanıtım için seçilmiş örneklerdir. Kişisel yolculuk, hesap veya sağlık verisi kullanılmamıştır.
+Bu 0.9 ve 0.10 sürümlerinden alınmış tarihsel örnek ekranlardır; 0.11.0 arayüzünü göstermez. Konumlar tanıtım için seçilmiş örneklerdir. Kişisel yolculuk, hesap veya sağlık verisi kullanılmamıştır.
 
 | Ana harita | Rota planlama |
 | --- | --- |
@@ -40,7 +38,7 @@ Supabase grup sunucusu ve TomTom trafik bağlantısı varsayılan kaynak yapıla
 
 [Yol tarifi ve trafik](docs/YOL_TARIFI_VE_TRAFIK.md): mevcut konumdan planlama, sesli yönlendirme ve isteğe bağlı TomTom trafik tahmini.
 
-[OSM Topluluğu](docs/OSM_TOPLULUGU.md) mesajlar, kişiler, hesap ve OSM sitesindeki takip işlemlerini kapsar. [Android Auto](docs/ANDROID_AUTO.md) hedefsiz sürüş kaydı ve navigasyon sunar. Wear OS 0.6.0, kayıt ve navigasyon durumunu telefondan alır; kart ve kadran alanında günlük Samsung Health adımlarını ve ayrı İz kayıtlarını gösterir. Sağlık sensörleri yalnız uygun bir kayıt sırasında çalışır. [Saat desteği ve kimlik geçişi](docs/WATCH_SUPPORT.md) · [Saat sağlık ölçümü](docs/WATCH_HEALTH_LIVE.md) · [Kart ve kadran](docs/WATCH_SURFACES.md).
+[OSM Topluluğu](docs/OSM_TOPLULUGU.md) mesajlar, kişiler, hesap ve OSM sitesindeki takip işlemlerini kapsar. [Android Auto](docs/ANDROID_AUTO.md) hedefsiz sürüş kaydı ve navigasyon sunar. Wear OS 0.6.1 / code 11, bu telefon sürümünde değişmedi; telefon-saat iletişimi v6'dır ve bu Release'te yeni Wear APK'sı yoktur. Saat, kayıt ve navigasyon durumunu telefondan alır; kart ve kadran alanında günlük Samsung Health adımlarını ve ayrı İz kayıtlarını gösterir. Sağlık sensörleri yalnız uygun bir kayıt sırasında çalışır. [Saat desteği ve kimlik geçişi](docs/WATCH_SUPPORT.md) · [Saat sağlık ölçümü](docs/WATCH_HEALTH_LIVE.md) · [Kart ve kadran](docs/WATCH_SURFACES.md).
 
 Altı yolculuk türünde rota havası, kalkış karşılaştırması ve türe özel canlı uyarılar için [hava durumu kullanımına](docs/weather/USAGE.md) bakın.
 
@@ -52,10 +50,11 @@ Altı yolculuk türünde rota havası, kalkış karşılaştırması ve türe ö
 
 ### 0.11.0 doğrulama kapsamı
 
-- Değişmeyen ürün kaynağına ait hedefli birim testleri 142 geçti; telefon lint sonucu 0 hata / 108 uyarı olarak korundu. Yalnız test kodu değiştiğinden bu çalışma için yeniden çalıştırılmadı.
-- Sınırlı QA AndroidTest turunda R1'de 10 geçti ve 1 test beklentisi başarısız oldu. R2'de düzeltilen kısayol testi geçti; telefon sahnesi test gövdesine ulaşmadan açılışta kaldı. R3'te telefon sahnesi testi geçti; R1'in 10 geçen kontrolü R3'te tekrarlanmadı.
+- Önceki debug QA bağlamında, değişmeyen üretim kaynağı için 142 hedefli birim testi geçti; lint sonucu 0 hata / 108 uyarı olarak korundu. Yalnız test kodu değiştiğinden bu kontroller o turda yeniden çalıştırılmadı; bu sonuçlar Release APK'sının R8 doğrulaması değildir.
+- Aynı önceki debug QA turunda R1'de 10 geçti ve 1 test beklentisi başarısız oldu. R2'de düzeltilen kısayol testi geçti; telefon sahnesi test gövdesine ulaşmadan açılışta kaldı. R3'te telefon sahnesi testi geçti; R1'in 10 geçen kontrolü R3'te tekrarlanmadı.
 - UI/UX, normal yazı ölçeğinde alınan iki gerçek GPU görüntüsünü sınırlı kapsamda kabul etti; görsel engel bulmadı. İkinci görüntüde elle tutulan genel bakışın bir kısmı hava durumu katmanı altında kaldı; bu, uyarlanabilir hedefleme kanıtı değildir.
 - Ev/İş kısayollarını içeren başlık yerleşimi çalışma zamanında kontrol edilmedi. Android Auto bileşeni/hostu, gerçek GNSS/sürüş, fiziksel yatış doğruluğu ve enerji etkisi, tam uygulama ve daha geniş erişilebilirlik kabul edilmedi. Wear OS 0.6.1 / code 11 ve iletişim v6 değişmedi ve yeniden test edilmedi.
+- 0.11.0 Release APK'sı için yeni R8 Release derlemesi 304.443 saniyede geçti; 135 dış bağımlılık artefaktı envanterlendi. Herkese açık yapılandırma denetimi üç sağlayıcı alanının boş olduğunu doğruladı; bu, özel yapılandırma veya kişisel verilerin tam denetimi değildir. Paket doğrulaması: `org.iz.navigation`, 0.11.0 / code 22, min SDK 29 / target SDK 36, hata ayıklama kapalı, v3 imza şeması ve 16 KiB hizalama geçti; boyut 50.321.150 bayt, SHA-256 `2772781B6DCE98A0A6DBEE07DAD15A06C189C9DE87B936D2F64571CD407FDDB6`. Bağımsız statik paket kontrolü bu hash için geçti: uygulama kimliği, imza geçmişi ve hizalama, 283 dosya bağı, 135 ikili bileşen, 20 izin, 32 bileşen, yedekleme/FileProvider yapılandırması, üç boş sağlayıcı alanı ve imzalı-imzasız paket içerik eşlemesi incelendi. Bu sonuç çalışma zamanı veya cihaz kabulü değildir.
 
 ## 0.10.1 yenilikleri
 

@@ -47,7 +47,7 @@ code or the separate Google Play Services application.
 The release's license/source supplement contains the full third-party notices
 and source locations for the dependencies resolved by that build. İz's matching
 source is available from the same release tag. Build-tool dependencies are not
-bundled in the APK. See the [release files](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.9.2).
+bundled in the APK. See the [release files](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.11.0).
 
 ## Map data and online services
 
