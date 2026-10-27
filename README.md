@@ -1,26 +1,24 @@
 # İz - navigasyon ve yolculuk günlüğü
 
-**Telefon sürümü: 0.10.1 / code 20.** Konum araması, navigasyon kartı ve oturum bitirme akışları iyileştirildi; kaydedilen rotalar, GPX çizgi takibi ve Geziler korunur. [0.10 kullanım rehberi](docs/IZ_010_KULLANIM.md).
+**Telefon 0.11.0 / code 22.** İz; motosiklet rotasını, sürüş sırasında harita kamerasını ve tamamlanmış motosiklet yolculukları için deneysel yatış özetini bir araya getirir. Android 10 veya üzeri ve Google Play hizmetleri gerekir. [İz 0.11.0 sürüm notları ve indirme dosyaları](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.11.0) · [Kullanım kılavuzu](docs/IZ_010_KULLANIM.md).
 
-Telefon **0.11.0 / code 22** geliştirme adayı için değişmeyen ürün kaynağına ait hedefli birim testleri 142 geçti; lint sonucu 0 hata ve 108 uyarı olarak korundu, yalnız test kodunun değiştiği bu çalışma için yeniden çalıştırılmadı. Sınırlı QA AndroidTest turunda R1'de 10 geçti, 1 test beklentisi başarısız oldu; R2'de düzeltilen kısayol testi geçti, telefon sahnesinin açılışı test gövdesine ulaşmadan kaldı ve görüntü alınmadı; R3'te telefon sahnesi testi geçti. R1'de geçen 10 kontrol R3'te yeniden çalıştırılmadı. R3'te normal yazı ölçeğinde alınan iki GPU ekran görüntüsü UI/UX tarafından sınırlı kapsamda kabul edildi; görsel engel bulunmadı. İkinci görüntüde elle tutulan genel bakışın bir bölümü hava durumu katmanı altında kaldı; bu manuel tutuşu gösterir, uyarlanabilir hedeflemeyi kanıtlamaz. Bu sınırlı QA sonucu tam telefon veya Android Auto kabulü değildir. Ev/İş kısayollarını içeren başlık yerleşimi çalışma zamanında kontrol edilmedi. Auto bileşeni/hostu, gerçek GNSS/sürüş, fiziksel yatış doğruluğu ve enerji etkisi, tam uygulama ve daha geniş erişilebilirlik kabul edilmedi. Wear OS **0.6.1 / code 11** ve iletişim **v6** değişmedi, yeniden test edilmedi. Bu kaynak ve notlar 0.11 APK Release, gündelik cihaza kurulum veya tam çalışma zamanı kabulünü belgelemez. İndirilebilir **0.10.1 / code 20** sürümünün durumu kendi Release kaydında yer alır. [Kullanım kılavuzundaki 0.11 aday bölümü](docs/IZ_010_KULLANIM.md) · [Aday değişiklik kaydı](CHANGELOG.md) · [Sürüm değişikliği planı](docs/SURUM_PLANI.md).
+Wear OS **0.6.1 / code 11** ve telefon-saat iletişimi **v6** bu telefon sürümünde değişmez; yeni Wear APK'sı bu sürümün parçası değildir. [Değişiklik geçmişi](CHANGELOG.md) · [Sürüm planı](docs/SURUM_PLANI.md).
 
 [Değişiklik geçmişi](CHANGELOG.md) · [Sürüm değişikliği planı](docs/SURUM_PLANI.md)
 
 Araba, motosiklet, bisiklet, yürüyüş, koşu ve yolcu için haritayla açılan Kotlin / Jetpack Compose uygulaması. Üstte **Nereye?**, yanda konum ve katmanlar, altta **Kaydet / Grup / Menü** bulunur. Yol tarifi günlük kaydı olmadan da çalışır; yeni başlangıçta **Yolculuğu kaydet** seçimi açıktır. Yolculuklar, ziyaretler, özel notlar ve fotoğraflar telefonda saklanır. Geçmiş, istatistikler, yerler, ısı haritası, OSM Topluluğu ve ayarlara Menüden ulaşılır.
 
-Bu depo İz'in kaynak kodunu ve telefon için **0.10.1 (code 20)** APK'sını yayımlar. Wear OS **0.6.0 (code 10)** ve telefon-saat iletişim biçimi **v5** olarak korunur; bu sürümde yeni saat APK'sı yoktur. Play Store yayını yapılmamıştır. [0.10 kullanım rehberi](docs/IZ_010_KULLANIM.md) · [0.9 yenilikleri ve kullanım](docs/IZ_090_YENILIKLER.md) · [Grup sunucusu kurulumu](docs/GROUP_SETUP.md) · [Saat kartı ve kadran alanı](docs/WATCH_SURFACES.md).
+Bu depo İz'in kaynak kodunu ve telefon uygulamasını içerir. İz; yolculuk kaydı, rota planlama ve GPX takibini yerel günlükle birleştirir. Wear OS desteği ve telefon-saat iletişimi sürümden bağımsız olarak numaralandırılır. [Kullanım rehberi](docs/IZ_010_KULLANIM.md) · [0.9 yenilikleri ve kullanım](docs/IZ_090_YENILIKLER.md) · [Grup sunucusu kurulumu](docs/GROUP_SETUP.md) · [Saat kartı ve kadran alanı](docs/WATCH_SURFACES.md).
 
 ## İndir ve dene
 
-**[İz 0.10.1 telefon APK'sını indir](https://github.com/osmanatayozturk/iz-android/releases/download/v0.10.1/iz-0.10.1-android-4dfcb750.apk)** · [Sürüm notları, bilinen sınırlamalar ve dosyalar](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.10.1)
-
-[0.10.1 kaynak kodu](https://github.com/osmanatayozturk/iz-android/tree/v0.10.1) · [Kaynak kodunu ZIP olarak indir](https://github.com/osmanatayozturk/iz-android/releases/download/v0.10.1/source-4dfcb750.zip)
+**[İz 0.11.0 sürüm sayfası, APK ve dosyalar](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.11.0)** · [0.11.0 kaynak kodu](https://github.com/osmanatayozturk/iz-android/tree/v0.11.0) · [Kaynak kodunu ZIP olarak indir](https://github.com/osmanatayozturk/iz-android/archive/refs/tags/v0.11.0.zip)
 
 Android **10 veya üzeri** ve Google Play hizmetleri gerekir. APK'yı telefonda açın; Android isterse dosyayı açtığınız tarayıcı veya dosya yöneticisi için uygulama yükleme izni verin. Konum ve diğer izinler ilgili özellik kullanılırken açıklanır. Otomatik kayıt ilk kurulumda kapalıdır.
 
 Genel APK kişisel servis anahtarları, hesaplar veya yolculuk verileri içermez. Temel harita, Valhalla ile rota planlama, Open-Meteo hava durumu, GPX özellikleri ve telefondaki günlük ek ayar olmadan kullanılabilir. TomTom trafik özellikleri için kendi anahtarınızı; OSM hesabına bağlanmak için kendi herkese açık OSM uygulama kimliğinizi girmeniz gerekir. Grup özelliği genel APK'da bir Supabase sunucusuna bağlı değildir; kendi sunucunuzla derleme için [grup kurulumu](docs/GROUP_SETUP.md) belgesini kullanın.
 
-Paket hata ayıklamaya kapalıdır ve İz'in yayın anahtarıyla imzalanmıştır. Android'in tanıdığı imza geçmişine ve aynı uygulama kimliğine sahip önceki kurulumlar yerinde güncellenebilir. Farklı imzalı kurulumlarda Android güncellemeyi reddeder; uygulamayı kaldırmadan önce Ayarlar'dan özel günlüğünüzü yedekleyin. Dosya özetleri ve bilinen test sınırları [sürüm notlarında](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.10.1) yer alır.
+Release sayfasında yayımlanan APK'nın imza bilgisi, dosya özeti ve doğrulama kapsamı sürüme ait notlarda yer alır. Aynı uygulama kimliği ve uyumlu imza geçmişi olan kurulumlar yerinde güncellenebilir. Android farklı imzalı paketi reddeder; uygulamayı kaldırmadan önce özel günlüğünüzü yedekleyin.
 
 ## Uygulamadan görüntüler
 
@@ -45,6 +43,19 @@ Supabase grup sunucusu ve TomTom trafik bağlantısı varsayılan kaynak yapıla
 [OSM Topluluğu](docs/OSM_TOPLULUGU.md) mesajlar, kişiler, hesap ve OSM sitesindeki takip işlemlerini kapsar. [Android Auto](docs/ANDROID_AUTO.md) hedefsiz sürüş kaydı ve navigasyon sunar. Wear OS 0.6.0, kayıt ve navigasyon durumunu telefondan alır; kart ve kadran alanında günlük Samsung Health adımlarını ve ayrı İz kayıtlarını gösterir. Sağlık sensörleri yalnız uygun bir kayıt sırasında çalışır. [Saat desteği ve kimlik geçişi](docs/WATCH_SUPPORT.md) · [Saat sağlık ölçümü](docs/WATCH_HEALTH_LIVE.md) · [Kart ve kadran](docs/WATCH_SURFACES.md).
 
 Altı yolculuk türünde rota havası, kalkış karşılaştırması ve türe özel canlı uyarılar için [hava durumu kullanımına](docs/weather/USAGE.md) bakın.
+
+## 0.11.0 yenilikleri
+
+- **Motosiklet rotası ve hedefler:** Tek Motosiklet türü korunur. Ev ve İş kısayolları kayıtlı yerlerden seçilir; rota önizlemesi ve başlatma kullanıcı onayı ister. Varsayılan rota en hızlı seçenektir ve bilinen kaplamasız yollardan kaçınır; otoyol ve ücretli yol tercihleri açık kalır.
+- **Sürüş kamerası:** Telefon kamerası, teyitli kayıt veya yönlendirme sırasında hız ve yaklaşan manevralara göre kadrajı ayarlar. Elle harita kullanımı ve düz görünüm/genel bakış kontrolleri korunur.
+- **Yolculuk sonrası deneysel yatış özeti:** Yalnız tamamlanmış motosiklet yolculuklarında, açık tercih, gövdeye sabit telefon, uygun kalibrasyon ve yeterli sensör/GPS örnekleriyle kullanılabilir. Canlı yatış göstergesi veya güvenlik uyarısı değildir; fiziksel doğruluk ya da enerji kazancı iddiası taşımaz.
+
+### 0.11.0 doğrulama kapsamı
+
+- Değişmeyen ürün kaynağına ait hedefli birim testleri 142 geçti; telefon lint sonucu 0 hata / 108 uyarı olarak korundu. Yalnız test kodu değiştiğinden bu çalışma için yeniden çalıştırılmadı.
+- Sınırlı QA AndroidTest turunda R1'de 10 geçti ve 1 test beklentisi başarısız oldu. R2'de düzeltilen kısayol testi geçti; telefon sahnesi test gövdesine ulaşmadan açılışta kaldı. R3'te telefon sahnesi testi geçti; R1'in 10 geçen kontrolü R3'te tekrarlanmadı.
+- UI/UX, normal yazı ölçeğinde alınan iki gerçek GPU görüntüsünü sınırlı kapsamda kabul etti; görsel engel bulmadı. İkinci görüntüde elle tutulan genel bakışın bir kısmı hava durumu katmanı altında kaldı; bu, uyarlanabilir hedefleme kanıtı değildir.
+- Ev/İş kısayollarını içeren başlık yerleşimi çalışma zamanında kontrol edilmedi. Android Auto bileşeni/hostu, gerçek GNSS/sürüş, fiziksel yatış doğruluğu ve enerji etkisi, tam uygulama ve daha geniş erişilebilirlik kabul edilmedi. Wear OS 0.6.1 / code 11 ve iletişim v6 değişmedi ve yeniden test edilmedi.
 
 ## 0.10.1 yenilikleri
 
@@ -82,7 +93,7 @@ Altı yolculuk türünde rota havası, kalkış karşılaştırması ve türe ö
 ./gradlew :app:lintDebug :wear:lintDebug
 ```
 
-Genel telefon paketinin derleme görevi `:app:assembleRelease` olur. Temiz çalışma kopyasında `local.properties` yalnız SDK yolunu içermeli; `OSM_CLIENT_ID`, `GROUP_SUPABASE_URL` ve `GROUP_SUPABASE_KEY` ortam/yerel değerleri boş olmalıdır. Çıktı minify edilmiş, hata ayıklamaya kapalı ve imzasızdır; Android Build Tools içindeki `zipalign` ve `apksigner` ile kendi özel sertifikanızla imzalayın. İmzalama anahtarınızı veya parolanızı depoya eklemeyin. Yayımlanan paketin dosya özetleri `SHA256SUMS.4dfcb750.txt` dosyasında, doğrulama kapsamı ve bilinen sınırlar ise [sürüm notlarında](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.10.1) bulunur.
+Genel telefon paketinin derleme görevi `:app:assembleRelease` olur. Temiz çalışma kopyasında `local.properties` yalnız SDK yolunu içermeli; `OSM_CLIENT_ID`, `GROUP_SUPABASE_URL` ve `GROUP_SUPABASE_KEY` ortam/yerel değerleri boş olmalıdır. Çıktı minify edilmiş, hata ayıklamaya kapalı ve imzasızdır; Android Build Tools içindeki `zipalign` ve `apksigner` ile kendi özel sertifikanızla imzalayın. İmzalama anahtarınızı veya parolanızı depoya eklemeyin. Yayımlanan paketin SHA-256 özeti, doğrulama kapsamı ve bilinen sınırlar seçilen sürümün [Release sayfasında](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.11.0) bulunur.
 
 Telefon ve saat APK'ları `org.iz.navigation` uygulama kimliğini kullanır. Telefon namespace'i `org.iz.navigation`, saat namespace'i `org.iz.navigation.watch`, ortak protokol namespace'i `org.iz.navigation.wearprotocol`'dür. Önceki uygulama kimliğinden geçiş, Android tarafından yerinde güncelleme sayılmaz; veriyi ZIP ile taşıma adımları [saat desteği belgesinde](docs/WATCH_SUPPORT.md#önceki-uygulama-kimliğinden-geçiş) açıklanır.
 
@@ -151,7 +162,7 @@ Bu komutlar bağlı uygun telefon ve Wear OS cihazı ya da emülatörü gerektir
 - `group`: grup üyeliği, açık konum paylaşımı izni ve Supabase bağlantısı.
 - `ui`: tam ekran ana harita, rota planlayıcı, Menü üzerinden geçmiş/istatistikler/yerler/ayarlar, kayıt ayrıntıları, özel notlar, OSM katkı taslakları ve GPX önizlemesi.
 
-Başlangıç sürümü Android 10+ ve Google Play hizmetlerini hedefler. Play Store yayını yapılmamıştır; mağaza yayını öncesinde arka plan konum beyanı, gizlilik metni, yayın imzası ve güncel hedef SDK gereksinimleri tamamlanmalıdır.
+Başlangıç sürümü Android 10+ ve Google Play hizmetlerini hedefler. Mağaza dağıtımı yapılacaksa arka plan konum beyanı, gizlilik metni, yayın imzası ve güncel hedef SDK gereksinimleri ayrıca karşılanmalıdır.
 
 ## Rotalar, istatistikler ve adımlar
 
@@ -177,4 +188,4 @@ Copyright © 2026 İz projesine katkıda bulunanlar. Bu depodaki özgün kaynak 
 
 Harita ve yol verisi © OpenStreetMap katkıcılarıdır; uygulama içindeki ve belgelerdeki OpenStreetMap kaynak gösterimleri korunmalıdır. MapLibre, AndroidX, AppAuth, OkHttp, Health Connect istemcisi ve diğer bağımlılıkların lisans koşulları ayrıca geçerlidir.
 
-Kaynak kod, Google Play Services konum ve Wearable Data Layer bağımlılıklarını kullanır. Google Play Services tescilli bir çalışma zamanı bileşenidir ve bu depoda GPL kapsamında yeniden lisanslanmaz. APK ile eşleşen İz kaynak kodu, üçüncü taraf lisansları ve bağımlılık kaynakları [aynı sürümün dosyaları](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.10.1) üzerinden sağlanır.
+Kaynak kod, Google Play Services konum ve Wearable Data Layer bağımlılıklarını kullanır. Google Play Services tescilli bir çalışma zamanı bileşenidir ve bu depoda GPL kapsamında yeniden lisanslanmaz. APK ile eşleşen İz kaynak kodu, üçüncü taraf lisansları ve bağımlılık kaynakları [aynı sürümün dosyaları](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.11.0) üzerinden sağlanır.

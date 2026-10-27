@@ -1,10 +1,10 @@
 # Değişiklik geçmişi
 
-## Geliştirme adayı — telefon 0.11.0 / code 22
+## Telefon 0.11.0 / code 22 — motosiklet sürüşü
 
-27 Ekim 2026 tarihli telefon 0.11.0 / code 22 geliştirme adayı kaynakta uygulanıp derlendi. Aşağıdaki özellikler yayımlanmış uygulamada kullanılabilir kabul edilmemelidir. Yayımlanmış telefon sürümü 0.10.1 / code 20'dir. Wear OS 0.6.1 / code 11 ve telefon-saat iletişimi v6 değişmedi; bu adayda yeniden test edilmedi.
+Bu sürüm motosiklet yolculuklarında rota hedeflerini, sürüş kamerasını ve yolculuk tamamlandıktan sonra açılabilen deneysel yatış özetini bir araya getirir. İndirme dosyaları ve sürüme ait doğrulama notları [GitHub Release sayfasında](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.11.0) yer alır. Wear OS 0.6.1 / code 11 ve telefon-saat iletişimi v6 değişmedi; bu sürümde yeni Wear APK'sı yoktur.
 
-- Tek **Motosiklet** ulaşım türü korunur; ayrı işe gidiş modu veya profili yoktur. Aday kaynakta motosiklet için varsayılan rota tercihleri ve kullanıcının kayıtlı yerlerinden açıkça atanan Ev/İş hedef kısayolları bulunur; otoyol ve ücretli yol tercihleri izinli kalır, kayıtlı seçimler korunur.
+- Tek **Motosiklet** ulaşım türü korunur; ayrı işe gidiş modu veya profili yoktur. Motosiklet için varsayılan rota tercihleri ve kullanıcının kayıtlı yerlerinden açıkça atanan Ev/İş hedef kısayolları bulunur; otoyol ve ücretli yol tercihleri izinli kalır, kayıtlı seçimler korunur.
 - Araba/motosiklette teyitli kayıt veya yönlendirme sırasında telefon ve Android Auto için ortak sürüş kamerası bulunur. Elle kaydırma/yakınlaştırma, mevcut harita kontrolleri ve küçük/bilinmeyen Auto görünür alanında düz görünüm desteği kaynakta yer alır.
 - İsteğe bağlı yatış tahmini yalnız tamamlanmış motosiklet yolculuğunda ve gövdeye sabit telefonla kullanılmak üzere geliştirilmiştir. Gidon/bilinmeyen montaj, eksik kalibrasyon veya yetersiz örnekler sayısal sonuç sağlamaz; canlı yatış göstergesi ve tehlikeli manevra istemi yoktur.
 - Yatış sonucu deneysel olarak sunulur. Fiziksel ölçümle doğrulanmış doğruluk, güven yüzdesi veya enerji tasarrufu iddiası yoktur.
@@ -12,14 +12,14 @@
 ### Sınırlı doğrulama ve kalan kabul
 
 - Değişmeyen ürün kaynağına ait hedefli birim testi kanıtı 142 geçti, 0 başarısız oldu ve 0 atlandı; yalnız test kodunun değiştiği bu çalışma için yeniden çalıştırılmadı. Telefon lint sonucu 0 hata / 108 uyarı olarak korundu.
-- Telefon debug uygulaması, QA ürün paketi ve QA instrumentation test paketi üretildi. Bu debug/QA paketleri 0.11 APK Release veya gündelik cihaza kurulumu kanıtlamaz.
+- Telefon debug uygulaması, QA ürün paketi ve QA instrumentation test paketi üretildi. Bu debug/QA paketleri dağıtım APK'sının imzasını, SHA-256 değerini veya gündelik cihaza kurulumunu doğrulamaz.
 - Sınırlı QA AndroidTest turunda R1'de 10 geçti, 1 test beklentisi başarısız oldu. R2'de düzeltilen kısayol testi geçti; telefon sahnesinin açılışı test gövdesine ulaşmadan başarısız oldu ve ekran görüntüsü alınmadı. R3'te telefon sahnesi testi geçti. R1'de geçen 10 kontrol R3'te yeniden çalıştırılmadı.
 - R3'te normal yazı ölçeğinde iki gerçek GPU ekran görüntüsü alındı. UI/UX bu görüntülerle sınırlı kapsamı kabul etti; görsel engel bulunmadı. İkinci görüntüde elle tutulan genel bakışın bir bölümü hava durumu katmanı altında kaldı; bu manuel tutuşu gösterir, uyarlanabilir hedeflemeyi kanıtlamaz.
 - Ev/İş kısayollarını içeren başlık yerleşimi çalışma zamanında kontrol edilmedi. Android Auto bileşeni/hostu, gerçek GNSS/sürüş, fiziksel yatış doğruluğu ve enerji etkisi, tam uygulama ve daha geniş erişilebilirlik kabul edilmedi.
 - Wear OS 0.6.1 / code 11 ve iletişim v6 değişmedi ve yeniden test edilmedi. Gerçek sürüş yapılmadı; fiziksel yatış doğruluğu ve enerji etkisi ölçülmedi.
-- Bu kaynak ve bu doğrulama özeti 0.11 APK Release, gündelik cihaza kurulum veya tam çalışma zamanı kabulünü kanıtlamaz.
+- Bu sınırlı doğrulama özeti tam telefon/Android Auto çalışma zamanı kabulünü, gerçek sürüşü, fiziksel yatış doğruluğunu veya enerji etkisini kanıtlamaz.
 
-Kullanıcıya dönük aday notu: [kullanım kılavuzundaki 0.11 bölümü](docs/IZ_010_KULLANIM.md). Gerçek cihaz ve yayın durumu doğrulandıkça bu kayıt yeniden güncellenecektir.
+[0.11.0 kullanım rehberi](docs/IZ_010_KULLANIM.md). Bu sınırlı doğrulama, gerçek cihaz veya tam çalışma zamanı kabulü değildir.
 
 ## Önceki geliştirme adayı kaydı — telefon 0.10.2 / code 21, Wear OS 0.6.1 / code 11, iletişim v6
 
