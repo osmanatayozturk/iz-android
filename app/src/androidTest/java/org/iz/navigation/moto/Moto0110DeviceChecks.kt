@@ -108,6 +108,7 @@ class Moto0110DeviceChecks {
             val originalNav = (context.applicationContext as IzApplication).navigation.state.value
             val home = Place(id = id(), name = "Synthetic home", latitude = 0.0, longitude = 0.0)
             val work = Place(id = id(), name = "Synthetic work", latitude = 0.001, longitude = 0.001)
+            val expectedWork = work.copy(sortOrder = 1L)
             diary.savePlace(home); diary.savePlace(work)
             library.setDestinationShortcut(DestinationShortcutKind.HOME, home.id)
             library.setDestinationShortcut(DestinationShortcutKind.WORK, work.id)
@@ -123,7 +124,7 @@ class Moto0110DeviceChecks {
             diary.deletePlace(home.id)
             val remaining = withTimeout(5_000) { library.destinationShortcuts.first { it.size == 1 } }
             assertEquals(DestinationShortcutKind.WORK, remaining.single().kind)
-            assertEquals(work, remaining.single().place)
+            assertEquals(expectedWork, remaining.single().place)
             assertTrue(db.travelLibraryDao().allShortcuts().none { it.placeId == home.id })
             library.setDestinationShortcut(DestinationShortcutKind.WORK, null)
             assertTrue(withTimeout(5_000) { library.destinationShortcuts.first { it.isEmpty() } }.isEmpty())
