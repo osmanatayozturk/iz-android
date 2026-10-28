@@ -13,7 +13,7 @@ val Forest = Color(0xFF28604D)
 val Leaf = Color(0xFFDCE9D5)
 val Ink = Color(0xFF26382F)
 val Paper = Color(0xFFF7F7F2)
-val Muted = Color(0xFF6E7C73)
+val Muted = Color(0xFF5B6960)
 val Clay = Color(0xFFAD5D3E)
 
 @Composable

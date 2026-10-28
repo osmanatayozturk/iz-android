@@ -1,5 +1,14 @@
 # Değişiklik geçmişi
 
+## Geliştirme adayı — Telefon 0.11.1 / code 23 (yayımlanmadı)
+
+Bu bölüm, planlanan ilk telefon paketinin kapsamını kaydeder; değişikliklerin tamamlandığı, test edildiği veya yayımlandığı anlamına gelmez. Teknik doğrulama ve sürüm kabulü bekleniyor. Wear OS **0.6.1 / code 11** ile telefon-saat iletişimi **v6** bu adayın kapsamında değişmiyor.
+
+- **Yönlendirme başlığı:** Aktif dönüşlü yönlendirme sırasında üstteki Nereye? hedef/arama alanı ve boş bıraktığı aralık gizlenecek. Harita kontrolleri ile kamera görünür alanı kalan içeriğe göre yerleşecek; hedef alanı yönlendirme bitince geri gelecek. Yalnız kayıt, boş durum, rota önizleme ve dönüşsüz GPX takibi mevcut davranışı koruyacak. Manevra, mesafe, ses, uyarılar, oturum kartı ve İşlemler girişi korunacak.
+- **Günlükten bitirme teyidi (F01):** Günlük ayrıntısındaki Bitir eylemi, etkilenecek mevcut eşleşen yolculuğu ve sonuçlarını açıklayan açık teyit sunacak. Yönlendirmeyi, kaydı ve ikisini birlikte bitirme seçenekleri ayrı kalacak; iptal değişiklik yapmayacak ve eski bir teyit yeni oturumu bitiremeyecek.
+- **İkincil metin karşıtlığı (F02):** Normal boyuttaki ikincil metin için kullanılan metin/arka plan çiftleri en az 4,5:1 karşıtlık hedefini sağlayacak. Renk/token kararı İz'in yeşil-krem kimliğini koruyacak; kapsam değişen token ve yüzeylerle sınırlı.
+- Bu adayın kaynak, paket, çalışma zamanı, cihaz, bağımsız Test, güvenlik ve yayın kabulü henüz burada doğrulanmış sayılmaz. Sonuçlar sabit aday ve gerçek kanıtlarla bu kayda eklenir.
+
 ## Telefon 0.11.0 / code 22 — motosiklet sürüşü
 
 Bu sürüm motosiklet yolculuklarında rota hedeflerini, sürüş kamerasını ve yolculuk tamamlandıktan sonra açılabilen deneysel yatış özetini bir araya getirir. İndirme dosyaları ve sürüme ait doğrulama notları [GitHub Release sayfasında](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.11.0) yer alır. Wear OS 0.6.1 / code 11 ve telefon-saat iletişimi v6 değişmedi; bu sürümde yeni Wear APK'sı yoktur.

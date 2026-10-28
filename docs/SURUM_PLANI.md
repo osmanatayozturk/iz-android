@@ -6,9 +6,28 @@ Güncel yayın durumu bu dosyada, tamamlanan değişiklikler [değişiklik geçm
 
 | Bileşen | versionName | versionCode | Durum |
 |---|---|---|---|
-| Telefon | 0.11.0 | 22 | [Release sayfası](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.11.0): APK ve doğrulama notları |
+| Telefon | 0.11.0 | 22 | Yayımlandı: [Release sayfası](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.11.0), APK ve doğrulama notları |
 | Wear OS | 0.6.1 | 11 | Telefon 0.11.0 kaynaklarında değişmedi; yeni Wear APK'sı yok |
 | Ortak iletişim | v6 | — | Telefon 0.11.0 kaynaklarında değişmedi |
+
+## Planlanan telefon adayı 0.11.1 / code 23 — yayımlanmadı
+
+Bu, geliştirme ve doğrulama bekleyen kapsam planıdır; uygulama kaynaklarının, paketin veya sürüm kabulünün tamamlandığını göstermez. İlk aday üç konuyla sınırlı:
+
+- **Yönlendirme görünümü:** `nav.guidance` etkin olduğunda Nereye? hedef/arama yüzeyi, boş sarmalayıcısı ve aralığı gizlenecek. Gizli alan sıfır yükseklik kullanacak; harita kontrolleri ve kamera görünür alanı kalan ölçülmüş içeriğe göre hesaplanacak. Dönüş/mesafe, ses, operasyonel uyarılar, oturum kartı ve İşlemler girişi korunacak. Yönlendirme yokken başlık geri gelecek. Yalnız kayıt, rota önizleme ve dönüşsüz GPX takibinin davranışı değişmeyecek. Ev/İş kısayol kuralı aynı kalacak.
+- **Günlükte Bitir (F01):** Yalnız mevcut eşleşen yolculuk için sonuçları açıkça anlatan teyit gösterilecek. Yönlendirmeyi bitir, kaydı bitir ve tümünü bitir eylemleri ayrı seçilecek; iptal etkisiz olacak ve eski teyit başka bir oturum/yolculuğu bitiremeyecek. Mevcut güvenli bitirme komutları kullanılacak.
+- **İkincil metin (F02):** Normal boyuttaki küçük metin için değiştirilen her metin/arka plan çifti en az 4,5:1 karşıtlık sağlayacak. Renk kararı ve görsel kabul yalnız etkilenen token/yüzeylerle sınırlı olacak; İz'in yeşil-krem kimliği korunacak.
+
+Teknik kontroller, bağımsız Test, değişen yüzeylerin UI/UX kabulü, paket ve güvenlik incelemesi beklemededir. Bu plan bir çalışma zamanı, cihaz veya yayın kabulü değildir. Ayrıntılı çeyrek sıralaması için [0.11.1 sonrası yol haritasına](UC_AYLIK_YOL_HARITASI.md) bakın.
+
+### 0.11.1 kanıt alanları — sonuçlar geldikçe güncellenecek
+
+- Sabit kaynak/konfigürasyon ve sürüm eşleşmesi: bekliyor.
+- Başlık geçişleri ve F01 bitirme/iptal/stale-session senaryoları: bekliyor.
+- F02 değişen metin/arka plan çiftleri ve oranları; etkilenen yüzeylerin UI/UX kabulü: bekliyor.
+- Sabit adayın hedefli birim, lint, derleme ve bağımsız Test sonuçları: bekliyor.
+- Paket kimliği/sürümü/hash/imza ve eşleşen aday güvenlik kararı: bekliyor.
+- Çalışma zamanı/cihaz kabulü: yapılmadı. Yayın durumu: yayımlanmadı.
 
 ## Telefon 0.11.0 / code 22 — motosiklet sürüşü
 
@@ -127,7 +146,7 @@ Ayrıntılı görev ve teslim kuralları [AGENTS.md](../AGENTS.md) içindedir. �
 
 ## Sürüm numaralandırma ilkesi
 
-Önceki yayımlanmış telefon sürümü **0.10.1 / code 20**'dir. Telefon 0.11.0 / code 22 hedefi yukarıdaki tabloda gösterilmiştir. Wear OS **0.6.1 / code 11** bu telefon sürümünün kaynaklarında değişmemiştir; bu bilgi Wear paketinin yayımlandığı anlamına gelmez. Modüller ayrı numaralandırılır; eski sürüm örnekleri yeni hedef yerine kullanılmamalıdır.
+Yayımlanmış telefon sürümü **0.11.0 / code 22**'dir. **0.11.1 / code 23** yalnız planlanan adaydır. Wear OS **0.6.1 / code 11** ve iletişim **v6** değişik telefon sürümlerinde ayrıca ele alınır; bir modülün sürüm bilgisi diğer modülün yeni paketinin yayımlandığını göstermez. Modüller ayrı numaralandırılır; eski sürüm örnekleri yeni hedef yerine kullanılmamalıdır.
 
 - Sürüm numarası gerçek kapsam ve son yayımlanmış sürüme göre belirlenir. Yeni uygulama yayını için ilgili modülün `versionCode` değeri artar; ardışık test derlemeleri ayrı sürüm sayılmaz.
 - Telefon ve saat bağımsız numaralandırılır. Değişmeyen modülün sürümü artırılmaz. Değerlerin kaynağı `app/build.gradle.kts` ve `wear/build.gradle.kts` dosyalarıdır.

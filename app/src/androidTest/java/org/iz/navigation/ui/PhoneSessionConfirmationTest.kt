@@ -2,7 +2,7 @@ package org.iz.navigation.ui
 
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import android.view.KeyEvent
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.action.ViewActions.pressKey
@@ -18,7 +18,9 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class PhoneSessionConfirmationTest {
-    @get:Rule val compose = createComposeRule()
+    @get:Rule val compose = createEmptyComposeRule()
+    private val uxHost = Ux0111ComposeHost(compose)
+    @org.junit.After fun closeUxHost() = uxHost.close()
     private val nav = NavigationState(sessionId = "session-a", journey = Journey(id = "journey-a"),
         guidance = true, recording = true, sharingLocation = true, routeRevision = 7)
 
@@ -26,7 +28,7 @@ class PhoneSessionConfirmationTest {
         val visible = mutableStateOf(true)
         var confirms = 0
         val request = requireNotNull(phoneSessionEndRequest(PhoneSessionEnd.GUIDANCE, nav))
-        compose.setContent { IzTheme {
+        uxHost.setContent { IzTheme {
             if (visible.value) PhoneSessionEndConfirmation(request, nav, false, { visible.value = false }, { confirms++ })
         } }
         compose.onNodeWithText("Yol tarifi bitsin mi?").assertIsDisplayed()
@@ -39,7 +41,7 @@ class PhoneSessionConfirmationTest {
     @Test fun recordingConfirmationDeliversOnlyCapturedRecordingRequest() {
         val request = requireNotNull(phoneSessionEndRequest(PhoneSessionEnd.RECORDING, nav))
         var delivered: PhoneSessionEndRequest? = null
-        compose.setContent { IzTheme { PhoneSessionEndConfirmation(request, nav, false, {}, { delivered = it }) } }
+        uxHost.setContent { IzTheme { PhoneSessionEndConfirmation(request, nav, false, {}, { delivered = it }) } }
         compose.onNodeWithText("Yolculuk kaydı bitecek. Yol tarifi devam edecek. Grup paylaşımı devam edecek.").assertIsDisplayed()
         compose.runOnIdle { assertNull(delivered) }
         compose.onNodeWithTag("confirm-session-end").performClick()
@@ -50,7 +52,7 @@ class PhoneSessionConfirmationTest {
         val visible = mutableStateOf(true)
         var confirms = 0
         val request = requireNotNull(phoneSessionEndRequest(PhoneSessionEnd.ALL, nav))
-        compose.setContent { IzTheme {
+        uxHost.setContent { IzTheme {
             if (visible.value) PhoneSessionEndConfirmation(request, nav, false, { visible.value = false }, { confirms++ })
         } }
         compose.onNodeWithText("Yol tarifi bitecek. Yolculuk kaydı bitecek. Grup paylaşımı bitecek.").assertIsDisplayed()
@@ -64,7 +66,7 @@ class PhoneSessionConfirmationTest {
         val visible = mutableStateOf(true)
         var confirms = 0
         val request = requireNotNull(phoneSessionEndRequest(PhoneSessionEnd.ALL, nav))
-        compose.setContent { IzTheme {
+        uxHost.setContent { IzTheme {
             if (visible.value) PhoneSessionEndConfirmation(request, current.value, false, { visible.value = false }, { confirms++ })
         } }
         compose.onNodeWithTag("confirm-session-end").assertIsEnabled()
@@ -78,7 +80,7 @@ class PhoneSessionConfirmationTest {
         val visible = mutableStateOf(true)
         var confirms = 0
         val request = requireNotNull(phoneSessionEndRequest(PhoneSessionEnd.ALL, nav))
-        compose.setContent { IzTheme {
+        uxHost.setContent { IzTheme {
             if (visible.value) PhoneSessionEndConfirmation(request, nav, locked.value, { visible.value = false }, { confirms++ })
         } }
         compose.onNodeWithTag("confirm-session-end").assertIsEnabled()

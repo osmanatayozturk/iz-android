@@ -26,6 +26,7 @@ class JourneyNavigationCoordinatorTest {
         var renderFailure = false
         var speechFailure: RuntimeException? = null
         var finishFailure: RuntimeException? = null
+        var onUnattachedFinish: (suspend () -> Unit)? = null
         var onStopRecording: (suspend () -> Unit)? = null
         var planCalls = 0
         var onPlan: (suspend (List<RouteStop>, Transport) -> PlannedRoute)? = null
@@ -46,6 +47,12 @@ class JourneyNavigationCoordinatorTest {
         }
         override suspend fun stopRecording(id: String) { onStopRecording?.invoke(); finish(id) }
         override suspend fun finish(id: String) { finishFailure?.let { throw it }; finished++; journeys.value = journeys.value.map { it.copy(endedAt = 2000) }; running = null }
+        override suspend fun finishUnattached(id: String, stillUnattached: () -> Boolean): Boolean {
+            onUnattachedFinish?.invoke()
+            if (!stillUnattached() || activeJourney()?.id != id || !stillUnattached()) return false
+            finish(id)
+            return true
+        }
         override suspend fun interrupt(id: String) { journeys.value = journeys.value.map { it.copy(interrupted = true, endedAt = 2000) }; running = null; onInterrupted?.invoke() }
         override fun setPreparingNoRecord(enabled: Boolean) { preparing = enabled }
         override fun recordingId() = running
@@ -763,5 +770,105 @@ class JourneyNavigationCoordinatorTest {
         controller.stopGuidance(); runCurrent()
         advanceTimeBy(120_000); runCurrent()
         assertEquals(1, runtime.planCalls)
+    }
+
+    @Test fun unattachedFinishEndsOnlyMatchingJourneyWithoutCreatingSession() = runTest {
+        val runtime = Runtime().also { it.journeys.value = listOf(Journey(id = "orphan", startedAt = 1000)) }
+        val controller = JourneyNavigationCoordinator(runtime, null, {1000L}, backgroundScope)
+        runCurrent()
+        assertNull(controller.state.value.sessionId)
+        assertTrue(controller.finishUnattachedJourney("orphan"))
+        runCurrent()
+        assertEquals(1, runtime.finished)
+        assertEquals(2000L, runtime.journeys.value.single().endedAt)
+        assertNull(controller.state.value.sessionId)
+    }
+
+    @Test fun unattachedFinishRejectsUnrelatedAndAlreadyEndedJourney() = runTest {
+        val runtime = Runtime().also { it.journeys.value = listOf(Journey(id = "current", startedAt = 1000)) }
+        val controller = JourneyNavigationCoordinator(runtime, null, {1000L}, backgroundScope)
+        runCurrent()
+        assertFalse(controller.finishUnattachedJourney("old"))
+        runtime.journeys.value = listOf(Journey(id = "current", startedAt = 1000, endedAt = 2000))
+        runCurrent()
+        assertFalse(controller.finishUnattachedJourney("current"))
+        assertEquals(0, runtime.finished)
+    }
+
+    @Test fun unattachedFinishCannotEndAnAttachedGuidanceSession() = runTest {
+        val runtime = Runtime()
+        val controller = JourneyNavigationCoordinator(runtime, null, {1000L}, backgroundScope)
+        val session = controller.startGuidance(route())
+        val journey = requireNotNull(controller.state.value.journey).id
+        assertFalse(controller.finishUnattachedJourney(journey))
+        assertEquals(0, runtime.finished)
+        assertEquals(session, controller.state.value.sessionId)
+        assertTrue(controller.state.value.guidance)
+        assertTrue(controller.state.value.recording)
+    }
+
+    @Test fun unattachedFinishRechecksJourneyAfterRecorderWait() = runTest {
+        val runtime = Runtime().also { it.journeys.value = listOf(Journey(id = "old", startedAt = 1000)) }
+        val controller = JourneyNavigationCoordinator(runtime, null, {1000L}, backgroundScope)
+        runCurrent()
+        val entered = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+        runtime.onUnattachedFinish = { entered.complete(Unit); release.await() }
+        val finish = async { controller.finishUnattachedJourney("old") }
+        entered.await()
+        runtime.journeys.value = listOf(Journey(id = "replacement", startedAt = 1001))
+        runCurrent(); release.complete(Unit)
+        assertFalse(finish.await())
+        runCurrent()
+        assertEquals(0, runtime.finished)
+        assertEquals("replacement", runtime.journeys.value.single().id)
+        assertNull(runtime.journeys.value.single().endedAt)
+    }
+
+    @Test fun unattachedFinishRejectsDiaryInvalidationDuringRecorderWait() = runTest {
+        val runtime = Runtime().also { it.journeys.value = listOf(Journey(id = "old", startedAt = 1000)) }
+        val controller = JourneyNavigationCoordinator(runtime, null, {1000L}, backgroundScope)
+        runCurrent()
+        val entered = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+        runtime.onUnattachedFinish = { entered.complete(Unit); release.await() }
+        val finish = async { controller.finishUnattachedJourney("old") }
+        entered.await(); controller.invalidateAfterDiaryReplacement(); runCurrent(); release.complete(Unit)
+        assertFalse(finish.await())
+        assertEquals(0, runtime.finished)
+        assertNull(runtime.journeys.value.single().endedAt)
+    }
+
+    @Test fun unattachedFinishDoesNotReattachQueuedFixAfterClosure() = runTest {
+        val runtime = Runtime()
+        val controller = JourneyNavigationCoordinator(runtime, null, {1000L}, backgroundScope)
+        runCurrent()
+        runtime.authoritativeJourney = Journey(id = "orphan", startedAt = 1000)
+        runtime.running = "orphan"
+        val entered = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+        runtime.onUnattachedFinish = { entered.complete(Unit); release.await() }
+        val finish = async { controller.finishUnattachedJourney("orphan") }
+        entered.await()
+        controller.onAcceptedLocation("orphan", NavigationFix(route().stops.first().coordinate, 1000, 5f))
+        runCurrent()
+        assertNull(controller.state.value.sessionId)
+        release.complete(Unit)
+        assertTrue(finish.await())
+        runCurrent()
+        assertEquals(1, runtime.finished)
+        assertNull(controller.state.value.sessionId)
+    }
+
+    @Test fun unattachedFinishFailureReleasesCommandGuardForRetry() = runTest {
+        val runtime = Runtime().also {
+            it.journeys.value = listOf(Journey(id = "orphan", startedAt = 1000))
+            it.finishFailure = IllegalStateException("synthetic finish failure")
+        }
+        val controller = JourneyNavigationCoordinator(runtime, null, {1000L}, backgroundScope)
+        runCurrent()
+        val result = runCatching { controller.finishUnattachedJourney("orphan") }
+        assertTrue(result.exceptionOrNull() is IllegalStateException)
+        assertEquals(0, runtime.finished)
+        runtime.finishFailure = null
+        assertTrue(controller.finishUnattachedJourney("orphan"))
+        assertEquals(1, runtime.finished)
     }
 }

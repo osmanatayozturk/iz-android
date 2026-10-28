@@ -16,7 +16,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.iz.navigation.data.Transport
 import org.iz.navigation.navigation.NavigationFix
@@ -33,7 +33,9 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class NavigationHomeGeometryTest {
-    @get:Rule val compose = createComposeRule()
+    @get:Rule val compose = createEmptyComposeRule()
+    private val uxHost = Ux0111ComposeHost(compose)
+    @org.junit.After fun closeUxHost() = uxHost.close()
 
     @Test fun idleHomeRestoresBrandAboveSearch() {
         renderIdle(360.dp, 560.dp)
@@ -90,7 +92,7 @@ class NavigationHomeGeometryTest {
         val nav = mutableStateOf(NavigationState())
         val planner = mutableStateOf(false)
         var recenterClicks = 0
-        compose.setContent { IzTheme { Box(Modifier.requiredSize(360.dp, 560.dp)) {
+        uxHost.setContent { IzTheme { Box(Modifier.requiredSize(360.dp, 560.dp)) {
             NavigationHomeContent(PhoneDirectionsState(), nav.value, emptyList(), emptyList(), planner.value, "Hava",
                 { planner.value = true }, {}, {}, {}, {}, {}, {}, { recenterClicks++ }, {}, {})
         } } }
@@ -109,7 +111,8 @@ class NavigationHomeGeometryTest {
         ).forEach { active ->
             compose.runOnIdle { nav.value = active }
             compose.onNodeWithTag("home-brand").assertDoesNotExist()
-            compose.onNodeWithTag("open-navigation").assertIsDisplayed()
+            if (active.guidance) compose.onNodeWithTag("open-navigation").assertDoesNotExist()
+            else compose.onNodeWithTag("open-navigation").assertIsDisplayed()
             compose.runOnIdle { nav.value = NavigationState() }
             compose.onNodeWithTag("home-brand").assertIsDisplayed()
         }
@@ -117,7 +120,7 @@ class NavigationHomeGeometryTest {
 
     private fun renderIdle(width: Dp, height: Dp, fontScale: Float = 1f) {
         // Use a known density so portrait and landscape viewports both fit the emulator window.
-        compose.setContent { CompositionLocalProvider(LocalDensity provides Density(1f, fontScale)) {
+        uxHost.setContent { CompositionLocalProvider(LocalDensity provides Density(1f, fontScale)) {
             IzTheme { Box(Modifier.requiredSize(width, height)) {
                 NavigationHomeContent(PhoneDirectionsState(), NavigationState(), emptyList(), emptyList(), false, "Hava",
                     {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
@@ -173,7 +176,7 @@ class NavigationHomeGeometryTest {
             progress = NavigationProgress(0.0, 600.0, 5000.0, 0.0, 0, 160.0),
             roadSpeed = RoadSpeedState(0.0, RoadSpeedLimit(50.0, RoadSpeedSource.TOMTOM_POSTED, true,
                 System.currentTimeMillis(), a.coordinate, Transport.CAR, "test-road"), true))
-        compose.setContent { IzTheme { Box(Modifier.requiredSize(360.dp, 560.dp)) {
+        uxHost.setContent { IzTheme { Box(Modifier.requiredSize(360.dp, 560.dp)) {
             NavigationHomeContent(PhoneDirectionsState(), nav, emptyList(), emptyList(), false, "18° · Hava",
                 {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
         } } }
@@ -199,5 +202,101 @@ class NavigationHomeGeometryTest {
         File(directory, "speed-phone-360x560.png").outputStream().use {
             check(compose.onNodeWithTag("navigation-home").captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it))
         }
+    }
+
+    private var uxDensity = 0f
+    private fun uxGuided(recording: Boolean = false) = NavigationState(sessionId = "ux-header-session",
+        sessionTransport = Transport.MOTORCYCLE, guidance = true, recording = recording,
+        journey = if (recording) org.iz.navigation.data.Journey(id = "ux-header-journey", transport = Transport.MOTORCYCLE) else null)
+
+    private fun renderUxHeader(nav: androidx.compose.runtime.MutableState<NavigationState>,
+        planner: androidx.compose.runtime.MutableState<Boolean>,
+        shortcuts: androidx.compose.runtime.MutableState<List<org.iz.navigation.data.DestinationShortcut>> = mutableStateOf(emptyList())) {
+        var fontScale = 0f
+        uxHost.setContent {
+            val observed = LocalDensity.current
+            androidx.compose.runtime.SideEffect { uxDensity = observed.density; fontScale = observed.fontScale }
+            IzTheme { Box(Modifier.requiredSize(360.dp, 560.dp)) {
+                NavigationHomeContent(PhoneDirectionsState(), nav.value, emptyList(), emptyList(), planner.value,
+                    "QA", { planner.value = true }, {}, {}, {}, {}, {}, { planner.value = true }, {}, {},
+                    shortcuts = shortcuts.value, onShortcut = {}, planner = {})
+            } }
+        }
+        compose.runOnIdle { assertEquals("Only the allocated normal-font scenario", 1f, fontScale, .01f) }
+    }
+
+    @Test fun uxGuidanceHidesDestinationHeaderAndPlannerCannotRestoreIt() {
+        val nav = mutableStateOf(uxGuided())
+        val planner = mutableStateOf(false)
+        renderUxHeader(nav, planner)
+        compose.onNodeWithTag("open-navigation").assertDoesNotExist()
+        compose.onNodeWithText("Nereye?").assertDoesNotExist()
+        compose.onNodeWithTag("home-finish-session").performClick()
+        compose.runOnIdle { assertTrue(planner.value) }
+        compose.onNodeWithTag("open-navigation").assertDoesNotExist()
+        for (next in listOf(uxGuided(true), uxGuided(true).copy(loading = true, gpsStale = true),
+            uxGuided(true).copy(progress = NavigationProgress(0.0, 30.0, 200.0, 150.0, -1, 0.0, offRoute = true)),
+            uxGuided(true).copy(fix = NavigationFix(WeatherCoordinate(41.0, 29.0), 1L, 5f, 0f, 0f)))) {
+            compose.runOnIdle { nav.value = next }
+            compose.onNodeWithTag("open-navigation").assertDoesNotExist()
+        }
+        compose.runOnIdle { planner.value = false }
+        compose.onNodeWithTag("open-navigation").assertDoesNotExist()
+        compose.onNodeWithTag("live-guidance-card").assertIsDisplayed()
+        compose.onNodeWithTag("compact-card-mute").assertIsDisplayed()
+    }
+
+    @Test fun uxGuidanceControlsUseZeroHeaderHeightAndPreserveOnlyShortcutOffset() {
+        val nav = mutableStateOf(uxGuided(true))
+        val planner = mutableStateOf(false)
+        val shortcuts = mutableStateOf(emptyList<org.iz.navigation.data.DestinationShortcut>())
+        renderUxHeader(nav, planner, shortcuts)
+        fun assertControlTop(extra: Float = 0f) {
+            val map = compose.onNodeWithTag("navigation-home-map").fetchSemanticsNode().boundsInRoot
+            val control = compose.onNodeWithTag("directions-recenter").fetchSemanticsNode().boundsInRoot
+            assertEquals("Removed header must reserve zero height", (24f * uxDensity + extra).toDouble(),
+                (control.top - map.top).toDouble(), 2.0)
+        }
+        assertControlTop()
+        compose.runOnIdle { shortcuts.value = listOf(org.iz.navigation.data.DestinationShortcut(
+            org.iz.navigation.data.DestinationShortcutKind.HOME,
+            org.iz.navigation.data.Place(id = "ux-home", name = "QA target", latitude = 41.0, longitude = 29.0))) }
+        val shortcut = compose.onNodeWithTag("destination-shortcut-HOME").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        assertControlTop(shortcut.height + 8f * uxDensity)
+        compose.runOnIdle { planner.value = true }
+        compose.onNodeWithTag("destination-shortcut-HOME").assertDoesNotExist()
+        assertControlTop()
+        compose.runOnIdle { planner.value = false; shortcuts.value = emptyList() }
+        assertControlTop()
+    }
+
+    @Test fun uxEndingGuidanceRestoresHeaderWhileRecordingAndSessionContinue() {
+        val nav = mutableStateOf(uxGuided(true))
+        val planner = mutableStateOf(false)
+        renderUxHeader(nav, planner)
+        compose.onNodeWithTag("open-navigation").assertDoesNotExist()
+        compose.runOnIdle { nav.value = nav.value.copy(guidance = false) }
+        compose.onNodeWithTag("open-navigation").assertIsDisplayed()
+        compose.onNodeWithTag("home-record").assertTextContains("Kayıt açık")
+        compose.runOnIdle { assertTrue(nav.value.recording); assertEquals("ux-header-session", nav.value.sessionId) }
+    }
+
+    @Test fun uxIdlePreviewAndRecordingOnlyKeepDestinationHeader() {
+        val nav = mutableStateOf(NavigationState())
+        val planner = mutableStateOf(false)
+        renderUxHeader(nav, planner)
+        val track = org.iz.navigation.gpx.ImportedTrack(name = "QA GPX", segments = listOf(
+            org.iz.navigation.gpx.TrackSegment("QA", listOf(WeatherCoordinate(41.0, 29.0), WeatherCoordinate(41.01, 29.01)))))
+        val gpx = NavigationState(sessionId = "qa-gpx", sessionTransport = Transport.MOTORCYCLE, locationActive = true,
+            trackFollow = org.iz.navigation.gpx.TrackFollowState(track, org.iz.navigation.gpx.TrackFollowSelection(),
+                org.iz.navigation.gpx.TrackFollowProgress(0.0, 100.0, null, org.iz.navigation.gpx.TrackFollowStatus.WAITING_FOR_GPS)))
+        for (next in listOf(NavigationState(), uxGuided(true).copy(guidance = false), gpx,
+            NavigationState(sessionId = "location-only", sessionTransport = Transport.MOTORCYCLE, locationActive = true),
+            NavigationState(loading = true, gpsStale = true))) {
+            compose.runOnIdle { nav.value = next }
+            compose.onNodeWithTag("open-navigation").assertIsDisplayed()
+        }
+        compose.runOnIdle { planner.value = true }
+        compose.onNodeWithTag("open-navigation").assertIsDisplayed()
     }
 }

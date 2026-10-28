@@ -20,6 +20,8 @@ interface NavigationRuntime {
     suspend fun start(transport: Transport, stillCurrent: () -> Boolean = { true }): String
     suspend fun confirm(id: String, transport: Transport)
     suspend fun finish(id: String)
+    /** Conservative default: adapters must opt into the recorder-atomic unattached finish. */
+    suspend fun finishUnattached(id: String, stillUnattached: () -> Boolean): Boolean = false
     suspend fun stopRecording(id: String) = finish(id)
     suspend fun discardCandidate(id: String) = finish(id)
     /** The Android adapter serializes the decision and commit with every recorder writer. */
@@ -496,6 +498,9 @@ class JourneyNavigationCoordinator(
             if (mutableState.value.sessionId == expectedSessionId) endLocalSession()
         } finally { finishingSession = false }
     }
+
+    /** Minimal RED scaffold; guarded implementation follows the observed regression. */
+    suspend fun finishUnattachedJourney(expectedJourneyId: String): Boolean = false
 
     suspend fun finishJourney(expectedJourneyId: String) = commands.withLock {
         val before = mutableState.value

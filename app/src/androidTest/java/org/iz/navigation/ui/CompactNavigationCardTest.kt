@@ -12,7 +12,7 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -32,7 +32,9 @@ import java.io.File
 /** Synthetic card geometry and callback contracts; real session regression is in ApprovedPhoneUsabilityAcceptanceTest. */
 @RunWith(AndroidJUnit4::class)
 class CompactNavigationCardTest {
-    @get:Rule val compose = createComposeRule()
+    @get:Rule val compose = createEmptyComposeRule()
+    private val uxHost = Ux0111ComposeHost(compose)
+    @org.junit.After fun closeUxHost() = uxHost.close()
     private val state = mutableStateOf(guided())
     private val panel = mutableStateOf(false)
     private var density = 0f
@@ -180,7 +182,7 @@ class CompactNavigationCardTest {
     }
 
     private fun render(width: Dp? = null) {
-        compose.setContent { IzTheme {
+        uxHost.setContent { IzTheme {
             density = LocalDensity.current.density
             fontScale = LocalDensity.current.fontScale
             Box(if (width == null) Modifier.fillMaxSize() else Modifier.width(width).fillMaxSize()) {

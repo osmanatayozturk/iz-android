@@ -33,6 +33,7 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.unit.Dp
@@ -47,6 +48,10 @@ import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
 import org.iz.navigation.IzApplication
 import org.iz.navigation.data.Transport
+import org.iz.navigation.data.DestinationShortcut
+import org.iz.navigation.data.DestinationShortcutKind
+import org.iz.navigation.data.Journey
+import org.iz.navigation.data.Place
 import org.iz.navigation.health.HealthPrivacyActivity
 import org.iz.navigation.integration.OsmServiceSettings
 import org.iz.navigation.navigation.NavigationFix
@@ -89,10 +94,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
-import kotlin.math.max
 
 /**
- * ONE synthetic native PHONE component scene, normal font only. Not MainActivity, a real
+ * IZ-UX-0111 synthetic native PHONE component scene, normal font only. Not MainActivity, a real
  * recorder/GNSS session, a ride, full-app navigation, real Auto/DHU or accuracy/energy evidence.
  * Fresh test-owned existing QA HealthPrivacyActivity rehosts the scene; no health reads.
  * Actual NavigationHomeContent + PhoneDirectionsContent remain mounted around one actual MapView.
@@ -106,6 +110,8 @@ class Moto0110PhoneDrivingScene {
     @get:Rule val compose = createEmptyComposeRule()
     private val showScene = mutableStateOf(true)
     private val planning = mutableStateOf(false)
+    private val shortcuts = mutableStateOf(emptyList<DestinationShortcut>())
+    private val layouts = JSONArray()
     private val containerHeight = mutableStateOf<Dp?>(null)
     private val a = WeatherCoordinate(41.0, 29.0)
     private val coveredFix = WeatherCoordinate(41.0005, 29.0005)
@@ -123,18 +129,27 @@ class Moto0110PhoneDrivingScene {
     private var lastFixAt = 0L
     private var sceneDeadline = 0L
     private var captures = 0
+    private var adaptiveExpected = true
     private var transport: MemoryTiles? = null
 
-    @Test(timeout = 90_000) fun nativePhoneDrivingSceneKeepsManualHoldAcrossActualPlanner() {
+    /** Run only with a fresh source/package/target lease and izExpectedOrientation=portrait|landscape.
+     * Observe the allocated orientation; never rotate the device or override font/GPS/system settings.
+     * This exercises settled measured native layout, not an assertion about every first render frame.
+     */
+    @Test(timeout = 90_000) fun nativeUx0111HeaderShortcutsAndManualHoldAcrossActualPlanner() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assertEquals("Dedicated QA only", "org.iz.navigation.batterycheck", context.packageName)
+        val expectedOrientation = InstrumentationRegistry.getArguments().getString("izExpectedOrientation")
+        check(expectedOrientation in setOf("portrait", "landscape")) { "Explicit allocated portrait/landscape argument required" }
         assertFalse("No actual tracker", TrackingService.isRunning)
         val actual = (context.applicationContext as IzApplication).navigation.state.value
         assertFalse("No actual navigation/location session", actual.guidance || actual.recording || actual.locationActive || actual.loading)
         val directory = File(checkNotNull(context.getExternalFilesDir(null)),
-            "qa/moto-0110-phone-scene/${SystemClock.uptimeMillis()}").apply { check(mkdirs()) }
+            "qa/ux-0111-phone-scene/${SystemClock.uptimeMillis()}").apply { check(mkdirs()) }
         val evidence = JSONObject().put("status", "STARTED").put("evidenceClass", "SYNTHETIC_NATIVE_PHONE_COMPONENT")
             .put("fullAppOrRealGnssOrAutoHost", false).put("enlargedFont", false)
+            .put("expectedOrientation", expectedOrientation)
+            .put("sourceCommitArgument", InstrumentationRegistry.getArguments().getString("izCandidateCommit"))
             .put("hostClass", HealthPrivacyActivity::class.java.name).put("hostPackage", context.packageName)
             .put("hostOwnership", "FRESH_TEST_OWNED_EXISTING_QA_PRIVACY_ACTIVITY_REHOST")
         var savedProvider: ModuleProvider? = null
@@ -208,7 +223,7 @@ class Moto0110PhoneDrivingScene {
                                 val open = { planning.value = true }
                                 NavigationHomeContent(ui, nav.value, emptyList(), emptyList(), planning.value,
                                     "Synthetic QA", open, {}, {}, {}, {}, {}, open, {}, {},
-                                    planner = {
+                                    shortcuts = shortcuts.value, onShortcut = {}, planner = {
                                         PhoneDirectionsContent(ui = ui, nav = nav.value, points = emptyList(), commandBusy = false,
                                             onClose = { planning.value = false }, chooseOrigin = {}, chooseDestination = {},
                                             currentOrigin = {}, transport = {}, preview = {}, start = {}, freeDrive = {},
@@ -222,6 +237,13 @@ class Moto0110PhoneDrivingScene {
             } }
             compose.waitForIdle()
             assertEquals("Observe normal font; never override it", 1f, fontScale, .01f)
+            // Actual-header RED: old guidance UI contains this Surface, not just a helper result.
+            compose.onNodeWithTag("open-navigation").assertDoesNotExist()
+            val home = bounds("navigation-home")
+            val observedOrientation = if (home.width > home.height) "landscape" else "portrait"
+            assertEquals("Actual allocated viewport orientation", expectedOrientation, observedOrientation)
+            evidence.put("observedOrientation", observedOrientation)
+            adaptiveExpected = hasSafeAdaptiveArea(exposedGeometry())
             val readyStarted = SystemClock.elapsedRealtime()
             await("one resumed, nonzero, style-ready native map and adaptive camera", 20_000) {
                 onMain {
@@ -253,27 +275,60 @@ class Moto0110PhoneDrivingScene {
                         .put("activityClass", activity.javaClass.name).put("activityResumed", true)
                 })
             awaitSource(map, a)
+            assertGuidanceLayout(map, "guidance-only-empty", populated = false)
             val initial = snapshot(map, "initial-adaptive")
             assertAdaptive(initial, a)
             val exposed = exposedGeometry()
             val projected = onMain { map.projection.toScreenLocation(LatLng(a.latitude, a.longitude)) }
-            val expectedY = exposed.top + .65f * (exposed.bottom - exposed.top)
+            val expectedY = exposed.top + (if (adaptiveExpected) .65f else .5f) * exposed.height
             assertEquals("Fix anchor uses measured exposed height", expectedY.toDouble(), projected.y.toDouble(), 8.0)
             assertTrue("Fix must be in the exposed horizontal region", projected.x > exposed.left && projected.x < exposed.right)
             val mapBounds = bounds("navigation-home-map")
             val rootPoint = Offset(projected.x + mapBounds.left, projected.y + mapBounds.top)
-            for (tag in listOf("open-navigation", "live-guidance-card", "home-weather", "home-record", "home-group", "home-menu", "directions-recenter", "map-layers")) {
+            for (tag in listOf("live-guidance-card", "home-weather", "home-record", "home-group", "home-menu", "directions-recenter", "map-layers")) {
                 assertFalse("Projected fix is covered by $tag", bounds(tag).contains(rootPoint))
             }
             evidence.put("initialExposedPx", exposed.json()).put("initialProjectionPx", JSONArray(listOf(projected.x, projected.y)))
-            capture(activity, directory, "01-initial-adaptive")
+            capture(activity, directory, "01-guidance-header-hidden-empty")
 
+            val populated = listOf(
+                DestinationShortcut(DestinationShortcutKind.HOME, Place(id = "qa-home", name = "Synthetic home", latitude = 41.002, longitude = 29.002)),
+                DestinationShortcut(DestinationShortcutKind.WORK, Place(id = "qa-work", name = "Synthetic work", latitude = 41.003, longitude = 29.003)),
+            )
+            compose.runOnIdle { shortcuts.value = populated }
+            assertGuidanceLayout(map, "guidance-only-populated", populated = true)
+            compose.runOnIdle { nav.value = nav.value.copy(recording = true, journey = Journey(id = "qa-ux0111-local-journey")) }
+            assertGuidanceLayout(map, "combined-populated", populated = true)
+            // Only synthetic component state changes; never start or fake a tracker/GPS/service.
+            for ((stage, state) in listOf(
+                "rerouting" to nav.value.copy(loading = true, message = "Rota dışındasın. Yeni rota hesaplanıyor."),
+                "stale-gps" to nav.value.copy(gpsStale = true, locationActive = false, message = "Sentetik GPS uyarısı"),
+            )) {
+                compose.runOnIdle { nav.value = state }
+                assertGuidanceLayout(map, stage, populated = true, checkNativePadding = false)
+                sameMap(activity, view, map)
+            }
+            compose.runOnIdle { nav.value = nav.value.copy(guidance = false, arrived = true, loading = false,
+                message = "Hedefe vardın. Yolculuk kaydı devam ediyor.") }
+            compose.onNodeWithTag("open-navigation").assertIsDisplayed()
+            compose.onNodeWithTag("home-finish-session").assertIsDisplayed()
+            assertTrue("Arrival component transition must keep recording", nav.value.recording)
+            layouts.put(JSONObject().put("stage", "arrival-record-only-header-restored").put("recording", true)
+                .put("headerPx", bounds("open-navigation").json()))
+            sameMap(activity, view, map)
+            compose.runOnIdle { nav.value = nav.value.copy(guidance = true, arrived = false, gpsStale = false,
+                locationActive = true, loading = false, message = null, fix = fix(a)); shortcuts.value = emptyList() }
+            adaptiveExpected = hasSafeAdaptiveArea(exposedGeometry())
+            await("current-layout follow after guidance returns", 5_000) { adaptive(onMain { pose(map) }, a) }
+            assertGuidanceLayout(map, "guidance-return-empty", populated = false)
+
+            val beforeOcclusion = snapshot(map, "current-layout-before-occlusion")
             // Actual measured overlays cover the small native viewport while follow is still active.
             compose.runOnIdle { containerHeight.value = 160.dp }
             compose.waitForIdle()
             await("occluded nonzero native viewport", 3_000) { onMain { abs(view.height - 160f * density) <= 2f } }
             val coveredMap = bounds("navigation-home-map")
-            val topPanelsBottom = max(bounds("open-navigation").bottom, bounds("live-guidance-card").bottom)
+            val topPanelsBottom = visibleTopPanelsBottom()
             val bottomActionsTop = bounds("home-record").top
             assertTrue("Measured panels leave no exposed vertical gap", topPanelsBottom >= bottomActionsTop)
             evidence.put("occlusionMeasuredPx", JSONObject().put("map", coveredMap.json())
@@ -281,9 +336,10 @@ class Moto0110PhoneDrivingScene {
             publishFix(coveredFix)
             awaitSource(map, coveredFix)
             await("covered native camera is actually flat", 3_000) { flat(onMain { pose(map) }) }
-            assertHeld(map, initial, "covered-follow-new-fix", 1_200, preservePadding = true, requireFlat = true)
+            assertHeld(map, beforeOcclusion, "covered-follow-new-fix", 1_200, preservePadding = true, requireFlat = true)
             compose.runOnIdle { containerHeight.value = null }
             compose.waitForIdle()
+            adaptiveExpected = hasSafeAdaptiveArea(exposedGeometry())
             await("reopened follow resumes at the current synthetic fix", 5_000) { adaptive(onMain { pose(map) }, coveredFix) }
             sameMap(activity, view, map)
 
@@ -291,28 +347,38 @@ class Moto0110PhoneDrivingScene {
             swipeNative(view, exposedGeometry())
             await("native gesture moves the camera", 4_000) { !sameTarget(onMain { pose(map) }, beforePan) }
             settleCamera(map)
-            snapshot(map, "after-single-native-pan")
+            val manual = snapshot(map, "after-single-native-pan")
+            compose.runOnIdle { shortcuts.value = populated }
+            assertGuidanceLayout(map, "manual-held-populated", populated = true, checkNativePadding = false)
+            assertHeld(map, manual, "shortcut-layout-must-not-release-manual-hold", 400)
             // Actual Home Actions opens the actual planner; no stand-in planner composable.
             compose.onNodeWithTag("home-finish-session").assertIsDisplayed().performClick()
             compose.onNodeWithTag("navigation-screen").assertIsDisplayed()
             assertTrue(planning.value)
+            compose.onNodeWithTag("open-navigation").assertDoesNotExist()
+            compose.onNodeWithTag("destination-shortcut-HOME").assertDoesNotExist()
+            compose.onNodeWithTag("destination-shortcut-WORK").assertDoesNotExist()
             sameMap(activity, view, map)
             compose.onNodeWithTag("navigation-screen").performScrollToNode(hasTestTag("close-directions-planner"))
             compose.onNodeWithTag("close-directions-planner").performClick()
             compose.onNodeWithTag("live-guidance-card").assertIsDisplayed()
             sameMap(activity, view, map)
             settleCamera(map)
+            assertGuidanceLayout(map, "planner-return-populated", populated = true, checkNativePadding = false)
             val postReturn = snapshot(map, "post-actual-planner-return-before-B")
             val since = publishFix(b)
             evidence.put("freshBElapsedSincePreviousFixMillis", since)
             assertTrue("Use real elapsed time, not a clock/GPS override", since >= 1_100)
             awaitSource(map, b)
             assertHeld(map, postReturn, "manual-held-native-source-B", 1_200)
-            capture(activity, directory, "02-post-return-manual-held-B")
+            capture(activity, directory, "02-header-hidden-populated-manual-held-B")
+            adaptiveExpected = hasSafeAdaptiveArea(exposedGeometry())
             compose.onNodeWithTag("directions-recenter").assertIsDisplayed().performClick()
             await("only actual Konumum releases hold and follows B", 5_000) { adaptive(onMain { pose(map) }, b) }
             awaitSource(map, b)
             snapshot(map, "actual-Konumum-follows-B")
+            compose.runOnIdle { nav.value = nav.value.copy(fix = fix(b).copy(speedMps = 0f)) }
+            assertGuidanceLayout(map, "stationary-header-still-hidden", populated = true, checkNativePadding = false)
             sameMap(activity, view, map)
             assertEquals(1, mounts.get())
             assertFalse(disposed.get())
@@ -356,7 +422,7 @@ class Moto0110PhoneDrivingScene {
                     }
                 }
                 cleanup { transport?.assertHealthy() }
-                evidence.put("captureRequests", captures).put("poses", poses).put("mapCompositionMounts", mounts.get())
+                evidence.put("captureRequests", captures).put("poses", poses).put("layouts", layouts).put("mapCompositionMounts", mounts.get())
                     .put("mapCompositionDisposed", disposed.get()).put("nativeViewsRemoved", nativeViewsRemoved)
                     .put("providerIdentityRestored", providerRestored).put("transport", transport?.stats())
                     .put("cleanupFailureCount", cleanupErrors.size).put("interruptedAtCleanup", wasInterrupted)
@@ -414,15 +480,56 @@ class Moto0110PhoneDrivingScene {
     }
     private fun bounds(tag: String) = compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
     private fun Rect.json() = JSONArray(listOf(left, top, right, bottom))
-    /** Measured last panel plus its existing12dp outer gap; existing home safety bottom is112dp. */
+    private fun optionalBounds(tag: String): Rect? = compose.onAllNodesWithTag(tag).fetchSemanticsNodes().singleOrNull()?.boundsInRoot
+    private fun visibleTopPanelsBottom(): Float = listOf("open-navigation", "live-guidance-card", "home-weather",
+        "road-speed-panel", "destination-shortcut-HOME", "destination-shortcut-WORK")
+        .mapNotNull(::optionalBounds).maxOf { it.bottom }
+
+    /** Assert actual tags/positions and native camera padding, never a mirrored visibility helper. */
+    private fun assertGuidanceLayout(map: MapLibreMap, stage: String, populated: Boolean, checkNativePadding: Boolean = true) {
+        compose.waitForIdle()
+        assertTrue(nav.value.guidance)
+        compose.onNodeWithTag("open-navigation").assertDoesNotExist()
+        compose.onNodeWithTag("live-guidance-card").assertIsDisplayed()
+        val mapBounds = bounds("navigation-home-map")
+        val shortcutBounds = listOf("destination-shortcut-HOME", "destination-shortcut-WORK").mapNotNull(::optionalBounds)
+        assertEquals("HOME/WORK policy preserved: $stage", if (populated) 2 else 0, shortcutBounds.size)
+        val measuredRowHeight = if (populated) shortcutBounds.maxOf { it.bottom } - shortcutBounds.minOf { it.top } else 0f
+        val expectedTop = 24f * density + if (populated) measuredRowHeight + 8f * density else 0f
+        val actualTop = bounds("directions-recenter").top - mapBounds.top
+        assertEquals("$stage controls have no hidden80dp header reservation", expectedTop.toDouble(), actualTop.toDouble(), 2.0)
+        if (checkNativePadding) {
+            val exposed = exposedGeometry()
+            adaptiveExpected = hasSafeAdaptiveArea(exposed)
+            val coordinate = checkNotNull(nav.value.fix).coordinate
+            val expectedY = exposed.top + (if (adaptiveExpected) .65f else .5f) * exposed.height
+            // Native forward anchoring adds padding beyond the Compose inset; check its
+            // projected visible result rather than comparing raw base inset with native padding.
+            await("$stage native anchor uses remaining measured panels", 5_000) {
+                onMain {
+                    val value = pose(map)
+                    val point = map.projection.toScreenLocation(LatLng(coordinate.latitude, coordinate.longitude))
+                    value.padding.size == 4 && adaptive(value, coordinate) && abs(point.y - expectedY) <= 8f &&
+                        abs(value.padding[0] - 28f * density) <= 2.0 && abs(value.padding[2] - 84f * density) <= 2.0 &&
+                        abs(value.padding[3] - 112f * density) <= 2.0
+                }
+            }
+        }
+        check(layouts.length() < 32)
+        layouts.put(JSONObject().put("stage", stage).put("headerExists", false).put("shortcuts", shortcutBounds.size)
+            .put("controlsTopPx", actualTop.toDouble()).put("measuredShortcutRowHeightPx", measuredRowHeight.toDouble())
+            .put("remainingPanelsBottomPx", visibleTopPanelsBottom().toDouble()).put("nativePadding", JSONArray(onMain { pose(map).padding })))
+    }
+    /** Measured last remaining panel plus its12dp outer gap; existing home safety bottom is112dp. */
     private fun exposedGeometry(): Rect {
         val map = bounds("navigation-home-map")
-        val panelsBottom = max(max(bounds("open-navigation").bottom, bounds("live-guidance-card").bottom), bounds("home-weather").bottom)
+        val panelsBottom = visibleTopPanelsBottom()
         return Rect(28f * density, panelsBottom - map.top + 12f * density,
             map.width - 84f * density, map.height - 112f * density).also {
-            assertTrue("Allocated native viewport must have adaptive exposed extent", it.width >= 160 && it.height >= 160)
+            assertTrue("Allocated native viewport must have a positive measured exposed extent", it.width > 0 && it.height > 0)
         }
     }
+    private fun hasSafeAdaptiveArea(exposed: Rect) = exposed.width >= 160f && exposed.height >= 160f
     private fun sameMap(activity: Activity, view: MapView, map: MapLibreMap) = onMain {
         check(activity.window.decorView.maps().single() === view)
         check(requestedView.get() === view && mapRef.get() === map && mounts.get() == 1 && !disposed.get())
@@ -446,8 +553,12 @@ class Moto0110PhoneDrivingScene {
     private fun sameTarget(value: Pose, expected: Pose) = abs(value.lat - expected.lat) <= .000001 && abs(value.lon - expected.lon) <= .000001
     private fun adaptive(value: Pose, coordinate: WeatherCoordinate) = abs(value.lat - coordinate.latitude) <= .000001 &&
         abs(value.lon - coordinate.longitude) <= .000001 && abs(value.zoom - 17.0) <= .1 &&
-        abs(value.pitch - 45.0) <= 1 && abs(((value.bearing - 90.0 + 540.0) % 360.0) - 180.0) <= 2
-    private fun assertAdaptive(value: Pose, coordinate: WeatherCoordinate) { assertTrue("Actual native adaptive camera: ${value.json()}", adaptive(value, coordinate)) }
+        abs(value.pitch - (if (adaptiveExpected) 45.0 else 0.0)) <= 1 &&
+        value.bearing.isFinite() && (if (adaptiveExpected) value.bearing in 0.0..360.0 else abs(value.bearing) <= .01)
+    private fun assertAdaptive(value: Pose, coordinate: WeatherCoordinate) {
+        assertTrue("Actual initial native follow camera: ${value.json()}", adaptive(value, coordinate))
+        if (adaptiveExpected) assertTrue("Initial moving course is90degrees", abs(((value.bearing - 90.0 + 540.0) % 360.0) - 180.0) <= 2)
+    }
     private fun flat(value: Pose) = abs(value.pitch) <= .01 && abs(((value.bearing + 540.0) % 360.0) - 180.0) <= .01
     private fun assertHeld(map: MapLibreMap, expected: Pose, stage: String, millis: Long,
         preservePadding: Boolean = false, requireFlat: Boolean = false) {
