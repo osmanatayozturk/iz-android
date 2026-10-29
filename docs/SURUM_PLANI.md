@@ -15,21 +15,21 @@ Güncel yayın durumu bu dosyada, tamamlanan değişiklikler [değişiklik geçm
 
 Tek aday, önceki 0.11.1 kapsamını ve onaylı 0.11.2 değişikliklerini birleştirir; ayrı 0.11.1 Release planlanmıyor. Bu bölüm kapsam planıdır, uygulama/test/paket/sürüm kabulünün tamamlandığını göstermez.
 
-- **Birleşik 0.11.1 kapsamı:** Aktif dönüşlü yönlendirmede Nereye? başlığı ve boşluğu gizlenecek; dönüş/mesafe, uyarılar, ses, oturum kartı, İşlemler ve harita/kamera durumu korunacak. Günlükten Bitir yalnız eşleşen yolculuğu ve etkilerini açıklayan teyitle ilerleyecek; yönlendirme, kayıt ve tümünü bitirme ayrı olacak, iptal etkisiz kalacak. Normal boyuttaki ikincil metin/arka plan çiftleri en az 4,5:1 sağlayacak. Kod henüz güncel adayda ayrıca doğrulanmış sayılmaz.
+- **Birleşik 0.11.1 kapsamı:** Aktif dönüşlü yönlendirmede Nereye? başlığı ve boşluğu gizlenecek; dönüş/mesafe, uyarılar, ses, oturum kartı, İşlemler ve harita/kamera durumu korunacak. Günlükten Bitir yalnız eşleşen yolculuğu ve etkilerini açıklayan teyitle ilerleyecek; yönlendirme, kayıt ve tümünü bitirme ayrı olacak, iptal etkisiz kalacak. Normal boyuttaki ikincil metin/arka plan çiftleri en az 4,5:1 sağlayacak. Bu özellikler 0.11.2 kaynak adayında bulunur; regresyon ve cihaz kabul durumu aşağıda ayrı izlenir.
 - **TTS ve ses durumu:** Tek telefon motorunun hazırlık/dil durumu, istek başına ses odağı/çıktı hatası ve sessiz tercih ayrılacak; hava durumu konuşmasıyla ortak TTS sahibi korunacak. Yalnız teyitli yönlendirme başlangıcında yönlendirme için bir kez sessiz hazırlık yapılacak. Başarısızlık görsel yönlendirmeyi durdurmayacak. Geçerli kısa uyarı mevcut manevra kartında GPS ve rota-yenileme uyarılarını değiştirmeden; ayrıntı ve Sesi test et/Tekrar dene/Seslendirme ayarları mevcut kontrollerde gösterilecek. Yönlendirme sırasında dönüş anonsu yoksa elle test çalışabilir; anons sürüyorsa test sıraya alınmadan meşgul bilgisi verilir, yeni dönüş anonsu elle testi kesebilir. Hazır motor, duyulabilir/interkom/çevrimdışı ses kabulü değildir.
 - **Geri gezinme ve geri yükleme:** Telefon sayfaları gerçek açan sayfa ve ebeveyn bağlamına döner. Liste/arama/filtre/sıralama/konum gibi hafif görüntüleme durumu güvenli, kararlı anahtarlarla korunur; hassas domain verisi, credential veya iş/izin sonucu saklanmaz. Geri, onCreate/onNewIntent veya süreç dönüşü başlatma/durdurma/yeniden planlama/gönderim komutunu tekrar oynatmaz. Saat ve Auto gezinmesi bu değişikliğin dışında.
 - **Kirli düzenlemeden çıkış:** Yalnız gerçek ve kaydedilmemiş fark çıkış teyidi ister. Temiz filtre/sorgu/kaydırma ve değişmemiş sıralama kirli sayılmaz; değişmiş, açık kaydetme isteyen sıralamalar çıkış korumasına dahildir. Çocuk seçiciler ebeveyn girdisini atmaz. **Düzenlemeye dön** girdiyi korur; **Değişikliklerden vazgeç** yalnız kaydedilmemiş farkı atıp çıkışı bir kez sürdürür. Mevcut OSM yerel otomatik kaydı sürer; onaylanmış kayıt geri alınmaz, atılan metin yaşam döngüsü geri çağrısıyla yeniden oluşmaz. Back otomatik Save/Send yapmaz.
 - **Uyumluluk:** Telefon hedefi 0.11.2/code24'tür. Yeni veritabanı/yedek biçimi veya genel taslak deposu planlanmıyor. Wear OS 0.6.1/code11 ve iletişim v6 değişmiyor.
 
-Teknik kontroller, bağımsız Test, değişen yüzeylerin UI/UX kabulü, paket ve güvenlik incelemesi beklemededir. Bu plan bir çalışma zamanı, cihaz veya yayın kabulü değildir. Ayrıntılı sonraki sıralama için [üç aylık yol haritasına](UC_AYLIK_YOL_HARITASI.md) bakın.
+Paketleme ve üç APK’nın manifest/imza doğrulaması geçti; bunlar yalnız Debug/QA doğrulamasıdır, Release veya yayın paketi değildir. USB envanterinde cihaz bulunmadığı için native kontrol HOLD; çalışma zamanı/cihaz kabulü yapılmadı. Adaya özgü açık olumlu güvenlik raporu ve yayın kabulü beklemede. UI/UX çalışma zamanı ve cihaz kabulü yapılmadı. Ayrıntılı sonraki sıralama için [üç aylık yol haritasına](UC_AYLIK_YOL_HARITASI.md) bakın.
 
-### 0.11.2 kanıt alanları — güncel aday için bekliyor
+### 0.11.2 kanıt alanları — güncel durum
 
-- Kaynak/sürüm eşleşmesi ve tek sabit aday: bekliyor.
-- TTS durum, gecikme, stale callback, BUSY ve dönüş önceliği; telefon geri geçmişi, dönüş/restore ve gerçek kirli çıkış senaryoları: bekliyor.
-- Birleşik 0.11.1 başlık, F01, F02 regresyonları; etkilenen yüzeylerin UI/UX kabulü: bekliyor.
-- Dar host koşusunda 46 kontrol geçti; bu, tam aday kabulü değildir. Sabit adayın tam hedefli/bütünleşik test, lint, derleme ve bağımsız Test kontrolleri çalıştırılmadı.
-- Paket kimliği/sürümü/hash/imza ve eşleşen aday güvenlik kararı: bekliyor.
+- APP-03 Debug/QA doğrulama kaynağı: commit 4656b3492a8d2ff469e0043c0f28ad03c44ef7d6, telefon 0.11.2/code 24; bu kimlik son Release kaynak bağlaması değildir.
+- Cihazda: TTS durum, gecikme, stale callback, BUSY ve dönüş önceliği; telefon geri geçmişi, dönüş/restore ve gerçek kirli çıkış senaryoları bekliyor.
+- Cihazda: Birleşik 0.11.1 başlık, F01, F02 regresyonları ve değişen yüzeylerin UI/UX kabulü bekliyor.
+- APP-02 kaynağı 8b2160e06cc6fa5c5b3b141c50e070242e51afe7 üzerinde 934 birim testi geçti (0 başarısız/hata/atlama), lint 0 hata/ölümcül hata ve 95 uyarı verdi; Debug ve ayrı QA ürün APK’ları üretildi. APP-03 kaynağı 4656b3492a8d2ff469e0043c0f28ad03c44ef7d6 yalnız AndroidTest test-kaynağı düzeltmesini içerir; APP-02 ile APP-03 arasında ürün/derleme ve birim-test girdileri aynı kaldı. Eksik AndroidTest APK’sı üretildi, üç APK manifest/imza kontrolü geçti ve ürün APK’larının hash’leri aynı kaldı. Birim/lint APP-03’te tekrarlanmadı; AndroidTest APK’sı çalıştırılmadı.
+- Debug/QA ürün APK’larının kimlik/sürüm/hash/manifest/imza kontrolleri geçti; AndroidTest APK’sının hedefi org.iz.navigation.batterycheck ve çalıştırıcısı AndroidJUnitRunner olarak doğrulandı (AndroidTest sürümü varsayılmadı). Release paketi ve aynı adaya ait açık olumlu güvenlik raporu: bekliyor.
 - Cihaz/çalışma zamanı kabulü: yapılmadı. Yayın durumu: yayımlanmadı.
 
 ### 0.11.1 dönemi kanıtı — tarihsel, 0.11.2 kabulü değildir
