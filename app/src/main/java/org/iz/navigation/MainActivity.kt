@@ -24,14 +24,15 @@ import java.io.PrintWriter
 
 class MainActivity : ComponentActivity() {
     private var incoming by mutableStateOf<Intent?>(null)
+    private var incomingIsCold by mutableStateOf(false)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        receiveIntent(intent)
+        if (savedInstanceState == null) { incomingIsCold = true; receiveIntent(intent) }
         lifecycleScope.launch {
             runCatching { TrackingController(this@MainActivity).recoverInterrupted() }
         }
-        setContent { IzTheme { DiaryApp(incoming, consumeIntent = { incoming = null }) } }
+        setContent { IzTheme { DiaryApp(incoming, consumeIntent = { incoming = null }, incomingIsCold = incomingIsCold) } }
         // Own the window policy here so internal screens and dialogs share it.
         lifecycleScope.launch {
             val guidance = (application as IzApplication).navigation.state.map { it.guidance }
@@ -82,6 +83,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        incomingIsCold = false
         receiveIntent(intent)
     }
 }

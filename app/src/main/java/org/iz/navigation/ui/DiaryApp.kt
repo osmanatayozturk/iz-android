@@ -10,13 +10,15 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -28,6 +30,8 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import org.iz.navigation.ui.history.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -35,6 +39,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -43,6 +48,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -65,6 +71,7 @@ import org.iz.navigation.integration.osm.OsmContributionController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.tasks.await
 import java.io.File
 import java.text.SimpleDateFormat
@@ -83,84 +90,111 @@ private data class TransportAction(val journeyId: String? = null, val split: Boo
 private data class Deletion(val text: String, val action: suspend () -> Unit)
 
 @Composable
-fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = viewModel()) {
+fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = viewModel(), incomingIsCold: Boolean = false) {
     val context = LocalContext.current
+    val resultOwner: UiResultViewModel = viewModel()
+    val featureOwners: UiEntryViewModels = viewModel()
+    val featureFactory = remember(context.applicationContext) { ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as android.app.Application) }
     val state by vm.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val media = remember { MediaStoreHelper(context) }
     val settings = remember { TrackerSettings(context) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    var tab by rememberSaveable { mutableIntStateOf(0) }
-    var menuOpen by remember { mutableStateOf(false) }
-    var groupPage by rememberSaveable { mutableStateOf(false) }
+    var initialIntentPending by remember { mutableStateOf(incoming != null) }
+    val history = rememberUiHistory()
+    val entries by history.entries.collectAsStateWithLifecycle()
+    val uiEntry = entries.last()
+    var restoringUiInput by remember(uiEntry.key) { mutableStateOf(history.isRestoredEntry(uiEntry.key) && uiEntry.entityId != null && uiEntry.page in setOf(UiPage.DIRECTIONS, UiPage.GPX)) }
+    val exitGuard = remember { UiExitGuard() }
+    val navigator = remember(history, exitGuard) { UiHistoryNavigator(history, exitGuard) }
+    val browseHolder = rememberSaveableStateHolder()
+    val knownBrowseKeys = remember { mutableSetOf<String>() }
+    LaunchedEffect(entries.map { it.key }) {
+        val retained = entries.map { it.key }.toSet()
+        (knownBrowseKeys - retained).forEach { browseHolder.removeState(it); browseHolder.removeState("list/$it"); browseHolder.removeState("gpx/$it") }
+        knownBrowseKeys.clear(); knownBrowseKeys.addAll(retained)
+        featureOwners.retain(retained)
+        resultOwner.deliveredCommunityTargets.retainAll(retained)
+    }
+    var tab by navigator.tab()
+    var menuOpen by rememberUiEntryState<Boolean>(history) { false }
+    var groupPage by navigator.pageFlag(UiPage.GROUP)
     val groups = (context.applicationContext as org.iz.navigation.IzApplication).groups
     val groupState by groups.state.collectAsStateWithLifecycle()
-    var selectedJourney by rememberSaveable { mutableStateOf<String?>(null) }
-    var selectedPlace by rememberSaveable { mutableStateOf<String?>(null) }
-    var transportAction by remember { mutableStateOf<TransportAction?>(null) }
-    var addPlace by remember { mutableStateOf(false) }
-    var targetJourney by remember { mutableStateOf<String?>(null) }
-    var pin by remember { mutableStateOf<GeoCoordinate?>(null) }
-    var osmSelection by remember { mutableStateOf<SelectedOsmPlace?>(null) }
-    var photoTarget by remember { mutableStateOf<PhotoTarget?>(null) }
-    var captureUri by rememberSaveable { mutableStateOf<String?>(null) }
-    var captureJourney by rememberSaveable { mutableStateOf<String?>(null) }
-    var captureVisit by rememberSaveable { mutableStateOf<String?>(null) }
-    var editJourney by remember { mutableStateOf<Journey?>(null) }
-    var editVisit by remember { mutableStateOf<Visit?>(null) }
-    var editPlace by remember { mutableStateOf<Place?>(null) }
-    var editPhoto by remember { mutableStateOf<Photo?>(null) }
-    var missingPhotoMetadata by remember { mutableStateOf<List<Photo>>(emptyList()) }
-    var photosToShare by remember { mutableStateOf<List<Photo>?>(null) }
-    var searchOsm by remember { mutableStateOf(false) }
-    var contributionsPage by rememberSaveable { mutableStateOf(false) }
-    var communityPage by rememberSaveable { mutableStateOf(false) }
+    var selectedJourney by navigator.selected(UiPage.JOURNEY)
+    var selectedPlace by navigator.selected(UiPage.PLACE)
+    val transportState = rememberUiEntryState<TransportAction?>(history) { null }
+    var transportAction by transportState
+    var addPlace by rememberUiEntryState<Boolean>(history) { false }
+    var targetJourney by rememberUiEntryState<String?>(history) { null }
+    var pin by rememberUiEntryState<GeoCoordinate?>(history) { null }
+    var osmSelection by rememberUiEntryState<SelectedOsmPlace?>(history) { null }
+    val photoTargetState = rememberUiEntryState<PhotoTarget?>(history) { null }
+    var photoTarget by photoTargetState
+    var editJourney by rememberUiEntryState<Journey?>(history) { null }
+    var editVisit by rememberUiEntryState<Visit?>(history) { null }
+    var editPlace by rememberUiEntryState<Place?>(history) { null }
+    var editPhoto by rememberUiEntryState<Photo?>(history) { null }
+    var missingPhotoMetadata by rememberUiEntryState<List<Photo>>(history) { emptyList() }
+    var photosToShare by rememberUiEntryState<List<Photo>?>(history) { null }
+    var searchOsm by rememberUiEntryState<Boolean>(history) { false }
+    var contributionsPage by navigator.pageFlag(UiPage.CONTRIBUTIONS)
+    var communityPage by navigator.pageFlag(UiPage.COMMUNITY)
     var communityMessageId by rememberSaveable { mutableStateOf<Long?>(null) }
     var communityAccountId by rememberSaveable { mutableStateOf<Long?>(null) }
-    var osmActions by rememberSaveable { mutableStateOf(false) }
-    var mapEditsPage by rememberSaveable { mutableStateOf(false) }
-    var weatherPage by rememberSaveable { mutableStateOf(false) }
-    var navigationPage by rememberSaveable { mutableStateOf(false) }
-    var navigationEntryId by rememberSaveable { mutableLongStateOf(0L) }
+    var osmActions by navigator.pageFlag(UiPage.OSM_ACTIONS)
+    var mapEditsPage by navigator.pageFlag(UiPage.MAP_EDITS)
+    var weatherPage by navigator.pageFlag(UiPage.WEATHER)
+    var navigationPage by navigator.pageFlag(UiPage.DIRECTIONS)
+    val navigationEntryId = uiEntry.key.removePrefix("entry-").toLongOrNull() ?: 0L
+    var continueNavigationPreparation by remember { mutableStateOf(false) }
     var navigationStops by remember { mutableStateOf<List<org.iz.navigation.weather.RouteStop>?>(null) }
     var navigationTransport by remember { mutableStateOf<Transport?>(null) }
     var navigationTarget by remember { mutableStateOf<org.iz.navigation.car.NavigationTarget?>(null) }
     var navigationInitialPlan by remember { mutableStateOf<SavedWeatherPlan?>(null) }
-    var libraryOpen by rememberSaveable { mutableStateOf(false) }
-    var collectionsOpen by rememberSaveable { mutableStateOf(false) }
-    var gpxPage by rememberSaveable { mutableStateOf(false) }
-    var routeToSave by remember { mutableStateOf<SavedRoutePlan?>(null) }
-    var libraryBusy by remember { mutableStateOf(false) }
-    var gpxStarting by remember { mutableStateOf(false) }
+    var libraryOpen by navigator.pageFlag(UiPage.ROUTES)
+    var collectionsOpen by navigator.pageFlag(UiPage.COLLECTIONS)
+    var gpxPage by navigator.pageFlag(UiPage.GPX)
+    var routeToSave by rememberUiEntryState<SavedRoutePlan?>(history) { null }
+    var libraryBusy by resultOwner.libraryBusy
+    var gpxStarting by resultOwner.gpxStarting
     var gpxPermissionPending by remember { mutableStateOf(false) }
     val gpxPermissionGate = remember { GpxStartPermissionGate() }
     val library = remember { TravelLibraryRepository(context) }
     val destinationShortcuts by library.destinationShortcuts.collectAsStateWithLifecycle(initialValue = emptyList())
-    val gpxImports: GpxImportViewModel = viewModel()
+    val gpxOwnerKey = entries.lastOrNull { it.page == UiPage.GPX }?.key ?: "map"
+    val gpxImports = featureOwners.get("gpx", gpxOwnerKey, GpxImportViewModel::class.java, featureFactory)
     val importedGpx by gpxImports.state.collectAsStateWithLifecycle()
     val navigation = (context.applicationContext as org.iz.navigation.IzApplication).navigation
     val navigationState by navigation.state.collectAsStateWithLifecycle()
-    var contributionPicker by remember { mutableStateOf(false) }
-    var contributionPlace by remember { mutableStateOf<Place?>(null) }
-    var contributionEdit by remember { mutableStateOf<ContributionDraft?>(null) }
+    var contributionPicker by rememberUiEntryState<Boolean>(history) { false }
+    var contributionPlace by rememberUiEntryState<Place?>(history) { null }
     var contributionEditId by rememberSaveable { mutableStateOf<String?>(null) }
-    var contributionBusy by remember { mutableStateOf(false) }
-    var gpxJourney by remember { mutableStateOf<Journey?>(null) }
-    var pendingGpxId by rememberSaveable { mutableStateOf<String?>(null) }
-    var preparingGpx by remember { mutableStateOf(false) }
+    var contributionEdit by rememberUiEntryState<ContributionDraft?>(history, onDrop = { contributionEditId = null }) { null }
+    var contributionBusy by resultOwner.contributionBusy
+    var acknowledgedContribution by remember { mutableStateOf<ContributionDraft?>(null) }
+    var gpxJourney by rememberUiEntryState<Journey?>(history) { null }
+    var pendingGpxId by remember { mutableStateOf<String?>(null) }
+    var preparingGpx by resultOwner.preparingGpx
     val gpxStore = remember { PendingGpxStore(File(context.noBackupFilesDir, "pending-gpx")) }
     val osmAuth = remember { OsmAuthManager.get(context) }
     val authState by osmAuth.state.collectAsStateWithLifecycle()
     val contributionController = remember { OsmContributionController(vm.repository, osmAuth) }
-    var deletion by remember { mutableStateOf<Deletion?>(null) }
-    var showDetection by remember { mutableStateOf(false) }
+    var deletion by rememberUiEntryState<Deletion?>(history) { null }
+    val detectionState = rememberUiEntryState<Boolean>(history) { false }
+    var showDetection by detectionState
     var refresh by remember { mutableIntStateOf(0) }
-    var restoreUri by remember { mutableStateOf<Uri?>(null) }
-    var backupBusy by remember { mutableStateOf(false) }
-    var showBackupOptions by rememberSaveable { mutableStateOf(false) }
-    var includeHealthBackup by rememberSaveable { mutableStateOf(false) }
+    var restoreUri by rememberUiEntryState<Uri?>(history) { null }
+    var backupBusy by resultOwner.backupBusy
+    var showBackupOptions by rememberUiEntryState<Boolean>(history) { false }
+    var includeHealthBackup by remember { mutableStateOf(false) }
     val healthManager = remember { (context.applicationContext as org.iz.navigation.IzApplication).healthManager }
     val active = state.active(now)
+    fun executeEditor(message: String, action: suspend () -> Unit) {
+        if (resultOwner.formBusy.value) return
+        resultOwner.formBusy.value = true
+        vm.execute(message) { try { action() } finally { resultOwner.formBusy.value = false } }
+    }
     var pendingDiaryEnd by remember { mutableStateOf<DiarySessionEndTarget?>(null) }
     var diaryEndBusy by remember { mutableStateOf(false) }
     val diaryEndScope = rememberCoroutineScope()
@@ -168,13 +202,13 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
         { diaryEndBusy = it }, { vm.message(it.message ?: "İşlem tamamlanamadı. Yeniden deneyebilirsin.") }) }
 
     fun openDirections(stops: List<RouteStop>? = null, transport: Transport? = active?.transport,
-        plan: SavedWeatherPlan? = null) {
+        plan: SavedWeatherPlan? = null, sourcePlanId: String? = null) {
+        continueNavigationPreparation = false
         navigationStops = stops
         navigationTransport = transport
         navigationInitialPlan = plan
         navigationTarget = null
-        navigationEntryId++
-        navigationPage = true
+        history.push(UiPage.DIRECTIONS, sourcePlanId)
         groupPage = false
         weatherPage = false
         communityPage = false
@@ -185,14 +219,12 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     }
 
     fun openGpx(track: ImportedTrack? = null) {
+        if (history.current.page == UiPage.GPX && track == null) return
         gpxPermissionGate.cancel(); gpxPermissionPending = false
-        gpxImports.show(track)
-        gpxPage = true; libraryOpen = false; collectionsOpen = false
-        navigationPage = false; weatherPage = false; groupPage = false; communityPage = false
-        selectedJourney = null; selectedPlace = null; contributionsPage = false
+        val entry = history.push(UiPage.GPX, track?.id)
+        featureOwners.get("gpx", entry.key, GpxImportViewModel::class.java, featureFactory).show(track)
         groups.dismissScreenRequest()
     }
-
     fun prepareSaveRoute(stops: List<RouteStop>, transport: Transport, preferences: RoutePreferences,
         originCurrent: Boolean, speed: Double?) {
         if (stops.size !in 2..5) { vm.message("Kaydetmek için başlangıç ve varış seç."); return }
@@ -201,8 +233,22 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
             originUsesCurrentLocation = originCurrent, travelSpeedKmh = speed)
     }
 
+    fun phoneModel(entry: UiEntry): PhoneNavigationViewModel {
+        val ownerKey = if (entry.page == UiPage.MAP || entry.parentKey == "map" && entry.entityId == null) "map" else entry.key
+        val model = featureOwners.get("directions", ownerKey, PhoneNavigationViewModel::class.java, featureFactory)
+        featureOwners.onRetain("directions", ownerKey) { keys -> model.retainUiEntries(keys.map { it.removePrefix("entry-").toLongOrNull() ?: 0L }.toSet()) }
+        model.retainUiEntries(entries.map { it.key.removePrefix("entry-").toLongOrNull() ?: 0L }.toSet())
+        return model
+    }
     fun openAddPlace(journeyId: String? = active?.id, location: GeoCoordinate? = null) {
         targetJourney = journeyId; pin = location; osmSelection = null; addPlace = true
+    }
+    var trackExportOwner by remember { mutableStateOf<UiAsyncOwner?>(null) }
+    fun captureResultOwner() = if (history.current.key == uiEntry.key) exitGuard.captureAsyncOwner(history.current.key) else null
+    fun accepts(owner: UiAsyncOwner?) = exitGuard.acceptsAsyncOwner(owner, history.current.key)
+    val launcherCapture: () -> UiAsyncOwner? = {
+        val actual = history.current.key
+        if (actual == uiEntry.key) exitGuard.captureAsyncOwner(actual) else null
     }
     fun hasPermission(permission: String) = ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
     fun completeGpxStart() {
@@ -215,68 +261,112 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
         }
         gpxStarting = true
         vm.execute {
-            try { navigation.startTrackFollow(request.track, request.selection, request.transport,
-                request.replaceExisting, request.expectedReplacementKey) }
+            try {
+                navigation.startTrackFollow(request.track, request.selection, request.transport, request.replaceExisting, request.expectedReplacementKey)
+                exitGuard.update(null); history.toMap()
+            }
             finally { gpxStarting = false }
         }
     }
-    suspend fun importStoredPhoto(uri: Uri, target: PhotoTarget) {
+    suspend fun importStoredPhoto(uri: Uri, target: PhotoTarget, entry: String) {
         val photo = media.importPhoto(uri, target.journeyId, target.visitId)
         try { vm.repository.savePhoto(photo) }
         catch (e: Exception) { vm.repository.photoFile(photo.relativePath).delete(); throw e }
-        if (photo.takenAt == null || photo.latitude == null) missingPhotoMetadata = missingPhotoMetadata + photo
+        if (history.current.key == entry && (photo.takenAt == null || photo.latitude == null)) missingPhotoMetadata = missingPhotoMetadata + photo
     }
-    val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-        refresh++; vm.message("İzinler güncellendi. İlgili işlemi yeniden seçebilirsin.")
+    val permissions = rememberUiResultLauncher(ActivityResultContracts.RequestMultiplePermissions(), resultOwner.requests,
+        "permissions", launcherCapture) { owner, _ ->
+        if (accepts(owner)) { refresh++; vm.message("İzinler güncellendi. İlgili işlemi yeniden seçebilirsin.") }
     }
-    val gpxPermissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+    val gpxPermissions = rememberUiResultLauncher(ActivityResultContracts.RequestMultiplePermissions(), resultOwner.requests,
+        "gpx-permissions", launcherCapture) { owner, _ ->
         gpxPermissionPending = false
-        if (gpxPage) completeGpxStart() else gpxPermissionGate.cancel()
+        if (accepts(owner) && gpxPage) completeGpxStart() else gpxPermissionGate.cancel()
     }
-    LaunchedEffect(gpxPage) {
-        if (!gpxPage) { gpxPermissionGate.cancel(); gpxPermissionPending = false }
-    }
-    val gallery = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(20)) { uris ->
-        val target = photoTarget
-        if (target != null && uris.isNotEmpty()) vm.execute("Fotoğraflar günlüğüne eklendi.") {
-            for (uri in uris) importStoredPhoto(uri, target)
+    LaunchedEffect(gpxPage) { if (!gpxPage) { gpxPermissionGate.cancel(); gpxPermissionPending = false } }
+    val gallery = rememberUiResultLauncher(ActivityResultContracts.PickMultipleVisualMedia(20), resultOwner.requests,
+        "gallery", launcherCapture) { owner, uris ->
+        val payload = resultOwner.takePayload("gallery", owner) as? UiResultPayload.Photos
+        val originalTarget = payload?.let { PhotoTarget(it.journeyId, it.visitId) }
+        if (accepts(owner) && originalTarget != null && uris.isNotEmpty()) vm.execute("Fotoğraflar günlüğüne eklendi.") {
+            for (uri in uris) importStoredPhoto(uri, originalTarget, owner!!.entryKey)
         }
-        photoTarget = null
+        if (accepts(owner) && payload != null && photoTargetState.revision == payload.modalRevision && photoTarget == originalTarget) photoTarget = null
     }
-    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { taken ->
-        val uri = captureUri?.let(Uri::parse)
-        val journeyId = captureJourney; val visitId = captureVisit
-        captureUri = null
-        if (uri != null) vm.execute(if (taken) "Fotoğraf günlüğüne eklendi." else null) {
-            try { if (taken) importStoredPhoto(uri, PhotoTarget(journeyId, visitId)) }
+    fun cleanupCamera(owner: UiAsyncOwner) {
+        val payload = resultOwner.takePayload("camera", owner) as? UiResultPayload.Camera ?: return
+        runCatching { media.deletePendingCapture(Uri.parse(payload.uri)) }
+    }
+    val camera = rememberUiResultLauncher(ActivityResultContracts.TakePicture(), resultOwner.requests,
+        "camera", launcherCapture, onLaunchFailure = ::cleanupCamera) { owner, taken ->
+        val payload = resultOwner.takePayload("camera", owner) as? UiResultPayload.Camera
+        val accepted = accepts(owner)
+        if (payload != null) vm.execute(if (taken && accepted) "Fotoğraf günlüğüne eklendi." else null) {
+            val uri = Uri.parse(payload.uri)
+            try { if (taken && accepted) importStoredPhoto(uri, PhotoTarget(payload.journeyId, payload.visitId), owner!!.entryKey) }
             finally { media.deletePendingCapture(uri) }
         }
     }
-    val exportBackup = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
-        val withHealth = includeHealthBackup
-        includeHealthBackup = false
-        if (uri != null) vm.execute("Yedek dosyası kaydedildi.") {
+    val exportBackup = rememberUiResultLauncher(ActivityResultContracts.CreateDocument("application/zip"), resultOwner.requests,
+        "backup-export", launcherCapture) { owner, uri ->
+        val payload = resultOwner.takePayload("backup-export", owner) as? UiResultPayload.Backup
+        if (uri != null && payload != null && accepts(owner)) vm.execute("Yedek dosyası kaydedildi.") {
             backupBusy = true
-            try { DiaryBackup(context, vm.repository).exportTo(uri, includeHealth = withHealth) } finally { backupBusy = false }
+            try { DiaryBackup(context, vm.repository).exportTo(uri, includeHealth = payload.includeHealth) } finally { backupBusy = false }
         }
     }
-    val exportGpx = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/gpx+xml")) { uri ->
-        val exportId = pendingGpxId; pendingGpxId = null
-        if (exportId != null) vm.execute(if (uri != null) "GPX dosyası kaydedildi." else null) {
+    fun cleanupTrackExport(owner: UiAsyncOwner) {
+        val payload = resultOwner.takePayload("gpx-export", owner) as? UiResultPayload.TrackExport ?: return
+        vm.execute { withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) { gpxStore.remove(payload.id) } }
+    }
+    val exportGpx = rememberUiResultLauncher(ActivityResultContracts.CreateDocument("application/gpx+xml"), resultOwner.requests,
+        "gpx-export", launcherCapture, onLaunchFailure = ::cleanupTrackExport) { owner, uri ->
+        val payload = resultOwner.takePayload("gpx-export", owner) as? UiResultPayload.TrackExport
+        val accepted = accepts(owner)
+        if (payload != null) vm.execute(if (uri != null && accepted) "GPX dosyası kaydedildi." else null) {
             try {
-                if (uri != null) withContext(Dispatchers.IO) {
-                    val xml = gpxStore.read(exportId)
+                if (uri != null && accepted) withContext(Dispatchers.IO) {
+                    val xml = gpxStore.read(payload.id)
                     val output = context.contentResolver.openOutputStream(uri) ?: error("Dosya açılamadı.")
                     output.bufferedWriter(Charsets.UTF_8).use { it.write(xml) }
                 }
-            } finally {
-                withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) { gpxStore.remove(exportId) }
-            }
-        } else if (uri != null) vm.message("Önizleme kapandı. Rotayı yeniden dışa aktarabilirsin.")
+            } finally { withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) { gpxStore.remove(payload.id) } }
+        }
     }
-    val importBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> restoreUri = uri }
-    val importTrack = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) gpxImports.read(uri)
+    val importBackup = rememberUiResultLauncher(ActivityResultContracts.OpenDocument(), resultOwner.requests,
+        "backup-import", launcherCapture) { owner, uri -> if (accepts(owner)) restoreUri = uri }
+    val importTrack = rememberUiResultLauncher(ActivityResultContracts.OpenDocument(), resultOwner.requests,
+        "gpx-import", launcherCapture) { owner, uri ->
+        if (uri != null && accepts(owner)) exitGuard.requestExit { gpxImports.read(uri) }
+    }
+    fun cleanupDirectionsPermission(owner: UiAsyncOwner) {
+        val payload = resultOwner.takePayload("directions-permissions", owner) as? UiResultPayload.Permissions
+        payload?.result?.onStale?.invoke()
+    }
+    val directionsPermissions = rememberUiResultLauncher(ActivityResultContracts.RequestMultiplePermissions(), resultOwner.requests,
+        "directions-permissions", launcherCapture, onLaunchFailure = ::cleanupDirectionsPermission) { owner, _ ->
+        val payload = resultOwner.takePayload("directions-permissions", owner) as? UiResultPayload.Permissions
+        if (accepts(owner)) payload?.result?.onResult?.invoke() else payload?.result?.onStale?.invoke()
+    }
+    val openDirectionsPermissions: (Array<String>, UiPermissionReturn) -> Boolean = { names, result ->
+        directionsPermissions.launch(names) { owner -> resultOwner.putPayload("directions-permissions", owner, UiResultPayload.Permissions(result)) }
+    }
+    val voiceSettings = rememberUiResultLauncher(ActivityResultContracts.StartActivityForResult(), resultOwner.requests,
+        "voice-settings", launcherCapture) { owner, _ ->
+        val payload = resultOwner.takePayload("voice-settings", owner) as? UiResultPayload.Voice
+        val current = navigation.state.value
+        if (payload?.owner?.matches(current.sessionId, current.routeRevision, current.guidance, accepts(owner)) == true)
+            org.iz.navigation.navigation.NavigationSpeech.get(context).retry()
+    }
+    val openVoiceSettings: () -> Unit = {
+        org.iz.navigation.navigation.NavigationVoiceSettings.open(context) { intent ->
+            voiceSettings.launch(intent) { owner ->
+                val current = navigation.state.value
+                resultOwner.putPayload("voice-settings", owner, UiResultPayload.Voice(
+                    PhoneVoiceSettingsOwner(owner, current.sessionId, current.routeRevision, current.guidance)))
+            }
+        }
+        Unit
     }
 
     LaunchedEffect(Unit) {
@@ -285,90 +375,100 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     LaunchedEffect(contributionEditId) {
         if (contributionEdit == null) contributionEdit = contributionEditId?.let { vm.repository.getContribution(it) }
     }
+    LaunchedEffect(uiEntry.key) {
+        val captured = uiEntry
+        val id = captured.entityId
+        if (id != null && captured.page == UiPage.GPX) {
+            val track = library.importedTracks.first().firstOrNull { it.id == id }
+            if (history.current.key != captured.key) return@LaunchedEffect
+            if (track == null) history.prune { it.key != captured.key }
+            else if (gpxImports.state.value.track?.id != id) gpxImports.show(track)
+        } else if (id != null && captured.page == UiPage.DIRECTIONS) {
+            val plan = library.savedPlans.first().firstOrNull { it.id == id }
+            if (history.current.key != captured.key) return@LaunchedEffect
+            if (plan == null) history.prune { it.key != captured.key }
+            else if (history.isRestoredEntry(captured.key)) {
+                navigationStops = plan.stops; navigationTransport = plan.transport
+                navigationInitialPlan = SavedWeatherPlan(plan.stops, System.currentTimeMillis(), plan.transport,
+                    plan.preferences, plan.originUsesCurrentLocation, plan.travelSpeedKmh)
+            }
+        }
+        restoringUiInput = false
+    }
+    LaunchedEffect(entries.map { it.key to it.entityId }, state.journeys.map { it.id }, state.places.map { it.id }, authState.user?.id, authState.busy) {
+        val journeys = vm.repository.journeys.first().map { it.id }.toSet()
+        val places = vm.repository.places.first().map { it.id }.toSet()
+        val account = osmAuth.state.value
+        history.prune { row -> when (row.page) {
+            UiPage.JOURNEY -> row.entityId in journeys
+            UiPage.PLACE -> row.entityId in places
+            UiPage.COMMUNITY -> account.busy || row.accountKey == null || row.accountKey == account.user?.id?.toString()
+            else -> true
+        } }
+    }
     LaunchedEffect(Unit) { while (true) { now = System.currentTimeMillis(); delay(15_000) } }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { refresh++; vm.execute { vm.repository.cleanupExpired() } }
     LaunchedEffect(incoming) {
-        incoming ?: return@LaunchedEffect
-        if (incoming.getBooleanExtra("openGpx", false)) {
-            openGpx(); consumeIntent(); return@LaunchedEffect
-        }
-        gpxPage = false; libraryOpen = false; collectionsOpen = false
-        if (incoming.action == org.iz.navigation.osmcommunity.CommunityNotifications.ACTION_OPEN_MESSAGE) {
-            communityMessageId = incoming.getLongExtra(org.iz.navigation.osmcommunity.CommunityNotifications.EXTRA_MESSAGE_ID, -1L)
-            communityAccountId = incoming.getLongExtra(org.iz.navigation.osmcommunity.CommunityNotifications.EXTRA_ACCOUNT_ID, -1L)
-            communityPage = true
-            navigationPage = false
-            weatherPage = false
-            selectedJourney = null
-            selectedPlace = null
-            contributionsPage = false
-            consumeIntent()
-            return@LaunchedEffect
-        }
-        communityPage = false
-        val target = org.iz.navigation.car.NavigationIntents.parse(incoming)
-        if (incoming.getBooleanExtra("openNavigation", false) || target != null) {
-            groupPage = false
-            groups.dismissScreenRequest()
-            navigationStops = null
-            navigationTransport = null
-            navigationInitialPlan = null
-            navigationEntryId++
-            navigationTarget = target
-            navigationPage = true
-            weatherPage = false
-            selectedJourney = null
-            selectedPlace = null
-            contributionsPage = false
-            consumeIntent()
-            return@LaunchedEffect
-        }
-        navigationPage = false
-        if (incoming.getBooleanExtra("openWeather", false)) {
-            weatherPage = true
-            selectedJourney = null
-            selectedPlace = null
-            contributionsPage = false
-            consumeIntent()
-            return@LaunchedEffect
-        }
-        weatherPage = false
-        val id = incoming.getStringExtra("journeyId")
-        val suggestion = runCatching { Transport.valueOf(incoming.getStringExtra("suggestedTransport").orEmpty()) }.getOrDefault(Transport.WALK)
-        when (incoming.getStringExtra("trackingPrompt")) {
-            "journey" -> { selectedJourney = id; tab = 1 }
-            "confirm" -> {
-                val pending = id?.let { vm.repository.getJourney(it) }
-                if (pending?.status == JourneyStatus.TEMPORARY && !DiaryRules.isExpired(pending, System.currentTimeMillis())) { selectedJourney = id; tab = 1; transportAction = TransportAction(id, suggestion = suggestion) }
-                else vm.message("Bu geçici kayıt artık bulunmuyor veya onay süresi dolmuş.")
+        val delivered = incoming ?: return@LaunchedEffect
+        val id = delivered.getStringExtra("journeyId")
+        val prompt = delivered.getStringExtra("trackingPrompt")
+        val suggestion = runCatching { Transport.valueOf(delivered.getStringExtra("suggestedTransport").orEmpty()) }.getOrDefault(Transport.WALK)
+        val pending = if (prompt == "confirm") id?.let { vm.repository.getJourney(it) } else null
+        val activeId = if (prompt == "mode_change") vm.repository.activeJourney()?.id else null
+        // Delivery is consumed once. Restoration never supplies a fresh intent from MainActivity.
+        exitGuard.requestExit {
+            exitGuard.update(null)
+            when {
+                delivered.getBooleanExtra("openGpx", false) -> {
+                    if (incomingIsCold) history.toMap()
+                    openGpx()
+                }
+                delivered.action == org.iz.navigation.osmcommunity.CommunityNotifications.ACTION_OPEN_MESSAGE -> {
+                    communityMessageId = delivered.getLongExtra(org.iz.navigation.osmcommunity.CommunityNotifications.EXTRA_MESSAGE_ID, -1L)
+                    communityAccountId = delivered.getLongExtra(org.iz.navigation.osmcommunity.CommunityNotifications.EXTRA_ACCOUNT_ID, -1L)
+                    history.openExternal(UiPage.COMMUNITY, communityMessageId?.toString(), communityAccountId?.toString(), incomingIsCold)
+                }
+                delivered.getBooleanExtra("openNavigation", false) || org.iz.navigation.car.NavigationIntents.parse(delivered) != null -> {
+                    navigationStops = null; navigationTransport = null; navigationInitialPlan = null
+                    navigationTarget = org.iz.navigation.car.NavigationIntents.parse(delivered)
+                    history.openExternal(UiPage.DIRECTIONS, cold = incomingIsCold)
+                }
+                delivered.getBooleanExtra("openWeather", false) -> history.openExternal(UiPage.WEATHER, cold = incomingIsCold)
+                prompt == "journey" || prompt == "stop" -> if (id != null) history.openExternal(UiPage.JOURNEY, id, cold = incomingIsCold)
+                prompt == "confirm" -> {
+                    if (pending?.status == JourneyStatus.TEMPORARY && !DiaryRules.isExpired(pending, System.currentTimeMillis())) {
+                        history.openExternal(UiPage.JOURNEY, pending.id, cold = incomingIsCold)
+                        transportState.setForEntry(history.current.key, TransportAction(pending.id, suggestion = suggestion))
+                    } else vm.message("Bu geçici kayıt artık bulunmuyor veya onay süresi dolmuş.")
+                }
+                prompt == "mode_change" -> if (activeId == id) transportAction = TransportAction(split = true, suggestion = suggestion)
+                    else vm.message("Bu yolculuk artık devam etmiyor.")
+                prompt == "permission" -> { history.openExternal(UiPage.SETTINGS, cold = incomingIsCold); detectionState.setForEntry(history.current.key, true) }
             }
-            "mode_change" -> {
-                if (vm.repository.activeJourney()?.id == id) transportAction = TransportAction(split = true, suggestion = suggestion)
-                else vm.message("Bu yolculuk artık devam etmiyor.")
-            }
-            "stop" -> { selectedJourney = id; tab = 1 }
-            "permission" -> { tab = 4; showDetection = true }
         }
-        consumeIntent()
+        consumeIntent(); initialIntentPending = false
     }
 
-    fun returnToMap() {
-        tab = 0; selectedJourney = null; selectedPlace = null; contributionsPage = false
-        weatherPage = false; navigationPage = false; navigationTarget = null; communityPage = false
-        communityMessageId = null; communityAccountId = null; groupPage = false
-        libraryOpen = false; collectionsOpen = false; gpxPage = false
-        groups.dismissScreenRequest()
+    fun returnToMap() { navigator.toMap() }
+    fun returnToParent() { navigator.back() }
+    val backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+    val keyboard = LocalSoftwareKeyboardController.current
+    val imeVisible = WindowInsets.isImeVisible
+    fun backFromTop() {
+        if (imeVisible) keyboard?.hide() else if (backDispatcher != null) backDispatcher.onBackPressed() else returnToParent()
     }
-    val homeVisible = (tab == 0 || navigationPage) && selectedJourney == null && selectedPlace == null &&
-        !contributionsPage && !weatherPage && !communityPage && !groupPage && !gpxPage
-    BackHandler(enabled = !homeVisible, onBack = ::returnToMap)
+    val homeVisible = uiEntry.page == UiPage.MAP || uiEntry.page == UiPage.DIRECTIONS
+    BackHandler(enabled = entries.size > 1, onBack = ::returnToParent)
     LaunchedEffect(groupState.screenRequested) { if (groupState.screenRequested) groupPage = true }
 
-    Scaffold(containerColor = Paper, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
+    CompositionLocalProvider(LocalUiExitGuard provides exitGuard, LocalUiEntryKey provides uiEntry.key, LocalUiHistory provides history, LocalUiVoiceSettingsAction provides openVoiceSettings, LocalUiDirectionsPermissions provides openDirectionsPermissions,
+        LocalUiOperationBusy provides { resultOwner.backupBusy.value || resultOwner.libraryBusy.value || resultOwner.gpxStarting.value || resultOwner.preparingGpx.value || resultOwner.formBusy.value || resultOwner.contributionBusy.value }) {
+    UiEditOwner(UiEditState(uiEntry.key + "/ui", null, 0, 0, false, false))
+    if (!libraryOpen && !collectionsOpen && !mapEditsPage && !osmActions) Scaffold(containerColor = Paper, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             if (!homeVisible) Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = ::returnToMap, modifier = Modifier.testTag("return-home-map")) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Haritaya dön")
+                IconButton(onClick = ::backFromTop, modifier = Modifier.testTag("return-home-map")) {
+                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Geri")
                 }
                 Text("iz", fontFamily = androidx.compose.ui.text.font.FontFamily.Serif, fontSize = 28.sp,
                     fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
@@ -384,7 +484,11 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                 }
             }
             when {
-                gpxPage -> GpxTrackScreen(track = importedGpx.track, active = navigationState.trackFollow,
+                initialIntentPending -> Text("Açılıyor…", Modifier.padding(24.dp))
+                restoringUiInput -> Text("Kayıt açılıyor…", Modifier.padding(24.dp))
+                gpxPage -> GpxTrackScreen(track = importedGpx.track,
+                    browse = rememberUiGpxBrowse(browseHolder, uiEntry.key, (importedGpx.track ?: navigationState.trackFollow?.track)?.id,
+                        navigationState.trackFollow?.takeIf { it.track.id == (importedGpx.track ?: navigationState.trackFollow?.track)?.id }?.selection ?: org.iz.navigation.gpx.TrackFollowSelection()), active = navigationState.trackFollow,
                     fix = navigationState.fix, gpsStale = navigationState.gpsStale,
                     currentTransport = navigationState.sessionTransport.takeIf {
                         navigationState.sessionId != null && navigationState.journey?.status != JourneyStatus.TEMPORARY },
@@ -417,25 +521,29 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                                         }
                                         if (prompt.notifications) add(Manifest.permission.POST_NOTIFICATIONS)
                                     }
-                                    gpxPermissions.launch(required.toTypedArray())
+                                    val launched = runCatching { gpxPermissions.launch(required.toTypedArray()) }.getOrElse {
+                                        vm.message(it.message ?: "İzin ekranı açılamadı."); false
+                                    }
+                                    if (!launched) { gpxPermissionPending = false; gpxPermissionGate.cancel() }
                                 } else completeGpxStart()
                             }
                         }
                     },
                     onStop = { vm.execute { navigation.stopTrackFollow() } },
-                    onDismiss = ::returnToMap,
+                    onDismiss = ::returnToParent,
                     onDismissInterrupted = navigation::dismissInterruptedTrackFollow,
                     replacementKey = navigationState.navigationReplacementKey())
                 groupPage -> GroupScreen(groups, onClose = { groupPage = false; groups.dismissScreenRequest() },
                     onOpenRoute = { stops, transport -> groups.dismissScreenRequest(); openDirections(stops, transport) })
                 communityPage -> OsmCommunityScreen(onClose = { communityPage = false; communityMessageId = null; communityAccountId = null },
-                    initialMessageId = communityMessageId, initialAccountId = communityAccountId,
-                    onOpenSettings = { communityPage = false; communityMessageId = null; communityAccountId = null; tab = 4 })
-                weatherPage -> WeatherPlannerScreen(onClose = { weatherPage = false }, initialTransport = active?.transport,
+                    initialMessageId = remember(uiEntry.key) { uiEntry.entityId?.toLongOrNull()?.takeIf { !history.isRestoredEntry(uiEntry.key) && resultOwner.deliveredCommunityTargets.add(uiEntry.key) } }, initialAccountId = uiEntry.accountKey?.toLongOrNull(),
+                    onOpenSettings = { tab = 4 })
+                weatherPage -> WeatherPlannerScreen(onClose = { weatherPage = false },
+                    vm = featureOwners.get("weather", uiEntry.key, WeatherPlannerViewModel::class.java, featureFactory), initialTransport = active?.transport,
                     onDirections = { stops, transport -> openDirections(stops, transport) },
                     onDirectionsWithPlan = { plan -> openDirections(plan.stops, plan.transport, plan) },
                     onSaveRoute = ::prepareSaveRoute,
-                    onNavigationStarted = { openDirections() })
+                    onNavigationStarted = { exitGuard.update(null); history.toMap() })
                 contributionsPage -> ContributionsScreen(state.contributions, contributionBusy,
                     onNew = { contributionPlace = null; contributionPicker = true }, onEdit = { contributionEdit = it; contributionEditId = it.id },
                     onCheck = { draft -> vm.execute {
@@ -446,6 +554,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     onDelete = { draft -> deletion = Deletion("Bu kayıt yalnızca uygulamadaki katkı listenden silinecek. OSM’de yayımlanmış bildirim silinmez.") { vm.repository.deleteContribution(draft.id) } },
                 )
                 journey != null -> JourneyDetail(journey, state, now,
+                    listState = rememberUiBrowseListState(browseHolder, uiEntry.key),
                     onEdit = { if (journey.status == JourneyStatus.TEMPORARY) transportAction = TransportAction(journey.id) else editJourney = journey }, onConfirm = { transportAction = TransportAction(journey.id) },
                     onFinish = {
                         if (!diaryEndBusy && !backupBusy) {
@@ -464,6 +573,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     onSharePhotos = { photosToShare = state.photos.filter { it.journeyId == journey.id } },
                 )
                 place != null -> PlaceDetail(place, state,
+                    listState = rememberUiBrowseListState(browseHolder, uiEntry.key),
                     onEdit = { osmSelection = null; editPlace = place }, onMaps = { vm.execute { MediaShare.openPlace(context, place) } },
                     onContribute = { contributionPlace = place; contributionPicker = true },
                     onAddVisit = { vm.execute("Yeni ziyaret eklendi.") { vm.repository.saveVisit(Visit(placeId = place.id, journeyId = active?.id, visitedAt = now)) } },
@@ -474,18 +584,24 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     onDeletePhoto = { photo -> deletion = Deletion("Fotoğraf günlükten silinecek.") { vm.repository.deletePhoto(photo.id) } },
                     onEditPhoto = { editPhoto = it },
                 )
-                tab == 0 || navigationPage -> NavigationScreen(onClose = { navigationPage = false; navigationTarget = null },
+                uiEntry.page == UiPage.JOURNEY || uiEntry.page == UiPage.PLACE -> Text("Kayıt açılıyor…", Modifier.padding(24.dp))
+                uiEntry.page == UiPage.MAP || navigationPage -> NavigationScreen(onClose = { navigationPage = false; navigationTarget = null },
+                    vm = phoneModel(uiEntry),
                     incomingTarget = navigationTarget, initialStops = navigationStops, initialTransport = navigationTransport,
                     entryId = navigationEntryId, initiallyPlanning = navigationPage,
-                    initialPlan = navigationInitialPlan, onSaveRoute = ::prepareSaveRoute,
+                    initialPlan = if (navigationPage) navigationInitialPlan else null, onSaveRoute = ::prepareSaveRoute,
+                    onStarted = { exitGuard.update(null); history.toMap() }, restoringEntry = history.isRestoredEntry(uiEntry.key),
+                    continuePreparation = continueNavigationPreparation, onMap = ::returnToMap,
+                    onPlannerOpened = { if (history.current.page != UiPage.DIRECTIONS) { continueNavigationPreparation = true; navigationStops = null; navigationInitialPlan = null; navigationTarget = null; history.push(UiPage.DIRECTIONS) } },
                     onMenu = { menuOpen = true }, onGroup = { groupPage = true }, onWeather = { weatherPage = true },
                     onPin = { openAddPlace(location = it) })
-                tab == 1 -> JourneysScreen(state, now, onJourney = { selectedJourney = it.id }, onStart = { transportAction = TransportAction() }, onConfirm = { transportAction = TransportAction(it.id) }, onReject = { j -> deletion = Deletion("Bu geçici rota silinecek ve açıksa takip duracak.") { vm.tracker.reject(j.id) } })
-                tab == 2 -> PlacesScreen(state, onPlace = { selectedPlace = it.id }, onAdd = { openAddPlace() }, onReorder = vm.repository::reorderPlaces, shortcuts = destinationShortcuts,
-                    onShortcut = { kind, target -> vm.execute { library.setDestinationShortcut(kind, target?.id) } })
-                tab == 3 -> HeatmapScreen(state)
-                tab == 5 -> DiaryStatisticsScreen(state, now, onJourney = { selectedJourney = it.id })
+                tab == 1 -> browseHolder.SaveableStateProvider(uiEntry.key) { JourneysScreen(state, now, onJourney = { selectedJourney = it.id }, onStart = { transportAction = TransportAction() }, onConfirm = { transportAction = TransportAction(it.id) }, onReject = { j -> deletion = Deletion("Bu geçici rota silinecek ve açıksa takip duracak.") { vm.tracker.reject(j.id) } }) }
+                tab == 2 -> browseHolder.SaveableStateProvider(uiEntry.key) { PlacesScreen(state, onPlace = { selectedPlace = it.id }, onAdd = { openAddPlace() }, onReorder = vm.repository::reorderPlaces, shortcuts = destinationShortcuts,
+                    onShortcut = { kind, target -> vm.execute { library.setDestinationShortcut(kind, target?.id) } }) }
+                tab == 3 -> browseHolder.SaveableStateProvider(uiEntry.key) { HeatmapScreen(state) }
+                tab == 5 -> browseHolder.SaveableStateProvider(uiEntry.key) { DiaryStatisticsScreen(state, now, onJourney = { selectedJourney = it.id }) }
                 else -> SettingsScreen(settings, refresh, backupBusy,
+                    listState = rememberUiBrowseListState(browseHolder, uiEntry.key),
                     onDetection = { if (settings.enabled) { vm.tracker.disableDetection(); refresh++ } else showDetection = true },
                     onRepairDetection = { vm.tracker.enableDetection { error -> refresh++; error?.let(vm::message) } },
                     onStopMinutes = { settings.stopMinutes = it; refresh++ },
@@ -493,7 +609,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     onExport = { includeHealthBackup = false; showBackupOptions = true },
                     onImport = { importBackup.launch(arrayOf("application/zip", "application/octet-stream")) },
                     onContributions = { osmActions = true }, onMessage = vm::message,
-                    onCommunity = { communityMessageId = null; communityAccountId = null; communityPage = true },
+                    onCommunity = { communityMessageId = null; communityAccountId = null; navigator.open(UiPage.COMMUNITY, accountKey = osmAuth.state.value.user?.id?.toString()) },
                 )
             }
         }
@@ -501,7 +617,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
 
     if (menuOpen) AlertDialog(onDismissRequest = { menuOpen = false }, title = { Text("Menü") }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            fun open(action: () -> Unit) { menuOpen = false; returnToMap(); action() }
+            fun open(action: () -> Unit) { menuOpen = false; action() }
             TextButton({ open { tab = 1 } }, Modifier.fillMaxWidth().testTag("menu-journeys")) { Text("Yolculuklar") }
             TextButton({ open { libraryOpen = true } }, Modifier.fillMaxWidth().testTag("menu-route-library")) { Text("Rotalarım") }
             TextButton({ open { collectionsOpen = true } }, Modifier.fillMaxWidth().testTag("menu-collections")) { Text("Geziler") }
@@ -510,12 +626,12 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
             TextButton({ open { tab = 2 } }, Modifier.fillMaxWidth().testTag("menu-places")) { Text("Yerler") }
             TextButton({ open { tab = 3 } }, Modifier.fillMaxWidth().testTag("menu-heatmap")) { Text("Yoğunluk haritası") }
             TextButton({ open { openAddPlace() } }, Modifier.fillMaxWidth().testTag("menu-add-place")) { Text("Bir yer kaydet") }
-            TextButton({ open { communityPage = true } }, Modifier.fillMaxWidth().testTag("menu-community")) { Text("OSM Topluluğu") }
+            TextButton({ open { navigator.open(UiPage.COMMUNITY, accountKey = osmAuth.state.value.user?.id?.toString()) } }, Modifier.fillMaxWidth().testTag("menu-community")) { Text("OSM Topluluğu") }
             TextButton({ open { osmActions = true } }, Modifier.fillMaxWidth().testTag("menu-osm")) { Text("OSM'ye katkı") }
             TextButton({ open { weatherPage = true } }, Modifier.fillMaxWidth().testTag("menu-weather")) { Text("Hava durumu") }
             TextButton({ open { tab = 4 } }, Modifier.fillMaxWidth().testTag("menu-settings")) { Text("Ayarlar") }
         }
-    }, confirmButton = { TextButton({ menuOpen = false }) { Text("Haritaya dön") } })
+    }, confirmButton = { TextButton({ menuOpen = false; returnToMap() }) { Text("Haritaya dön") } })
     pendingDiaryEnd?.let { target ->
         DiarySessionEndActions(target, state.journeys.firstOrNull { it.id == target.journeyId }, navigationState,
             diaryEndBusy || backupBusy, onDismiss = { pendingDiaryEnd = null }, onConfirm = { captured, request ->
@@ -537,16 +653,16 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                 }
             })
     }
-    if (libraryOpen) TravelLibraryScreen(repository = library, onDismiss = { libraryOpen = false },
+    if (libraryOpen) browseHolder.SaveableStateProvider(uiEntry.key) { TravelLibraryScreen(repository = library, onDismiss = { libraryOpen = false },
         onOpenPlan = { plan ->
             openDirections(plan.stops, plan.transport, SavedWeatherPlan(plan.stops, System.currentTimeMillis(),
-                plan.transport, plan.preferences, plan.originUsesCurrentLocation, plan.travelSpeedKmh))
-        }, onOpenTrack = ::openGpx)
-    if (collectionsOpen) JourneyCollectionsScreen(repository = library,
+                plan.transport, plan.preferences, plan.originUsesCurrentLocation, plan.travelSpeedKmh), sourcePlanId = plan.id)
+        }, onOpenTrack = ::openGpx) }
+    if (collectionsOpen) browseHolder.SaveableStateProvider(uiEntry.key) { JourneyCollectionsScreen(repository = library,
         snapshot = DiarySnapshot(journeys = state.journeys), analysis = state.analysis,
         onDismiss = { collectionsOpen = false }, onOpenJourney = {
-            collectionsOpen = false; selectedJourney = it.id; tab = 1
-        })
+            selectedJourney = it.id
+        }) }
     routeToSave?.let { plan -> SaveRoutePlanDialog(plan, libraryBusy, onDismiss = { routeToSave = null },
         onSave = { named ->
             libraryBusy = true
@@ -557,8 +673,8 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
         }) }
     if (osmActions) AlertDialog(onDismissRequest = { osmActions = false }, title = { Text("OpenStreetMap'e katkı") }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedButton(onClick = { osmActions = false; mapEditsPage = true }, Modifier.fillMaxWidth()) { Text("Doğrudan mekân ekle") }
-            OutlinedButton(onClick = { osmActions = false; contributionsPage = true }, Modifier.fillMaxWidth()) { Text("Harita notları ve bildirimler") }
+            OutlinedButton(onClick = { mapEditsPage = true }, Modifier.fillMaxWidth()) { Text("Doğrudan mekân ekle") }
+            OutlinedButton(onClick = { contributionsPage = true }, Modifier.fillMaxWidth()) { Text("Harita notları ve bildirimler") }
         }
     }, confirmButton = { TextButton(onClick = { osmActions = false }) { Text("Kapat") } })
     if (mapEditsPage) Dialog(onDismissRequest = { mapEditsPage = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -585,9 +701,9 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     else -> {
                         val navigation = (context.applicationContext as org.iz.navigation.IzApplication).navigation
                         navigation.startFreeDrive(transport, recordJourney = true)
-                        selectedJourney = navigation.state.value.journey?.id
+                        exitGuard.update(null); history.toMap()
                     } }
-                transportAction = null; tab = 1
+                transportAction = null
             }
         }
     }
@@ -600,25 +716,25 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                 if (location == null) vm.message("Konum alınamadı. Haritaya uzun basarak yer seçebilirsin.") else { osmSelection = null; pin = GeoCoordinate(location.latitude, location.longitude) }
             }
         }, onSave = { name, note, existingPlace ->
-            vm.execute("Yer ziyaretin kaydedildi.") {
+            executeEditor("Yer ziyaretin kaydedildi.") {
                 val place = existingPlace ?: Place(name = name.trim(), latitude = pin?.latitude, longitude = pin?.longitude,
                     osmType = osmSelection?.osmRef?.type, osmId = osmSelection?.osmRef?.id,
                     source = if (osmSelection?.osmRef != null) PlaceSource.OSM else PlaceSource.USER).also { vm.repository.savePlace(it) }
                 vm.repository.saveVisit(Visit(placeId = place.id, journeyId = targetJourney, visitedAt = now, note = note.trim()))
-                addPlace = false; selectedJourney = null; selectedPlace = place.id; tab = 2
+                addPlace = false; selectedJourney = null; selectedPlace = place.id
             }
         },
     )
     if (searchOsm) OsmSearchDialog(onDismiss = { searchOsm = false }, onSelect = { osmSelection = it; pin = GeoCoordinate(it.latitude, it.longitude); searchOsm = false })
     photoTarget?.let { target ->
         AlertDialog(onDismissRequest = { photoTarget = null }, title = { Text("Bir anı ekle") }, text = { Text("Seçtiğin fotoğrafların bir kopyası yalnızca bu uygulamada saklanır.") },
-            confirmButton = { TextButton(onClick = { gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) { Text("Galeriden seç") } },
+            confirmButton = { TextButton(onClick = { gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) { owner -> resultOwner.putPayload("gallery", owner, UiResultPayload.Photos(target.journeyId, target.visitId, photoTargetState.revision)) } }) { Text("Galeriden seç") } },
             dismissButton = { TextButton(onClick = {
-                runCatching { val uri = media.createCaptureUri(); captureUri = uri.toString(); captureJourney = target.journeyId; captureVisit = target.visitId; photoTarget = null; camera.launch(uri) }.onFailure { vm.message("Kamera açılamadı: ${it.message}") }
+                runCatching { camera.launchPrepared { owner -> val uri = media.createCaptureUri(); resultOwner.putPayload("camera", owner, UiResultPayload.Camera(uri.toString(), target.journeyId, target.visitId)); photoTarget = null; uri } }.onFailure { vm.message("Kamera açılamadı: ${it.message}") }
             }) { Text("Fotoğraf çek") } },
         )
     }
-    editJourney?.let { j -> JourneyEditor(j, { editJourney = null }) { updated -> vm.execute {
+    editJourney?.let { j -> JourneyEditor(j, { editJourney = null }) { updated -> executeEditor("Yolculuk kaydı güncellendi.") {
         if (updated.transport.supportsSteps && updated.endedAt == null && !hasPermission(Manifest.permission.ACTIVITY_RECOGNITION)) {
             permissions.launch(arrayOf(Manifest.permission.ACTIVITY_RECOGNITION))
         }
@@ -629,13 +745,13 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     editPlace?.let { p -> PlaceDetailsEditor(p, osmSelection,
         onSearch = { searchOsm = true },
         onDismiss = { editPlace = null },
-        onSave = { updated -> vm.execute { vm.repository.savePlace(updated); editPlace = null } },
+        onSave = { updated -> executeEditor("Yer bilgileri kaydedildi.") { vm.repository.savePlace(updated); editPlace = null } },
     ) }
-    editVisit?.let { v -> VisitEditor(v, { editVisit = null }) { note -> vm.execute { vm.repository.saveVisit(v.copy(note = note)); editVisit = null } } }
+    editVisit?.let { v -> VisitEditor(v, { editVisit = null }) { note -> executeEditor("Ziyaret güncellendi.") { vm.repository.saveVisit(v.copy(note = note)); editVisit = null } } }
     val photoEditor = editPhoto ?: missingPhotoMetadata.firstOrNull()
     photoEditor?.let { photo ->
         fun closePhoto() { if (editPhoto != null) editPhoto = null else missingPhotoMetadata = missingPhotoMetadata.drop(1) }
-        PhotoEditor(photo, onDismiss = { closePhoto() }) { updated -> vm.execute("Fotoğraf bilgileri kaydedildi.") { vm.repository.savePhoto(updated); closePhoto() } }
+        PhotoEditor(photo, onDismiss = { closePhoto() }) { updated -> executeEditor("Fotoğraf bilgileri kaydedildi.") { vm.repository.savePhoto(updated); closePhoto() } }
     }
     photosToShare?.let { photos -> PhotoShareSheet(photos, onDismiss = { photosToShare = null },
         onShare = { selected -> vm.execute { MediaShare.sharePhotos(context, selected) } },
@@ -649,18 +765,24 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
             } })
     }
     contributionEdit?.let { draft -> ContributionEditor(draft, authState.user != null, contributionBusy || authState.busy,
-        onDismiss = { contributionEdit = null; contributionEditId = null }, onSave = { updated -> vm.execute("Gözlem taslağı saklandı.") { vm.osmReady.await(); vm.repository.saveContribution(updated); contributionEdit = null; contributionEditId = null; contributionsPage = true } },
-        onPublish = { updated -> vm.execute {
-            contributionBusy = true
-            try { vm.osmReady.await(); vm.repository.saveContribution(updated); val result = contributionController.send(updated.id); contributionEdit = null; contributionEditId = null; contributionsPage = true; vm.message(result.message) }
+        onDismiss = { contributionEdit = null; contributionEditId = null }, onSave = { updated -> contributionBusy = true; vm.execute("Gözlem taslağı saklandı.") {
+            try { vm.osmReady.await(); vm.repository.saveContribution(updated); acknowledgedContribution = updated; contributionEdit = null; contributionEditId = null; contributionsPage = true }
             finally { contributionBusy = false }
         } },
-        onLogin = { updated -> vm.execute {
-            vm.osmReady.await(); vm.repository.saveContribution(updated)
-            contributionEdit = updated; contributionEditId = updated.id
-            osmAuth.startLogin(context.findActivity() ?: error("Giriş ekranı açılamadı."))
+        onPublish = { updated -> contributionBusy = true; vm.execute {
+            try { vm.osmReady.await(); vm.repository.saveContribution(updated); acknowledgedContribution = updated; val result = contributionController.send(updated.id); contributionEdit = null; contributionEditId = null; contributionsPage = true; vm.message(result.message) }
+            finally { contributionBusy = false }
+        } },
+        onLogin = { updated -> contributionBusy = true; vm.execute {
+            try {
+                vm.osmReady.await(); vm.repository.saveContribution(updated)
+                acknowledgedContribution = updated; contributionEdit = updated; contributionEditId = updated.id
+                osmAuth.startLogin(context.findActivity() ?: error("Giriş ekranı açılamadı."))
+            } finally { contributionBusy = false }
         } },
         authError = authState.error,
+        liveBaseline = { contributionEdit?.takeIf { it.id == draft.id } ?: acknowledgedContribution?.takeIf { it.id == draft.id } ?: draft },
+        liveBusy = { contributionBusy || osmAuth.state.value.busy },
     ) }
     gpxJourney?.let { journey -> key(journey.id) {
         val loaded by produceState<Result<List<TrackPoint>>?>(null, journey.id) {
@@ -675,12 +797,20 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
             confirmButton = { TextButton(onClick = { gpxJourney = null }) { Text("Kapat") } })
         else GpxExportSheet(journey, points, { gpxJourney = null }) { xml ->
             if (!preparingGpx) {
+                trackExportOwner = captureResultOwner()
+                if (trackExportOwner == null) return@GpxExportSheet
                 preparingGpx = true
                 vm.execute {
                     try {
                         pendingGpxId = withContext(Dispatchers.IO) { gpxStore.prepare(xml) }
                         gpxJourney = null
-                        exportGpx.launch("iz-rota-${journey.startedAt}.gpx")
+                        val exportId = pendingGpxId ?: error("GPX önizlemesi bulunamadı.")
+                        pendingGpxId = null
+                        val captured = trackExportOwner
+                        val launched = captured != null && exportGpx.launchWithOwner(captured, "iz-rota-${journey.startedAt}.gpx") { owner ->
+                            resultOwner.putPayload("gpx-export", owner, UiResultPayload.TrackExport(exportId))
+                        }
+                        if (!launched) withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) { gpxStore.remove(exportId) }
                     } finally { preparingGpx = false }
                 }
             }
@@ -726,10 +856,12 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
         } },
         confirmButton = { TextButton(onClick = {
             showBackupOptions = false
-            exportBackup.launch("iz-yedek-" + SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).format(Date()) + ".zip")
+            exportBackup.launch("iz-yedek-" + SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).format(Date()) + ".zip") { owner -> resultOwner.putPayload("backup-export", owner, UiResultPayload.Backup(includeHealthBackup)); includeHealthBackup = false }
         }) { Text("Dosyaya kaydet") } },
         dismissButton = { TextButton(onClick = { showBackupOptions = false }) { Text("Vazgeç") } })
     if (backupBusy) AlertDialog(onDismissRequest = {}, title = { Text("Arşivin hazırlanıyor") }, text = { Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) { CircularProgressIndicator(Modifier.size(28.dp)); Text("İşlem tamamlanana kadar lütfen bekle.") } }, confirmButton = {})
+    UiExitConfirmation(exitGuard)
+    }
 }
 
 @Composable
@@ -840,10 +972,10 @@ private fun JourneysScreen(state: DiaryState, now: Long, onJourney: (Journey) ->
 }
 
 @Composable
-private fun JourneyDetail(journey: Journey, state: DiaryState, now: Long, onEdit: () -> Unit, onConfirm: () -> Unit, onFinish: () -> Unit, onSwitch: () -> Unit, onAddPlace: () -> Unit, onPhoto: () -> Unit, onVisit: (Visit) -> Unit, onDelete: () -> Unit, onDeletePhoto: (Photo) -> Unit, onEditPhoto: (Photo) -> Unit, onExportGpx: () -> Unit, onSharePhotos: () -> Unit) {
+private fun JourneyDetail(journey: Journey, state: DiaryState, now: Long, onEdit: () -> Unit, onConfirm: () -> Unit, onFinish: () -> Unit, onSwitch: () -> Unit, onAddPlace: () -> Unit, onPhoto: () -> Unit, onVisit: (Visit) -> Unit, onDelete: () -> Unit, onDeletePhoto: (Photo) -> Unit, onEditPhoto: (Photo) -> Unit, onExportGpx: () -> Unit, onSharePhotos: () -> Unit, listState: LazyListState = rememberLazyListState()) {
     val prepared = state.prepared(journey)
     val visits = state.visits.filter { it.journeyId == journey.id }.sortedBy { it.visitedAt }
-    LazyColumn(contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    LazyColumn(state = listState, contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item { PageHeading(journey.title.ifBlank { journey.transport.label() }, date(journey.startedAt)) }
         item { Row(verticalAlignment = Alignment.CenterVertically) { ModeBadge(journey.transport); Spacer(Modifier.width(12.dp)); Text(journey.transport.label(), Modifier.weight(1f)); IconButton(onClick = onEdit) { Icon(Icons.Outlined.Edit, "Yolculuğu düzenle") } } }
         if (journey.interrupted) item { Notice("Konum kaydında kesinti var. Eksik bölüm rotaya eklenmedi.") }
@@ -869,9 +1001,9 @@ private fun JourneyDetail(journey: Journey, state: DiaryState, now: Long, onEdit
 }
 
 @Composable
-private fun PlaceDetail(place: Place, state: DiaryState, onEdit: () -> Unit, onMaps: () -> Unit, onContribute: () -> Unit, onAddVisit: () -> Unit, onEditVisit: (Visit) -> Unit, onShare: (Visit) -> Unit, onPhoto: (Visit) -> Unit, onDelete: () -> Unit, onDeleteVisit: (Visit) -> Unit, onDeletePhoto: (Photo) -> Unit, onEditPhoto: (Photo) -> Unit) {
+private fun PlaceDetail(place: Place, state: DiaryState, onEdit: () -> Unit, onMaps: () -> Unit, onContribute: () -> Unit, onAddVisit: () -> Unit, onEditVisit: (Visit) -> Unit, onShare: (Visit) -> Unit, onPhoto: (Visit) -> Unit, onDelete: () -> Unit, onDeleteVisit: (Visit) -> Unit, onDeletePhoto: (Photo) -> Unit, onEditPhoto: (Photo) -> Unit, listState: LazyListState = rememberLazyListState()) {
     val visits = state.visits.filter { it.placeId == place.id }.sortedByDescending { it.visitedAt }
-    LazyColumn(contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    LazyColumn(state = listState, contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item { Row(verticalAlignment = Alignment.Top) { Column(Modifier.weight(1f)) { PageHeading(place.name, "${visits.size} ziyaret · Kişisel yer günlüğü") }; IconButton(onClick = onEdit) { Icon(Icons.Outlined.Edit, "Yer adını düzenle") } } }
         if (place.latitude != null && place.longitude != null) item { DiaryMap(emptyList(), listOf(place), Modifier.fillMaxWidth().height(200.dp).clip(RoundedCornerShape(24.dp))) }
         item { FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton(onClick = onMaps) { Text("Başka haritada aç") }; OutlinedButton(onClick = onContribute) { Text("Düzeltme bildir") }; Button(onClick = onAddVisit) { Text("Yeni ziyaret") } } }
@@ -888,10 +1020,10 @@ private fun PlaceDetail(place: Place, state: DiaryState, onEdit: () -> Unit, onM
 }
 
 @Composable
-private fun SettingsScreen(settings: TrackerSettings, refresh: Int, busy: Boolean, onDetection: () -> Unit, onRepairDetection: () -> Unit, onStopMinutes: (Int) -> Unit, onPermissions: () -> Unit, onExport: () -> Unit, onImport: () -> Unit, onContributions: () -> Unit, onMessage: (String) -> Unit, onCommunity: () -> Unit) {
+private fun SettingsScreen(settings: TrackerSettings, refresh: Int, busy: Boolean, onDetection: () -> Unit, onRepairDetection: () -> Unit, onStopMinutes: (Int) -> Unit, onPermissions: () -> Unit, onExport: () -> Unit, onImport: () -> Unit, onContributions: () -> Unit, onMessage: (String) -> Unit, onCommunity: () -> Unit, listState: LazyListState = rememberLazyListState()) {
     val context = LocalContext.current
     val photoSize = remember(refresh) { File(context.filesDir, "photos").walkTopDown().filter { it.isFile }.sumOf { it.length() } / (1024 * 1024) }
-    LazyColumn(contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+    LazyColumn(state = listState, contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
         item { PageHeading("Senin günlüğün,\nsenin kontrolün.", "Kayıtlar yalnızca bu telefonda saklanır.") }
         item { Surface(shape = RoundedCornerShape(22.dp), color = Color.White) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("Hareketi fark et", style = MaterialTheme.typography.titleMedium); Text("15 dakikada 500 metreyi tamamlayınca kaydet", style = MaterialTheme.typography.bodySmall, color = Muted) }; Switch(settings.enabled, { onDetection() }) }
@@ -918,7 +1050,11 @@ private fun SettingsScreen(settings: TrackerSettings, refresh: Int, busy: Boolea
 @Composable
 private fun TextEditor(title: String, initial: String, initialNote: String?, onDismiss: () -> Unit, onSave: (String, String) -> Unit) {
     var name by remember { mutableStateOf(initial) }; var note by remember { mutableStateOf(initialNote.orEmpty()) }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text(title) }, text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) { OutlinedTextField(name, { name = it }, label = { Text("Ad") }); if (initialNote != null) OutlinedTextField(note, { note = it }, label = { Text("Özel not") }, minLines = 3) } }, confirmButton = { TextButton(onClick = { onSave(name.trim(), note.trim()) }, enabled = name.isNotBlank()) { Text("Kaydet") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Vazgeç") } })
+    val working = { listOf(name, note) }
+    val baseline = listOf(initial, initialNote.orEmpty())
+    val back = rememberUiEditExit("text-editor", working(), baseline, currentWorking = working,
+        discardUnsaved = { name = initial; note = initialNote.orEmpty() }, exit = onDismiss)
+    AlertDialog(onDismissRequest = back, title = { Text(title) }, text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) { OutlinedTextField(name, { name = it }, label = { Text("Ad") }); if (initialNote != null) OutlinedTextField(note, { note = it }, label = { Text("Özel not") }, minLines = 3) } }, confirmButton = { TextButton(onClick = { onSave(name.trim(), note.trim()) }, enabled = name.isNotBlank()) { Text("Kaydet") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Vazgeç") } })
 }
 
 @Composable

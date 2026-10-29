@@ -5,7 +5,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
+import org.iz.navigation.ui.history.rememberUiEditExit
+import org.iz.navigation.ui.history.LocalUiOperationBusy
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import org.iz.navigation.data.*
@@ -13,20 +14,26 @@ import java.util.Locale
 
 @Composable
 fun PlaceDetailsEditor(place: Place, osm: SelectedOsmPlace?, onSearch: () -> Unit, onDismiss: () -> Unit, onSave: (Place) -> Unit) {
-    var name by rememberSaveable(place.id) { mutableStateOf(place.name) }
-    var latitude by rememberSaveable(place.id) { mutableStateOf(place.latitude?.toString().orEmpty()) }
-    var longitude by rememberSaveable(place.id) { mutableStateOf(place.longitude?.toString().orEmpty()) }
+    val operationBusy = LocalUiOperationBusy.current
+    var name by remember(place.id) { mutableStateOf(place.name) }
+    var latitude by remember(place.id) { mutableStateOf(place.latitude?.toString().orEmpty()) }
+    var longitude by remember(place.id) { mutableStateOf(place.longitude?.toString().orEmpty()) }
     var reference by remember { mutableStateOf(place.osmType?.let { type -> place.osmId?.let { OsmRef(type, it) } }) }
     var source by remember { mutableStateOf(place.source) }
     var error by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(osm) {
         if (osm != null) { name = osm.name; latitude = osm.latitude.toString(); longitude = osm.longitude.toString(); reference = osm.osmRef; source = if (osm.osmRef == null) PlaceSource.USER else PlaceSource.OSM }
     }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Yeri düzenle") }, text = {
+    val originalReference = place.osmType?.let { type -> place.osmId?.let { OsmRef(type, it) } }
+    val working = { listOf(name, latitude, longitude, reference, source) }
+    val baseline = listOf(place.name, place.latitude?.toString().orEmpty(), place.longitude?.toString().orEmpty(), originalReference, place.source)
+    val back = rememberUiEditExit("place-${place.id}", working(), baseline, currentWorking = working,
+        discardUnsaved = { name = place.name; latitude = place.latitude?.toString().orEmpty(); longitude = place.longitude?.toString().orEmpty(); reference = originalReference; source = place.source }, exit = onDismiss)
+    AlertDialog(onDismissRequest = back, title = { Text("Yeri düzenle") }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedTextField(name, { name = it }, label = { Text("Bu yere verdiğin ad") })
-            OutlinedTextField(latitude, { latitude = it; reference = null; source = PlaceSource.USER }, label = { Text("Enlem (isteğe bağlı)") })
-            OutlinedTextField(longitude, { longitude = it; reference = null; source = PlaceSource.USER }, label = { Text("Boylam (isteğe bağlı)") })
+            OutlinedTextField(name, { if (!operationBusy()) name = it }, enabled = !operationBusy(), label = { Text("Bu yere verdiğin ad") })
+            OutlinedTextField(latitude, { if (!operationBusy()) { latitude = it; reference = null; source = PlaceSource.USER } }, enabled = !operationBusy(), label = { Text("Enlem (isteğe bağlı)") })
+            OutlinedTextField(longitude, { if (!operationBusy()) { longitude = it; reference = null; source = PlaceSource.USER } }, enabled = !operationBusy(), label = { Text("Boylam (isteğe bağlı)") })
             OutlinedButton(onClick = onSearch) { Text("OSM’de yer eşleştir") }
             Text(reference?.let { "OSM: ${it.type.name.lowercase(Locale.ROOT)}/${it.id}" } ?: "Kişisel yer", style = MaterialTheme.typography.bodySmall)
             if (reference != null) TextButton(onClick = { reference = null; source = PlaceSource.USER }) { Text("OSM eşlemesini kaldır") }
@@ -41,8 +48,12 @@ fun PlaceDetailsEditor(place: Place, osm: SelectedOsmPlace?, onSearch: () -> Uni
 
 @Composable
 internal fun PlaceEditor(pin: GeoCoordinate?, osm: SelectedOsmPlace?, places: List<Place>, onDismiss: () -> Unit, onSearch: () -> Unit, onLocate: () -> Unit, onSave: (String, String, Place?) -> Unit) {
-    var name by rememberSaveable { mutableStateOf("") }
-    var note by rememberSaveable { mutableStateOf("") }
+    val operationBusy = LocalUiOperationBusy.current
+    val initialName = remember { osm?.name.orEmpty() }
+    val initialPin = remember { pin }
+    val initialReference = remember { osm?.osmRef }
+    var name by remember { mutableStateOf(initialName) }
+    var note by remember { mutableStateOf("") }
     var selected by remember { mutableStateOf<Place?>(null) }
     var expanded by remember { mutableStateOf(false) }
     LaunchedEffect(osm) {
@@ -51,7 +62,12 @@ internal fun PlaceEditor(pin: GeoCoordinate?, osm: SelectedOsmPlace?, places: Li
             selected = osm.osmRef?.let { ref -> places.firstOrNull { it.osmType == ref.type && it.osmId == ref.id } }
         }
     }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Bir yer kaydet") }, text = {
+    val initialSelected = remember { initialReference?.let { ref -> places.firstOrNull { it.osmType == ref.type && it.osmId == ref.id }?.id } }
+    val working = { listOf(name, note, selected?.id, pin, osm?.osmRef) }
+    val baseline = listOf(initialName, "", initialSelected, initialPin, initialReference)
+    val back = rememberUiEditExit("new-place", working(), baseline, currentWorking = working,
+        discardUnsaved = { name = initialName; note = ""; selected = places.firstOrNull { it.id == initialSelected } }, exit = onDismiss)
+    AlertDialog(onDismissRequest = back, title = { Text("Bir yer kaydet") }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (places.isNotEmpty()) Box {
                 OutlinedButton(onClick = { expanded = true }) { Text(selected?.name ?: "Kayıtlı yerlerimden seç") }
@@ -61,21 +77,24 @@ internal fun PlaceEditor(pin: GeoCoordinate?, osm: SelectedOsmPlace?, places: Li
                 }
             }
             if (selected == null) {
-                OutlinedTextField(name, { name = it }, label = { Text("Bu yere verdiğin ad") }, singleLine = true)
+                OutlinedTextField(name, { if (!operationBusy()) name = it }, enabled = !operationBusy(), label = { Text("Bu yere verdiğin ad") }, singleLine = true)
                 TextButton(onClick = onLocate) { Text("Bulunduğum konumu kullan") }
                 Text(pin?.let { String.format(Locale.ROOT, "Seçilen konum: %.5f, %.5f", it.latitude, it.longitude) } ?: "Konum isteğe bağlı. Haritaya uzun basarak da seçebilirsin.", style = MaterialTheme.typography.bodySmall, color = Muted)
                 OutlinedButton(onClick = onSearch) { Text(if (osm == null) "OSM’de yer eşleştir" else "OSM eşlemesini değiştir") }
                 osm?.let { Text("OSM: ${it.name}", style = MaterialTheme.typography.bodySmall, color = Muted) }
             }
-            OutlinedTextField(note, { note = it }, label = { Text("Bu ziyarete özel not") }, minLines = 2)
+            OutlinedTextField(note, { if (!operationBusy()) note = it }, enabled = !operationBusy(), label = { Text("Bu ziyarete özel not") }, minLines = 2)
         }
     }, confirmButton = { TextButton(onClick = { onSave(name, note, selected) }, enabled = selected != null || name.isNotBlank()) { Text("Ziyareti kaydet") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Vazgeç") } })
 }
 
 @Composable
 internal fun VisitEditor(visit: Visit, onDismiss: () -> Unit, onSave: (String) -> Unit) {
-    var note by rememberSaveable(visit.id) { mutableStateOf(visit.note) }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Ziyaret notun") }, text = {
-        OutlinedTextField(note, { note = it }, label = { Text("Yalnızca sana özel") }, minLines = 4)
+    val operationBusy = LocalUiOperationBusy.current
+    var note by remember(visit.id) { mutableStateOf(visit.note) }
+    val back = rememberUiEditExit("visit-${visit.id}", note, visit.note,
+        currentWorking = { note }, discardUnsaved = { note = visit.note }, exit = onDismiss)
+    AlertDialog(onDismissRequest = back, title = { Text("Ziyaret notun") }, text = {
+        OutlinedTextField(note, { if (!operationBusy()) note = it }, enabled = !operationBusy(), label = { Text("Yalnızca sana özel") }, minLines = 4)
     }, confirmButton = { TextButton(onClick = { onSave(note.trim()) }) { Text("Kaydet") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Vazgeç") } })
 }

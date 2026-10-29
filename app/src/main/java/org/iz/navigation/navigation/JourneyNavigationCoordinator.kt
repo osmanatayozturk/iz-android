@@ -71,6 +71,8 @@ interface NavigationRuntime {
         visible = state.sessionId != null && speedMode(state.sessionTransport))
     suspend fun refreshRoadSpeed() {}
     fun render(state: NavigationState)
+    /** Silent, non-blocking preflight only after a guidance activation has committed. */
+    fun prepareSpeech() {}
     fun speak(text: String)
     fun cancelSpeech()
 }
@@ -374,6 +376,8 @@ class JourneyNavigationCoordinator(
             guidance = guidance, arrived = false, progress = null, routeRevision = epoch,
             loading = false, message = if (simulated) "Deneme sürüşü · günlüğe kaydedilmez" else null,
             simulation = simulated))
+        // Voice availability cannot undo the already committed visual guidance/session.
+        if (guidance) runCatching { runtime.prepareSpeech() }
         if (!simulated) saveRoute(route)
         if (simulated) startSimulation(route, requireNotNull(journey))
         else mutableState.value.fix?.takeIf { fresh(it, clock()) }?.let { onAcceptedLocation(sessionId, it) }

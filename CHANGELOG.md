@@ -1,13 +1,25 @@
 # Değişiklik geçmişi
 
-## Geliştirme adayı — Telefon 0.11.1 / code 23 (yayımlanmadı)
+## Geliştirme adayı — Telefon 0.11.2 / code 24 (yayımlanmadı)
 
-Bu bölüm, planlanan ilk telefon paketinin kapsamını kaydeder; değişikliklerin tamamlandığı, test edildiği veya yayımlandığı anlamına gelmez. Teknik doğrulama ve sürüm kabulü bekleniyor. Wear OS **0.6.1 / code 11** ile telefon-saat iletişimi **v6** bu adayın kapsamında değişmiyor.
+Bu tek aday, önceki 0.11.1 planındaki başlık, günlük bitirme teyidi ve metin karşıtlığı değişikliklerini içerir; ayrı 0.11.1 sürümü yayımlanmaz. Aşağıdaki kapsam onaylı plandır, tamamlanmış uygulama veya kabul beyanı değildir. Wear OS **0.6.1 / code 11** ve telefon-saat iletişimi **v6** değişmiyor.
 
-- **Yönlendirme başlığı:** Aktif dönüşlü yönlendirme sırasında üstteki Nereye? hedef/arama alanı ve boş bıraktığı aralık gizlenecek. Harita kontrolleri ile kamera görünür alanı kalan içeriğe göre yerleşecek; hedef alanı yönlendirme bitince geri gelecek. Yalnız kayıt, boş durum, rota önizleme ve dönüşsüz GPX takibi mevcut davranışı koruyacak. Manevra, mesafe, ses, uyarılar, oturum kartı ve İşlemler girişi korunacak.
-- **Günlükten bitirme teyidi (F01):** Günlük ayrıntısındaki Bitir eylemi, etkilenecek mevcut eşleşen yolculuğu ve sonuçlarını açıklayan açık teyit sunacak. Yönlendirmeyi, kaydı ve ikisini birlikte bitirme seçenekleri ayrı kalacak; iptal değişiklik yapmayacak ve eski bir teyit yeni oturumu bitiremeyecek.
-- **İkincil metin karşıtlığı (F02):** Normal boyuttaki ikincil metin için kullanılan metin/arka plan çiftleri en az 4,5:1 karşıtlık hedefini sağlayacak. Renk/token kararı İz'in yeşil-krem kimliğini koruyacak; kapsam değişen token ve yüzeylerle sınırlı.
-- Bu adayın kaynak, paket, çalışma zamanı, cihaz, bağımsız Test, güvenlik ve yayın kabulü henüz burada doğrulanmış sayılmaz. Sonuçlar sabit aday ve gerçek kanıtlarla bu kayda eklenir.
+### Birleşik 0.11.1 kapsamı
+
+- **Yönlendirme başlığı:** Dönüşlü aktif yönlendirmede Nereye? başlığı ve boşluğu gizlenir; dönüş/mesafe, ses, uyarılar, oturum kartı, İşlemler ve harita/kamera durumu korunur. Yönlendirme bitince başlık geri gelir; yalnız kayıt, rota önizleme ve dönüşsüz GPX takibi değişmez.
+- **Günlükten bitirme teyidi (F01):** Mevcut eşleşen yolculuk ve etkileri açıklanır. Yönlendirme, kayıt ve tüm oturum için bitirme seçenekleri ayrıdır; iptal değişiklik yapmaz, eski teyit başka oturumu bitiremez.
+- **İkincil metin karşıtlığı (F02):** Normal boyuttaki ikincil metin/arka plan çiftleri en az 4,5:1 olur; değişiklik ilgili renk tokenı ve yüzeylerle sınırlı kalır.
+
+### 0.11.2 kapsamı
+
+- **Sesli yönlendirme durumu:** Tek telefon TTS motoru sesli yönlendirme ve hava durumu istemlerini yönetir. Motor/dil hazırlığı, tekil ses odağı/çıktı hatası ve sessiz tercih ayrı gösterilir. Teyitli yönlendirme başlangıcında, yönlendirme için bir kez sessiz hazırlık yapılır; ses kullanılamazsa görsel yönlendirme sürer. Geçerli hata manevra kartında kısa, GPS ve rota-yenileme uyarılarını değiştirmeden gösterilir; kontrollerde ayrıntı bulunur. Yönlendirme sırasında dönüş anonsu sürmüyorsa elle ses testi çalışabilir; anons sürüyorsa test sıraya alınmadan meşgul bilgisi verilir. Yeni dönüş anonsu elle testi kesebilir. Hazır olma durumu sesin duyulduğunu kanıtlamaz.
+- **Telefon geri gezinmesi ve bağlam:** Sayfalar ve menüler gerçek açan ekranına döner. Liste/ayrıntı, arama, tarih/harita seçicisi, GPX, hava, grup, topluluk/OSM, ayarlar, yedekleme ve paylaşım akışlarının hafif görüntüleme durumu korunur. Geri veya ekranı geri yükleme rota başlatma, durdurma, yeniden planlama, gönderim ya da izin sonucunu tekrar oynatmaz. Saat ve Auto kendi gezinme akışlarını korur.
+- **Düzenleme koruması:** Yalnız gerçekten kaydedilmemiş değişiklikler için **Düzenlemeye dön** ve **Değişikliklerden vazgeç** seçenekleri sunulur. Sorgu, filtre, kaydırma veya değişmemiş sıralama tek başına kirli sayılmaz; değişmiş, açık kaydetme isteyen sıralamalar korunma/teyit kapsamındadır. Çocuk seçici üst formu bırakmaz. Vazgeçme sadece bekleyen değişikliği atar ve çıkışı bir kez sürdürür. Mevcut OSM yerel otomatik kaydı devam eder; onaylanmış kayıt geri alınmaz ve atılan metin yeniden diriltilmez. Geri eylemi otomatik kaydetme/gönderme yapmaz.
+- **Veri ve uyumluluk:** Yeni günlük/yedek biçimi veya küresel taslak deposu planlanmıyor. Telefon **0.11.2 / code 24**; Wear OS **0.6.1 / code 11** ve iletişim **v6** aynı kalacak.
+
+### Kanıt durumu
+
+0.11.2 için dar kapsamlı bir host koşusunda 46 kontrol geçti; bu sonuç yalnız o koşula aittir, tam aday kabulü değildir. Tam 0.11.2 aday kontrol kümesi ve sabit adayın birim/lint/build/bağımsız Test/UI/UX kontrolleri çalıştırılmadı. Cihaz/çalışma zamanı, paket, güvenlik ve yayın kabulü de yoktur. 0.11.1 geliştirmesindeki b3 tam koşusu tarihsel olarak 860 testten 856 geçti ve 4 kaldı; `7ade5c9` kaynağında sonradan seçilen dört düzeltme kontrolü geçti, lint 0 hata/ölümcül hata ve 92 uyarı verdi. Bu sonuçlar 0.11.2 kontrolü değildir; 0.11.1 için yerel cihaz hedefi yoktu. README görselleri de 0.9/0.10 döneminden tarihsel örneklerdir.
 
 ## Telefon 0.11.0 / code 22 — motosiklet sürüşü
 

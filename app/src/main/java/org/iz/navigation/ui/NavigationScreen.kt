@@ -5,7 +5,6 @@ import android.app.Application
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -120,10 +119,31 @@ internal class PhoneNavigationViewModel(application: Application) : AndroidViewM
         })
 
 
-    fun enter(entryId: Long, initialStops: List<RouteStop>?, transport: Transport?, initialPlan: SavedWeatherPlan? = null) {
-        directions.enter(entryId, initialStops, transport ?: navigation.state.value.sessionTransport ?: navigation.state.value.journey?.transport,
-            locateOnOpen = !navigation.state.value.guidance, initialPlan = initialPlan)
-        if (initialPlan == null && navigation.state.value.sessionId == null && ui.value.originCurrent && !ui.value.locating) directions.useCurrentOrigin()
+    private var currentUiEntry: Long? = null
+    private val inputs = linkedMapOf<Long, PhoneDirectionsInput>()
+    private var retainedUiKeys: Set<Long>? = null
+    private val initialPreviews = mutableSetOf<Long>()
+    private val initialTargets = mutableSetOf<Long>()
+    fun retainUiEntries(keys: Set<Long>) {
+        retainedUiKeys = keys
+        inputs.keys.retainAll(keys); initialPreviews.retainAll(keys); initialTargets.retainAll(keys)
+    }
+    fun takeInitialPreview(entryId: Long) = initialPreviews.add(entryId)
+    fun takeInitialTarget(entryId: Long) = initialTargets.add(entryId)
+    fun enter(entryId: Long, initialStops: List<RouteStop>?, transport: Transport?, initialPlan: SavedWeatherPlan? = null,
+        restoring: Boolean = false, continuePreparation: Boolean = false) {
+        if (currentUiEntry == entryId) return
+        currentUiEntry?.takeIf { retainedUiKeys?.contains(it) != false }?.let { inputs[it] = directions.workingInput() }
+        val retained = inputs[entryId]
+        if (continuePreparation) directions.adoptUiEntry(entryId)
+        else if (retained != null) { directions.adoptUiEntry(entryId); directions.restoreUiInput(retained) }
+        else directions.enter(entryId, initialStops,
+            transport ?: navigation.state.value.sessionTransport ?: navigation.state.value.journey?.transport,
+            locateOnOpen = !restoring && !navigation.state.value.guidance, initialPlan = initialPlan)
+        currentUiEntry = entryId
+        while (inputs.size > 24) inputs.remove(inputs.keys.first())
+        if (!restoring && retained == null && !continuePreparation && initialPlan == null &&
+            navigation.state.value.sessionId == null && ui.value.originCurrent && !ui.value.locating) directions.useCurrentOrigin()
     }
     fun target(value: NavigationTarget) {
         value.coordinate?.let { coordinate ->
@@ -192,6 +212,11 @@ internal fun NavigationScreen(
     vm: PhoneNavigationViewModel = viewModel(),
     initialPlan: SavedWeatherPlan? = null,
     onSaveRoute: ((List<RouteStop>, Transport, RoutePreferences, Boolean, Double?) -> Unit)? = null,
+    onStarted: () -> Unit = {},
+    restoringEntry: Boolean = false,
+    continuePreparation: Boolean = false,
+    onPlannerOpened: () -> Unit = {},
+    onMap: () -> Unit = onClose,
 ) {
     val context = LocalContext.current
     val ui by vm.ui.collectAsStateWithLifecycle()
@@ -203,10 +228,32 @@ internal fun NavigationScreen(
     val shortcuts by vm.shortcuts.collectAsStateWithLifecycle()
     val commandBusy by vm.commandBusy.collectAsStateWithLifecycle()
     val commandErrorVersion by vm.commandErrorVersion.collectAsStateWithLifecycle()
+    val speech = remember(context) { org.iz.navigation.navigation.NavigationSpeech.get(context) }
+    val speechStatus by speech.status.collectAsStateWithLifecycle()
+    val openVoiceSettings = org.iz.navigation.ui.history.LocalUiVoiceSettingsAction.current
+    var voiceNotice by remember(entryId) { mutableStateOf<String?>(null) }
+    LaunchedEffect(speechStatus.readiness, speechStatus.requestFailure) {
+        if (speechStatus.readiness == org.iz.navigation.navigation.EngineReadiness.READY && speechStatus.requestFailure == null) voiceNotice = null
+    }
+    val voiceControls: @Composable () -> Unit = {
+        PhoneVoiceControls(speechStatus, nav.muted, voiceNotice,
+            onTest = { voiceNotice = when (speech.testVoice()) {
+                org.iz.navigation.navigation.SpeechTestResult.ACCEPTED -> "Ses denemesi istendi. Sesi duyduğunu kendin kontrol et."
+                org.iz.navigation.navigation.SpeechTestResult.BUSY -> "Dönüş anonsu sürdüğü için bu ses denemesi başlatılmadı."
+                org.iz.navigation.navigation.SpeechTestResult.UNAVAILABLE -> "Ses motoru hazır olmadığı için bu deneme başlatılmadı."
+            } },
+            onRetry = { voiceNotice = null; speech.retry() },
+            onSettings = { voiceNotice = null; openVoiceSettings?.invoke() })
+    }
+    val uiHistory = org.iz.navigation.ui.history.LocalUiHistory.current
+    org.iz.navigation.ui.history.UiEditOwner(org.iz.navigation.ui.history.UiEditState(
+        org.iz.navigation.ui.history.LocalUiEntryKey.current + "/navigation-work", null, 0, 0, false, ui.starting || commandBusy),
+        currentState = { org.iz.navigation.ui.history.UiEditState((uiHistory?.current?.key ?: "standalone") + "/navigation-work",
+            null, 0, 0, false, vm.ui.value.starting || vm.commandBusy.value) }, discardUnsaved = {})
     val app = context.applicationContext as IzApplication
     val groupState by app.groups.state.collectAsStateWithLifecycle()
     val weather by app.weatherManager.state.collectAsStateWithLifecycle()
-    var showPlanning by remember(entryId) { mutableStateOf(initiallyPlanning) }
+    var showPlanning by androidx.compose.runtime.saveable.rememberSaveable(entryId) { mutableStateOf(initiallyPlanning) }
     var addingVia by remember(entryId) { mutableStateOf(false) }
     var recordDialog by remember { mutableStateOf(false) }
     var sessionActions by remember { mutableStateOf(false) }
@@ -223,17 +270,28 @@ internal fun NavigationScreen(
     var showPickerMap by remember(entryId) { mutableStateOf(false) }
     var showTrafficSettings by remember { mutableStateOf(false) }
     var incomingQuery by remember(entryId) { mutableStateOf("") }
-    var savedPlanPreviewRequested by remember(entryId, initialPlan) { mutableStateOf(false) }
     var trackReplacementDialog by remember(entryId, nav.trackReplacementKey(), vm.directions.revisionToken) {
         mutableStateOf<String?>(null)
     }
     fun hasFineLocation() = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-    val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-        val precise = hasFineLocation()
-        if (!precise && vm.permissionGate.isPendingFor(entryId, vm.directions.revisionToken)) {
-            vm.directions.reportMessage("Güncel konum için hassas konum izni gerekli. İzinleri ayarlayıp yeniden dene.")
+    val openPermissions = org.iz.navigation.ui.history.LocalUiDirectionsPermissions.current
+    fun requestPermissions(names: Array<String>, forAction: Boolean): Boolean {
+        val requestedRevision = vm.directions.revisionToken
+        fun rejectOwnRequest() {
+            if (forAction && vm.permissionGate.isPendingFor(entryId, requestedRevision))
+                vm.permissionGate.consume(entryId, requestedRevision, false)
         }
-        vm.permissionGate.consume(entryId, vm.directions.revisionToken, precise)?.let(vm::perform)
+        val callback = org.iz.navigation.ui.history.UiPermissionReturn(onResult = {
+            val precise = ContextCompat.checkSelfPermission(vm.getApplication<Application>(), Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            if (!precise && forAction && vm.permissionGate.isPendingFor(entryId, requestedRevision))
+                vm.directions.reportMessage("Güncel konum için hassas konum izni gerekli. İzinleri ayarlayıp yeniden dene.")
+            if (forAction && vm.permissionGate.isPendingFor(entryId, requestedRevision))
+                vm.permissionGate.consume(entryId, vm.directions.revisionToken, precise)?.let(vm::perform)
+        }, onStale = ::rejectOwnRequest)
+        val launched = try { openPermissions?.invoke(names, callback) == true }
+        catch (error: Exception) { vm.directions.reportMessage(error.message ?: "İzin ekranı açılamadı."); false }
+        if (!launched) rejectOwnRequest()
+        return launched
     }
     fun permissionNames() = buildList {
         add(Manifest.permission.ACCESS_FINE_LOCATION)
@@ -268,13 +326,15 @@ internal fun NavigationScreen(
             }
         }
         if (required.isEmpty()) vm.perform(action)
-        else if (vm.permissionGate.request(action, entryId, vm.directions.revisionToken)) permissions.launch(required.toTypedArray())
+        else if (vm.permissionGate.request(action, entryId, vm.directions.revisionToken)) requestPermissions(required.toTypedArray(), forAction = true)
     }
     fun select(stop: RouteStop) {
         if (addingVia) { vm.directions.addVia(stop); addingVia = false }
         else if (pickerOrigin) vm.directions.setOrigin(stop) else vm.directions.setDestination(stop)
     }
-    fun closePlanner() { showPlanning = false; onClose() }
+    val uiExit = org.iz.navigation.ui.history.LocalUiExitGuard.current
+    fun closePlanner() { val exit = { showPlanning = false; onClose() }; if (uiExit == null) exit() else uiExit.requestExit(exit) }
+    fun goToMap() { val exit = { showPlanning = false; onMap() }; if (uiExit == null) exit() else uiExit.requestExit(exit) }
     trackReplacementDialog?.let { key ->
         AlertDialog(
             onDismissRequest = { trackReplacementDialog = null },
@@ -299,14 +359,15 @@ internal fun NavigationScreen(
         previousSession = nav.sessionId
     }
     val openedStartedCount = remember(entryId) { ui.startedCount }
-    LaunchedEffect(ui.startedCount) { if (ui.startedCount > openedStartedCount) showPlanning = false }
+    LaunchedEffect(ui.startedCount) { if (ui.startedCount > openedStartedCount) { showPlanning = false; onStarted() } }
     LaunchedEffect(entryId, incomingTarget, initialPlan) {
-        vm.enter(entryId, initialStops, initialTransport, initialPlan)
-        if (initialPlan != null && !savedPlanPreviewRequested) {
-            savedPlanPreviewRequested = true
+        vm.enter(entryId, initialStops, initialTransport, initialPlan, restoringEntry, continuePreparation)
+        val firstPreview = vm.takeInitialPreview(entryId)
+        if (!restoringEntry && initialPlan != null && firstPreview) {
             requestAction(DirectionsAction.PREVIEW)
         }
-        incomingTarget?.let { target ->
+        val firstTarget = vm.takeInitialTarget(entryId)
+        incomingTarget?.takeIf { !restoringEntry && firstTarget }?.let { target ->
             vm.target(target)
             if (target.coordinate == null && target.query.isNotBlank()) {
                 incomingQuery = target.query
@@ -317,14 +378,14 @@ internal fun NavigationScreen(
     }
 
     NavigationHomeContent(ui = ui, nav = nav, points = points,
-        shortcuts = shortcuts, onShortcut = { kind -> showPlanning = true; vm.shortcut(kind) },
+        shortcuts = shortcuts, onShortcut = { kind -> showPlanning = true; onPlannerOpened(); vm.shortcut(kind) },
         members = groupState.markers.map { org.iz.navigation.integration.RouteMapMember(it.userId, it.name, it.latitude, it.longitude, it.delayed) },
-        showPlanner = showPlanning,
+        showPlanner = showPlanning, voiceFault = phoneVoiceFault(speechStatus, nav.guidance, nav.muted),
         weatherLabel = weather.assessment?.samples?.firstOrNull()?.reading?.temperatureC?.let { "${it.toInt()}° · Hava" } ?: "Hava durumu",
         onSearch = {
             val current = vm.navigation.state.value
             openPhoneDirectionsPanel(current, showPlanning,
-                { vm.enter(System.nanoTime(), null, current.sessionTransport ?: vm.ui.value.transport) }, { showPlanning = true })
+                { vm.enter(System.nanoTime(), null, current.sessionTransport ?: vm.ui.value.transport) }, { showPlanning = true; onPlannerOpened() })
         },
         onRecord = {
             if (nav.recording) sessionActions = true
@@ -335,12 +396,12 @@ internal fun NavigationScreen(
             } else recordDialog = true
         },
         onGroup = onGroup, onMenu = onMenu, onWeather = onWeather,
-        onMute = { vm.navigation.setMuted(!nav.muted) }, onManageSession = { showPlanning = true },
+        onMute = { vm.navigation.setMuted(!nav.muted) }, onManageSession = { showPlanning = true; onPlannerOpened() },
         onLocate = { requestAction(DirectionsAction.CURRENT_ORIGIN) }, onPin = onPin,
     ) {
     PhoneDirectionsContent(
-        ui = ui, nav = nav, points = points, commandBusy = commandBusy, commandErrorVersion = commandErrorVersion,
-        onClose = ::closePlanner,
+        ui = ui, nav = nav, points = points, commandBusy = commandBusy, commandErrorVersion = commandErrorVersion, voiceControls = voiceControls,
+        onClose = ::closePlanner, onMap = ::goToMap,
         chooseOrigin = { addingVia = false; pickerOrigin = true; showSource = true },
         chooseDestination = { addingVia = false; pickerOrigin = false; showSource = true },
         currentOrigin = { requestAction(DirectionsAction.CURRENT_ORIGIN) },
@@ -351,7 +412,7 @@ internal fun NavigationScreen(
         showLive = vm.directions::showLiveRoute,
         trafficSettings = { showTrafficSettings = true },
         lastDestination = if (vm.navigation.lastRoute != null) vm::lastDestination else null,
-        permissions = { permissions.launch(permissionNames()) },
+        permissions = { requestPermissions(permissionNames(), forAction = false) },
         showMap = false, recordJourney = vm.directions::setRecordJourney, stopRecording = { requestEnd(PhoneSessionEnd.RECORDING) },
         addVia = { addingVia = true; pickerOrigin = false; showSource = true }, removeVia = vm.directions::removeVia,
         suggestStopOrder = { vm.directions.suggestStopOrder() }, acceptStopOrder = vm.directions::acceptStopOrder,
@@ -371,6 +432,7 @@ internal fun NavigationScreen(
     }
     if (sessionActions) AlertDialog(onDismissRequest = { sessionActions = false }, title = { Text("Yolculuk işlemleri") }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            voiceControls()
             if (nav.guidance) OutlinedButton({ requestEnd(PhoneSessionEnd.GUIDANCE) }, enabled = !commandBusy && !ui.starting) { Text(PhoneSessionEnd.GUIDANCE.label) }
             if (nav.recording) OutlinedButton({ requestEnd(PhoneSessionEnd.RECORDING) }, enabled = !commandBusy && !ui.starting) { Text(PhoneSessionEnd.RECORDING.label) }
             Button({ requestEnd(PhoneSessionEnd.ALL) }, enabled = !commandBusy && !ui.starting) { Text(PhoneSessionEnd.ALL.label) }

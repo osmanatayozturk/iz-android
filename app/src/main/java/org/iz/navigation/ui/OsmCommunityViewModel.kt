@@ -9,7 +9,6 @@ import org.iz.navigation.IzApplication
 import org.iz.navigation.osmcommunity.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -60,10 +59,21 @@ internal class OsmCommunityViewModel(application: Application, private val saved
     private val mutableUi = MutableStateFlow(CommunityUiState(accountId = community.value.accountId, cacheIdentity = community.value.cacheIdentity))
     val ui = mutableUi.asStateFlow()
     private var operation: Job? = null
-    private var draftSave: Job? = null
-    private var draftRevision = 0L
+    private var uiGeneration = 0L
+    private val callers = ArrayDeque<CommunityUiState>()
     private var pendingRestore = savedState.get<Bundle>(EDITOR_STATE)
+    private var pendingBrowsing = savedState.get<Bundle>(BROWSING_STATE)
     private var pendingNotification: Pair<Long, Long>? = null
+    private val draftAutosave = OsmCommunityEditorAutosave(viewModelScope, repository::persistDraft,
+        onSnapshot = { draft ->
+            if (draft == null) clearSavedEditor() else {
+                rememberEditor(draft)
+                if (mutableUi.value.editor?.id == draft.id && mutableUi.value.accountId == draft.accountId)
+                    mutableUi.value = mutableUi.value.copy(editor = draft)
+            }
+        },
+        onError = { reportError("Taslak kaydedilemedi. Ekranı kapatmadan yeniden dene.") })
+    val editorState = draftAutosave.state
 
     init {
         viewModelScope.launch {
@@ -71,19 +81,21 @@ internal class OsmCommunityViewModel(application: Application, private val saved
                 if (state.accountId != mutableUi.value.accountId || state.cacheIdentity != mutableUi.value.cacheIdentity) {
                     if (state.accountId != mutableUi.value.accountId) pendingNotification = null
                     operation?.cancel()
-                    draftSave?.cancel()
-                    draftRevision++
+                    draftAutosave.close()
+                    uiGeneration++; callers.clear()
                     mutableUi.value = CommunityUiState(accountId = state.accountId, cacheIdentity = state.cacheIdentity)
                     if (state.accountId == null || pendingRestore?.getLong("account") != state.accountId) clearSavedEditor()
                 } else {
                     val editor = mutableUi.value.editor
                     val stored = state.drafts.firstOrNull { it.id == editor?.id }
                     if (stored != null && stored.status in setOf(CommunityDraftStatus.SENDING, CommunityDraftStatus.UNKNOWN)) {
+                        draftAutosave.close()
                         mutableUi.value = mutableUi.value.copy(editor = stored)
                         clearSavedEditor()
                     }
                 }
                 if (state.ready) {
+                    restoreBrowsing(state)
                     restoreEditor(state)
                     pendingNotification?.let { target ->
                         pendingNotification = null
@@ -94,8 +106,8 @@ internal class OsmCommunityViewModel(application: Application, private val saved
         }
     }
 
-    fun section(value: CommunitySection) { persistEditor(); clearSavedEditor(); mutableUi.value = mutableUi.value.copy(section = value, detail = null, person = null, editor = null) }
-    fun folder(value: CommunityFolder) { persistEditor(); clearSavedEditor(); mutableUi.value = mutableUi.value.copy(folder = value, detail = null, person = null, editor = null) }
+    fun section(value: CommunitySection) { closeEditor(); callers.clear(); mutableUi.value = mutableUi.value.copy(section = value, detail = null, person = null, editor = null); rememberBrowsing() }
+    fun folder(value: CommunityFolder) { closeEditor(); callers.clear(); mutableUi.value = mutableUi.value.copy(folder = value, detail = null, person = null, editor = null); rememberBrowsing() }
     fun clearError() { mutableUi.value = mutableUi.value.copy(error = null, notice = null) }
     fun reportError(message: String) { mutableUi.value = mutableUi.value.copy(error = message) }
 
@@ -106,6 +118,7 @@ internal class OsmCommunityViewModel(application: Application, private val saved
 
     fun openNotification(messageId: Long?, accountId: Long?) {
         if (!communityTargetMatches(messageId, accountId, community.value.accountId)) {
+            closeEditor(); callers.clear()
             mutableUi.value = CommunityUiState(accountId = community.value.accountId, cacheIdentity = community.value.cacheIdentity,
                 error = "Bu bildirim başka bir OSM hesabına ait. İlgili hesabı bağlayıp mesajı Mesajlar bölümünden açabilirsin.")
             return
@@ -117,45 +130,84 @@ internal class OsmCommunityViewModel(application: Application, private val saved
         openMessage(messageId!!)
     }
 
-    fun openMessage(id: Long) = runOperation {
-        val account = community.value.accountId ?: return@runOperation
-        val cache = community.value.cacheIdentity
-        val detail = repository.message(id)
-        if (community.value.accountId != account) return@runOperation
-        updateFor(account, cache) { it.copy(section = CommunitySection.MESSAGES, detail = detail, editor = null, person = null) }
-        if (detail.summary.toId == account && !detail.summary.read) {
-            repository.markRead(id, true)
-            updateFor(account, cache) { it.copy(detail = detail.copy(summary = detail.summary.copy(read = true))) }
+    fun openMessage(id: Long) {
+        if (mutableUi.value.busy) return
+        pushCaller(); closeEditor()
+        runOperation {
+            val account = community.value.accountId ?: return@runOperation
+            val cache = community.value.cacheIdentity
+            val detail = repository.message(id)
+            if (community.value.accountId != account) return@runOperation
+            updateFor(account, cache) { it.copy(section = CommunitySection.MESSAGES, detail = detail, editor = null, person = null) }
+            if (detail.summary.toId == account && !detail.summary.read) {
+                repository.markRead(id, true)
+                updateFor(account, cache) { it.copy(detail = detail.copy(summary = detail.summary.copy(read = true))) }
+            }
         }
     }
 
-    fun openProfile(id: Long) = runOperation {
-        val account = community.value.accountId
-        val cache = community.value.cacheIdentity
-        val profile = repository.profile(id)
-        updateFor(account, cache) { it.copy(person = profile, detail = null) }
+    fun openProfile(id: Long) {
+        if (mutableUi.value.busy) return
+        pushCaller(); closeEditor()
+        runOperation {
+            val account = community.value.accountId
+            val cache = community.value.cacheIdentity
+            val profile = repository.profile(id)
+            updateFor(account, cache) { it.copy(person = profile, detail = null) }
+        }
     }
 
+    private fun pushCaller(includeEditor: Boolean = false) {
+        val current = mutableUi.value
+        if (callers.size == 32) callers.removeFirst()
+        callers.addLast(current.copy(editor = if (includeEditor) current.editor else null, busy = false, error = null, notice = null))
+    }
+
+    /** UI-only return. Never persists, sends, reconciles or re-fetches a caller. */
     fun back(): Boolean {
-        if (mutableUi.value.editor == null && mutableUi.value.detail == null && mutableUi.value.person == null) return false
-        persistEditor()
-        clearSavedEditor()
-        mutableUi.value = mutableUi.value.copy(editor = null, detail = null, person = null)
+        val current = mutableUi.value
+        if (current.busy || editorState.value.saving) return true
+        if (current.editor == null && current.detail == null && current.person == null) return false
+        closeEditor()
+        val caller = callers.removeLastOrNull()
+        mutableUi.value = caller?.takeIf {
+            it.accountId == community.value.accountId && it.cacheIdentity == community.value.cacheIdentity
+        } ?: current.copy(editor = null, detail = null, person = null)
+        mutableUi.value.editor?.let { previous ->
+            val live = community.value.drafts.firstOrNull { it.id == previous.id && it.accountId == previous.accountId }
+            mutableUi.value = mutableUi.value.copy(editor = live)
+            if (live != null) community.value.cacheIdentity?.let { draftAutosave.open(live, it, live) }
+        }
+        rememberBrowsing()
         return true
     }
 
+    fun closeEditor() {
+        uiGeneration++
+        draftAutosave.close()
+        clearSavedEditor()
+        mutableUi.value = mutableUi.value.copy(editor = null)
+    }
+
+    fun discardEditorDelta() { draftAutosave.discardUnsaved() }
+
     fun editDraft(draft: CommunityDraft) {
         if (draft.accountId != community.value.accountId || !community.value.ready || mutableUi.value.busy) return
-        mutableUi.value = mutableUi.value.copy(editor = draft, detail = null, person = null, section = CommunitySection.MESSAGES, folder = CommunityFolder.DRAFTS)
-        rememberEditor(draft)
+        val cache = community.value.cacheIdentity ?: return
+        pushCaller()
+        uiGeneration++
+        mutableUi.value = mutableUi.value.copy(editor = draft, detail = null, person = null,
+            section = CommunitySection.MESSAGES, folder = CommunityFolder.DRAFTS)
+        val stored = community.value.drafts.firstOrNull { it.id == draft.id }
+        draftAutosave.open(draft, cache, stored)
+        rememberBrowsing()
     }
 
     fun compose(recipientId: Long? = null, title: String = "") {
         val accountId = community.value.accountId ?: return
         editDraft(CommunityDraft(accountId = accountId, recipientId = recipientId, title = CommunityText.truncateTitle(title)))
-        persistEditor()
+        draftAutosave.saveNow(force = true) // Existing initial local draft save; never a remote send.
     }
-
     fun reply() {
         val detail = mutableUi.value.detail ?: return
         val account = community.value.accountId ?: return
@@ -169,48 +221,18 @@ internal class OsmCommunityViewModel(application: Application, private val saved
         if (current.id != draft.id || draft.accountId != community.value.accountId || mutableUi.value.busy ||
             current.status in setOf(CommunityDraftStatus.UNKNOWN, CommunityDraftStatus.SENDING)) return
         val next = draft.copy(status = CommunityDraftStatus.DRAFT, error = null, updatedAt = System.currentTimeMillis())
-        mutableUi.value = mutableUi.value.copy(editor = next)
-        val inlineSnapshot = rememberEditor(next)
-        draftSave?.cancel()
-        val revision = ++draftRevision
-        draftSave = if (inlineSnapshot) viewModelScope.launch {
-            delay(250); enqueueSave(next, revision)
-        } else {
-            // Large text cannot fit safely in Android's Activity state parcel.
-            enqueueSave(next, revision)
-            null
-        }
+        draftAutosave.change(next)
+        if (!rememberEditor(next)) draftAutosave.saveNow() // Existing large-text immediate local persistence.
     }
 
-    fun persistEditor() {
-        val draft = mutableUi.value.editor ?: return
-        if (draft.status !in setOf(CommunityDraftStatus.DRAFT, CommunityDraftStatus.FAILED)) return
-        draftSave?.cancel()
-        val revision = ++draftRevision
-        enqueueSave(draft, revision)
-    }
-
-    private fun enqueueSave(draft: CommunityDraft, revision: Long) {
-        // The repository owns this captured write; finishing the Activity cannot cancel it.
-        val pending = repository.persistDraft(draft)
-        val cache = community.value.cacheIdentity
-        viewModelScope.launch {
-            try { pending.await() }
-            catch (e: CancellationException) { throw e }
-            catch (_: Exception) {
-                if (revision == draftRevision) updateFor(draft.accountId, cache) {
-                    it.copy(error = "Taslak kaydedilemedi. Ekranı kapatmadan yeniden dene.")
-                }
-            }
-        }
-    }
-
+    /** Backgrounding may flush the active owner; Back and disposal must not call this. */
+    fun persistEditor() { draftAutosave.saveNow() }
     fun send() {
         val draft = mutableUi.value.editor ?: return
-        if (!community.value.canSend || !communityDraftCanSend(draft) || mutableUi.value.busy) return
+        if (!community.value.canSend || !communityDraftCanSend(draft) || mutableUi.value.busy || editorState.value.saving) return
         val cache = community.value.cacheIdentity
-        draftSave?.cancel()
-        draftRevision++
+        draftAutosave.close()
+        uiGeneration++
         clearSavedEditor()
         runOperation {
             updateFor(draft.accountId, cache) { it.copy(editor = draft.copy(status = CommunityDraftStatus.SENDING)) }
@@ -221,7 +243,9 @@ internal class OsmCommunityViewModel(application: Application, private val saved
             } catch (e: Exception) {
                 val stored = community.value.drafts.firstOrNull { it.id == draft.id }
                 updateFor(draft.accountId, cache) { it.copy(editor = stored ?: draft) }
-                if (community.value.accountId == draft.accountId && community.value.cacheIdentity == cache) rememberEditor(stored ?: draft)
+                if (community.value.accountId == draft.accountId && community.value.cacheIdentity == cache) {
+                    draftAutosave.open(stored ?: draft, requireNotNull(cache), stored)
+                }
                 throw e
             }
         }
@@ -231,17 +255,19 @@ internal class OsmCommunityViewModel(application: Application, private val saved
         val draft = mutableUi.value.editor ?: return
         if (draft.status != CommunityDraftStatus.UNKNOWN || mutableUi.value.busy) return
         val now = System.currentTimeMillis()
+        pushCaller(includeEditor = true)
         mutableUi.value = mutableUi.value.copy(editor = draft.copy(id = UUID.randomUUID().toString(),
             status = CommunityDraftStatus.DRAFT, createdAt = now, updatedAt = now, error = null))
-        mutableUi.value.editor?.let(::rememberEditor)
-        persistEditor()
+        mutableUi.value.editor?.let { copy ->
+            community.value.cacheIdentity?.let { draftAutosave.open(copy, it, null); draftAutosave.saveNow(force = true) }
+        }
     }
 
     fun deleteDraft() {
         val draft = mutableUi.value.editor ?: return
         val cache = community.value.cacheIdentity
-        draftSave?.cancel()
-        draftRevision++
+        draftAutosave.close()
+        uiGeneration++
         clearSavedEditor()
         runOperation { repository.deleteDraft(draft.id); updateFor(draft.accountId, cache) { it.copy(editor = null) } }
     }
@@ -293,8 +319,41 @@ internal class OsmCommunityViewModel(application: Application, private val saved
         }
     }
 
-    private fun updateFor(account: Long?, cache: String?, update: (CommunityUiState) -> CommunityUiState) =
+    private fun updateFor(account: Long?, cache: String?, update: (CommunityUiState) -> CommunityUiState) {
         publishCommunityUi(mutableUi, account, community.value.accountId, cache, community.value.cacheIdentity, update)
+        rememberBrowsing()
+    }
+
+    /** Safe structural browsing state only: no message bodies, draft objects or pending exit actions. */
+    private fun rememberBrowsing() {
+        val state = community.value
+        val current = mutableUi.value
+        if (!state.ready || current.accountId != state.accountId || current.cacheIdentity != state.cacheIdentity) return
+        savedState[BROWSING_STATE] = Bundle().apply {
+            state.accountId?.let { putLong("account", it) }
+            putString("cache", state.cacheIdentity)
+            putString("section", current.section.name); putString("folder", current.folder.name)
+            val parent = callers.lastOrNull()
+            putString("parentSection", (parent?.section ?: current.section).name)
+            putString("parentFolder", (parent?.folder ?: current.folder).name)
+        }
+    }
+
+    private fun restoreBrowsing(state: CommunityState) {
+        val saved = pendingBrowsing ?: return
+        pendingBrowsing = null
+        if (saved.getLong("account") != state.accountId || saved.getString("cache") != state.cacheIdentity) {
+            savedState.remove<Bundle>(BROWSING_STATE)
+            return
+        }
+        val section = saved.getString("parentSection")?.let { runCatching { CommunitySection.valueOf(it) }.getOrNull() }
+            ?: CommunitySection.MESSAGES
+        val folder = saved.getString("parentFolder")?.let { runCatching { CommunityFolder.valueOf(it) }.getOrNull() }
+            ?: CommunityFolder.INBOX
+        // Details require a valid cached entity; prune to the recorded mailbox rather than replay a fetch/mark-read.
+        mutableUi.value = mutableUi.value.copy(section = section, folder = folder)
+        if (pendingRestore != null) callers.addLast(mutableUi.value)
+    }
 
     private fun rememberEditor(draft: CommunityDraft): Boolean {
         val state = community.value
@@ -345,23 +404,32 @@ internal class OsmCommunityViewModel(application: Application, private val saved
             return
         }
         // Validate against durable UNKNOWN/retired-id guards before exposing an editable restored draft.
+        val restoreOwner = uiGeneration
+        mutableUi.value = mutableUi.value.copy(busy = true)
         val pending = repository.persistDraft(restored)
         viewModelScope.launch {
             try {
                 pending.await()
+                if (restoreOwner != uiGeneration || mutableUi.value.editor != null) return@launch
                 updateFor(state.accountId, state.cacheIdentity) { it.copy(editor = restored, folder = CommunityFolder.DRAFTS) }
+                if (mutableUi.value.editor?.id == restored.id && community.value.cacheIdentity == state.cacheIdentity)
+                    draftAutosave.open(restored, requireNotNull(state.cacheIdentity), restored)
             } catch (e: CancellationException) { throw e }
             catch (_: Exception) {
+                if (restoreOwner != uiGeneration) return@launch
                 updateFor(state.accountId, state.cacheIdentity) {
                     it.copy(editor = null, error = "Önceki taslak geri açılamadı. Güncel durumu Taslaklar veya Gönderilen bölümünde kontrol et.")
                 }
                 if (community.value.cacheIdentity == state.cacheIdentity) clearSavedEditor()
+            } finally {
+                if (restoreOwner == uiGeneration) updateFor(state.accountId, state.cacheIdentity) { it.copy(busy = false) }
             }
         }
     }
 
     private companion object {
         const val EDITOR_STATE = "osm-community-editor"
+        const val BROWSING_STATE = "osm-community-browsing"
         const val MAX_EDITOR_SNAPSHOT_BYTES = 32 * 1024L
     }
 }

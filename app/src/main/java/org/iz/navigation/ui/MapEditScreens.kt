@@ -107,6 +107,8 @@ fun MapEditPage(onClose: () -> Unit) {
     val editing = drafts.firstOrNull { it.id == editingId && it.status in setOf(MapEditStatus.DRAFT, MapEditStatus.FAILED) }
     if (editing != null) MapEditEditor(editing.editableCopy(), busy, session.canWriteMap, session.busy,
         authError = editorMessage ?: session.error,
+        liveBaseline = { drafts.firstOrNull { it.id == editing.id }?.editableCopy() ?: editing.editableCopy() },
+        liveBusy = { busy || auth.state.value.busy },
         onClose = { editingId = null },
         onSave = { draft -> action { repository.saveMapEdit(draft); editingId = null; "Taslak saklandı." } },
         onPreview = { draft -> osmReady?.await(); editorMessage = null; repository.saveMapEdit(draft); controller.nearby(draft) },
@@ -152,6 +154,16 @@ internal fun MapEditEditor(initial: MapEditDraft, busy: Boolean, canWriteMap: Bo
     authError: String?, onClose: () -> Unit, onSave: (MapEditDraft) -> Unit,
     onPreview: suspend (MapEditDraft) -> List<OsmDuplicateCandidate>, onLogin: (MapEditDraft) -> Unit,
     onPublish: (MapEditDraft, Set<OsmRef>) -> Unit) {
+    MapEditEditor(initial, busy, canWriteMap, authBusy, authError, onClose, onSave, onPreview, onLogin,
+        onPublish, liveBaseline = { initial }, liveBusy = { busy || authBusy })
+}
+
+@Composable
+internal fun MapEditEditor(initial: MapEditDraft, busy: Boolean, canWriteMap: Boolean, authBusy: Boolean,
+    authError: String?, onClose: () -> Unit, onSave: (MapEditDraft) -> Unit,
+    onPreview: suspend (MapEditDraft) -> List<OsmDuplicateCandidate>, onLogin: (MapEditDraft) -> Unit,
+    onPublish: (MapEditDraft, Set<OsmRef>) -> Unit,
+    liveBaseline: () -> MapEditDraft, liveBusy: () -> Boolean) {
     var name by rememberSaveable(initial.id) { mutableStateOf(initial.name) }
     var street by rememberSaveable(initial.id) { mutableStateOf(initial.street) }
     var number by rememberSaveable(initial.id) { mutableStateOf(initial.houseNumber) }
@@ -175,7 +187,21 @@ internal fun MapEditEditor(initial: MapEditDraft, busy: Boolean, canWriteMap: Bo
         surveyConfirmed = survey, observedAt = observedAt ?: initial.observedAt)
     val valid = observedAt != null && runCatching { validateMapEditForPublish(draft) }.isSuccess
     val locked = busy || querying || authBusy
-    Dialog(onDismissRequest = { if (!locked) onClose() }, properties = DialogProperties(usePlatformDefaultWidth = false,
+    val auth = remember(context) { OsmAuthManager.get(context) }
+    val exit = OsmDraftExitOwner("osm-map-edit/" + initial.id,
+        accountKey = { auth.communitySessionSource.sessions.value?.let { it.userId.toString() + ":" + it.generation } },
+        working = { listOf(name.trim(), street.trim(), number.trim(), preset, survey, observationDate) },
+        baseline = { liveBaseline().let { saved ->
+            listOf(saved.name, saved.street, saved.houseNumber, saved.preset, saved.surveyConfirmed,
+                Instant.ofEpochMilli(saved.observedAt).atZone(ZoneId.systemDefault()).toLocalDate().toString())
+        } },
+        busy = { liveBusy() || querying },
+        discard = { liveBaseline().let { saved ->
+            name = saved.name; street = saved.street; number = saved.houseNumber; preset = saved.preset
+            survey = saved.surveyConfirmed
+            observationDate = Instant.ofEpochMilli(saved.observedAt).atZone(ZoneId.systemDefault()).toLocalDate().toString()
+        } })
+    Dialog(onDismissRequest = { if (!locked) { if (preview) { preview = false; reviewed = false } else exit(onClose) } }, properties = DialogProperties(usePlatformDefaultWidth = false,
         dismissOnBackPress = !locked, dismissOnClickOutside = !locked)) {
         Surface(Modifier.padding(16.dp).widthIn(max = 560.dp).fillMaxWidth(), shape = MaterialTheme.shapes.extraLarge, tonalElevation = 6.dp) {
             Column(Modifier.verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -231,7 +257,7 @@ internal fun MapEditEditor(initial: MapEditDraft, busy: Boolean, canWriteMap: Bo
                 }
                 OutlinedButton(enabled = !locked && observedAt != null && runCatching { validateMapEdit(draft) }.isSuccess, onClick = { onSave(draft) }, modifier = Modifier.fillMaxWidth()) { Text("Taslağı sakla") }
                 if (locked) LinearProgressIndicator(Modifier.fillMaxWidth())
-                TextButton(onClick = onClose, enabled = !locked) { Text("Kapat") }
+                TextButton(onClick = { exit(onClose) }, enabled = !locked) { Text("Kapat") }
             }
         }
     }

@@ -15,6 +15,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.iz.navigation.data.Transport
+import org.iz.navigation.ui.history.rememberUiEditExit
 import org.iz.navigation.group.GroupCoordinator
 import org.iz.navigation.weather.RouteStop
 import com.google.zxing.BarcodeFormat
@@ -31,15 +32,19 @@ fun GroupScreen(group: GroupCoordinator, onClose: () -> Unit, onOpenRoute: (List
     DisposableEffect(group) { group.setScreenVisible(true); onDispose { group.setScreenVisible(false) } }
     val context=LocalContext.current
     val scope=rememberCoroutineScope()
-    var name by rememberSaveable { mutableStateOf("") }
-    var code by rememberSaveable(state.inviteInput) { mutableStateOf(state.inviteInput) }
+    var name by remember { mutableStateOf("") }
+    var code by remember(state.inviteInput) { mutableStateOf(state.inviteInput) }
     var consentDialog by remember { mutableStateOf(false) }
     var endDialog by remember { mutableStateOf(false) }
     var transport by rememberSaveable { mutableStateOf(Transport.MOTORCYCLE) }
     var modeMenu by remember { mutableStateOf(false) }
     var routeError by remember { mutableStateOf(false) }
+    val working = { if (group.state.value.groupId == null) listOf(name, code) else listOf("", group.state.value.inviteInput) }
+    val back = rememberUiEditExit("group-input", working(), listOf("", state.inviteInput), state.busy,
+        currentWorking = working, currentBusy = { group.state.value.busy },
+        discardUnsaved = { name = ""; code = group.state.value.inviteInput }, exit = onClose)
     val modes=listOf(Transport.CAR to "Araba",Transport.MOTORCYCLE to "Motosiklet",Transport.BICYCLE to "Bisiklet",Transport.WALK to "Yürüyüş",Transport.RUN to "Koşu",Transport.PASSENGER to "Yolcu")
-    Scaffold(topBar={ TopAppBar(title={ Text("Grup yolculuğu") },navigationIcon={ TextButton(onClick=onClose) { Text("Kapat") } },actions={ TextButton(onClick=group::refresh,enabled=state.configured && !state.busy) { Text("Yenile") } }) }) { padding ->
+    Scaffold(topBar={ TopAppBar(title={ Text("Grup yolculuğu") },navigationIcon={ TextButton(onClick=back) { Text("Kapat") } },actions={ TextButton(onClick=group::refresh,enabled=state.configured && !state.busy) { Text("Yenile") } }) }) { padding ->
         Column(Modifier.padding(padding).padding(horizontal=20.dp).fillMaxSize().verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {
             Text("Ortak hedef, herkesin kendi rotası",style=MaterialTheme.typography.titleLarge)
             Text("En fazla 10 kişi · En fazla 24 saat. Gruba katılmak konum paylaşımını açmaz.")

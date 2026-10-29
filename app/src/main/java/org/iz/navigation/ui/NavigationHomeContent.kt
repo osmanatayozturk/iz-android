@@ -40,7 +40,7 @@ internal fun NavigationHomeContent(ui: PhoneDirectionsState, nav: NavigationStat
     onManageSession: () -> Unit, onLocate: () -> Unit, onPin: (GeoCoordinate) -> Unit,
     planner: @Composable () -> Unit) {
     NavigationHomeContent(ui, nav, points, members, showPlanner, weatherLabel, onSearch, onRecord, onGroup,
-        onMenu, onWeather, onMute, onManageSession, onLocate, onPin, emptyList(), {}, planner)
+        onMenu, onWeather, onMute, onManageSession, onLocate, onPin, emptyList(), {}, planner = planner)
 }
 /** Only the visible cards accept gestures. The map has no scroll or sheet parent. */
 @Composable
@@ -62,6 +62,7 @@ internal fun NavigationHomeContent(
     onPin: (GeoCoordinate) -> Unit,
     shortcuts: List<org.iz.navigation.data.DestinationShortcut>,
     onShortcut: (org.iz.navigation.data.DestinationShortcutKind) -> Unit,
+    voiceFault: String? = null,
     planner: @Composable () -> Unit,
 ) {
     val presentation = navigationMapPresentation(ui, nav, points, showPlanner)
@@ -82,7 +83,7 @@ internal fun NavigationHomeContent(
         val speedText = roadSpeedPresentation(nav.roadSpeed)
         val layoutKey = listOf(maxWidth, maxHeight, density.density, density.fontScale, showPlanner,
             showDestinationHeader, live, nav.guidance, nav.recording, nav.simulation, nav.gpsStale,
-            nav.locationActive, nav.sessionTransport, nav.message, ui.message, weatherLabel, current == null, ui.locating,
+            nav.locationActive, nav.sessionTransport, nav.message, ui.message, weatherLabel, current == null, ui.locating, voiceFault,
             if (nav.guidance) navigationInstruction(nav) else null,
             if (nav.guidance) nav.progress?.nextManeuverDistanceMeters else null,
             nav.roadSpeed.visible, speedText.ownText, speedText.limitText, speedText.sourceText,
@@ -172,6 +173,8 @@ internal fun NavigationHomeContent(
                         Text(navigationInstruction(nav), fontSize = 24.sp, lineHeight = 29.sp,
                             maxLines = 3, overflow = TextOverflow.Ellipsis)
                     } else Text("${nav.sessionTransport?.label().orEmpty()} · Serbest yolculuk", style = MaterialTheme.typography.titleLarge)
+                    if (nav.guidance) voiceFault?.let { Text(it, modifier = Modifier.testTag("navigation-voice-fault"),
+                        color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                     if (nav.gpsStale) Text("GPS konumu bekleniyor", color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall)
                     if (!nav.locationActive && !nav.simulation) Text("Konum bağlantısı kuruluyor", style = MaterialTheme.typography.bodySmall)

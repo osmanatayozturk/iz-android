@@ -36,6 +36,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import org.iz.navigation.integration.osm.OsmAuthManager
 import org.iz.navigation.osmcommunity.*
+import org.iz.navigation.ui.history.LocalUiEntryKey
+import org.iz.navigation.ui.history.LocalUiExitGuard
+import org.iz.navigation.ui.history.UiEditOwner
+import org.iz.navigation.ui.history.UiEditState
 
 @Composable
 internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = null,
@@ -47,6 +51,9 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
     val authState by auth.state.collectAsStateWithLifecycle()
     val community by vm.community.collectAsStateWithLifecycle()
     val rawUi by vm.ui.collectAsStateWithLifecycle()
+    val editorState by vm.editorState.collectAsStateWithLifecycle()
+    val exitGuard = LocalUiExitGuard.current
+    val entryKey = LocalUiEntryKey.current
     // Room/auth may emit before the VM observer: never render another account's detail for even one frame.
     val ui = if (rawUi.accountId == community.accountId && rawUi.cacheIdentity == community.cacheIdentity) rawUi
         else CommunityUiState(accountId = community.accountId, cacheIdentity = community.cacheIdentity)
@@ -58,7 +65,20 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
         systemAllowed = notificationStatus.permissionGranted()
         vm.repository.refreshNotificationSchedule()
     }
-    fun close() { vm.persistEditor(); onClose() }
+    fun accountKey(): String? = vm.community.value.let { it.accountId?.toString() + ":" + it.cacheIdentity }
+    fun exit(action: () -> Unit) {
+        if (vm.ui.value.busy || vm.editorState.value.saving || auth.state.value.busy ||
+            vm.ui.value.accountId != vm.community.value.accountId || vm.ui.value.cacheIdentity != vm.community.value.cacheIdentity) return
+        if (exitGuard == null) action() else exitGuard.requestExit(action)
+    }
+    fun close() { vm.closeEditor(); onClose() }
+    fun back() { exit { if (!vm.back()) close() } }
+    if (ui.editor == null) UiEditOwner(
+        UiEditState(entryKey + "/community", accountKey(), 0, 0, false, ui.busy || authState.busy || editorState.saving),
+        currentState = { UiEditState(entryKey + "/community", accountKey(), 0, 0, false,
+            vm.ui.value.busy || auth.state.value.busy || vm.editorState.value.saving ||
+                vm.ui.value.accountId != vm.community.value.accountId || vm.ui.value.cacheIdentity != vm.community.value.cacheIdentity) },
+        discardUnsaved = {})
     fun login() {
         val activity = context.findActivity()
         if (activity == null) vm.reportError("OSM giriş ekranı açılamadı.")
@@ -74,7 +94,6 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
         vm.repository.refreshNotificationSchedule()
     }
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { vm.persistEditor() }
-    DisposableEffect(vm) { onDispose { vm.persistEditor() } }
     LaunchedEffect(community.accountId, community.canConsume, community.cacheIdentity) {
         if (community.accountId != null && community.ready && initialMessageId == null) vm.refresh()
         if (community.accountId != null && community.canConsume && community.notificationsEnabled &&
@@ -89,14 +108,16 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
             // On cold start the persisted session can precede the private repository state.
             if (community.accountId == null && authState.user?.id == initialAccountId) return@LaunchedEffect
             if (community.accountId == initialAccountId && !community.ready) return@LaunchedEffect
-            notificationHandled = true
-            vm.openNotification(initialMessageId, initialAccountId)
+            exit {
+                notificationHandled = true
+                vm.openNotification(initialMessageId, initialAccountId)
+            }
         }
     }
-    BackHandler { if (!vm.back()) close() }
+    BackHandler(onBack = ::back)
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { if (!vm.back()) close() }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "OSM topluluğundan geri dön") }
+            IconButton(onClick = ::back) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "OSM topluluğundan geri dön") }
             Column(Modifier.weight(1f)) {
                 Text("OSM Topluluğu", style = MaterialTheme.typography.titleLarge)
                 Text(authState.user?.displayName ?: "OpenStreetMap insanlarıyla bağlantı kur", style = MaterialTheme.typography.bodySmall, color = Muted)
@@ -105,7 +126,7 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
         }
         TabRow(selectedTabIndex = ui.section.ordinal) {
             listOf("Mesajlar", "Kişiler", "Hesabım").forEachIndexed { index, label ->
-                Tab(ui.section.ordinal == index, onClick = { vm.section(CommunitySection.entries[index]) }, text = { Text(label) })
+                Tab(ui.section.ordinal == index, onClick = { exit { vm.section(CommunitySection.entries[index]) } }, text = { Text(label) })
             }
         }
         if (ui.busy || authState.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -121,7 +142,10 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
             community.accountId != null && !community.ready -> Text("Kayıtlı topluluk bilgileri yükleniyor…", Modifier.padding(20.dp), color = Muted)
             ui.editor != null && community.accountId != null -> CommunityComposer(ui.editor, community.canSend, ui.busy,
                 vm::changeDraft, { vm.back() }, vm::send, vm::deleteDraft,
-                { vm.folder(CommunityFolder.OUTBOX); vm.refresh() }, vm::copyUncertainDraft)
+                { exit { vm.folder(CommunityFolder.OUTBOX); vm.refresh() } }, vm::copyUncertainDraft,
+                liveEditor = { vm.editorState.value }, accountKey = ::accountKey, onDiscard = vm::discardEditorDelta,
+                liveBusy = { vm.ui.value.busy || auth.state.value.busy || vm.ui.value.editor?.id != ui.editor?.id ||
+                    vm.ui.value.accountId != vm.community.value.accountId || vm.ui.value.cacheIdentity != vm.community.value.cacheIdentity })
             ui.detail != null && community.accountId != null -> CommunityMessageView(ui.detail, community.accountId!!, ui.busy,
                 { vm.back() }, vm::reply, vm::markRead, vm::deleteMessage, vm::openProfile, ::openLink)
             ui.person != null -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) {
@@ -129,7 +153,7 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
                     { vm.compose(ui.person.id) }, ::openLink, { vm.back() })
             }
             ui.section == CommunitySection.ACCOUNT -> CommunityAccount(community, systemAllowed, ui.busy || authState.busy,
-                authState.clientIdConfigured, authState.user?.displayName, ::login, { vm.persistEditor(); auth.disconnect() },
+                authState.clientIdConfigured, authState.user?.displayName, ::login, { exit { vm.closeEditor(); auth.disconnect() } },
                 onOpenSettings, vm::notifications, {
                     val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
                     context.startActivity(intent)
@@ -140,7 +164,9 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
                     runCatching { CommunityLinks.profile(it) }.onSuccess(::openLink)
                         .onFailure { vm.reportError("Geçerli bir OSM kullanıcı adı yaz.") }
                 }, ::openLink)
-            else -> CommunityMailboxes(community, ui, vm::folder, vm::openMessage, vm::editDraft, { vm.compose() }, vm::loadMore, ::login)
+            else -> CommunityMailboxes(community, ui, { folder -> exit { vm.folder(folder) } },
+                { id -> exit { vm.openMessage(id) } }, { draft -> exit { vm.editDraft(draft) } },
+                { exit { vm.compose() } }, vm::loadMore, ::login)
         }
     }
 }

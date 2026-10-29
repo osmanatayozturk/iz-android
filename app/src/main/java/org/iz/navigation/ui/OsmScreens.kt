@@ -204,13 +204,22 @@ private fun OsmPopup(onDismiss: () -> Unit, busy: Boolean = false, content: @Com
 @Composable
 internal fun ContributionEditor(initial: ContributionDraft, connected: Boolean, busy: Boolean,
     onDismiss: () -> Unit, onSave: (ContributionDraft) -> Unit, onPublish: (ContributionDraft) -> Unit, onLogin: (ContributionDraft) -> Unit,
-    authError: String? = null) {
+    authError: String? = null, liveBaseline: () -> ContributionDraft = { initial },
+    liveBusy: () -> Boolean = { busy }) {
     var text by rememberSaveable(initial.id) { mutableStateOf(initial.text) }
     var kind by rememberSaveable(initial.id) { mutableStateOf(initial.kind) }
-    var preview by rememberSaveable(initial.id) { mutableStateOf(false) }
+    var preview by remember(initial.id) { mutableStateOf(false) }
     val draft = initial.copy(text = text.trim(), kind = kind)
     val valid = draft.text.isNotBlank() && draft.text.length <= 2000
-    OsmPopup(onDismiss = onDismiss, busy = busy) {
+    val context = LocalContext.current
+    val auth = remember(context) { OsmAuthManager.get(context) }
+    val exit = OsmDraftExitOwner("osm-contribution/" + initial.id,
+        accountKey = { auth.communitySessionSource.sessions.value?.let { it.userId.toString() + ":" + it.generation } },
+        working = { listOf(text.trim(), kind) },
+        baseline = { liveBaseline().let { listOf(it.text, it.kind) } },
+        busy = { liveBusy() || auth.state.value.busy },
+        discard = { liveBaseline().let { text = it.text; kind = it.kind } })
+    OsmPopup(onDismiss = { if (preview) preview = false else exit(onDismiss) }, busy = busy) {
             Text(if (preview) "Herkese açık bildirim" else "Haritaya bir gözlem ekle", style = MaterialTheme.typography.headlineSmall)
             authError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             if (preview) {
@@ -233,7 +242,7 @@ internal fun ContributionEditor(initial: ContributionDraft, connected: Boolean, 
                 OutlinedButton(onClick = { onSave(draft) }, enabled = text.length <= 2000 && !busy, modifier = Modifier.fillMaxWidth()) { Text("Taslağı sakla") }
             }
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-            TextButton(onClick = onDismiss, enabled = !busy) { Text("Kapat") }
+            TextButton(onClick = { exit(onDismiss) }, enabled = !busy) { Text("Kapat") }
     }
 }
 
@@ -287,7 +296,10 @@ internal fun OsmSettingsPanel(onContributions: () -> Unit, onMessage: (String) -
         TextButton(onClick = { showClient = true }) { Text("OSM uygulama kimliği") }
         TextButton(onClick = { MediaShare.openUrl(context, "https://www.openstreetmap.org/copyright") }) { Text("© OpenStreetMap katkıcıları · Lisans") }
     }
-    if (showClient) AlertDialog(onDismissRequest = { showClient = false }, title = { Text("OSM uygulama bağlantısı") }, text = {
+    if (showClient) {
+        val closeClient = OsmDraftExitOwner("osm-client-settings", { null }, { listOf(clientId) },
+            { listOf("") }, { auth.state.value.busy }, { clientId = "" })
+        AlertDialog(onDismissRequest = { closeClient { showClient = false } }, title = { Text("OSM uygulama bağlantısı") }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Uygulama için kaydedilen public OAuth istemci kimliğini gir. Bu alan hesap şifren değildir.")
             OutlinedTextField(clientId, { clientId = it }, label = { Text("Client ID") }, singleLine = true)
@@ -297,6 +309,7 @@ internal fun OsmSettingsPanel(onContributions: () -> Unit, onMessage: (String) -
     }, confirmButton = { TextButton(enabled = clientId.isNotBlank(), onClick = {
         runCatching { auth.setClientId(clientId.trim()); showClient = false }.onFailure { onMessage(it.message ?: "Kimlik kaydedilemedi.") }
     }) { Text("Kaydet") } }, dismissButton = { TextButton(onClick = { showClient = false }) { Text("Vazgeç") } })
+    }
     if (showServices) OsmServiceEditor(onDismiss = { showServices = false }, onSaved = { showServices = false; onMessage("Harita servisleri güncellendi.") })
 }
 
@@ -309,7 +322,10 @@ private fun OsmServiceEditor(onDismiss: () -> Unit, onSaved: () -> Unit) {
     var search by remember { mutableStateOf(saved.nominatim) }
     var nearby by remember { mutableStateOf(saved.overpass) }
     var error by remember { mutableStateOf<String?>(null) }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Harita servisleri") }, text = {
+    val exit = OsmDraftExitOwner("osm-service-settings", { null },
+        { listOf(tiles, search, nearby) }, { listOf(saved.tileUrl, saved.nominatim, saved.overpass) },
+        { false }, { tiles = saved.tileUrl; search = saved.nominatim; nearby = saved.overpass })
+    AlertDialog(onDismissRequest = { exit(onDismiss) }, title = { Text("Harita servisleri") }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Kişisel kullanım için çevrimiçi OSM servisleri. Arama yalnızca Ara düğmesiyle çalışır; çevrimdışı harita paketi indirilmez.")
             OutlinedTextField(tiles, { tiles = it }, label = { Text("Harita adresi · {z}/{x}/{y}") })

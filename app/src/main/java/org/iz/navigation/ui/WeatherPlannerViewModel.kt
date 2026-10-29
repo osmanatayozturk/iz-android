@@ -660,6 +660,14 @@ internal class WeatherPlannerViewModel(application: Application) : AndroidViewMo
     )
     val state: StateFlow<WeatherPlannerState> = coordinator.state
     val liveState = manager.state
+    private var uiInitialized = false
+    private val initialUiPlans = mutableSetOf<String>()
+    fun enterUi(transport: Transport?, plan: SavedWeatherPlan?) {
+        if (uiInitialized) return
+        uiInitialized = true
+        if (plan == null) transport?.takeIf { it != Transport.UNKNOWN }?.let(coordinator::setTransport)
+    }
+    fun takeInitialPlan(entry: String) = initialUiPlans.add(entry)
 
     fun setRoutePreferences(value: RoutePreferences) = coordinator.setRoutePreferences(value)
     fun requestAlternatives() = coordinator.requestAlternatives()

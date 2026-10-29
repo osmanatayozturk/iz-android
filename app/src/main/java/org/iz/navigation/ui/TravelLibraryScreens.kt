@@ -5,6 +5,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import org.iz.navigation.ui.history.rememberUiEditExit
+import org.iz.navigation.ui.history.UiEditOwner
+import org.iz.navigation.ui.history.UiEditState
+import org.iz.navigation.ui.history.LocalUiEntryKey
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -27,6 +32,9 @@ fun TravelLibraryScreen(repository: TravelLibraryRepository, onOpenPlan: (SavedR
     val plans by repository.savedPlans.collectAsStateWithLifecycle(emptyList())
     val tracks by repository.importedTracks.collectAsStateWithLifecycle(emptyList())
     val actions = rememberLibraryActions()
+    val actionEntry = LocalUiEntryKey.current
+    UiEditOwner(UiEditState(actionEntry + "/library-work", null, 0, 0, false, actions.busy),
+        currentState = { UiEditState(actionEntry + "/library-work", null, 0, 0, false, actions.busy) }, discardUnsaved = {})
     TravelLibraryContent(plans, tracks, onOpenPlan, onOpenTrack,
         { plan, name -> actions.run { repository.savePlan(plan.copy(name = name, updatedAt = System.currentTimeMillis().coerceAtLeast(plan.createdAt))) } },
         { plan -> actions.run { repository.deletePlan(plan.id) } },
@@ -74,6 +82,9 @@ fun JourneyCollectionsScreen(repository: TravelLibraryRepository, snapshot: Diar
     val collections by repository.collections.collectAsStateWithLifecycle(emptyList())
     val memberships by repository.memberships.collectAsStateWithLifecycle(emptyList())
     val actions = rememberLibraryActions()
+    val actionEntry = LocalUiEntryKey.current
+    UiEditOwner(UiEditState(actionEntry + "/library-work", null, 0, 0, false, actions.busy),
+        currentState = { UiEditState(actionEntry + "/library-work", null, 0, 0, false, actions.busy) }, discardUnsaved = {})
     JourneyCollectionsContent(collections, memberships, snapshot,
         { name -> actions.run { repository.saveCollection(JourneyCollection(name = name)) } },
         { collection, name -> actions.run { repository.saveCollection(collection.copy(name = name, updatedAt = System.currentTimeMillis().coerceAtLeast(collection.createdAt))) } },
@@ -87,14 +98,14 @@ internal fun JourneyCollectionsContent(collections: List<JourneyCollection>, mem
     onDelete: (JourneyCollection) -> Unit, onSetJourneys: (String, List<String>) -> Unit,
     onOpenJourney: (Journey) -> Unit, onDismiss: () -> Unit, error: String? = null, busy: Boolean = false,
     analysis: org.iz.navigation.power.AnalysisState = org.iz.navigation.power.AnalysisState()) {
-    var selectedId by remember { mutableStateOf<String?>(null) }
+    var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     var creating by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<JourneyCollection?>(null) }
     var deleting by remember { mutableStateOf<JourneyCollection?>(null) }
     var selecting by remember { mutableStateOf<JourneyCollection?>(null) }
     val state = remember(snapshot, collections, memberships) { snapshot.copy(collections = collections, memberships = memberships) }
     val selected = collections.firstOrNull { it.id == selectedId }
-    LibraryWindow(selected?.name ?: "Geziler", onDismiss) {
+    LibraryWindow(selected?.name ?: "Geziler", { if (selectedId != null) selectedId = null else onDismiss() }) {
         LibraryStatus(error, busy)
         if (selected == null) {
             Text("Tamamlanan yolculuklarını bir gezide bir araya getir. Aynı yolculuk birden fazla gezide yer alabilir.")
@@ -153,7 +164,9 @@ private fun CollectionJourneyPicker(collection: JourneyCollection, eligible: Lis
     onDismiss: () -> Unit, onSave: (List<String>) -> Unit) {
     var ordered by remember(collection.id) { mutableStateOf(initial.distinct()) }
     val byId = eligible.associateBy { it.id }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    val back = rememberUiEditExit("collection-members-${collection.id}", ordered, initial.distinct(),
+        currentWorking = { ordered }, discardUnsaved = { ordered = initial.distinct() }, exit = onDismiss)
+    Dialog(onDismissRequest = back, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxSize().systemBarsPadding()) {
             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("${collection.name}: yolculuklar", style = MaterialTheme.typography.titleLarge)
@@ -248,7 +261,9 @@ private fun LibraryCard(name: String, kind: String, detail: String, key: String,
 private fun LibraryNameDialog(title: String, initial: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
     var name by remember { mutableStateOf(initial) }
     val valid = runCatching { TravelLibraryRules.validName(name.trim()) }.isSuccess
-    AlertDialog(onDismissRequest = onDismiss, title = { Text(title) }, text = {
+    val back = rememberUiEditExit("library-name", name, initial, currentWorking = { name },
+        discardUnsaved = { name = initial }, exit = onDismiss)
+    AlertDialog(onDismissRequest = back, title = { Text(title) }, text = {
         OutlinedTextField(name, { name = it }, label = { Text("Ad") }, singleLine = true, modifier = Modifier.testTag("library_name"),
             supportingText = { Text("En fazla 300 karakter") }, isError = name.isNotEmpty() && !valid)
     }, confirmButton = { TextButton(onClick = { onSave(name.trim()) }, enabled = valid) { Text("Kaydet") } },

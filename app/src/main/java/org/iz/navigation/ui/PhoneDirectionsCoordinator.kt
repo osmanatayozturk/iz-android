@@ -16,6 +16,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+internal data class PhoneDirectionsInput(val origin: RouteStop?, val originCurrent: Boolean,
+    val destination: RouteStop?, val via: List<RouteStop>, val transport: Transport,
+    val preferences: RoutePreferences, val travelSpeedKmh: Double?, val recordJourney: Boolean)
 internal data class PhoneDirectionsState(
     val transport: Transport = Transport.CAR,
     val origin: RouteStop? = null,
@@ -83,6 +86,19 @@ internal class PhoneDirectionsCoordinator(
         return route.requireUsablePreferences()
     }
 
+    fun adoptUiEntry(entryId: Long) { entry = entryId; enteredPlan = null }
+    fun workingInput(): PhoneDirectionsInput = state.value.let {
+        PhoneDirectionsInput(it.origin, it.originCurrent, it.destination, it.via.toList(), it.transport,
+            it.preferences, it.travelSpeedKmh, it.recordJourney)
+    }
+    fun restoreUiInput(input: PhoneDirectionsInput) {
+        if (starting) return
+        invalidatePreview(); locationJob?.cancel()
+        mutableState.update { it.copy(origin = input.origin, originCurrent = input.originCurrent,
+            destination = input.destination, via = input.via, transport = input.transport,
+            preferences = input.preferences, travelSpeedKmh = input.travelSpeedKmh, recordJourney = input.recordJourney,
+            locating = false, message = null) }
+    }
     fun enter(entryId: Long, initialStops: List<RouteStop>? = null, initialTransport: Transport? = null,
         locateOnOpen: Boolean = true, initialPlan: SavedWeatherPlan? = null) {
         if (entry == entryId && enteredPlan == initialPlan) return

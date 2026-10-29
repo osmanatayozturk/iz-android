@@ -59,6 +59,7 @@ import org.iz.navigation.data.GeoCoordinate
 import org.iz.navigation.data.Place
 import org.iz.navigation.data.SelectedOsmPlace
 import org.iz.navigation.data.Transport
+import org.iz.navigation.ui.history.rememberUiEditExit
 import org.iz.navigation.integration.FullscreenMapDialog
 import org.iz.navigation.integration.WeatherRouteMap
 import org.iz.navigation.weather.RideWeatherSettings
@@ -83,7 +84,7 @@ import kotlinx.coroutines.tasks.await
 private enum class WeatherLocationAction { ORIGIN, START }
 
 @Composable
-fun WeatherPlannerScreen(
+internal fun WeatherPlannerScreen(
     onClose: () -> Unit,
     initialTransport: Transport? = null,
     onDirections: (List<RouteStop>, Transport) -> Unit = { _, _ -> },
@@ -92,10 +93,10 @@ fun WeatherPlannerScreen(
     onSaveRoute: ((List<RouteStop>, Transport, RoutePreferences, Boolean, Double?) -> Unit)? = null,
     onDirectionsWithPreferences: ((List<RouteStop>, Transport, RoutePreferences) -> Unit)? = null,
     onDirectionsWithPlan: ((SavedWeatherPlan) -> Unit)? = null,
+    vm: WeatherPlannerViewModel = viewModel(),
 ) {
-    val vm: WeatherPlannerViewModel = viewModel()
     LaunchedEffect(vm, initialPlan) {
-        if (initialPlan == null) initialTransport?.takeIf { it != Transport.UNKNOWN }?.let(vm::setTransport)
+        vm.enterUi(initialTransport, initialPlan)
     }
     WeatherPlannerScreenContent(onClose, vm, onDirections, onNavigationStarted, onSaveRoute, onDirectionsWithPreferences, initialPlan, onDirectionsWithPlan)
 }
@@ -112,6 +113,8 @@ private fun WeatherPlannerScreenContent(
     onDirectionsWithPlan: ((SavedWeatherPlan) -> Unit)?,
 ) {
     val context = LocalContext.current
+    val uiEntry = org.iz.navigation.ui.history.LocalUiEntryKey.current
+    val restoredEntry = org.iz.navigation.ui.history.LocalUiHistory.current?.isRestoredEntry(uiEntry) == true
     val scope = rememberCoroutineScope()
     val state by vm.state.collectAsStateWithLifecycle()
     androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) { vm.refreshCredentials() }
@@ -247,13 +250,13 @@ private fun WeatherPlannerScreenContent(
 
 
     LaunchedEffect(initialPlan) {
-        if (initialPlan != null) {
+        if (initialPlan != null && vm.takeInitialPlan(uiEntry)) {
             vm.loadSavedPlan(initialPlan.stops, initialPlan.transport, initialPlan.preferences,
                 initialPlan.originUsesCurrentLocation, initialPlan.travelSpeedKmh)
-            if (initialPlan.originUsesCurrentLocation) {
+            if (!restoredEntry && initialPlan.originUsesCurrentLocation) {
                 calculateAfterOrigin = true
                 requestLocation(WeatherLocationAction.ORIGIN)
-            } else vm.calculate()
+            } else if (!restoredEntry) vm.calculate()
         }
     }
 
@@ -521,6 +524,19 @@ internal fun WeatherSettingsDialog(
     var weatherEndpoint by remember { mutableStateOf(initial.weatherEndpoint) }
     var error by remember { mutableStateOf<String?>(null) }
 
+    val working = { listOf(probability, precipitation, wind, gust, cold, hot, voice, alerts, travelSpeed, routeEndpoint, weatherEndpoint) }
+    val initialSpeed = (initial.travelSpeedKmh ?: defaultWeatherSettings(transport).travelSpeedKmh)?.toString().orEmpty()
+    val baseline = listOf(initial.thresholds.precipitationProbabilityPercent.toString(), initial.thresholds.precipitationMm.toString(),
+        initial.thresholds.windKmh.toString(), initial.thresholds.gustKmh.toString(), initial.thresholds.coldC.toString(), initial.thresholds.hotC.toString(),
+        initial.voiceEnabled, initial.alertsEnabled, initialSpeed, initial.routeEndpoint, initial.weatherEndpoint)
+    val back = rememberUiEditExit("weather-settings", working(), baseline, currentWorking = working,
+        discardUnsaved = {
+            probability = initial.thresholds.precipitationProbabilityPercent.toString(); precipitation = initial.thresholds.precipitationMm.toString()
+            wind = initial.thresholds.windKmh.toString(); gust = initial.thresholds.gustKmh.toString()
+            cold = initial.thresholds.coldC.toString(); hot = initial.thresholds.hotC.toString()
+            voice = initial.voiceEnabled; alerts = initial.alertsEnabled; travelSpeed = initialSpeed
+            routeEndpoint = initial.routeEndpoint; weatherEndpoint = initial.weatherEndpoint
+        }, exit = onDismiss)
     fun save() {
         try {
             fun number(value: String): Double =
@@ -550,7 +566,7 @@ internal fun WeatherSettingsDialog(
     }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = back,
         title = { Text("${transport.label()} · Hava ayarları") },
         text = {
             Column(

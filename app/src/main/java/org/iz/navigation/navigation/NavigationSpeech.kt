@@ -10,9 +10,10 @@ import android.os.SystemClock
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.widget.Toast
+import kotlinx.coroutines.flow.StateFlow
 import java.util.Locale
 
-/** One process-wide Turkish voice and audio-focus owner. Turns preempt weather. */
+/** One process-wide Turkish voice and audio-focus owner shared by turns, weather and explicit tests. */
 class NavigationSpeech private constructor(context: Context) {
     private val app = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
@@ -20,107 +21,90 @@ class NavigationSpeech private constructor(context: Context) {
     private val attributes = AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
-    private var tts: TextToSpeech? = null
-    private var ready = false
-    private var sequence = 0L
-    private var pending: Speech? = null
-    private var active: Speech? = null
-    private var activeId: String? = null
-    private var focus: AudioFocusRequest? = null
-    private data class Speech(val text: String, val turn: Boolean, val test: Boolean, val expiresAt: Long)
-
-    fun speakTurn(text: String) = post { submit(text, turn = true) }
-    fun speakWeather(text: String) = post { submit(text, turn = false) }
+    private val controller = NavigationSpeechController(::AndroidSpeechEngine, SpeechAudioFocus { onLost ->
+        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+            .setAudioAttributes(attributes).setAcceptsDelayedFocusGain(false)
+            .setOnAudioFocusChangeListener({ change -> if (change < 0) onLost() }, main).build()
+        if (audio.requestAudioFocus(request) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) null
+        else object : SpeechFocusLease {
+            private var released = false
+            override fun release() {
+                if (!released) { released = true; audio.abandonAudioFocusRequest(request) }
+            }
+        }
+    }, object : SpeechScheduler {
+        override fun nowMillis() = SystemClock.elapsedRealtime()
+        override fun after(delayMillis: Long, task: () -> Unit): () -> Unit {
+            val runnable = Runnable { task() }
+            main.postDelayed(runnable, delayMillis)
+            return { main.removeCallbacks(runnable) }
+        }
+    }, onTestFailure = {
+        Toast.makeText(app, "Ses denemesi tamamlanamadı. Ses durumunu ve telefonun seslendirme ayarlarını kontrol et.", Toast.LENGTH_LONG).show()
+    })
+    val status: StateFlow<SpeechStatus> = controller.status
+    fun prepareGuidance() = post { controller.prepareGuidance() }
+    fun retry() = post { controller.retry() }
+    /** UI callers are on main; background weather callers use the posted compatible wrapper below. */
+    fun testVoice(): SpeechTestResult {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        return controller.testVoice()
+    }
+    fun speakTurn(text: String) = post { controller.speakTurn(text) }
+    fun speakWeather(text: String) = post { controller.speakWeather(text) }
     fun testWeather() = post {
-        submit("İz yolculuk havası. Sesli uyarıları bu ses çıkışından duyacaksın.", false, true)
+        when (controller.testVoice(SpeechChannel.WEATHER)) {
+            SpeechTestResult.BUSY -> Toast.makeText(app, "Dönüş anonsu sürüyor. Ses denemesini sonra yeniden başlat.", Toast.LENGTH_LONG).show()
+            SpeechTestResult.UNAVAILABLE -> Toast.makeText(app, "Seslendirme kullanılamıyor. Seslendirme ayarlarını kontrol et.", Toast.LENGTH_LONG).show()
+            SpeechTestResult.ACCEPTED -> Unit
+        }
     }
-    fun cancelTurns() = post { cancel(true) }
-    fun cancelWeather() = post { cancel(false) }
-    internal fun suspendAutomaticWeather() = post {
-        if (pending?.test != true && active?.test != true) cancel(false)
-    }
-
+    fun cancelTurns() = post { controller.cancelTurns() }
+    fun cancelWeather() = post { controller.cancelWeather() }
+    internal fun suspendAutomaticWeather() = post { controller.suspendAutomaticWeather() }
     private fun post(action: () -> Unit) {
         if (Looper.myLooper() == Looper.getMainLooper()) action() else main.post { action() }
     }
 
-    private fun submit(text: String, turn: Boolean, test: Boolean = false) {
-        if (text.isBlank()) return
-        if (!turn && (active?.turn == true || pending?.turn == true)) return
-        // Drop preempted weather, including any delayed engine-initialization request.
-        stopActive()
-        pending = Speech(text.take(500), turn, test, SystemClock.elapsedRealtime() + 15_000L)
-        if (ready) drain() else initialize()
-    }
-
-    private fun initialize() {
-        if (tts != null) return
-        tts = TextToSpeech(app) { status ->
-            main.post {
-                val engine = tts ?: return@post
-                if (status != TextToSpeech.SUCCESS ||
-                    engine.setLanguage(Locale.forLanguageTag("tr-TR")) < TextToSpeech.LANG_AVAILABLE) {
-                    if (pending?.test == true) Toast.makeText(app,
-                        "Türkçe seslendirme kullanılamıyor. Telefonun metin okuma ayarlarını kontrol et.",
-                        Toast.LENGTH_LONG).show()
-                    pending = null
-                    engine.shutdown()
-                    tts = null
-                    return@post
-                }
-                engine.setAudioAttributes(attributes)
-                engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                    override fun onStart(id: String?) = Unit
-                    override fun onDone(id: String?) = finished(id)
-                    @Deprecated("Android legacy callback")
-                    override fun onError(id: String?) = finished(id)
-                    private fun finished(id: String?) {
-                        main.post { if (id == activeId) { activeId = null; active = null; releaseFocus() } }
+    private inner class AndroidSpeechEngine : SpeechEngine {
+        private var voice: TextToSpeech? = null
+        private var closed = false
+        override fun initialize(onReady: (EngineReadiness) -> Unit, onFinished: (String, Boolean) -> Unit) {
+            // Always post even if a vendor calls onInit inline, so assignment completes first.
+            voice = TextToSpeech(app) { result -> main.post {
+                if (closed) return@post
+                val engine = voice ?: return@post
+                val readiness = runCatching {
+                    if (result != TextToSpeech.SUCCESS) EngineReadiness.ENGINE_ERROR
+                    else when (val language = engine.setLanguage(Locale.forLanguageTag("tr-TR"))) {
+                        TextToSpeech.LANG_MISSING_DATA -> EngineReadiness.LANGUAGE_MISSING
+                        TextToSpeech.LANG_NOT_SUPPORTED -> EngineReadiness.LANGUAGE_UNSUPPORTED
+                        else -> if (language >= TextToSpeech.LANG_AVAILABLE) EngineReadiness.READY else EngineReadiness.ENGINE_ERROR
                     }
-                })
-                ready = true
-                drain()
-            }
+                }.getOrDefault(EngineReadiness.ENGINE_ERROR)
+                if (readiness != EngineReadiness.READY) { onReady(readiness); return@post }
+                val configured = runCatching {
+                    engine.setAudioAttributes(attributes) == TextToSpeech.SUCCESS &&
+                        engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                            override fun onStart(id: String?) = Unit
+                            override fun onDone(id: String?) = finish(id, false)
+                            override fun onStop(id: String?, interrupted: Boolean) = finish(id, true)
+                            @Deprecated("Android legacy callback")
+                            override fun onError(id: String?) = finish(id, true)
+                            override fun onError(id: String?, errorCode: Int) = finish(id, true)
+                            private fun finish(id: String?, failed: Boolean) {
+                                if (id != null) main.post { if (!closed) onFinished(id, failed) }
+                            }
+                        }) == TextToSpeech.SUCCESS
+                }.getOrDefault(false)
+                onReady(if (configured) EngineReadiness.READY else EngineReadiness.ENGINE_ERROR)
+            } }
         }
+        override fun speak(text: String, id: String) =
+            !closed && voice?.speak(text, TextToSpeech.QUEUE_FLUSH, null, id) == TextToSpeech.SUCCESS
+        override fun stop() { voice?.stop() }
+        override fun shutdown() { closed = true; val previous = voice; voice = null; previous?.shutdown() }
     }
-
-    private fun drain() {
-        val speech = pending ?: return
-        pending = null
-        if (speech.expiresAt < SystemClock.elapsedRealtime()) return
-        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
-            .setAudioAttributes(attributes).setAcceptsDelayedFocusGain(false)
-            .setOnAudioFocusChangeListener({ change ->
-                if (change < 0) post { pending = null; stopActive() }
-            }, main).build()
-        if (!runCatching { audio.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED }.getOrDefault(false)) {
-            if (speech.test) Toast.makeText(app, "Ses çıkışı şu an kullanılamıyor.", Toast.LENGTH_LONG).show()
-            return
-        }
-        focus = request
-        active = speech
-        val id = (++sequence).toString()
-        activeId = id
-        if (tts?.speak(speech.text, TextToSpeech.QUEUE_FLUSH, null, id) != TextToSpeech.SUCCESS) stopActive()
-    }
-
-    private fun cancel(turn: Boolean) {
-        if (pending?.turn == turn) pending = null
-        if (active?.turn == turn) stopActive()
-    }
-
-    private fun stopActive() {
-        active = null
-        activeId = null
-        tts?.stop()
-        releaseFocus()
-    }
-
-    private fun releaseFocus() {
-        focus?.let { runCatching { audio.abandonAudioFocusRequest(it) } }
-        focus = null
-    }
-
     companion object {
         @Volatile private var instance: NavigationSpeech? = null
         fun get(context: Context): NavigationSpeech = instance ?: synchronized(this) {

@@ -9,7 +9,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.remember
+import org.iz.navigation.ui.history.rememberUiEditExit
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -18,8 +19,10 @@ import org.iz.navigation.data.SavedRoutePlan
 @Composable
 internal fun SaveRoutePlanDialog(plan: SavedRoutePlan, busy: Boolean, onDismiss: () -> Unit,
     onSave: (SavedRoutePlan) -> Unit) {
-    var name by rememberSaveable(plan.id) { mutableStateOf(plan.name) }
-    AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text("Rotayı kaydet") }, text = {
+    var name by remember(plan.id) { mutableStateOf(plan.name) }
+    val back = rememberUiEditExit("save-route-${plan.id}", name, plan.name, busy,
+        currentWorking = { name }, currentBusy = { busy }, discardUnsaved = { name = plan.name }, exit = onDismiss)
+    AlertDialog(onDismissRequest = back, title = { Text("Rotayı kaydet") }, text = {
         Column {
             OutlinedTextField(value = name, onValueChange = { if (it.length <= 300) name = it },
                 label = { Text("Rota adı") }, singleLine = true, enabled = !busy,

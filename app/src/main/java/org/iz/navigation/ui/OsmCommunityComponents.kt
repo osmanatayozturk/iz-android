@@ -37,16 +37,45 @@ internal fun CommunityComposer(
     draft: CommunityDraft, canSend: Boolean, busy: Boolean, onChange: (CommunityDraft) -> Unit,
     onClose: () -> Unit, onSend: () -> Unit, onDelete: () -> Unit, onOutbox: () -> Unit, onCopy: () -> Unit,
 ) {
+    CommunityComposer(draft, canSend, busy, onChange, onClose, onSend, onDelete, onOutbox, onCopy,
+        liveEditor = { null }, accountKey = { draft.accountId.toString() }, onDiscard = {}, liveBusy = { busy })
+}
+
+@Composable
+internal fun CommunityComposer(
+    draft: CommunityDraft, canSend: Boolean, busy: Boolean, onChange: (CommunityDraft) -> Unit,
+    onClose: () -> Unit, onSend: () -> Unit, onDelete: () -> Unit, onOutbox: () -> Unit, onCopy: () -> Unit,
+    liveEditor: () -> OsmCommunityEditorState?, accountKey: () -> String?,
+    onDiscard: () -> Unit, liveBusy: () -> Boolean,
+) {
     val uncertain = draft.status == CommunityDraftStatus.UNKNOWN
     val editable = !busy && draft.status !in setOf(CommunityDraftStatus.UNKNOWN, CommunityDraftStatus.SENDING)
+    val saving = liveEditor()?.saving == true
     var useId by rememberSaveable(draft.id) { mutableStateOf(draft.recipientId != null) }
     var recipientNumber by rememberSaveable(draft.id) { mutableStateOf(draft.recipientId?.toString().orEmpty()) }
+
     var copyWarning by remember { mutableStateOf(false) }
     var deleteWarning by remember { mutableStateOf(false) }
+    val exit = OsmDraftExitOwner("community-editor/" + draft.id, accountKey,
+        working = {
+            val current = liveEditor()?.draft ?: draft
+            listOf(useId, if (useId) recipientNumber else current.recipientName, current.title, current.body)
+        },
+        baseline = {
+            val saved = liveEditor()?.baseline ?: draft
+            listOf(saved.recipientId != null, saved.recipientId?.toString() ?: saved.recipientName, saved.title, saved.body)
+        },
+        busy = { liveBusy() || liveEditor()?.saving == true },
+        discard = {
+            val saved = liveEditor()?.baseline ?: draft
+            useId = saved.recipientId != null
+            recipientNumber = saved.recipientId?.toString().orEmpty()
+            onDiscard()
+        })
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).imePadding().padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Taslağı sakla ve geri dön") }
+            IconButton(onClick = { exit(onClose) }, enabled = !busy) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Mesaj taslağından geri dön") }
             Text("Mesaj taslağı", style = MaterialTheme.typography.titleLarge)
         }
         when (draft.status) {
@@ -77,8 +106,9 @@ internal fun CommunityComposer(
             OutlinedButton(onClick = { copyWarning = true }, Modifier.fillMaxWidth(), enabled = !busy) { Text("Yeni taslağa kopyala") }
         } else {
             if (!canSend) Text("Göndermek için Hesabım bölümünden mesaj izni ver.", color = Muted)
-            Button(onClick = onSend, Modifier.fillMaxWidth(), enabled = canSend && editable && communityDraftCanSend(draft)) { Text("Gönder") }
+            Button(onClick = onSend, Modifier.fillMaxWidth(), enabled = canSend && editable && !saving && communityDraftCanSend(draft)) { Text("Gönder") }
         }
+        if (saving) LinearProgressIndicator(Modifier.fillMaxWidth())
         TextButton(onClick = { deleteWarning = true }, enabled = !busy && draft.status != CommunityDraftStatus.SENDING) { Text("Taslağı sil") }
     }
     if (copyWarning) AlertDialog(onDismissRequest = { copyWarning = false }, title = { Text("Yeni taslak oluşturulsun mu?") },

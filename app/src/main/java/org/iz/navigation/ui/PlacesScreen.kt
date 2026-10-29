@@ -1,6 +1,7 @@
 package org.iz.navigation.ui
 
 import androidx.activity.compose.BackHandler
+import org.iz.navigation.ui.history.rememberUiEditExit
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -34,15 +35,18 @@ internal fun PlacesScreen(state: DiaryState, onPlace: (Place) -> Unit, onAdd: ()
     shortcuts: List<org.iz.navigation.data.DestinationShortcut> = emptyList(),
     onShortcut: (org.iz.navigation.data.DestinationShortcutKind, Place?) -> Unit = { _, _ -> }) {
     var query by rememberSaveable { mutableStateOf("") }
-    var original by rememberSaveable { mutableStateOf<List<String>?>(null) }
-    var draft by rememberSaveable { mutableStateOf(emptyList<String>()) }
+    var original by remember { mutableStateOf<List<String>?>(null) }
+    var draft by remember { mutableStateOf(emptyList<String>()) }
     var saving by remember { mutableStateOf(false) }
-    var error by rememberSaveable { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val list = rememberLazyListState()
     val sorting = original != null
     fun cancel() { original = null; draft = emptyList(); error = null }
-    BackHandler(sorting && !saving) { cancel() }
+    val back = rememberUiEditExit("places-sort", if (sorting) draft else emptyList<String>(), original.orEmpty(), saving,
+        currentWorking = { if (sorting) draft else emptyList<String>() }, currentBaseline = { original.orEmpty() },
+        currentBusy = { saving }, discardUnsaved = ::cancel, exit = ::cancel)
+    BackHandler(sorting) { back() }
     val byId = remember(state.places) { state.places.associateBy { it.id } }
     val visible = if (sorting) draft.mapNotNull(byId::get) else state.places.filter { it.name.contains(query, ignoreCase = true) }
     fun move(id: String, direction: Int) {
@@ -62,7 +66,7 @@ internal fun PlacesScreen(state: DiaryState, onPlace: (Place) -> Unit, onAdd: ()
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Biriktirdiğin yerler", style = MaterialTheme.typography.headlineMedium)
                 Text("Bir kahve molası, bir manzara, bir anı.", color = Muted, style = MaterialTheme.typography.bodyMedium)
-                OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().testTag("places-search"),
+                OutlinedTextField(query, { query = it.take(256) }, Modifier.fillMaxWidth().testTag("places-search"),
                     enabled = !sorting, placeholder = { Text("Günlüğünde yer ara") }, leadingIcon = { Icon(Icons.Outlined.Search, null) },
                     singleLine = true, shape = RoundedCornerShape(18.dp))
                 if (sorting) {

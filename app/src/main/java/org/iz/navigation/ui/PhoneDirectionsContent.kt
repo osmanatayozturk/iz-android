@@ -66,7 +66,9 @@ internal fun PhoneDirectionsContent(
     requestAlternatives: () -> Unit = {},
     selectAlternative: (String) -> Unit = {},
     saveRoute: (() -> Unit)? = null,
+    onMap: () -> Unit = onClose,
     commandErrorVersion: Long = 0,
+    voiceControls: (@Composable () -> Unit)? = null,
 ) {
     val listState = rememberLazyListState()
     val shownRoute = ui.preview ?: nav.route
@@ -97,7 +99,8 @@ internal fun PhoneDirectionsContent(
                         else -> "İki nokta seç, rotanı önizle."
                     }, style = MaterialTheme.typography.bodyMedium)
                 }
-                TextButton(onClick = onClose, modifier = Modifier.testTag("close-directions-planner")) { Text("Haritaya dön") }
+                TextButton(onClick = onClose, modifier = Modifier.testTag("close-directions-planner")) { Text("Geri") }
+                TextButton(onClick = onMap, modifier = Modifier.testTag("directions-return-map")) { Text("Haritaya dön") }
             }
         }
         if (sessionActive) item {
@@ -111,6 +114,7 @@ internal fun PhoneDirectionsContent(
             if (ui.preview != null) TextButton(showLive) { Text("Canlı rotaya dön") }
             if (nav.guidance) OutlinedButton(mute) { Text(if (nav.muted) "Sesi aç" else "Sesi kapat") }
         }
+        if (voiceControls != null) item(key = "navigation-voice") { voiceControls() }
         if (showMap) item {
             WeatherRouteMap(
                 route = shownRoute, assessment = null,

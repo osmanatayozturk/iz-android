@@ -25,6 +25,8 @@ class JourneyNavigationCoordinatorTest {
         var preparing = false
         var renderFailure = false
         var speechFailure: RuntimeException? = null
+        var voicePreparations = 0
+        var prepareVoiceFailure: RuntimeException? = null
         var finishFailure: RuntimeException? = null
         var onUnattachedFinish: (suspend () -> Unit)? = null
         var onStopRecording: (suspend () -> Unit)? = null
@@ -63,6 +65,7 @@ class JourneyNavigationCoordinatorTest {
         }
         override suspend fun locate() = NavigationFix(WeatherCoordinate(40.0, 29.0), 1000, 5f)
         override fun render(state: NavigationState) { if (renderFailure) throw IllegalStateException("Disconnected display") }
+        override fun prepareSpeech() { voicePreparations++; prepareVoiceFailure?.let { throw it } }
         override fun speak(text: String) = Unit
         override fun cancelSpeech() { speechFailure?.let { throw it } }
     }
@@ -70,6 +73,41 @@ class JourneyNavigationCoordinatorTest {
         listOf(RouteVertex(WeatherCoordinate(40.0, 29.0), 0.0), RouteVertex(WeatherCoordinate(40.01, 29.0), 100.0)),
         1110.0, 100.0, 1000, listOf(0.0,100.0), Transport.CAR,
         maneuvers = listOf(RouteManeuver(1,"Kuzeye ilerleyin","Kuzeye ilerleyin", emptyList(),0,1,0.0,100.0)))
+
+    @Test fun silentVoicePreparationRunsOncePerCommittedGuidanceNotLocationUpdates() = runTest {
+        val runtime = Runtime()
+        val controller = JourneyNavigationCoordinator(runtime, null, { 1000L }, backgroundScope)
+        val id = controller.startGuidance(route(), recordJourney = false)
+        assertEquals(1, runtime.voicePreparations)
+        assertTrue(controller.state.value.guidance)
+        controller.onAcceptedLocation(id, NavigationFix(route().stops.first().coordinate, 1000, 5f))
+        runCurrent()
+        controller.onAcceptedLocation(id, NavigationFix(route().stops.first().coordinate, 1000, 5f))
+        runCurrent()
+        assertEquals(1, runtime.voicePreparations)
+        controller.startGuidance(route(), recordJourney = false)
+        assertEquals(2, runtime.voicePreparations)
+    }
+
+    @Test fun failedStartAndRouteWithoutGuidanceNeverPrepareVoice() = runTest {
+        val runtime = Runtime()
+        val controller = JourneyNavigationCoordinator(runtime, null, { 1000L }, backgroundScope)
+        assertTrue(runCatching { controller.startGuidance(route().copy(maneuvers = emptyList())) }.isFailure)
+        assertEquals(0, runtime.voicePreparations)
+        controller.activateRoute(route())
+        assertFalse(controller.state.value.guidance)
+        assertEquals(0, runtime.voicePreparations)
+    }
+
+    @Test fun voicePreparationFailureCannotAbortCommittedVisualGuidance() = runTest {
+        val runtime = Runtime().also { it.prepareVoiceFailure = IllegalStateException("Unavailable engine") }
+        val controller = JourneyNavigationCoordinator(runtime, null, { 1000L }, backgroundScope)
+        val id = controller.startGuidance(route(), recordJourney = false)
+        assertEquals(1, runtime.voicePreparations)
+        assertEquals(id, controller.state.value.sessionId)
+        assertTrue(controller.state.value.guidance)
+        assertFalse(controller.state.value.recording)
+    }
 
     @Test fun displayFailureCannotAbortRecordingOrLaterSessionCommands() = runTest {
         val runtime = Runtime().also { it.renderFailure = true }

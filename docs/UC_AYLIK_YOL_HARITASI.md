@@ -1,21 +1,24 @@
 # İz: üç aylık geliştirme yol haritası
 
-Bu belge, onaylı UX-0111 kapsamındaki kişisel kullanım odaklı üç aylık programı küçük, sıralı adaylara ayırır. Haftalık aday ritmi bir planlama hedefidir; takvim, otomatik çalışma veya her haftanın yayımlanacağı sözü değildir. Her aday ayrı teknik tahsis, kanıt ve koordinatör kabulü bekler. Yalnız ilk 0.11.1 adayı aşağıda tanımlıdır; sonraki maddeler backlog'dur, uygulanmış veya test edilmiş özellikler değildir.
+Bu belge, onaylı UX-0112 kapsamındaki kişisel kullanım odaklı üç aylık programı küçük, sıralı adaylara ayırır. İlk tek paket telefon 0.11.2/code24'tür ve önceki 0.11.1 planını da içerir; ayrı 0.11.1 yayını yoktur. Haftalık aday ritmi planlama hedefidir, takvim veya yayımlama sözü değildir. Sonraki maddeler backlog'dur; uygulanmış/test edilmiş özellikler değildir ve ilk paket kabulünden önce paralel başlatılmaz.
 
-## İlk aday — telefon 0.11.1 / code 23
+## İlk paket — telefon 0.11.2 / code 24, 0.11.1 kapsamı dahil
 
-Durum: planlandı; uygulama ve doğrulama bekliyor. Wear OS **0.6.1 / code 11** ile iletişim **v6** değişmeyecek.
+Durum: yayımlanmamış aday planı; uygulama ve doğrulama bekliyor. Yayımlanmış sürüm 0.11.0/code22 olarak kalır. Wear OS **0.6.1 / code 11** ile iletişim **v6** değişmeyecek.
 
-1. Aktif dönüşlü yönlendirmede Nereye? hedef/arama başlığını ve boşluğunu gizlemek; dönüş/mesafe, ses, uyarılar, oturum kartı, İşlemler, harita kimliği ve kamera/manuel takip durumunu korumak. Yönlendirme bitince başlığı göstermek; yalnız kayıt, rota önizleme ve dönüşsüz GPX davranışını korumak.
-2. Günlük ayrıntısındaki **Bitir** eyleminde mevcut eşleşen yolculuğun etkisini anlatan, iptal edilebilir ve eski oturuma uygulanamayan teyit kullanmak. Yönlendirme, kayıt ve tüm oturum için ayrı bitirme seçeneklerini korumak.
-3. Normal boyuttaki ikincil küçük metin/arka plan çiftlerinde en az 4,5:1 karşıtlığı sağlamak; renk değişikliğini ilgili token ve yüzeylerle sınırlayıp İz'in yeşil-krem kimliğini korumak.
+1. **Önceki 0.11.1 kapsamı:** Aktif dönüşlü yönlendirmede Nereye? başlığını ve aralığını gizlemek; dönüş/mesafe, uyarılar, ses, oturum kartı, İşlemler ve harita/kamera durumunu korumak. Yalnız kayıt, rota önizleme ve dönüşsüz GPX davranışını değiştirmemek. Günlük ayrıntısındaki **Bitir** için eşleşen yolculuğu açıklayan iptal edilebilir teyit; yönlendirme, kayıt ve tüm oturumu bitirme seçeneklerini ayrı tutmak. Normal metin karşıtlığını en az 4,5:1'e taşımak.
+2. **TTS durumu:** Telefon TTS motoru ve ses odağı tek sahibinde kalır; hava durumu konuşması bu ortak sahibi kullanmayı sürdürür. Yönlendirme için motor/dil hazırlığı teyitli yönlendirme başlangıcında bir kez sessizce yapılır. Motor/dil hazır oluşu tekil ses odağı/çıktı sorunlarından ve sessiz tercihinden ayrılır. Hata görsel yönlendirmeyi engellemez, mevcut GPS/rota-yenileme uyarılarını değiştirmez; eski callback yeni istek/oturumu bozamaz. Yönlendirme sırasında dönüş anonsu sürmüyorsa TTS testi çalışabilir; anons sürüyorsa sıraya alınmadan BUSY döner. Yeni dönüş anonsu elle testi keser. Otomatik tekrar, ses indirme veya sistem sesi/engine değişimi yoktur.
+3. **Telefon gezinme geçmişi:** Menü ve sayfa, gerçek açan ekranına geri döner. Journeys/Places/Collections/Routes, GPX, Directions, Weather, Group, Community/OSM, Settings, backup/export/share ve map/picker/editor akışları kendi liste/ayrıntı/ebeveyn bağlamını korur. Yalnız hafif sorgu/filtre/sıralama/scroll/entity/account anahtarları saklanır; gizli ekran ağacı, domain nesnesi, kimlik bilgisi, izin tokenı veya iş gövdesi tutulmaz. Geri/restore ağ, kayıt, rota veya gönderim eylemini yeniden oynatmaz. Saat ve Auto kendi yüzeylerinde kalır.
+4. **Gerçek kaydedilmemiş değişiklikler:** Yalnız özellik sahibinin dirty/busy ve onaylanmış kayıt/revision bilgisiyle doğruladığı değişiklik çıkış teyidi ister. **Düzenlemeye dön** girdiyi korur; **Değişikliklerden vazgeç** sadece kaydedilmemiş farkı atıp bekleyen çıkışı bir kez yürütür. Filtre, arama, kaydırma ve değişmemiş sıralama tek başına dirty değildir; değişmiş, açık kaydetme isteyen sıralamalar korunur. Seçiciler ebeveyn girdisini terk etmez. OSM'un mevcut yerel autosave'i sürer; onaylanan kayıt geri alınmaz veya silinmez, dispose callback'i atılan metni diriltmez. Back otomatik save/send yapmaz.
+5. Başarılı teyitli rota başlatma yalnız onaydan sonra UI'ı sürüş haritasına alır; başarısızlık/iptal hazırlık bağlamını korur. Bu gezinme akışları günlük/navigasyon yaşam döngüsünü değiştirmez ve yeni veri/yedek biçimi veya genel taslak deposu oluşturmaz.
 
-## Haftalar 1–4 — temel akış ve açıklamalar
+Dar kapsamlı bir host koşusunda 46 kontrol geçti; bu sonuç tam 0.11.2 kabulü değildir. Tam aday test/lint/build ve bağımsız entegre kontrol kümesi çalıştırılmadı; native/UIUX/Security/yayın kabulü de yoktur. 0.11.1'e ait önceki test, lint ve ekran görüntüleri tarihsel kanıttır; 0.11.2 kabulü olarak kullanılamaz.
 
-Bu sıradaki küçük adaylar ilk paket kabulünden sonra ele alınır; paralel başlatılmaz:
+## Haftalar 1–4 — sonraki küçük adaylar
 
-- **İlk aday:** 0.11.1'deki başlık, günlük bitirme teyidi ve karşıtlık çalışması.
-- **Sonraki aday:** Sesli yönlendirme kullanılabilirliğini ve ilgili durum açıklamalarını netleştirmek (F03); liste/ayrıntı ekranları arasında gezinirken üst ekran ve liste bağlamını geri yüklemek veya korumak (F04); bağlantılı açıklama konularını (F05/F09) yalnız kabul edilen kapsamda ele almak.
+Yalnız 0.11.2 kabulünden sonra, sırayla değerlendirilecek başlıklar:
+
+- **Sonraki aday:** İlgili açıklama/disclosure konularını (F05/F09) yalnız ayrı kabul edilen kapsamda ele almak.
 - **Sonraki aday:** Tek Motosiklet modunu koruyarak daha sade navigasyon ile ayrıntılı gösterge paneli arasındaki sunumu ele almak.
 - **Sonraki aday:** Ekran kilitliyken ve interkomla kullanım tutarlılığını incelemek; saati bilgilendirici yüzey olarak tutmak ve Android Auto/Wear metinleriyle ilgili F06–F08 açıklama konularını değerlendirmek.
 

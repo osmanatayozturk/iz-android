@@ -7,27 +7,34 @@ Güncel yayın durumu bu dosyada, tamamlanan değişiklikler [değişiklik geçm
 | Bileşen | versionName | versionCode | Durum |
 |---|---|---|---|
 | Telefon | 0.11.0 | 22 | Yayımlandı: [Release sayfası](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.11.0), APK ve doğrulama notları |
+| Telefon adayı | 0.11.2 | 24 | Planlandı; yayımlanmadı. 0.11.1 ayrı Release olmayacak |
 | Wear OS | 0.6.1 | 11 | Telefon 0.11.0 kaynaklarında değişmedi; yeni Wear APK'sı yok |
 | Ortak iletişim | v6 | — | Telefon 0.11.0 kaynaklarında değişmedi |
 
-## Planlanan telefon adayı 0.11.1 / code 23 — yayımlanmadı
+## Planlanan birleşik telefon adayı 0.11.2 / code 24 — yayımlanmadı
 
-Bu, geliştirme ve doğrulama bekleyen kapsam planıdır; uygulama kaynaklarının, paketin veya sürüm kabulünün tamamlandığını göstermez. İlk aday üç konuyla sınırlı:
+Tek aday, önceki 0.11.1 kapsamını ve onaylı 0.11.2 değişikliklerini birleştirir; ayrı 0.11.1 Release planlanmıyor. Bu bölüm kapsam planıdır, uygulama/test/paket/sürüm kabulünün tamamlandığını göstermez.
 
-- **Yönlendirme görünümü:** `nav.guidance` etkin olduğunda Nereye? hedef/arama yüzeyi, boş sarmalayıcısı ve aralığı gizlenecek. Gizli alan sıfır yükseklik kullanacak; harita kontrolleri ve kamera görünür alanı kalan ölçülmüş içeriğe göre hesaplanacak. Dönüş/mesafe, ses, operasyonel uyarılar, oturum kartı ve İşlemler girişi korunacak. Yönlendirme yokken başlık geri gelecek. Yalnız kayıt, rota önizleme ve dönüşsüz GPX takibinin davranışı değişmeyecek. Ev/İş kısayol kuralı aynı kalacak.
-- **Günlükte Bitir (F01):** Yalnız mevcut eşleşen yolculuk için sonuçları açıkça anlatan teyit gösterilecek. Yönlendirmeyi bitir, kaydı bitir ve tümünü bitir eylemleri ayrı seçilecek; iptal etkisiz olacak ve eski teyit başka bir oturum/yolculuğu bitiremeyecek. Mevcut güvenli bitirme komutları kullanılacak.
-- **İkincil metin (F02):** Normal boyuttaki küçük metin için değiştirilen her metin/arka plan çifti en az 4,5:1 karşıtlık sağlayacak. Renk kararı ve görsel kabul yalnız etkilenen token/yüzeylerle sınırlı olacak; İz'in yeşil-krem kimliği korunacak.
+- **Birleşik 0.11.1 kapsamı:** Aktif dönüşlü yönlendirmede Nereye? başlığı ve boşluğu gizlenecek; dönüş/mesafe, uyarılar, ses, oturum kartı, İşlemler ve harita/kamera durumu korunacak. Günlükten Bitir yalnız eşleşen yolculuğu ve etkilerini açıklayan teyitle ilerleyecek; yönlendirme, kayıt ve tümünü bitirme ayrı olacak, iptal etkisiz kalacak. Normal boyuttaki ikincil metin/arka plan çiftleri en az 4,5:1 sağlayacak. Kod henüz güncel adayda ayrıca doğrulanmış sayılmaz.
+- **TTS ve ses durumu:** Tek telefon motorunun hazırlık/dil durumu, istek başına ses odağı/çıktı hatası ve sessiz tercih ayrılacak; hava durumu konuşmasıyla ortak TTS sahibi korunacak. Yalnız teyitli yönlendirme başlangıcında yönlendirme için bir kez sessiz hazırlık yapılacak. Başarısızlık görsel yönlendirmeyi durdurmayacak. Geçerli kısa uyarı mevcut manevra kartında GPS ve rota-yenileme uyarılarını değiştirmeden; ayrıntı ve Sesi test et/Tekrar dene/Seslendirme ayarları mevcut kontrollerde gösterilecek. Yönlendirme sırasında dönüş anonsu yoksa elle test çalışabilir; anons sürüyorsa test sıraya alınmadan meşgul bilgisi verilir, yeni dönüş anonsu elle testi kesebilir. Hazır motor, duyulabilir/interkom/çevrimdışı ses kabulü değildir.
+- **Geri gezinme ve geri yükleme:** Telefon sayfaları gerçek açan sayfa ve ebeveyn bağlamına döner. Liste/arama/filtre/sıralama/konum gibi hafif görüntüleme durumu güvenli, kararlı anahtarlarla korunur; hassas domain verisi, credential veya iş/izin sonucu saklanmaz. Geri, onCreate/onNewIntent veya süreç dönüşü başlatma/durdurma/yeniden planlama/gönderim komutunu tekrar oynatmaz. Saat ve Auto gezinmesi bu değişikliğin dışında.
+- **Kirli düzenlemeden çıkış:** Yalnız gerçek ve kaydedilmemiş fark çıkış teyidi ister. Temiz filtre/sorgu/kaydırma ve değişmemiş sıralama kirli sayılmaz; değişmiş, açık kaydetme isteyen sıralamalar çıkış korumasına dahildir. Çocuk seçiciler ebeveyn girdisini atmaz. **Düzenlemeye dön** girdiyi korur; **Değişikliklerden vazgeç** yalnız kaydedilmemiş farkı atıp çıkışı bir kez sürdürür. Mevcut OSM yerel otomatik kaydı sürer; onaylanmış kayıt geri alınmaz, atılan metin yaşam döngüsü geri çağrısıyla yeniden oluşmaz. Back otomatik Save/Send yapmaz.
+- **Uyumluluk:** Telefon hedefi 0.11.2/code24'tür. Yeni veritabanı/yedek biçimi veya genel taslak deposu planlanmıyor. Wear OS 0.6.1/code11 ve iletişim v6 değişmiyor.
 
-Teknik kontroller, bağımsız Test, değişen yüzeylerin UI/UX kabulü, paket ve güvenlik incelemesi beklemededir. Bu plan bir çalışma zamanı, cihaz veya yayın kabulü değildir. Ayrıntılı çeyrek sıralaması için [0.11.1 sonrası yol haritasına](UC_AYLIK_YOL_HARITASI.md) bakın.
+Teknik kontroller, bağımsız Test, değişen yüzeylerin UI/UX kabulü, paket ve güvenlik incelemesi beklemededir. Bu plan bir çalışma zamanı, cihaz veya yayın kabulü değildir. Ayrıntılı sonraki sıralama için [üç aylık yol haritasına](UC_AYLIK_YOL_HARITASI.md) bakın.
 
-### 0.11.1 kanıt alanları — sonuçlar geldikçe güncellenecek
+### 0.11.2 kanıt alanları — güncel aday için bekliyor
 
-- Sabit kaynak/konfigürasyon ve sürüm eşleşmesi: bekliyor.
-- Başlık geçişleri ve F01 bitirme/iptal/stale-session senaryoları: bekliyor.
-- F02 değişen metin/arka plan çiftleri ve oranları; etkilenen yüzeylerin UI/UX kabulü: bekliyor.
-- Sabit adayın hedefli birim, lint, derleme ve bağımsız Test sonuçları: bekliyor.
+- Kaynak/sürüm eşleşmesi ve tek sabit aday: bekliyor.
+- TTS durum, gecikme, stale callback, BUSY ve dönüş önceliği; telefon geri geçmişi, dönüş/restore ve gerçek kirli çıkış senaryoları: bekliyor.
+- Birleşik 0.11.1 başlık, F01, F02 regresyonları; etkilenen yüzeylerin UI/UX kabulü: bekliyor.
+- Dar host koşusunda 46 kontrol geçti; bu, tam aday kabulü değildir. Sabit adayın tam hedefli/bütünleşik test, lint, derleme ve bağımsız Test kontrolleri çalıştırılmadı.
 - Paket kimliği/sürümü/hash/imza ve eşleşen aday güvenlik kararı: bekliyor.
-- Çalışma zamanı/cihaz kabulü: yapılmadı. Yayın durumu: yayımlanmadı.
+- Cihaz/çalışma zamanı kabulü: yapılmadı. Yayın durumu: yayımlanmadı.
+
+### 0.11.1 dönemi kanıtı — tarihsel, 0.11.2 kabulü değildir
+
+Önceki `b3` kaynağının tam birim turunda 860 testten 856'sı geçti, 4'ü başarısız oldu. Sonraki `7ade5c9` kaynağında seçilen dört düzeltme kontrolü geçti; lint 0 hata/ölümcül hata ve 92 uyarı verdi. Bunlar yalnız o kaynak ve kapsam için tarihsel kanıttır; 0.11.2 kaynağında test/derleme sonucu değildir. 0.11.1 için native cihaz hedefi yoktu. README'deki ekran görüntüleri 0.9/0.10 döneminden tarihsel örneklerdir; 0.11.2 ekran görüntüsü değildir.
 
 ## Telefon 0.11.0 / code 22 — motosiklet sürüşü
 
@@ -146,7 +153,7 @@ Ayrıntılı görev ve teslim kuralları [AGENTS.md](../AGENTS.md) içindedir. �
 
 ## Sürüm numaralandırma ilkesi
 
-Yayımlanmış telefon sürümü **0.11.0 / code 22**'dir. **0.11.1 / code 23** yalnız planlanan adaydır. Wear OS **0.6.1 / code 11** ve iletişim **v6** değişik telefon sürümlerinde ayrıca ele alınır; bir modülün sürüm bilgisi diğer modülün yeni paketinin yayımlandığını göstermez. Modüller ayrı numaralandırılır; eski sürüm örnekleri yeni hedef yerine kullanılmamalıdır.
+Yayımlanmış telefon sürümü **0.11.0 / code 22**'dir. **0.11.2 / code 24** tek planlanan birleşik adaydır; ayrı 0.11.1 sürümü yayımlanmayacaktır. Wear OS **0.6.1 / code 11** ve iletişim **v6** modüller bazında ayrıca numaralandırılır; telefon adayından yeni Wear paketi sonucu çıkarılmaz.
 
 - Sürüm numarası gerçek kapsam ve son yayımlanmış sürüme göre belirlenir. Yeni uygulama yayını için ilgili modülün `versionCode` değeri artar; ardışık test derlemeleri ayrı sürüm sayılmaz.
 - Telefon ve saat bağımsız numaralandırılır. Değişmeyen modülün sürümü artırılmaz. Değerlerin kaynağı `app/build.gradle.kts` ve `wear/build.gradle.kts` dosyalarıdır.

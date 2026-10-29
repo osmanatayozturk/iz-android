@@ -12,6 +12,8 @@ import androidx.room.withTransaction
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.iz.navigation.osmcommunity.*
+import org.iz.navigation.ui.history.UiEditState
+import org.iz.navigation.ui.history.UiExitGuard
 import kotlinx.coroutines.*
 import org.junit.After
 import org.junit.Assert.*
@@ -90,7 +92,7 @@ class OsmCommunityLifecycleTest {
         awaitBody("finish", "latest")
     }
 
-    @Test fun switchingToAnotherDraftDoesNotCancelPreviousFinalSave() = runBlocking {
+    @Test fun acceptedFinalSaveSurvivesFolderAndDraftSwitch() = runBlocking {
         val first = CommunityDraft(id = "first", accountId = 1, title = "A", body = "old A")
         val second = CommunityDraft(id = "second", accountId = 1, title = "B", body = "old B")
         repository.saveDraft(first); repository.saveDraft(second)
@@ -101,12 +103,84 @@ class OsmCommunityLifecycleTest {
         locked.await()
         try {
             withContext(Dispatchers.Main) {
-                model.changeDraft(first.copy(body = "latest A")); model.folder(CommunityFolder.DRAFTS)
+                model.changeDraft(first.copy(body = "latest A"))
+                model.persistEditor() // Explicitly accepted repository write; folder/Back must not force one.
+                model.folder(CommunityFolder.DRAFTS)
                 model.editDraft(second); model.changeDraft(second.copy(body = "latest B")); model.persistEditor()
             }
         } finally { release.complete(Unit) }
         gate.join()
         awaitBody("first", "latest A"); awaitBody("second", "latest B")
+    }
+
+    /** Actual VM + in-memory repository + live guard provider; no Compose-frame refresh or remote write. */
+    @Test fun guardedDirtyBackBeforeDebounceKeepsOrDiscardsOnlyUnsavedDelta() = runBlocking {
+        val draft = CommunityDraft(id = "guarded-back", accountId = 1, title = "Synthetic baseline", body = "acknowledged body")
+        repository.saveDraft(draft)
+        val persisted = requireNotNull(db.communityDao().draft(1, draft.id)).draft
+        val (model, store) = vm()
+        withTimeout(5_000) {
+            while (!model.community.value.ready || model.ui.value.accountId != 1L) delay(20)
+        }
+        withContext(Dispatchers.Main) {
+            model.editDraft(persisted)
+            assertEquals(persisted, model.ui.value.editor)
+            assertFalse(model.editorState.value.dirty)
+            val guard = UiExitGuard()
+            val owner = Any()
+            fun liveState(): UiEditState {
+                val editor = model.editorState.value
+                val community = model.community.value
+                return UiEditState("community-editor/" + persisted.id,
+                    community.accountId.toString() + ":" + community.cacheIdentity,
+                    editor.editRevision, editor.acknowledgedRevision, editor.dirty,
+                    editor.saving || model.ui.value.busy || model.ui.value.accountId != community.accountId ||
+                        model.ui.value.cacheIdentity != community.cacheIdentity)
+            }
+            var discardCalls = 0
+            var exitCalls = 0
+            guard.updateOwned(owner, liveState(), currentState = ::liveState, discardUnsaved = {
+                discardCalls++
+                model.discardEditorDelta()
+            })
+            // Keep these actions in one non-suspending Main block so the250ms debounce cannot run first.
+            model.changeDraft(persisted.copy(body = "unsaved working body"))
+            assertTrue(model.editorState.value.dirty)
+            assertFalse(model.editorState.value.saving)
+            fun back() { guard.requestExit {
+                exitCalls++
+                assertEquals("Discard must restore only the acknowledged body before leaving", persisted.body, model.ui.value.editor?.body)
+                assertTrue(model.back())
+            } }
+            back()
+            assertNotNull("Request must read live dirty state registered originally as clean", guard.pending.value)
+            assertEquals(0, exitCalls)
+            assertFalse("Back cannot force persistEditor", model.editorState.value.saving)
+            guard.keepEditing()
+            assertNull(guard.pending.value)
+            assertEquals("unsaved working body", model.ui.value.editor?.body)
+            assertTrue(model.editorState.value.dirty)
+            assertEquals(0, discardCalls)
+            assertEquals(0, exitCalls)
+            back()
+            assertNotNull(guard.pending.value)
+            guard.discardAndExit()
+            assertEquals(1, discardCalls)
+            assertEquals(1, exitCalls)
+            assertNull(model.ui.value.editor)
+            assertNull(model.editorState.value.draft)
+            assertNull(guard.pending.value)
+            guard.discardAndExit()
+            assertEquals("Retired exit cannot replay", 1, exitCalls)
+            guard.clearOwner(owner)
+            // A late explicit lifecycle flush and ViewModel disposal must not revive the discarded text.
+            model.persistEditor()
+            store.clear()
+        }
+        assertEquals(persisted, db.communityDao().draft(1, draft.id)?.draft)
+        delay(350)
+        assertEquals("Cancelled debounce/disposal cannot resurrect unsaved text", persisted, db.communityDao().draft(1, draft.id)?.draft)
+        assertEquals(listOf(persisted), db.communityDao().drafts(1).map { it.draft })
     }
 
     @Test fun savedStateRestoresLastDebouncedEditAfterRecreation() = runBlocking {

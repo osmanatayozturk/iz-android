@@ -2,9 +2,9 @@
 
 **Telefon 0.11.0 / code 22.** İz; motosiklet rotasını, sürüş sırasında harita kamerasını ve tamamlanmış motosiklet yolculukları için deneysel yatış özetini bir araya getirir. Android 10 veya üzeri ve Google Play hizmetleri gerekir. [İz 0.11.0 sürüm notları ve indirme dosyaları](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.11.0) · [Kullanım kılavuzu](docs/IZ_010_KULLANIM.md).
 
-## Sıradaki telefon adayı: 0.11.1 / code 23
+## Sıradaki telefon adayı: 0.11.2 / code 24
 
-Bu sürüm henüz yayımlanmadı; aşağıdaki maddeler planlanan kapsamı gösterir. Aktif dönüşlü yönlendirmede Nereye? başlığı ve boşluğu gizlemek, günlük ayrıntısındaki **Bitir** için etkilenecek yolculuğu açıklayan iptal edilebilir teyit eklemek ve normal boyuttaki ikincil metin/arka plan çiftlerinde en az 4,5:1 karşıtlığı sağlamak planlanıyor. Yönlendirme, kayıt ve tüm oturumu bitirme seçenekleri ayrı kalacak. Uygulama, test, güvenlik ve yayın sonuçları tamamlanmış kabul edilmiyor. Wear OS **0.6.1 / code 11** ile iletişim **v6** değişiklik kapsamı dışında.
+0.11.2 yayımlanmamıştır. Tek aday önceki 0.11.1 planındaki yönlendirme başlığı, günlük bitirme teyidi ve ikincil metin karşıtlığını; telefon TTS durumu/testini, gerçek ekrandan geri gezinme ve görüntüleme durumunu geri yüklemeyi, kaydedilmemiş düzenlemeler için çıkış teyidini birleştirir. Dar kapsamlı bir host koşusunda 46 kontrol geçti; bu, tam aday kabulü değildir. Tam 0.11.2 test/lint/build/bağımsız kabul kontrolleri çalıştırılmadı; cihaz/çalışma zamanı, güvenlik ve yayın kabulü de yapılmadı. Yönlendirme sırasında dönüş anonsu yoksa elle ses testi çalışabilir; etkin anons sırasında test sıraya alınmadan meşgul olur. Önceki ekran görüntüleri tarihsel 0.9/0.10 örnekleridir. Wear OS **0.6.1 / code 11** ve iletişim **v6** değişmiyor. Ayrıntı: [değişiklik geçmişi](CHANGELOG.md) ve [üç aylık yol haritası](docs/UC_AYLIK_YOL_HARITASI.md).
 
 Wear OS **0.6.1 / code 11** ve telefon-saat iletişimi **v6** bu telefon sürümünde değişmez; yeni Wear APK'sı bu sürümün parçası değildir. [Değişiklik geçmişi](CHANGELOG.md) · [Sürüm planı](docs/SURUM_PLANI.md).
 
@@ -24,7 +24,7 @@ Release sayfasında yayımlanan APK'nın imza bilgisi, dosya özeti ve doğrulam
 
 ## Önceki sürümlerden uygulama görüntüleri
 
-Bu 0.9 ve 0.10 sürümlerinden alınmış tarihsel örnek ekranlardır; 0.11.0 arayüzünü göstermez. Konumlar tanıtım için seçilmiş örneklerdir. Kişisel yolculuk, hesap veya sağlık verisi kullanılmamıştır.
+Bu 0.9 ve 0.10 sürümlerinden alınmış tarihsel örnek ekranlardır; 0.11.0 veya planlanan 0.11.2 arayüzünü göstermez. Konumlar tanıtım için seçilmiş örneklerdir. Kişisel yolculuk, hesap veya sağlık verisi kullanılmamıştır.
 
 | Ana harita | Rota planlama |
 | --- | --- |

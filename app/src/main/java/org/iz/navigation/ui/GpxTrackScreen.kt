@@ -1,6 +1,7 @@
 package org.iz.navigation.ui
 
 import androidx.activity.compose.BackHandler
+import org.iz.navigation.ui.history.rememberUiEditExit
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.lazy.LazyColumn
@@ -40,21 +41,22 @@ internal fun GpxTrackScreen(
     onStart: (ImportedTrack, TrackFollowSelection, Transport, Boolean, String?) -> Unit,
     onStop: () -> Unit, onDismiss: () -> Unit, onDismissInterrupted: () -> Unit,
     replacementKey: String? = null,
+    browse: org.iz.navigation.ui.history.GpxBrowseState? = null,
 ) {
     val displayed = track ?: active?.track
     val matchingActive = active?.takeIf { it.track.id == displayed?.id }
     val initial = matchingActive?.selection ?: TrackFollowSelection()
-    var segmentIndex by rememberSaveable(displayed?.id) { mutableIntStateOf(initial.segmentIndex) }
-    var reversed by rememberSaveable(displayed?.id) { mutableStateOf(initial.reversed) }
-    var startPointIndex by rememberSaveable(displayed?.id) { mutableIntStateOf(initial.startPointIndex) }
-    var startFraction by rememberSaveable(displayed?.id) { mutableDoubleStateOf(initial.startFraction) }
-    var chosenTransport by rememberSaveable { mutableStateOf(Transport.WALK.name) }
-    val transport = currentTransport?.takeIf { it != Transport.UNKNOWN } ?: Transport.valueOf(chosenTransport)
+    var segmentIndex by (browse?.segment ?: rememberSaveable(displayed?.id) { mutableIntStateOf(initial.segmentIndex) })
+    var reversed by (browse?.reversed ?: rememberSaveable(displayed?.id) { mutableStateOf(initial.reversed) })
+    var startPointIndex by (browse?.point ?: rememberSaveable(displayed?.id) { mutableIntStateOf(initial.startPointIndex) })
+    var startFraction by (browse?.fraction ?: rememberSaveable(displayed?.id) { mutableDoubleStateOf(initial.startFraction) })
+    var chosenTransport by (browse?.transport ?: rememberSaveable { mutableStateOf(Transport.WALK.name) })
+    val transport = currentTransport?.takeIf { it != Transport.UNKNOWN } ?: runCatching { Transport.valueOf(chosenTransport).takeUnless { it == Transport.UNKNOWN } }.getOrNull() ?: Transport.WALK
     val selection = TrackFollowSelection(segmentIndex, reversed, startPointIndex, startFraction)
     var segmentDialog by remember { mutableStateOf(false) }
     var transportDialog by remember { mutableStateOf(false) }
     var saveDialog by remember { mutableStateOf(false) }
-    var saveName by rememberSaveable(displayed?.id) { mutableStateOf(displayed?.name.orEmpty()) }
+    var saveName by remember(displayed?.id) { mutableStateOf(displayed?.name.orEmpty()) }
     var pendingStart by remember { mutableStateOf<GpxStartRequest?>(null) }
     var candidates by remember { mutableStateOf<List<GpxStartCandidate>>(emptyList()) }
     var pickRequest by remember { mutableIntStateOf(0) }
@@ -212,12 +214,16 @@ internal fun GpxTrackScreen(
             }
         }
     }, confirmButton = { TextButton(onClick = { transportDialog = false }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Vazgeç") } })
-    if (saveDialog && displayed != null) AlertDialog(onDismissRequest = { saveDialog = false }, title = { Text("İze bir ad ver") },
+    if (saveDialog && displayed != null) {
+    val back = rememberUiEditExit("gpx-name-${displayed.id}", saveName, displayed.name, busy,
+        currentWorking = { saveName }, currentBusy = { currentBusy }, discardUnsaved = { saveName = displayed.name }, exit = { saveDialog = false })
+    AlertDialog(onDismissRequest = back, title = { Text("İze bir ad ver") },
         text = { OutlinedTextField(value = saveName, onValueChange = { if (it.length <= 300) saveName = it },
             label = { Text("İzin adı") }, singleLine = true, modifier = Modifier.testTag("gpx-save-name")) },
         confirmButton = { TextButton(onClick = { saveDialog = false; onSave(displayed.copy(name = saveName.trim())) },
             enabled = !busy && saveName.isNotBlank(), modifier = Modifier.heightIn(min = 48.dp).testTag("gpx-confirm-save")) { Text("Sakla") } },
         dismissButton = { TextButton(onClick = { saveDialog = false }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Vazgeç") } })
+    }
     pendingStart?.let { request -> AlertDialog(onDismissRequest = { pendingStart = null },
         title = { Text(if (active != null) "GPX takibini yeniden başlat?" else "Yönlendirmeden GPX takibine geç?") },
         text = { Text("Devam eden ${if (active != null) "GPX takibi" else "yol yönlendirmesi"} sona erecek. “${request.track.name}”, seçilen bölüm ve başlangıçla takip edilecek. Varsa açık günlük kaydı devam eder.") },

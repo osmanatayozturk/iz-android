@@ -142,6 +142,7 @@ internal class AndroidNavigationRuntime(private val context: Context) : Navigati
                 .record(LocationDiagnostics.Event.DISPLAY_FAILED, null, null)
         }
     }
+    override fun prepareSpeech() { NavigationSpeech.get(context).prepareGuidance() }
     override fun speak(text: String) { NavigationSpeech.get(context).speakTurn(text) }
     override fun cancelSpeech() { NavigationSpeech.get(context).cancelTurns() }
 }
