@@ -29,7 +29,7 @@ class MotorcyclePhoneLayoutTest {
         compose.setContent { CompositionLocalProvider(LocalDensity provides Density(1f, 1f)) {
             IzTheme { Box(Modifier.requiredSize(width, height)) {
                 NavigationHomeContent(PhoneDirectionsState(), nav, emptyList(), emptyList(), false, "Hava",
-                    {}, {}, {}, {}, {}, {}, {}, {}, {}, shortcuts, {}, {})
+                    {}, {}, {}, {}, {}, {}, {}, {}, {}, shortcuts, {}, planner = {})
             } }
         } }
     }
