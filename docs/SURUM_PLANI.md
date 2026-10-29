@@ -1,36 +1,28 @@
 # İz sürüm değişikliği planı
 
-Güncel yayın durumu bu dosyada, tamamlanan değişiklikler [değişiklik geçmişinde](../CHANGELOG.md) bulunur.
+Bu dosya telefon ve uyumlu bileşenlerin kaynak sürümlerini kaydeder. Dağıtım durumu, dosyalar ve doğrulama kapsamı için ilgili [GitHub Releases/sürüm notları kaydını](https://github.com/osmanatayozturk/iz-android/releases) esas alın; davranış özeti [değişiklik geçmişindedir](../CHANGELOG.md).
 
-## Güncel sürümler
+## Telefon kaynak sürümü ve uyumluluk
 
-| Bileşen | versionName | versionCode | Durum |
+| Bileşen | versionName | versionCode | Dağıtım ve doğrulama kaydı |
 |---|---|---|---|
-| Telefon | 0.11.0 | 22 | Yayımlandı: [Release sayfası](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.11.0), APK ve doğrulama notları |
-| Telefon adayı | 0.11.2 | 24 | Planlandı; yayımlanmadı. 0.11.1 ayrı Release olmayacak |
-| Wear OS | 0.6.1 | 11 | Telefon 0.11.0 kaynaklarında değişmedi; yeni Wear APK'sı yok |
-| Ortak iletişim | v6 | — | Telefon 0.11.0 kaynaklarında değişmedi |
+| Telefon | 0.11.2 | 24 | Sürüme özgü APK ve doğrulama bilgileri: [GitHub Releases](https://github.com/osmanatayozturk/iz-android/releases) |
+| Wear OS | 0.6.1 | 11 | Bu telefon kaynak sürümünde korunur |
+| Ortak iletişim | v6 | — | Bu telefon kaynak sürümünde korunur |
 
-## Planlanan birleşik telefon adayı 0.11.2 / code 24 — yayımlanmadı
+## Telefon 0.11.2 / code 24 — kapsam ve doğrulama kaydı
 
-Tek aday, önceki 0.11.1 kapsamını ve onaylı 0.11.2 değişikliklerini birleştirir; ayrı 0.11.1 Release planlanmıyor. Bu bölüm kapsam planıdır, uygulama/test/paket/sürüm kabulünün tamamlandığını göstermez.
+Telefon 0.11.2, önceki 0.11.1 planındaki arayüz iyileştirmelerini aynı sürümdeki sesli yönlendirme ve ekran geçmişi değişiklikleriyle birleştirir; 0.11.1 ayrı bir telefon sürümü değildir. Bu bölüm kaynak davranışını ve host doğrulama zincirini özetler. Dağıtım durumu, dosyalar ve doğrulama kapsamı için ilgili [GitHub Releases/sürüm notları kaydını](https://github.com/osmanatayozturk/iz-android/releases) esas alın.
 
-- **Birleşik 0.11.1 kapsamı:** Aktif dönüşlü yönlendirmede Nereye? başlığı ve boşluğu gizlenecek; dönüş/mesafe, uyarılar, ses, oturum kartı, İşlemler ve harita/kamera durumu korunacak. Günlükten Bitir yalnız eşleşen yolculuğu ve etkilerini açıklayan teyitle ilerleyecek; yönlendirme, kayıt ve tümünü bitirme ayrı olacak, iptal etkisiz kalacak. Normal boyuttaki ikincil metin/arka plan çiftleri en az 4,5:1 sağlayacak. Bu özellikler 0.11.2 kaynak adayında bulunur; regresyon ve cihaz kabul durumu aşağıda ayrı izlenir.
-- **TTS ve ses durumu:** Tek telefon motorunun hazırlık/dil durumu, istek başına ses odağı/çıktı hatası ve sessiz tercih ayrılacak; hava durumu konuşmasıyla ortak TTS sahibi korunacak. Yalnız teyitli yönlendirme başlangıcında yönlendirme için bir kez sessiz hazırlık yapılacak. Başarısızlık görsel yönlendirmeyi durdurmayacak. Geçerli kısa uyarı mevcut manevra kartında GPS ve rota-yenileme uyarılarını değiştirmeden; ayrıntı ve Sesi test et/Tekrar dene/Seslendirme ayarları mevcut kontrollerde gösterilecek. Yönlendirme sırasında dönüş anonsu yoksa elle test çalışabilir; anons sürüyorsa test sıraya alınmadan meşgul bilgisi verilir, yeni dönüş anonsu elle testi kesebilir. Hazır motor, duyulabilir/interkom/çevrimdışı ses kabulü değildir.
+- **Yönlendirme başlığı, bitirme teyidi ve karşıtlık:** Aktif dönüşlü yönlendirmede Nereye? başlığı ve boşluğu gizlenir; dönüş/mesafe, uyarılar, ses, oturum kartı, İşlemler ve harita/kamera durumu korunur. Günlükten Bitir, eşleşen yolculuğu ve etkilerini açıklayan teyidi açar; yönlendirme, kayıt ve tüm oturum seçenekleri ayrıdır, iptal değişiklik yapmaz. Normal boyuttaki ikincil metin/arka plan çiftleri en az 4,5:1 karşıtlık sağlar.
+- **TTS ve ses durumu:** Tek telefon motoru sesli yönlendirme ve hava istemlerini yönetir. Motor/dil hazırlığı, istek başına ses odağı/çıktı hatası ve sessiz tercih ayrı durumlar olarak gösterilir. Teyitli yönlendirme başlangıcında motor/dil bir kez sessizce hazırlanır. Ses hatası görsel yönlendirmeyi durdurmaz; kısa uyarı manevra kartında, ayrıntılar mevcut ses kontrollerinde gösterilir. Motor/dil kullanılabilir durumdaysa ve dönüş anonsu sürmüyorsa elle ses testi denenebilir; anons sürüyorsa istek sıraya alınmadan meşgul yanıtı verir. Yeni dönüş anonsu elle testi kesebilir. Motorun hazır durumu duyulabilir, interkom veya çevrimdışı ses kabulü anlamına gelmez.
 - **Geri gezinme ve geri yükleme:** Telefon sayfaları gerçek açan sayfa ve ebeveyn bağlamına döner. Liste/arama/filtre/sıralama/konum gibi hafif görüntüleme durumu güvenli, kararlı anahtarlarla korunur; hassas domain verisi, credential veya iş/izin sonucu saklanmaz. Geri, onCreate/onNewIntent veya süreç dönüşü başlatma/durdurma/yeniden planlama/gönderim komutunu tekrar oynatmaz. Saat ve Auto gezinmesi bu değişikliğin dışında.
 - **Kirli düzenlemeden çıkış:** Yalnız gerçek ve kaydedilmemiş fark çıkış teyidi ister. Temiz filtre/sorgu/kaydırma ve değişmemiş sıralama kirli sayılmaz; değişmiş, açık kaydetme isteyen sıralamalar çıkış korumasına dahildir. Çocuk seçiciler ebeveyn girdisini atmaz. **Düzenlemeye dön** girdiyi korur; **Değişikliklerden vazgeç** yalnız kaydedilmemiş farkı atıp çıkışı bir kez sürdürür. Mevcut OSM yerel otomatik kaydı sürer; onaylanmış kayıt geri alınmaz, atılan metin yaşam döngüsü geri çağrısıyla yeniden oluşmaz. Back otomatik Save/Send yapmaz.
 - **Uyumluluk:** Telefon hedefi 0.11.2/code24'tür. Yeni veritabanı/yedek biçimi veya genel taslak deposu planlanmıyor. Wear OS 0.6.1/code11 ve iletişim v6 değişmiyor.
 
-Paketleme ve üç APK’nın manifest/imza doğrulaması geçti; bunlar yalnız Debug/QA doğrulamasıdır, Release veya yayın paketi değildir. USB envanterinde cihaz bulunmadığı için native kontrol HOLD; çalışma zamanı/cihaz kabulü yapılmadı. Adaya özgü açık olumlu güvenlik raporu ve yayın kabulü beklemede. UI/UX çalışma zamanı ve cihaz kabulü yapılmadı. Ayrıntılı sonraki sıralama için [üç aylık yol haritasına](UC_AYLIK_YOL_HARITASI.md) bakın.
+### Kaynak ve host doğrulama özeti
 
-### 0.11.2 kanıt alanları — güncel durum
-
-- APP-03 Debug/QA doğrulama kaynağı: commit 4656b3492a8d2ff469e0043c0f28ad03c44ef7d6, telefon 0.11.2/code 24; bu kimlik son Release kaynak bağlaması değildir.
-- Cihazda: TTS durum, gecikme, stale callback, BUSY ve dönüş önceliği; telefon geri geçmişi, dönüş/restore ve gerçek kirli çıkış senaryoları bekliyor.
-- Cihazda: Birleşik 0.11.1 başlık, F01, F02 regresyonları ve değişen yüzeylerin UI/UX kabulü bekliyor.
-- APP-02 kaynağı 8b2160e06cc6fa5c5b3b141c50e070242e51afe7 üzerinde 934 birim testi geçti (0 başarısız/hata/atlama), lint 0 hata/ölümcül hata ve 95 uyarı verdi; Debug ve ayrı QA ürün APK’ları üretildi. APP-03 kaynağı 4656b3492a8d2ff469e0043c0f28ad03c44ef7d6 yalnız AndroidTest test-kaynağı düzeltmesini içerir; APP-02 ile APP-03 arasında ürün/derleme ve birim-test girdileri aynı kaldı. Eksik AndroidTest APK’sı üretildi, üç APK manifest/imza kontrolü geçti ve ürün APK’larının hash’leri aynı kaldı. Birim/lint APP-03’te tekrarlanmadı; AndroidTest APK’sı çalıştırılmadı.
-- Debug/QA ürün APK’larının kimlik/sürüm/hash/manifest/imza kontrolleri geçti; AndroidTest APK’sının hedefi org.iz.navigation.batterycheck ve çalıştırıcısı AndroidJUnitRunner olarak doğrulandı (AndroidTest sürümü varsayılmadı). Release paketi ve aynı adaya ait açık olumlu güvenlik raporu: bekliyor.
-- Cihaz/çalışma zamanı kabulü: yapılmadı. Yayın durumu: yayımlanmadı.
+APP-02 kaynak adayı 8b2160e06cc6fa5c5b3b141c50e070242e51afe7 üzerinde 934 birim testi geçti (0 başarısızlık, 0 hata, 0 atlama); lint 0 hata/ölümcül hata ve 95 uyarı verdi, Debug ve QA ürün APK’ları üretildi. APP-03 doğrulama kaynağı 4656b3492a8d2ff469e0043c0f28ad03c44ef7d6 yalnız AndroidTest kaynaklı test çağrısı düzeltmesini içerir. APP-02 ile APP-03 arasında ürün, derleme ve birim-test girdileri aynı kaldığından önceki birim/lint sonuçları yeniden çalıştırılmadan kullanıldı. AndroidTest APK’sı üretildi; üç APK’nın manifest/imza kontrolü geçti ve Debug/QA ürün APK’larının SHA-256 değerleri aynı kaldı. Bu host ve Debug/QA paket doğrulama kaydı Release APK’sı veya cihazda AndroidTest çalıştırması anlamına gelmez. Dağıtım durumu, dosyalar ve doğrulama kapsamı için ilgili [GitHub Releases/sürüm notları kaydını](https://github.com/osmanatayozturk/iz-android/releases) esas alın.
 
 ### 0.11.1 dönemi kanıtı — tarihsel, 0.11.2 kabulü değildir
 
@@ -153,7 +145,7 @@ Ayrıntılı görev ve teslim kuralları [AGENTS.md](../AGENTS.md) içindedir. �
 
 ## Sürüm numaralandırma ilkesi
 
-Yayımlanmış telefon sürümü **0.11.0 / code 22**'dir. **0.11.2 / code 24** tek planlanan birleşik adaydır; ayrı 0.11.1 sürümü yayımlanmayacaktır. Wear OS **0.6.1 / code 11** ve iletişim **v6** modüller bazında ayrıca numaralandırılır; telefon adayından yeni Wear paketi sonucu çıkarılmaz.
+Telefon kaynak sürümü **0.11.2 / code 24**'tür; önceki 0.11.1 arayüz kapsamı bu sürüme dahildir ve ayrı 0.11.1 telefon sürümü yoktur. Sürüme özgü Release kaynağı, APK ve dağıtım durumu [GitHub Releases](https://github.com/osmanatayozturk/iz-android/releases) bölümünden izlenir. Wear OS **0.6.1 / code 11** ve iletişim **v6** modüller bazında ayrıca numaralandırılır; telefon kaynak sürümü bunları değiştirmez.
 
 - Sürüm numarası gerçek kapsam ve son yayımlanmış sürüme göre belirlenir. Yeni uygulama yayını için ilgili modülün `versionCode` değeri artar; ardışık test derlemeleri ayrı sürüm sayılmaz.
 - Telefon ve saat bağımsız numaralandırılır. Değişmeyen modülün sürümü artırılmaz. Değerlerin kaynağı `app/build.gradle.kts` ve `wear/build.gradle.kts` dosyalarıdır.

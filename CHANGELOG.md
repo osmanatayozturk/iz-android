@@ -1,8 +1,8 @@
 # Değişiklik geçmişi
 
-## Geliştirme adayı — Telefon 0.11.2 / code 24 (yayımlanmadı)
+## Telefon 0.11.2 / code 24 — sesli yönlendirme ve ekran bağlamı
 
-Bu tek aday, önceki 0.11.1 planındaki başlık, günlük bitirme teyidi ve metin karşıtlığı değişikliklerini içerir; ayrı 0.11.1 sürümü yayımlanmaz. Aşağıdaki kapsam onaylı plandır, tamamlanmış uygulama veya kabul beyanı değildir. Wear OS **0.6.1 / code 11** ve telefon-saat iletişimi **v6** değişmiyor.
+Telefon 0.11.2, yönlendirme başlığı, günlük bitirme teyidi ve metin karşıtlığı iyileştirmelerini tek sürümde birleştirir; 0.11.1 ayrı bir telefon sürümü değildir. Bu kayıt sürüm davranışını ve doğrulanmış kaynak/host kapsamını açıklar. Wear OS **0.6.1 / code 11** ve telefon-saat iletişimi **v6** değişmez.
 
 ### Birleşik 0.11.1 kapsamı
 
@@ -17,9 +17,9 @@ Bu tek aday, önceki 0.11.1 planındaki başlık, günlük bitirme teyidi ve met
 - **Düzenleme koruması:** Yalnız gerçekten kaydedilmemiş değişiklikler için **Düzenlemeye dön** ve **Değişikliklerden vazgeç** seçenekleri sunulur. Sorgu, filtre, kaydırma veya değişmemiş sıralama tek başına kirli sayılmaz; değişmiş, açık kaydetme isteyen sıralamalar korunma/teyit kapsamındadır. Çocuk seçici üst formu bırakmaz. Vazgeçme sadece bekleyen değişikliği atar ve çıkışı bir kez sürdürür. Mevcut OSM yerel otomatik kaydı devam eder; onaylanmış kayıt geri alınmaz ve atılan metin yeniden diriltilmez. Geri eylemi otomatik kaydetme/gönderme yapmaz.
 - **Veri ve uyumluluk:** Yeni günlük/yedek biçimi veya küresel taslak deposu planlanmıyor. Telefon **0.11.2 / code 24**; Wear OS **0.6.1 / code 11** ve iletişim **v6** aynı kalacak.
 
-### Kanıt durumu
+### Kaynak ve doğrulama kaydı
 
-APP-02 kaynak adayı 8b2160e06cc6fa5c5b3b141c50e070242e51afe7 üzerinde 934 birim testi geçti, başarısızlık/hata/atlama olmadı; lint 0 hata/ölümcül hata ve 95 uyarı verdi. Aynı aşamada Debug ve ayrı QA ürün APK’ları üretildi. APP-03 kaynak adayı 4656b3492a8d2ff469e0043c0f28ad03c44ef7d6 yalnız AndroidTest kaynaklı planlayıcı çağrısına adlandırılmış argüman ekledi; APP-02 ile APP-03 arasında ürün/derleme ve birim-test girdileri aynı kaldı. Eksik AndroidTest APK’sı üretildi ve üç APK’nın gerçek manifest/imza doğrulamaları geçti; Debug ve QA ürün APK’larının SHA-256 değerleri değişmedi. Birim/lint sonuçları APP-03 üzerinde yeniden çalıştırılmadı; değişmeyen ilgili girdiler için önceki sonuç olarak kullanıldı. AndroidTest APK’sı cihazda çalıştırılmadı. USB envanterinde 0 cihaz bulundu; native kontrol HOLD. Bu Debug/QA paketleri Release, kişisel yapılandırma veya yayın kanıtı değildir. Adayın açık olumlu güvenlik raporu, cihaz kabulü ve yayın kabulü henüz yoktur. Önceki 46 dar host kontrolü yalnız kendi erken koşusuna aittir. 0.11.1’deki b3 (860 testten 856 geçti, 4 kaldı) ve 7ade5c9 üzerindeki dört düzeltme kontrolü ile lint (0 hata/ölümcül hata, 92 uyarı) tarihsel kanıttır; 0.11.2 sonucu değildir. README görselleri 0.9/0.10 döneminden tarihsel örneklerdir.
+APP-02 kaynak adayı 8b2160e06cc6fa5c5b3b141c50e070242e51afe7 üzerinde 934 birim testi geçti (0 başarısızlık, 0 hata, 0 atlama); lint 0 hata/ölümcül hata ve 95 uyarı verdi, Debug ve QA ürün APK’ları üretildi. APP-03 doğrulama kaynağı 4656b3492a8d2ff469e0043c0f28ad03c44ef7d6 AndroidTest kaynaklı tek planlayıcı çağrısı düzeltmesini içerir. APP-02 ile APP-03 arasında ürün, derleme ve birim-test girdileri aynı kaldığından birim/lint sonuçları tekrar çalıştırılmadan kullanıldı. AndroidTest APK’sı üretildi; üç APK’nın manifest/imza kontrolleri geçti ve Debug/QA ürün APK’larının SHA-256 değerleri değişmedi. Bu sonuçlar yerel Debug/QA kaynak doğrulama zincirini kaydeder; Release APK’sı veya cihazda AndroidTest çalıştırması anlamına gelmez. Dağıtım durumu, dosyalar ve doğrulama kapsamı için ilgili [GitHub Releases/sürüm notları kaydını](https://github.com/osmanatayozturk/iz-android/releases) esas alın. 0.11.1’deki b3 (860 testten 856 geçti, 4 kaldı) ve 7ade5c9 üzerindeki dört düzeltme kontrolü ile lint (0 hata/ölümcül hata, 92 uyarı) tarihsel kanıttır. README görselleri 0.9/0.10 döneminden tarihsel örneklerdir.
 
 ## Telefon 0.11.0 / code 22 — motosiklet sürüşü
 
