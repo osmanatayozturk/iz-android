@@ -85,12 +85,13 @@ fun WeatherRouteMap(
     navigationControlsHorizontal: Boolean = false,
     drivingCamera: DriveCameraInput? = null,
     cameraViewportReady: Boolean = true,
+    navigationControlsReady: Boolean = true,
     overlay: @Composable BoxScope.() -> Unit = {},
 ) {
     ExpandableMap(modifier = modifier, title = title, expandable = expandable) { mapModifier ->
         Box(mapModifier) {
             WeatherRouteMapContent(route, assessment, Modifier.fillMaxSize(), onSampleClick,
-                onMapLongClick, stops, liveCoordinate, recordedPoints, gpsStale, singleStopLabel, cameraIdentity, navigationLayout, members, onLocate, attributionBottomInset, cameraViewportInsets, navigationControlsTopInset, navigationControlsHorizontal, drivingCamera, cameraViewportReady)
+                onMapLongClick, stops, liveCoordinate, recordedPoints, gpsStale, singleStopLabel, cameraIdentity, navigationLayout, members, onLocate, attributionBottomInset, cameraViewportInsets, navigationControlsTopInset, navigationControlsHorizontal, drivingCamera, cameraViewportReady, navigationControlsReady)
             overlay()
         }
     }
@@ -118,6 +119,7 @@ private fun WeatherRouteMapContent(
     navigationControlsHorizontal: Boolean,
     drivingCamera: DriveCameraInput?,
     cameraViewportReady: Boolean,
+    navigationControlsReady: Boolean,
 ) {
     val context = LocalContext.current
     val tileUrl = remember(context) { OsmServiceSettings(context).read().tileUrl }
@@ -271,9 +273,11 @@ private fun WeatherRouteMapContent(
                 }
             }
             }
-            val controlsModifier = Modifier.align(Alignment.TopEnd).padding(top = navigationControlsTopInset, end = 12.dp)
-            if (navigationControlsHorizontal) Row(controlsModifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) { controls() }
-            else Column(controlsModifier, verticalArrangement = Arrangement.spacedBy(8.dp)) { controls() }
+            if (navigationControlsReady) {
+                val controlsModifier = Modifier.align(Alignment.TopEnd).padding(top = navigationControlsTopInset, end = 12.dp)
+                if (navigationControlsHorizontal) Row(controlsModifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) { controls() }
+                else Column(controlsModifier, verticalArrangement = Arrangement.spacedBy(8.dp)) { controls() }
+            }
         } else Column(Modifier.align(Alignment.BottomStart).padding(start = 8.dp, bottom = 30.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surface.copy(alpha = .95f)) {

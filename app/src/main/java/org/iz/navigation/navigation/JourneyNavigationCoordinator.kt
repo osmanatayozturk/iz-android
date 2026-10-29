@@ -587,7 +587,11 @@ class JourneyNavigationCoordinator(
             if (before.sessionId != null) return
             val observationEpoch = epoch
             val trip = runtime.activeJourney()?.takeIf { it.id == id } ?: return
-            if (observationEpoch != epoch || runtime.recordingId() != id) return
+            // This lookup may have started before a finish command acquired ownership.
+            if (finishingSession) commands.withLock { }
+            val current = mutableState.value
+            if (observationEpoch != epoch || id in retiredJourneys || current.sessionId != null ||
+                (current.journey != null && current.journey.id != id) || runtime.recordingId() != id) return
             clearRoute()
             publish(mutableState.value.copy(journey = trip, sessionId = id, sessionTransport = trip.transport, recording = runtime.recordingId() == id))
             before = mutableState.value

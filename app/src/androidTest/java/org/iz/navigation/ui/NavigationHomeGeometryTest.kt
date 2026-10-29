@@ -270,6 +270,45 @@ class NavigationHomeGeometryTest {
         assertControlTop()
     }
 
+    @Test fun uxShortcutControlsStayFixedOnFirstFrameOfNavigationTextUpdates() {
+        val nav = mutableStateOf(uxGuided(true).copy(
+            progress = NavigationProgress(0.0, 30.0, 200.0, 150.0, -1, 0.0),
+            roadSpeed = RoadSpeedState(ownKmh = 5.0, visible = true)))
+        val planner = mutableStateOf(false)
+        val shortcuts = mutableStateOf(listOf(org.iz.navigation.data.DestinationShortcut(
+            org.iz.navigation.data.DestinationShortcutKind.HOME,
+            org.iz.navigation.data.Place(id = "ux-steady-home", name = "QA target", latitude = 41.0, longitude = 29.0))))
+        renderUxHeader(nav, planner, shortcuts)
+        val mapTop = compose.onNodeWithTag("navigation-home-map").fetchSemanticsNode().boundsInRoot.top
+        val row = compose.onNodeWithTag("destination-shortcut-HOME").fetchSemanticsNode().boundsInRoot
+        val expectedTop = mapTop + 24f * uxDensity + row.height + 8f * uxDensity
+        fun assertSteadyControls() {
+            compose.onNodeWithTag("open-navigation").assertDoesNotExist()
+            val control = compose.onNodeWithTag("directions-recenter").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            assertEquals("Unchanged shortcut bounds must survive the FIRST navigation-update frame",
+                expectedTop.toDouble(), control.top.toDouble(), 2.0)
+            assertTrue("Controls must not overlap the shortcut", control.top >= row.bottom)
+        }
+        assertSteadyControls()
+        compose.mainClock.autoAdvance = false
+        try {
+            val initial = nav.value
+            for (next in listOf(
+                initial.copy(progress = initial.progress?.copy(nextManeuverDistanceMeters = 140.0)),
+                initial.copy(roadSpeed = RoadSpeedState(ownKmh = 25.0, visible = true)),
+                initial.copy(message = "QA operational warning"))) {
+                compose.runOnUiThread { nav.value = next }
+                // One frame commits exactly one recomposition/layout. Do not settle away a bad first frame.
+                compose.mainClock.advanceTimeByFrame()
+                assertSteadyControls()
+                repeat(2) { compose.mainClock.advanceTimeByFrame(); assertSteadyControls() }
+            }
+        } finally {
+            compose.mainClock.autoAdvance = true
+            compose.waitForIdle()
+        }
+    }
+
     @Test fun uxEndingGuidanceRestoresHeaderWhileRecordingAndSessionContinue() {
         val nav = mutableStateOf(uxGuided(true))
         val planner = mutableStateOf(false)
