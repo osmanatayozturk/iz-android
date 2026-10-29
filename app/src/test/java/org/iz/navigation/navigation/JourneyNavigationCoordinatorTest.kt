@@ -837,6 +837,28 @@ class JourneyNavigationCoordinatorTest {
         assertNull(runtime.journeys.value.single().endedAt)
     }
 
+    @Test fun unattachedFinishDoesNotAdoptInFlightLookupAfterDelayedRecorderStop() = runTest {
+        val runtime = Runtime()
+        val controller = JourneyNavigationCoordinator(runtime, null, {1000L}, backgroundScope)
+        runCurrent()
+        runtime.authoritativeJourney = Journey(id = "orphan", startedAt = 1000)
+        runtime.running = "orphan"
+        val lookupEntered = CompletableDeferred<Unit>(); val releaseLookup = CompletableDeferred<Unit>()
+        runtime.onActive = { call ->
+            if (call == 1) { lookupEntered.complete(Unit); releaseLookup.await() }
+        }
+        controller.onAcceptedLocation("orphan", NavigationFix(route().stops.first().coordinate, 1000, 5f))
+        lookupEntered.await()
+        assertTrue(controller.finishUnattachedJourney("orphan"))
+        assertEquals(1, runtime.finished)
+        // Android stopService returns before the recorder clears its running identity.
+        runtime.running = "orphan"
+        releaseLookup.complete(Unit)
+        runCurrent()
+        assertNull(controller.state.value.sessionId)
+        assertNull(controller.state.value.journey)
+    }
+
     @Test fun unattachedFinishDoesNotReattachQueuedFixAfterClosure() = runTest {
         val runtime = Runtime()
         val controller = JourneyNavigationCoordinator(runtime, null, {1000L}, backgroundScope)

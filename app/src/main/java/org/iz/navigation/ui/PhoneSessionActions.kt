@@ -71,3 +71,34 @@ internal val PhoneSessionEndRequest.explanation: String get() = buildList {
         }
     }
 }.joinToString(" ")
+
+/** Captures the diary row and the exact shared session whose consequences the user will see. */
+internal data class DiarySessionEndTarget(val journeyId: String, val startedAt: Long,
+    val status: org.iz.navigation.data.JourneyStatus, val snapshot: NavigationStopSnapshot?) {
+    fun matches(journey: org.iz.navigation.data.Journey?, nav: NavigationState): Boolean {
+        if (journey == null || journey.id != journeyId || journey.startedAt != startedAt ||
+            journey.status != status || journey.endedAt != null) return false
+        return if (snapshot != null) snapshot == NavigationStopSnapshot.from(nav) &&
+            nav.journey?.id == journeyId && nav.journey.startedAt == startedAt && !nav.simulation
+        else nav.sessionId == null && !nav.guidance && !nav.recording && !nav.locationActive && !nav.simulation &&
+            (nav.journey == null || nav.journey.id == journeyId)
+    }
+}
+
+internal fun diarySessionEndTarget(journey: org.iz.navigation.data.Journey, nav: NavigationState): DiarySessionEndTarget? {
+    val snapshot = NavigationStopSnapshot.from(nav)
+    val target = DiarySessionEndTarget(journey.id, journey.startedAt, journey.status, snapshot)
+    return target.takeIf { it.matches(journey, nav) }
+}
+
+internal suspend fun dispatchDiarySessionEnd(target: DiarySessionEndTarget, request: PhoneSessionEndRequest?,
+    currentJourney: org.iz.navigation.data.Journey?, current: NavigationState, locked: Boolean,
+    stopGuidance: suspend (NavigationStopSnapshot) -> Boolean,
+    stopRecording: suspend (NavigationStopSnapshot) -> Boolean,
+    finish: suspend (NavigationStopSnapshot) -> Boolean,
+    finishUnattached: suspend (String) -> Boolean): Boolean {
+    if (locked || !target.matches(currentJourney, current)) return false
+    if (target.snapshot == null) return request == null && finishUnattached(target.journeyId)
+    if (request == null || request.snapshot != target.snapshot) return false
+    return dispatchPhoneSessionEnd(request, current, false, stopGuidance, stopRecording, finish)
+}

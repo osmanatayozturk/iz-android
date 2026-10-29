@@ -89,4 +89,34 @@ class PhoneSessionConfirmationTest {
         compose.onNodeWithTag("cancel-session-end").assertIsEnabled().performClick()
         compose.runOnIdle { assertEquals(0, confirms) }
     }
+    @Test fun diaryChoicesKeepGuidanceRecordingAndAllSeparateAndCancelHasNoDispatch() {
+        val visible = mutableStateOf(true)
+        val target = requireNotNull(diarySessionEndTarget(requireNotNull(nav.journey), nav))
+        var confirms = 0
+        uxHost.setContent { IzTheme {
+            if (visible.value) DiarySessionEndActions(target, nav.journey, nav, false,
+                { visible.value = false }, { _, _ -> confirms++ })
+        } }
+        PhoneSessionEnd.entries.forEach { compose.onNodeWithTag("diary-end-choice-${it.name}").assertIsDisplayed() }
+        compose.onNodeWithTag("diary-end-choice-GUIDANCE").performClick()
+        compose.onNodeWithText("Yol tarifi bitecek. Yolculuk kaydı devam edecek. Grup paylaşımı devam edecek.").assertIsDisplayed()
+        compose.onNodeWithTag("cancel-session-end").performClick()
+        compose.runOnIdle { assertEquals(0, confirms) }
+    }
+
+    @Test fun diaryChoiceConfirmationRejectsReplacementBeforeDispatch() {
+        val current = mutableStateOf(nav)
+        val visible = mutableStateOf(true)
+        val target = requireNotNull(diarySessionEndTarget(requireNotNull(nav.journey), nav))
+        var confirms = 0
+        uxHost.setContent { IzTheme {
+            if (visible.value) DiarySessionEndActions(target, current.value.journey, current.value, false,
+                { visible.value = false }, { _, _ -> confirms++ })
+        } }
+        compose.onNodeWithTag("diary-end-choice-RECORDING").performClick()
+        compose.onNodeWithTag("confirm-session-end").assertIsEnabled()
+        compose.runOnIdle { current.value = nav.copy(sessionId = "replacement") }
+        compose.onNodeWithTag("confirm-session-end").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(0, confirms) }
+    }
 }

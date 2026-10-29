@@ -499,8 +499,25 @@ class JourneyNavigationCoordinator(
         } finally { finishingSession = false }
     }
 
-    /** Minimal RED scaffold; guarded implementation follows the observed regression. */
-    suspend fun finishUnattachedJourney(expectedJourneyId: String): Boolean = false
+    /** Finish only the captured diary target while no navigation session owns it. */
+    suspend fun finishUnattachedJourney(expectedJourneyId: String): Boolean = commands.withLock {
+        val token = epoch
+        fun stillUnattached(): Boolean {
+            val current = mutableState.value
+            return token == epoch && !trackStartPending && current.sessionId == null &&
+                !current.simulation && !current.guidance && current.route == null && current.trackFollow == null &&
+                (current.journey == null || current.journey.id == expectedJourneyId)
+        }
+        if (!stillUnattached()) return@withLock false
+        finishingSession = true
+        try {
+            if (!runtime.finishUnattached(expectedJourneyId, ::stillUnattached)) return@withLock false
+            retireJourney(expectedJourneyId)
+            val current = mutableState.value
+            if (current.sessionId == null && current.journey?.id == expectedJourneyId) endLocalSession()
+            true
+        } finally { finishingSession = false }
+    }
 
     suspend fun finishJourney(expectedJourneyId: String) = commands.withLock {
         val before = mutableState.value
@@ -561,7 +578,9 @@ class JourneyNavigationCoordinator(
     }
 
     private suspend fun accept(id: String, fix: NavigationFix) {
-        if (id in retiredJourneys && id != mutableState.value.sessionId) return
+        val acceptedEpoch = epoch
+        if (finishingSession) commands.withLock { }
+        if (acceptedEpoch != epoch || id in retiredJourneys && id != mutableState.value.sessionId) return
         val now = clock()
         var before = mutableState.value
         if (!before.simulation && before.sessionId != id && before.journey?.id != id) {

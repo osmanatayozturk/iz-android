@@ -161,6 +161,11 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     var includeHealthBackup by rememberSaveable { mutableStateOf(false) }
     val healthManager = remember { (context.applicationContext as org.iz.navigation.IzApplication).healthManager }
     val active = state.active(now)
+    var pendingDiaryEnd by remember { mutableStateOf<DiarySessionEndTarget?>(null) }
+    var diaryEndBusy by remember { mutableStateOf(false) }
+    val diaryEndScope = rememberCoroutineScope()
+    val diaryEndWork = remember(diaryEndScope, vm) { PhoneNavigationWork(diaryEndScope,
+        { diaryEndBusy = it }, { vm.message(it.message ?: "İşlem tamamlanamadı. Yeniden deneyebilirsin.") }) }
 
     fun openDirections(stops: List<RouteStop>? = null, transport: Transport? = active?.transport,
         plan: SavedWeatherPlan? = null) {
@@ -442,12 +447,13 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                 )
                 journey != null -> JourneyDetail(journey, state, now,
                     onEdit = { if (journey.status == JourneyStatus.TEMPORARY) transportAction = TransportAction(journey.id) else editJourney = journey }, onConfirm = { transportAction = TransportAction(journey.id) },
-                    onFinish = { vm.execute("Yolculuk tamamlandı.") {
-                        val navigation = (context.applicationContext as org.iz.navigation.IzApplication).navigation
-                        val session = navigation.state.value
-                        if (session.journey?.id == journey.id && session.sessionId != null) navigation.finishSession(session.sessionId)
-                        else vm.tracker.finish(journey.id)
-                    } },
+                    onFinish = {
+                        if (!diaryEndBusy && !backupBusy) {
+                            val target = diarySessionEndTarget(journey, navigation.state.value)
+                            if (target == null) vm.message("Yolculuk veya oturum değişti. Yeniden kontrol et.")
+                            else pendingDiaryEnd = target
+                        }
+                    },
                     onSwitch = { transportAction = TransportAction(split = true) },
                     onAddPlace = { openAddPlace(journey.id) }, onPhoto = { photoTarget = PhotoTarget(journeyId = journey.id) },
                     onVisit = { selectedPlace = it.placeId; selectedJourney = null },
@@ -510,6 +516,27 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
             TextButton({ open { tab = 4 } }, Modifier.fillMaxWidth().testTag("menu-settings")) { Text("Ayarlar") }
         }
     }, confirmButton = { TextButton({ menuOpen = false }) { Text("Haritaya dön") } })
+    pendingDiaryEnd?.let { target ->
+        DiarySessionEndActions(target, state.journeys.firstOrNull { it.id == target.journeyId }, navigationState,
+            diaryEndBusy || backupBusy, onDismiss = { pendingDiaryEnd = null }, onConfirm = { captured, request ->
+                if (!diaryEndBusy && !backupBusy) {
+                    pendingDiaryEnd = null
+                    diaryEndWork.mutate {
+                        val currentJourney = vm.repository.getJourney(captured.journeyId)
+                        val accepted = dispatchDiarySessionEnd(captured, request, currentJourney, navigation.state.value,
+                            backupBusy, stopGuidance = { navigation.stopGuidance(it) },
+                            stopRecording = { navigation.stopRecording(it) }, finish = { navigation.finishSession(it) },
+                            finishUnattached = { navigation.finishUnattachedJourney(it) })
+                        if (!accepted) vm.message("Yolculuk veya oturum değişti. Yeniden kontrol et.")
+                        else vm.message(when (request?.action) {
+                            PhoneSessionEnd.GUIDANCE -> "Yol tarifi bitirildi."
+                            PhoneSessionEnd.ALL -> "Yolculuk oturumu bitirildi."
+                            else -> "Yolculuk kaydı bitirildi."
+                        })
+                    }
+                }
+            })
+    }
     if (libraryOpen) TravelLibraryScreen(repository = library, onDismiss = { libraryOpen = false },
         onOpenPlan = { plan ->
             openDirections(plan.stops, plan.transport, SavedWeatherPlan(plan.stops, System.currentTimeMillis(),

@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
 import org.iz.navigation.data.DiaryRepository
+import org.iz.navigation.data.Journey
 import org.iz.navigation.data.JourneyStatus
 import org.iz.navigation.data.Transport
 import kotlinx.coroutines.sync.withLock
@@ -72,6 +73,21 @@ class TrackingController(context: Context) {
     suspend fun finish(id: String, preserveSession: Boolean = false) = TrackingCoordinator.mutex.withLock {
         TrackingCoordinator.clearPendingManualStart(id)
         val journey = repository.getJourney(id) ?: return@withLock
+        finishLocked(journey, preserveSession)
+    }
+
+    /** Recheck the active diary row after acquiring the same mutex as recorder starts. */
+    suspend fun finishIfUnattached(id: String, stillUnattached: () -> Boolean): Boolean = TrackingCoordinator.mutex.withLock {
+        if (!stillUnattached()) return@withLock false
+        val journey = repository.activeJourney()
+        if (journey == null || journey.id != id || journey.endedAt != null || !stillUnattached()) return@withLock false
+        TrackingCoordinator.clearPendingManualStart(id)
+        finishLocked(journey, preserveSession = false)
+        true
+    }
+
+    private suspend fun finishLocked(journey: Journey, preserveSession: Boolean) {
+        val id = journey.id
         if (journey.endedAt == null) {
             repository.finishJourney(id)
             settings.suppressedActivity = settings.currentActivity

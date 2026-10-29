@@ -134,4 +134,63 @@ class PhoneSessionActionsTest {
         }
     }
 
+    @Test fun diaryTargetsOnlyItsMatchingSharedSessionOrUnattachedActiveJourney() {
+        val trip = requireNotNull(active.journey)
+        assertEquals(org.iz.navigation.navigation.NavigationStopSnapshot.from(active), diarySessionEndTarget(trip, active)?.snapshot)
+        assertNull(diarySessionEndTarget(trip.copy(id = "other"), active))
+        assertNull(diarySessionEndTarget(trip.copy(endedAt = 10), active))
+        assertNull(diarySessionEndTarget(trip, active.copy(simulation = true)))
+        val unattached = requireNotNull(diarySessionEndTarget(trip, NavigationState()))
+        assertNull(unattached.snapshot)
+        assertTrue(unattached.matches(trip, NavigationState(journey = trip)))
+        assertNull(diarySessionEndTarget(trip, NavigationState(sessionId = "unrelated", guidance = true)))
+    }
+
+    @Test fun diarySharedChoiceDispatchesOnlyCapturedActionAndNeverFallback() = runTest {
+        val trip = requireNotNull(active.journey)
+        val target = requireNotNull(diarySessionEndTarget(trip, active))
+        PhoneSessionEnd.entries.forEach { action ->
+            val request = requireNotNull(phoneSessionEndRequest(action, active))
+            val calls = mutableListOf<String>()
+            assertTrue(dispatchDiarySessionEnd(target, request, trip, active, false,
+                { calls += "guidance"; true }, { calls += "recording"; true }, { calls += "all"; true },
+                { error("Shared session must never use unattached fallback") }))
+            assertEquals(listOf(when (action) { PhoneSessionEnd.GUIDANCE -> "guidance"; PhoneSessionEnd.RECORDING -> "recording"; PhoneSessionEnd.ALL -> "all" }), calls)
+        }
+    }
+
+    @Test fun diaryUnattachedConfirmationUsesGuardedIdCommandAndPropagatesRejection() = runTest {
+        val trip = requireNotNull(active.journey)
+        val target = requireNotNull(diarySessionEndTarget(trip, NavigationState()))
+        var calls = 0
+        for (accepted in listOf(false, true)) {
+            assertEquals(accepted, dispatchDiarySessionEnd(target, null, trip, NavigationState(), false,
+                { error("No guidance") }, { error("No recording session") }, { error("No all-session finish") },
+                { id -> assertEquals(trip.id, id); calls++; accepted }))
+        }
+        assertEquals(2, calls)
+    }
+
+    @Test fun staleDiaryConfirmationCannotMutateReplacementSessionOrJourney() = runTest {
+        val trip = requireNotNull(active.journey)
+        val shared = requireNotNull(diarySessionEndTarget(trip, active))
+        val request = requireNotNull(phoneSessionEndRequest(PhoneSessionEnd.ALL, active))
+        val unattached = requireNotNull(diarySessionEndTarget(trip, NavigationState()))
+        suspend fun rejected(target: DiarySessionEndTarget, selected: PhoneSessionEndRequest?, row: Journey?, nav: NavigationState, locked: Boolean = false) {
+            assertFalse(dispatchDiarySessionEnd(target, selected, row, nav, locked,
+                { error("Stale guidance") }, { error("Stale recording") }, { error("Stale all") }, { error("Stale fallback") }))
+        }
+        for (row in listOf(null, trip.copy(id = "replacement"), trip.copy(startedAt = trip.startedAt + 1), trip.copy(endedAt = 10),
+            trip.copy(status = org.iz.navigation.data.JourneyStatus.TEMPORARY))) {
+            rejected(shared, request, row, active)
+            rejected(unattached, null, row, NavigationState())
+        }
+        for (nav in listOf(active.copy(sessionId = "replacement"), active.copy(routeRevision = 99), active.copy(recording = false))) {
+            rejected(shared, request, trip, nav)
+        }
+        rejected(unattached, null, trip, active)
+        rejected(shared, null, trip, active)
+        rejected(unattached, request, trip, NavigationState())
+        rejected(shared, request, trip, active, true)
+    }
 }

@@ -419,13 +419,21 @@ internal fun PhoneSessionEndConfirmation(
     val currentRequest = request.matches(current)
     LaunchedEffect(currentRequest) { if (!currentRequest) onDismiss() }
     if (!currentRequest) return
+    PhoneEndConfirmation(request.title, request.explanation, request.action.label, locked, onDismiss,
+        onConfirm = { if (request.matches(current)) onConfirm(request) })
+}
+
+/** Common consequence/cancel UI; callers retain their own fresh identity check before dispatch. */
+@Composable
+internal fun PhoneEndConfirmation(title: String, explanation: String, confirmLabel: String, locked: Boolean,
+    onDismiss: () -> Unit, onConfirm: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(request.title) },
-        text = { Column(Modifier.verticalScroll(rememberScrollState())) { Text(request.explanation) } },
+        title = { Text(title) },
+        text = { Column(Modifier.verticalScroll(rememberScrollState())) { Text(explanation) } },
         confirmButton = {
-            TextButton(onClick = { if (!locked && request.matches(current)) onConfirm(request) }, enabled = !locked,
-                modifier = Modifier.testTag("confirm-session-end")) { Text(request.action.label) }
+            TextButton(onClick = { if (!locked) onConfirm() }, enabled = !locked,
+                modifier = Modifier.testTag("confirm-session-end")) { Text(confirmLabel) }
         },
         dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.testTag("cancel-session-end")) { Text("Vazgeç") } },
     )

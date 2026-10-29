@@ -36,6 +36,8 @@ internal class AndroidNavigationRuntime(private val context: Context) : Navigati
     override suspend fun start(transport: Transport, stillCurrent: () -> Boolean) = tracker.startManual(transport, stillCurrent)
     override suspend fun confirm(id: String, transport: Transport) { tracker.confirm(id, transport) }
     override suspend fun finish(id: String) { tracker.finish(id) }
+    override suspend fun finishUnattached(id: String, stillUnattached: () -> Boolean) =
+        tracker.finishIfUnattached(id, stillUnattached)
     override suspend fun stopRecording(id: String) { tracker.finish(id, preserveSession = true) }
     override suspend fun discardCandidate(id: String) {
         tracker.reject(id)

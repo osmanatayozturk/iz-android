@@ -72,15 +72,36 @@ internal fun NavigationHomeContent(
     val textMeasurer = rememberTextMeasurer()
     val baseShowBrand = !live && !showPlanner
     val showShortcuts = !showPlanner && shortcuts.isNotEmpty()
-    var shortcutHeight by remember(density) { mutableStateOf(0.dp) }
-    val shortcutOffset = if (showShortcuts) shortcutHeight + 8.dp else 0.dp
-    var headerHeight by remember(baseShowBrand, density) { mutableStateOf(if (baseShowBrand) 144.dp else 80.dp) }
-    var panelsHeight by remember(baseShowBrand, density) { mutableStateOf(if (baseShowBrand) 144.dp else 260.dp) }
+    val showDestinationHeader = !nav.guidance
+    var shortcutMeasurement by remember { mutableStateOf<Pair<List<Any?>, androidx.compose.ui.unit.Dp>?>(null) }
+    var headerMeasurement by remember { mutableStateOf<Pair<List<Any?>, androidx.compose.ui.unit.Dp>?>(null) }
+    var panelsMeasurement by remember { mutableStateOf<Pair<List<Any?>, androidx.compose.ui.unit.Dp>?>(null) }
     BoxWithConstraints(Modifier.fillMaxSize().testTag("navigation-home")) {
+        // Bounds from an earlier header/panel/viewport must never drive this frame's camera.
+        // GPS coordinates alone do not invalidate geometry or remount the native map.
+        val speedText = roadSpeedPresentation(nav.roadSpeed)
+        val layoutKey = listOf(maxWidth, maxHeight, density.density, density.fontScale, showPlanner,
+            showDestinationHeader, live, nav.guidance, nav.recording, nav.simulation, nav.gpsStale,
+            nav.locationActive, nav.sessionTransport, nav.message, ui.message, weatherLabel, current == null, ui.locating,
+            if (nav.guidance) navigationInstruction(nav) else null,
+            if (nav.guidance) nav.progress?.nextManeuverDistanceMeters else null,
+            nav.roadSpeed.visible, speedText.ownText, speedText.limitText, speedText.sourceText,
+            if (showShortcuts) shortcuts.map { it.kind to it.place.name } else emptyList())
+        val shortcutHeight = shortcutMeasurement?.takeIf { it.first == layoutKey }?.second ?: 0.dp
+        val shortcutOffset = if (showShortcuts) shortcutHeight + 8.dp else 0.dp
+        val headerHeight = if (!showDestinationHeader) 0.dp else
+            headerMeasurement?.takeIf { it.first == layoutKey }?.second ?: if (baseShowBrand) 144.dp else 80.dp
+
         val showBrand = baseShowBrand && !(showShortcuts && maxHeight < 400.dp)
         val compact = maxHeight - shortcutOffset < 640.dp
         val shortIdle = baseShowBrand && maxHeight - shortcutOffset < 400.dp
         val horizontalMapControls = baseShowBrand && headerHeight + shortcutOffset + 24.dp + 104.dp > maxHeight - 92.dp
+        // Compact branches depend on measured header/shortcut extents as well as input data.
+        val panelsKey = layoutKey + listOf(showBrand, compact, shortIdle, headerHeight, shortcutOffset)
+        val panelsHeight = panelsMeasurement?.takeIf { it.first == panelsKey }?.second ?: 0.dp
+        val viewportReady = panelsMeasurement?.first == panelsKey &&
+            (!showDestinationHeader || headerMeasurement?.first == layoutKey) &&
+            (!showShortcuts || shortcutMeasurement?.first == layoutKey)
         val attributionWidth = with(density) {
             textMeasurer.measure("© OpenStreetMap contributors", style = MaterialTheme.typography.labelSmall).size.width.toDp()
         } + 20.dp
@@ -90,6 +111,7 @@ internal fun NavigationHomeContent(
             recordedPoints = presentation.trail, gpsStale = live && nav.gpsStale,
             cameraIdentity = presentation.cameraIdentity,
             drivingCamera = phoneDriveCameraInput(nav, showPlanner, android.os.SystemClock.elapsedRealtime()),
+            cameraViewportReady = viewportReady,
             navigationLayout = true, members = members, onLocate = onLocate, onMapLongClick = onPin,
             navigationControlsTopInset = headerHeight + shortcutOffset + 24.dp,
             navigationControlsHorizontal = horizontalMapControls,
@@ -97,11 +119,11 @@ internal fun NavigationHomeContent(
             cameraViewportInsets = PaddingValues(start = 28.dp, top = panelsHeight + 24.dp, end = 84.dp,
                 bottom = if (showPlanner) maxHeight * .64f + 24.dp else 112.dp))
         Column(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(12.dp)
-            .onSizeChanged { panelsHeight = with(density) { it.height.toDp() } }, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (showShortcuts) Box(Modifier.fillMaxWidth().onSizeChanged { shortcutHeight = with(density) { it.height.toDp() } }) {
+            .onSizeChanged { panelsMeasurement = panelsKey to with(density) { it.height.toDp() } }, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (showShortcuts) Box(Modifier.fillMaxWidth().onSizeChanged { shortcutMeasurement = layoutKey to with(density) { it.height.toDp() } }) {
                 ShortcutDestinationsRow(shortcuts, !ui.busy, onShortcut)
             }
-            Column(Modifier.fillMaxWidth().onSizeChanged { headerHeight = with(density) { it.height.toDp() } },
+            if (showDestinationHeader) Column(Modifier.fillMaxWidth().onSizeChanged { headerMeasurement = layoutKey to with(density) { it.height.toDp() } },
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (showBrand) HomeBrand()
                 Surface(onClick = onSearch, modifier = Modifier.fillMaxWidth().testTag("open-navigation"),
