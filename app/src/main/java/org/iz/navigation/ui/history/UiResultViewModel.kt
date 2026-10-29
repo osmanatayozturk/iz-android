@@ -17,6 +17,7 @@ internal sealed interface UiResultPayload {
 /** Activity UI lifetime only. Neither request fences nor payloads use SavedState/History/database. */
 internal class UiResultViewModel : ViewModel() {
     val requests = UiResultRequests()
+    val registrations = UiOwnerRegistrations()
     val deliveredCommunityTargets = mutableSetOf<String>()
     val backupBusy = mutableStateOf(false)
     val libraryBusy = mutableStateOf(false)

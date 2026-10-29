@@ -18,7 +18,7 @@ class UiAsyncOwnerTest {
         guard.updateOwned(Any(), live, currentState = { live }, discardUnsaved = {})
         live = live.copy(editRevision = 3)
         val result = requireNotNull(guard.captureAsyncOwner("page"))
-        assertTrue("Capture must read actual revision3, not last composition revision2", result.matches("page", live))
+        assertTrue("Capture must read actual revision3, not last composition revision2", guard.acceptsAsyncOwner(result, "page"))
     }
     @Test fun guardRejectsResultAfterLiveAccountOrRevisionChangeWithoutComposition() {
         for (changeAccount in listOf(false, true)) {

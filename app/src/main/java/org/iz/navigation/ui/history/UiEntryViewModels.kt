@@ -13,13 +13,19 @@ internal class UiEntryViewModels : ViewModel() {
         var onRetain: ((Set<String>) -> Unit)? = null
     }
     private val owners = mutableMapOf<Key, Owner>()
+    private val savedOwners = UiEntrySavedStateOwners()
+    fun attachSavedStateHost(host: androidx.savedstate.SavedStateRegistryOwner) = savedOwners.attach(host)
+    fun detachSavedStateHost(host: androidx.savedstate.SavedStateRegistryOwner) = savedOwners.detach(host)
+    fun <T : ViewModel> getSavedState(feature: String, entry: String, type: Class<T>, application: android.app.Application,
+        host: androidx.savedstate.SavedStateRegistryOwner): T = savedOwners.get(feature, entry, type, application, host)
     fun <T : ViewModel> get(feature: String, entry: String, type: Class<T>, factory: ViewModelProvider.Factory): T =
         ViewModelProvider(owners.getOrPut(Key(feature, entry)) { Owner() }, factory)[type]
     fun onRetain(feature: String, entry: String, action: (Set<String>) -> Unit) { owners[Key(feature, entry)]?.onRetain = action }
     fun retain(entries: Set<String>) {
+        savedOwners.retain(entries)
         val removed = owners.keys.filter { it.entry !in entries }
         removed.forEach { owners.remove(it)?.viewModelStore?.clear() }
         owners.values.forEach { it.onRetain?.invoke(entries) }
     }
-    override fun onCleared() { owners.values.forEach { it.viewModelStore.clear() }; owners.clear() }
+    override fun onCleared() { savedOwners.clear(); owners.values.forEach { it.viewModelStore.clear() }; owners.clear() }
 }

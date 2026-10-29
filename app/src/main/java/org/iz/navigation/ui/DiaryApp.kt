@@ -94,6 +94,12 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     val context = LocalContext.current
     val resultOwner: UiResultViewModel = viewModel()
     val featureOwners: UiEntryViewModels = viewModel()
+    val savedStateHost = context.findActivity() as? androidx.savedstate.SavedStateRegistryOwner
+        ?: error("Phone entry state requires its Activity saved-state owner")
+    DisposableEffect(featureOwners, savedStateHost) {
+        featureOwners.attachSavedStateHost(savedStateHost)
+        onDispose { featureOwners.detachSavedStateHost(savedStateHost) }
+    }
     val featureFactory = remember(context.applicationContext) { ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as android.app.Application) }
     val state by vm.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
@@ -114,6 +120,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
         (knownBrowseKeys - retained).forEach { browseHolder.removeState(it); browseHolder.removeState("list/$it"); browseHolder.removeState("gpx/$it") }
         knownBrowseKeys.clear(); knownBrowseKeys.addAll(retained)
         featureOwners.retain(retained)
+        resultOwner.registrations.retainEntries(retained)
         resultOwner.deliveredCommunityTargets.retainAll(retained)
     }
     var tab by navigator.tab()
@@ -461,7 +468,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     BackHandler(enabled = entries.size > 1, onBack = ::returnToParent)
     LaunchedEffect(groupState.screenRequested) { if (groupState.screenRequested) groupPage = true }
 
-    CompositionLocalProvider(LocalUiExitGuard provides exitGuard, LocalUiEntryKey provides uiEntry.key, LocalUiHistory provides history, LocalUiVoiceSettingsAction provides openVoiceSettings, LocalUiDirectionsPermissions provides openDirectionsPermissions,
+    CompositionLocalProvider(LocalUiOwnerRegistrations provides resultOwner.registrations, LocalUiExitGuard provides exitGuard, LocalUiEntryKey provides uiEntry.key, LocalUiHistory provides history, LocalUiVoiceSettingsAction provides openVoiceSettings, LocalUiDirectionsPermissions provides openDirectionsPermissions,
         LocalUiOperationBusy provides { resultOwner.backupBusy.value || resultOwner.libraryBusy.value || resultOwner.gpxStarting.value || resultOwner.preparingGpx.value || resultOwner.formBusy.value || resultOwner.contributionBusy.value }) {
     UiEditOwner(UiEditState(uiEntry.key + "/ui", null, 0, 0, false, false))
     if (!libraryOpen && !collectionsOpen && !mapEditsPage && !osmActions) Scaffold(containerColor = Paper, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
@@ -535,7 +542,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     replacementKey = navigationState.navigationReplacementKey())
                 groupPage -> GroupScreen(groups, onClose = { groupPage = false; groups.dismissScreenRequest() },
                     onOpenRoute = { stops, transport -> groups.dismissScreenRequest(); openDirections(stops, transport) })
-                communityPage -> OsmCommunityScreen(onClose = { communityPage = false; communityMessageId = null; communityAccountId = null },
+                communityPage -> OsmCommunityScreen(vm = featureOwners.getSavedState("community", uiEntry.key, OsmCommunityViewModel::class.java, context.applicationContext as android.app.Application, savedStateHost), onClose = { communityPage = false; communityMessageId = null; communityAccountId = null },
                     initialMessageId = remember(uiEntry.key) { uiEntry.entityId?.toLongOrNull()?.takeIf { !history.isRestoredEntry(uiEntry.key) && resultOwner.deliveredCommunityTargets.add(uiEntry.key) } }, initialAccountId = uiEntry.accountKey?.toLongOrNull(),
                     onOpenSettings = { tab = 4 })
                 weatherPage -> WeatherPlannerScreen(onClose = { weatherPage = false },

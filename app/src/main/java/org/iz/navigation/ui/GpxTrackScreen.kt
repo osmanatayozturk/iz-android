@@ -47,10 +47,12 @@ internal fun GpxTrackScreen(
     val matchingActive = active?.takeIf { it.track.id == displayed?.id }
     val initial = matchingActive?.selection ?: TrackFollowSelection()
     var segmentIndex by (browse?.segment ?: rememberSaveable(displayed?.id) { mutableIntStateOf(initial.segmentIndex) })
-    var reversed by (browse?.reversed ?: rememberSaveable(displayed?.id) { mutableStateOf(initial.reversed) })
+    val reversedState: MutableState<Boolean> = browse?.reversed ?: rememberSaveable(displayed?.id) { mutableStateOf(initial.reversed) }
+    var reversed by reversedState
     var startPointIndex by (browse?.point ?: rememberSaveable(displayed?.id) { mutableIntStateOf(initial.startPointIndex) })
     var startFraction by (browse?.fraction ?: rememberSaveable(displayed?.id) { mutableDoubleStateOf(initial.startFraction) })
-    var chosenTransport by (browse?.transport ?: rememberSaveable { mutableStateOf(Transport.WALK.name) })
+    val transportState: MutableState<String> = browse?.transport ?: rememberSaveable { mutableStateOf(Transport.WALK.name) }
+    var chosenTransport by transportState
     val transport = currentTransport?.takeIf { it != Transport.UNKNOWN } ?: runCatching { Transport.valueOf(chosenTransport).takeUnless { it == Transport.UNKNOWN } }.getOrNull() ?: Transport.WALK
     val selection = TrackFollowSelection(segmentIndex, reversed, startPointIndex, startFraction)
     var segmentDialog by remember { mutableStateOf(false) }

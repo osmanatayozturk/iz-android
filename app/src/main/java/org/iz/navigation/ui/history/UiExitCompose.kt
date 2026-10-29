@@ -11,8 +11,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import org.iz.navigation.ui.findActivity
 import androidx.compose.ui.platform.testTag
 
+val LocalUiOwnerRegistrations = staticCompositionLocalOf<UiOwnerRegistrations?> { null }
 val LocalUiExitGuard = staticCompositionLocalOf<UiExitGuard?> { null }
 val LocalUiEntryKey = staticCompositionLocalOf { "standalone" }
 val LocalUiHistory = staticCompositionLocalOf<UiHistory?> { null }
@@ -27,12 +30,18 @@ fun UiEditOwner(state: UiEditState, discardUnsaved: () -> Unit = {}) {
 @Composable
 fun UiEditOwner(state: UiEditState, currentState: () -> UiEditState, discardUnsaved: () -> Unit) {
     val guard = LocalUiExitGuard.current ?: return
-    val owner = remember(state.entryKey, state.accountKey) { Any() }
+    val registrations = LocalUiOwnerRegistrations.current
+    val key = UiOwnerRegistrations.Key(LocalUiEntryKey.current, state.entryKey, state.accountKey)
+    val owner = remember(registrations, key) { registrations?.acquire(key) ?: Any() }
+    val activity = LocalContext.current.findActivity()
     val operationBusy = LocalUiOperationBusy.current
     SideEffect { guard.updateOwned(owner, state.copy(busy = state.busy || operationBusy()),
         currentState = { val live = currentState(); live.copy(busy = live.busy || operationBusy()) }, discardUnsaved = discardUnsaved) }
     DisposableEffect(guard, owner) {
-        onDispose { guard.clearOwner(owner) }
+        onDispose {
+            guard.clearOwner(owner)
+            registrations?.release(key, owner, changingConfigurations = activity?.isChangingConfigurations == true)
+        }
     }
 }
 
