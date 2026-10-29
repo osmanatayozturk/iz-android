@@ -51,7 +51,7 @@ class MatrixRoutingTest {
                     transport = mode, preferences = preferences, provider = RouteProvider.TOMTOM, effectiveDepartureAt = at)
             },
         )
-        val result = requireNotNull(planner.propose(stops, 1_000L, Transport.MOTORCYCLE))
+        val result = requireNotNull(planner.propose(stops, 1_000L, Transport.MOTORCYCLE, RoutePreferences.defaults(Transport.MOTORCYCLE).copy(avoidUnpaved = false)))
         assertEquals(121_000L, matrixAt)
         assertEquals(listOf(matrixAt to Transport.MOTORCYCLE, matrixAt to Transport.MOTORCYCLE), calls)
         assertEquals(listOf(stops[0], stops[2], stops[1], stops[3]), result.orderedStops)

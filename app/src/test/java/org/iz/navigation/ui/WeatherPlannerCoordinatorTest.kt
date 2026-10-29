@@ -46,15 +46,18 @@ class WeatherPlannerCoordinatorTest {
     }
 
     @Test fun matrixAuthorizationCancellationInvalidatesWeatherCandidates() = runBlocking {
+        val matrixPreferences = org.iz.navigation.weather.RoutePreferences(avoidUnpaved = false)
         var revision = "one"
         val planner = object : RoutePlanner {
             override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
                 travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences) = route("base", stops, departureAt, transport)
+                    .copy(preferences = preferences)
         }
         val coordinator = WeatherPlannerCoordinator(this,
             services(planner, { _, departure -> comparisons(departure, true, 0.0) }).copy(credentialRevision = { revision },
                 suggestOrder = { _, _, _ -> revision = "two"; throw CancellationException("Credentials changed") }),
-            SavedWeatherPlan(listOf(origin, origin.copy(label = "via 1"), destination.copy(label = "via 2"), destination), 50_000L))
+            SavedWeatherPlan(listOf(origin, origin.copy(label = "via 1"), destination.copy(label = "via 2"), destination),
+                50_000L, preferences = matrixPreferences))
         coordinator.calculate()!!.join()
         coordinator.suggestStopOrder()!!.join()
         assertNull(coordinator.state.value.route)
@@ -86,17 +89,20 @@ class WeatherPlannerCoordinatorTest {
     }
 
     @Test fun expiredDepartureSelectionCancelsPendingOrderWithoutLeavingControlsBusy() = runBlocking {
+        val matrixPreferences = org.iz.navigation.weather.RoutePreferences(avoidUnpaved = false)
         var now = 10_000L
         val waiting = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
         val planner = object : RoutePlanner {
             override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
                 travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences) = route("base", stops, departureAt, transport)
+                    .copy(preferences = preferences)
         }
         val coordinator = WeatherPlannerCoordinator(this,
             services(planner, { _, departure -> comparisons(departure, true, 0.0) }).copy(clock = { now },
                 suggestOrder = { _, _, _ -> waiting.complete(Unit); release.await(); null }),
-            SavedWeatherPlan(listOf(origin, origin.copy(label = "via 1"), destination.copy(label = "via 2"), destination), 50_000L))
+            SavedWeatherPlan(listOf(origin, origin.copy(label = "via 1"), destination.copy(label = "via 2"), destination),
+                50_000L, preferences = matrixPreferences))
         coordinator.calculate()!!.join()
         coordinator.suggestStopOrder()!!
         waiting.await()

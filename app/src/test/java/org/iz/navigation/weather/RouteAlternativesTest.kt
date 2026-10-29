@@ -101,7 +101,7 @@ class RouteAlternativesTest {
             override suspend fun alternatives(stops: List<RouteStop>, departureAt: Long, transport: Transport, travelSpeedKmh: Double?, preferences: RoutePreferences) = RouteAlternatives(listOf(different))
         }
         assertThrows(RouteServiceException::class.java) { runBlocking {
-            planner.revalidateSelection(first, stops, 10L, Transport.MOTORCYCLE, null, RoutePreferences())
+            planner.revalidateSelection(first, stops, 10L, first.transport, null, first.preferences)
         } }
         Unit
     }
