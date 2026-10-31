@@ -6,20 +6,21 @@ Bu dosya telefon ve uyumlu bileşenlerin kaynak sürümlerini kaydeder. Dağıt�
 
 | Bileşen | versionName | versionCode | Dağıtım ve doğrulama kaydı |
 |---|---|---|---|
-| Telefon | 0.11.4 | 26 | Yayımlanmamış geliştirme adayı; APK/Release yayını yok |
+| Telefon | 0.11.4 | 26 | Yayımlanmamış aday; yerel Debug APK doğrulandı, herkese açık APK/Release yok |
 | Wear OS | 0.6.1 | 11 | Bu telefon kaynak sürümünde korunur |
 | Ortak iletişim | v6 | — | Bu telefon kaynak sürümünde korunur |
 
 ## Telefon 0.11.4 / code 26 — harita üzerinde Gösterge paneli
 
-**Durum:** Uygulama adayı hazırlanıyor. Bu belge anında hedefli masaüstü kontrolleri ve aday sonuçları çalıştırılmadı; son kaynak ve kabul sonuçları sabit adayda ayrı kaydedilecektir. 0.11.4 APK'sı veya Release yayımlandığı iddia edilmiyor. Telefon/native görünüm, güvenlik incelemesi ve koordinatörün son yayın kabulü beklemede. Wear OS **0.6.1 / code 11** ve iletişim **v6** değişmiyor.
+**Durum:** 0.11.4 / code 26 kaynak adayı tamamlandı. Son birim testinde 967 test başarısızlık/hata/atlama olmadan geçti; lint 0 hata/ölümcül hata ve 95 uyarı verdi. Yerel Debug derlemesi ile paket kimlik/imza okuması geçti. Bu aday için herkese açık APK veya Release yayımlanmadı. Wear OS **0.6.1 / code 11** ve iletişim **v6** değişmiyor.
 
 - **Yerleşim ve gezinme:** Tek mevcut harita ekranda kalır. **Gösterge** paneli dikeyde altta, yatayda yanda açılır. Geri paneli kapatır ve gerçek açan ekranı/aktif oturumu korur; panel açma veya kapama konum bulma, rota önizleme, kayıt ya da onaylı başka bir komutu yeniden çalıştırmaz.
 - **Bilgi sırası:** Hız ve varsa koşullu hız sınırı ilk sıradadır. Yönlendirme manevrası ve kritik uyarılar önde; mevcut sesi kapatma ve ayrı kayıt/yönlendirme/tüm oturum işlemleri erişilebilir kalır. Yönlendirmede Nereye? başlık yüksekliği 0 olarak korunur.
 - **Mevcut veriler ve korumalar:** Yalnız geçerli oturumun mevcut navigation, progress, roadSpeed, weather, group ve analysis snapshot'ları kullanılır. Yönlendirme/ilerleme yokken manevra, kalan rota veya ETA uydurulmaz; eski hız güncelmiş gibi sunulmaz. Tazelik, yanlış veri sahibi, hata ve gecikmiş durumlar açık kalır. Yeni üretici, harita, GPS/API isteği, zamanlayıcı, sorgu veya sensör başlatılmaz; yeni ETA/traffic hesabı, canlı trace/ağır istatistik veya ek motosiklet profili oluşturulmaz.
-- **Harita ve uyumluluk:** Mevcut kamera, elle harita tutuşu/recenter, ölçülen görünür alan ve atıf korunur. Wear OS **0.6.1 / code 11**, iletişim **v6**, veri/yedek biçimi, izinler ve bağımlılıklar değişmez. Masaüstü davranış kanıtı Compose/native yerleşim veya fiziksel telefon kabulü değildir; telefon/native kontrolü çalıştırılmadı.
+- **Harita ve uyumluluk:** Mevcut kamera, elle harita tutuşu/recenter, ölçülen görünür alan ve atıf korunur. Wear OS **0.6.1 / code 11**, iletişim **v6**, veri/yedek biçimi, izinler ve bağımlılıklar değişmez. Dikey ve yatay Ana ekran/panel bileşen kontrolleri geçti; bu kapsam tam uygulama gezinme akışını, TalkBack'i veya yapılandırma/süreç geri yüklemesini kapsamaz.
 - **Devralınan davranış:** 0.11.3'teki F05 yedek içeriği açıklaması ile F09 yerel mekân taslağı ve OSM bağlantı teyitlerinin mevcut davranışı 0.11.4'te korunur; önceki uygulama ve kabul kayıtları yeni aday için kanıt sayılmaz.
-- **Aday kapıları:** Uygulama ve bağımsız test kabulü, UI/UX kaynak kabulü, aday bazlı güvenlik incelemesi ve koordinatörün son yayın kabulü beklemededir. 0.11.3/0.11.2 kanıtı 0.11.4 için otomatik kabul değildir.
+- **Sınırlı telefon QA:** Yalnızca test uygulamasındaki Ana ekran/panel sahnelerinin dikey ve yatay kontrolleri geçti; atanmış UI/UX kaynak incelemesi ile iki normal yazı boyutlu görüntünün görsel kabulü tamamlandı. Geçici QA kurulumları kaldırıldı; gündelik uygulama kurulumu değiştirilmedi.
+- **Kalan kabul kapıları:** Bu sınırlı sonuç tam uygulama gezinme davranışını, TalkBack'i veya yapılandırma/süreç geri yüklemesini kapsamaz; bu kontroller çalıştırılmadı. Aday bazlı dış güvenlik incelemesi ve koordinatörün son yayın kabulü beklemede. Önceki sürümlerin kanıtları 0.11.4 kabuline aktarılmaz.
 
 ## Önceki aday — Telefon 0.11.3 / code 25 (tarihsel)
 
