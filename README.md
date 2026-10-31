@@ -1,12 +1,18 @@
 # İz - navigasyon ve yolculuk günlüğü
 
-**Telefon kaynak sürümü 0.11.3 / code 25 — yayımlanmamış geliştirme adayı.** Bu aday 0.11.2'nin mevcut telefon davranışını içerir ve buna F05 yedek içeriği açıklaması ile F09 mekân taslağı silme/OSM bağlantısını kesme teyitlerini ekler. Uygulama, bağımsız test ve UI/UX kabulü sürüyor; 0.11.2'nin eski test ve kabul kanıtları 0.11.3 kabulü sayılmaz. 0.11.3 için APK veya Release yayımlandığı iddia edilmiyor. Wear OS **0.6.1 / code 11** ve iletişim **v6** değişmiyor. [GitHub Releases: yayımlanmış sürüm notları ve dosyaları](https://github.com/osmanatayozturk/iz-android/releases) · [Kullanım kılavuzu](docs/IZ_010_KULLANIM.md).
+**Telefon kaynak hedefi 0.11.4 / code 26 — yayımlanmamış geliştirme adayı.** Tek mevcut haritayı koruyan Gösterge panelinin dikeyde altta, yatayda yanda açılması hedefleniyor. Hız ve varsa hız sınırı ilk sırada; yönlendirme varsa manevra ve kritik uyarılar önde, Geri paneli kapatarak oturumu koruyacak. Uygulama ve masaüstü doğrulaması sürüyor; bu belge anında hedefli kontroller çalıştırılmadı. APK veya Release yayımlandığı iddia edilmiyor. Telefon/native kabul, güvenlik incelemesi ve son yayın kabulü beklemede. Wear OS **0.6.1 / code 11** ve iletişim **v6** değişmiyor. [GitHub Releases: yayımlanmış sürüm notları ve dosyaları](https://github.com/osmanatayozturk/iz-android/releases) · [Kullanım kılavuzu](docs/IZ_010_KULLANIM.md).
 
-## Telefon 0.11.3 / code 25 — aday kapsamı ve durumu
+## Telefon 0.11.4 / code 26 — aday kapsamı ve durumu
 
-Yedek içeriğinin açıkça anlatılması, sağlık ölçümlerinin varsayılan olarak dışarıda kalması ve bu tercihin yatış/sensör verilerine uygulanmadığının belirtilmesi hedeflenir; mevcut yedek içeriği ve biçimi değişmez. Mekân taslağı silme ve OSM bağlantısını kesme öncesinde açık teyit sunulması hedeflenir; iptal hiçbir değişiklik yapmaz. Yerel topluluk verilerinin kapsamı, korunacak günlük/fotoğraflar/mekân taslakları ve uzak OSM hesabı/içeriklerinin silinmeyeceği açıklanır. Uygulama ve kabul tamamlanmadığından bunlar doğrulanmış davranış iddiası değildir. Yeni veri biçimi, Undo, saklama politikası veya backend değişikliği bu adaya dahil değildir. Ayrıntılı durum [değişiklik geçmişindedir](CHANGELOG.md).
+Bu aday tek mevcut haritayı koruyacak **Gösterge** panelini aynı ekranda açmayı hedefler: dikey ekranda alt panel, yatayda yan panel; hız ve varsa koşullu hız sınırı ilk sırada, manevra/önemli uyarılar ve mevcut oturum eylemleri erişilebilir kalır. Geri yalnız paneli kapatıp gerçek açan ekranı ve aktif oturumu korur. Mevcut veri sahipleri ve güncellik durumları kullanılacak; yeni üretici, harita, API/GPS isteği, zamanlayıcı veya sensör başlatılmayacak. Aday ve hedefli masaüstü kontrolleri bu belge anında henüz doğrulanmadı; mevcut test/kabul kanıtları bu sürüme taşınmaz. Ayrıntılı durum [değişiklik geçmişindedir](CHANGELOG.md).
 
-## Önceki aday: Telefon 0.11.2 / code 24 — yayımlanmadı
+0.11.4, önceki 0.11.3 sürümündeki F05 yedek içeriği açıklaması ile F09 yerel mekân taslağı ve OSM bağlantı teyitlerinin mevcut davranışını korur. Bu özelliklerin 0.11.3 tarihsel uygulaması 0.11.4 için test veya kabul kanıtı değildir.
+
+## Önceki adaylar: Telefon 0.11.3 ve 0.11.2 — tarihsel, kabulü devretmez
+
+0.11.3 ve 0.11.2'nin uygulama özellikleri, test bulguları ve açık kabul kapıları kendi adaylarına aittir. Hiçbiri 0.11.4 için test, UI/UX, native, güvenlik veya yayın kabulü sayılmaz. Önceki adayların kayıtları [değişiklik geçmişinde](CHANGELOG.md) korunur.
+
+0.11.3 tarihsel masaüstü tesliminde 957 birim testi sıfır hata/başarısızlık/atlama ile geçti; Debug lint 0 hata/ölümcül hata ve 95 uyarı verdi, yerel Debug paketi üretildi ve UI/UX kaynak metin/akış incelemesi kabul edildi. Native/cihaz, dış güvenlik ve sürüm/yayın kabulü verilmedi. Bu sonuçlar yalnız 0.11.3'ün tarihsel kanıtıdır.
 
 0.11.2, aktif dönüşlü yönlendirmede hedef başlığını gizlerken manevra ve oturum denetimlerini korur; günlükten bitirme teyidini netleştirir ve ikincil metin karşıtlığını iyileştirir. Telefonda TTS hazırlık/hata durumu gösterilir; ses kullanılamasa da görsel yönlendirme sürer. Geri dönüş ekranın gerçek açılma bağlamını ve güvenli görüntüleme durumunu korur; rota veya kayıt işlemlerini yeniden oynatmaz. Çıkış teyidi yalnız kaydedilmemiş düzenlemelerde gösterilir. Dönüş anonsu sürerken elle ses isteği meşgul yanıtı alır; yeni dönüş anonsu sürmekte olan elle testi kesebilir. Wear OS **0.6.1 / code 11** ve iletişim **v6** bu kaynak sürümünde korunur. Host doğrulama özeti [değişiklik geçmişindedir](CHANGELOG.md). Dağıtım durumu, dosyalar ve doğrulama kapsamı için ilgili [GitHub Releases/sürüm notları kaydını](https://github.com/osmanatayozturk/iz-android/releases) esas alın. Görseller aşağıda 0.9/0.10 dönemine ait tarihsel örneklerdir; bunlar güncel arayüz veya bu sürümün kabul kanıtı değildir.
 
@@ -30,7 +36,7 @@ Release sayfasında yayımlanan APK'nın imza bilgisi, dosya özeti ve doğrulam
 
 ## Önceki sürümlerden uygulama görüntüleri
 
-Bu 0.9 ve 0.10 sürümlerinden alınmış tarihsel örnek ekranlardır; güncel arayüzün veya 0.11.3 kabulünün kanıtı değildir. Konumlar tanıtım için seçilmiş örneklerdir. Kişisel yolculuk, hesap veya sağlık verisi kullanılmamıştır.
+Bu 0.9 ve 0.10 sürümlerinden alınmış tarihsel örnek ekranlardır; güncel arayüzün veya 0.11.4 kabulünün kanıtı değildir. Konumlar tanıtım için seçilmiş örneklerdir. Kişisel yolculuk, hesap veya sağlık verisi kullanılmamıştır.
 
 | Ana harita | Rota planlama |
 | --- | --- |

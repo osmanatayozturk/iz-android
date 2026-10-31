@@ -542,7 +542,8 @@ class JourneyNavigationCoordinator(
         publish(NavigationState(muted = mutableState.value.muted, routeRevision = epoch))
     }
 
-    fun setMuted(muted: Boolean) { scope.launch {
+    fun setMuted(muted: Boolean, stillCurrent: () -> Boolean = { true }) { scope.launch {
+        if (!stillCurrent()) return@launch
         if (muted) runtime.cancelSpeech()
         publish(mutableState.value.copy(muted = muted))
     } }

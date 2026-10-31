@@ -25,6 +25,7 @@ class JourneyNavigationCoordinatorTest {
         var preparing = false
         var renderFailure = false
         var speechFailure: RuntimeException? = null
+        var speechCancellations = 0
         var voicePreparations = 0
         var prepareVoiceFailure: RuntimeException? = null
         var finishFailure: RuntimeException? = null
@@ -67,12 +68,41 @@ class JourneyNavigationCoordinatorTest {
         override fun render(state: NavigationState) { if (renderFailure) throw IllegalStateException("Disconnected display") }
         override fun prepareSpeech() { voicePreparations++; prepareVoiceFailure?.let { throw it } }
         override fun speak(text: String) = Unit
-        override fun cancelSpeech() { speechFailure?.let { throw it } }
+        override fun cancelSpeech() { speechFailure?.let { throw it }; speechCancellations++ }
     }
     private fun route() = PlannedRoute("r", listOf(RouteStop("A", WeatherCoordinate(40.0, 29.0)), RouteStop("B", WeatherCoordinate(40.01, 29.0))),
         listOf(RouteVertex(WeatherCoordinate(40.0, 29.0), 0.0), RouteVertex(WeatherCoordinate(40.01, 29.0), 100.0)),
         1110.0, 100.0, 1000, listOf(0.0,100.0), Transport.CAR,
         maneuvers = listOf(RouteManeuver(1,"Kuzeye ilerleyin","Kuzeye ilerleyin", emptyList(),0,1,0.0,100.0)))
+
+    @Test fun queuedMuteRechecksOwnerBeforeSpeechAndStateMutation() = runTest {
+        val runtime = Runtime()
+        val controller = JourneyNavigationCoordinator(runtime, null, { 1000L }, backgroundScope)
+        val session = controller.startGuidance(route(), recordJourney = false)
+        runCurrent()
+        val before = runtime.speechCancellations
+        var currentEntry = "entry-original"
+        val expectedEntry = currentEntry
+        controller.setMuted(true) {
+            currentEntry == expectedEntry && controller.state.value.sessionId == session
+        }
+        currentEntry = "entry-replacement"
+        runCurrent()
+        assertFalse("Replaced owner cannot change mute", controller.state.value.muted)
+        assertEquals("Replaced owner cannot cancel speech", before, runtime.speechCancellations)
+
+        controller.setMuted(true) {
+            currentEntry == "entry-replacement" && controller.state.value.sessionId == session
+        }
+        runCurrent()
+        assertTrue(controller.state.value.muted)
+        assertEquals(before + 1, runtime.speechCancellations)
+
+        controller.setMuted(false)
+        runCurrent()
+        assertFalse("Legacy default call remains accepted", controller.state.value.muted)
+        assertEquals(before + 1, runtime.speechCancellations)
+    }
 
     @Test fun silentVoicePreparationRunsOncePerCommittedGuidanceNotLocationUpdates() = runTest {
         val runtime = Runtime()

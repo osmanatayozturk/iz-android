@@ -22,6 +22,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.sp
 import org.iz.navigation.R
 import org.iz.navigation.data.GeoCoordinate
@@ -63,6 +64,9 @@ internal fun NavigationHomeContent(
     shortcuts: List<org.iz.navigation.data.DestinationShortcut>,
     onShortcut: (org.iz.navigation.data.DestinationShortcutKind) -> Unit,
     voiceFault: String? = null,
+    showDashboard: Boolean = false,
+    onDashboard: (() -> Unit)? = null,
+    dashboard: (@Composable () -> Unit)? = null,
     planner: @Composable () -> Unit,
 ) {
     val presentation = navigationMapPresentation(ui, nav, points, showPlanner)
@@ -71,17 +75,31 @@ internal fun NavigationHomeContent(
     val current = presentation.coordinate
     val density = LocalDensity.current
     val textMeasurer = rememberTextMeasurer()
-    val baseShowBrand = !live && !showPlanner
-    val showShortcuts = !showPlanner && shortcuts.isNotEmpty()
-    val showDestinationHeader = !nav.guidance
+    val dashboardVisible = showDashboard && dashboard != null
+    val baseShowBrand = !live && !showPlanner && !dashboardVisible
+    val showShortcuts = !showPlanner && !dashboardVisible && shortcuts.isNotEmpty()
+    val showDestinationHeader = !nav.guidance && !dashboardVisible
     var shortcutMeasurement by remember { mutableStateOf<Pair<List<Any?>, androidx.compose.ui.unit.Dp>?>(null) }
     var headerMeasurement by remember { mutableStateOf<Pair<List<Any?>, androidx.compose.ui.unit.Dp>?>(null) }
     var panelsMeasurement by remember { mutableStateOf<Pair<List<Any?>, androidx.compose.ui.unit.Dp>?>(null) }
+    var dashboardMeasurement by remember { mutableStateOf<Pair<List<Any?>, IntSize>?>(null) }
+    var dashboardButtonMeasurement by remember { mutableStateOf<Pair<List<Any?>, androidx.compose.ui.unit.Dp>?>(null) }
+    val dashboardEpoch = remember(dashboardVisible) { Any() }
     BoxWithConstraints(Modifier.fillMaxSize().testTag("navigation-home")) {
+        val dashboardAtSide = dashboardVisible && maxWidth > maxHeight
+        val dashboardKey = listOf(maxWidth, maxHeight, density.density, density.fontScale, dashboardAtSide, dashboardEpoch)
+        val measuredDashboard = dashboardMeasurement?.takeIf { it.first == dashboardKey }?.second
+        val desiredSideWidth = (maxWidth * .44f).coerceAtMost(400.dp).coerceAtLeast(minOf(240.dp, maxWidth))
+        val desiredBottomHeight = (maxHeight * .52f).coerceAtMost((maxHeight - 100.dp).coerceAtLeast(0.dp))
+        val dashboardSideWidth = if (dashboardAtSide) measuredDashboard?.let { with(density) { it.width.toDp() } } ?: desiredSideWidth else 0.dp
+        val dashboardBottomHeight = if (dashboardVisible && !dashboardAtSide) measuredDashboard?.let { with(density) { it.height.toDp() } } ?: desiredBottomHeight else 0.dp
+        val dashboardButtonVisible = onDashboard != null && !dashboardVisible
+        val dashboardButtonKey = listOf(maxWidth, maxHeight, density.density, density.fontScale, dashboardEpoch)
+        val dashboardButtonHeight = if (dashboardButtonVisible) dashboardButtonMeasurement?.takeIf { it.first == dashboardButtonKey }?.second ?: 48.dp else 0.dp
         // Bounds from an earlier header/panel/viewport must never drive this frame's camera.
         // GPS coordinates alone do not invalidate geometry or remount the native map.
         val speedText = roadSpeedPresentation(nav.roadSpeed)
-        val layoutKey = listOf(maxWidth, maxHeight, density.density, density.fontScale, showPlanner,
+        val layoutKey = listOf(maxWidth, maxHeight, density.density, density.fontScale, showPlanner, dashboardVisible, dashboardAtSide, dashboardSideWidth, dashboardBottomHeight, dashboardButtonHeight,
             showDestinationHeader, live, nav.guidance, nav.recording, nav.simulation, nav.gpsStale,
             nav.locationActive, nav.sessionTransport, nav.message, ui.message, weatherLabel, current == null, ui.locating, voiceFault,
             if (nav.guidance) navigationInstruction(nav) else null,
@@ -107,12 +125,14 @@ internal fun NavigationHomeContent(
         // Never draw controls with a provisional offset when their own row/header changed.
         val controlsReady = (!showDestinationHeader || headerMeasurement?.first == headerKey) &&
             (!showShortcuts || shortcutMeasurement?.first == shortcutKey)
-        val viewportReady = panelsMeasurement?.first == panelsKey && controlsReady
+        val dashboardReady = !dashboardVisible || measuredDashboard != null
+        val dashboardButtonReady = !dashboardButtonVisible || dashboardButtonMeasurement?.first == dashboardButtonKey
+        val viewportReady = panelsMeasurement?.first == panelsKey && controlsReady && dashboardReady && dashboardButtonReady
         val attributionWidth = with(density) {
             textMeasurer.measure("© OpenStreetMap contributors", style = MaterialTheme.typography.labelSmall).size.width.toDp()
         } + 20.dp
         val compactWeatherWidth = (maxWidth - 24.dp - attributionWidth - 8.dp).coerceAtLeast(48.dp)
-        WeatherRouteMap(route = route, assessment = null, modifier = Modifier.fillMaxSize().testTag("navigation-home-map"),
+        WeatherRouteMap(route = route, assessment = null, modifier = Modifier.fillMaxSize().padding(end = dashboardSideWidth).testTag("navigation-home-map"),
             expandable = false, stops = presentation.stops, liveCoordinate = current,
             recordedPoints = presentation.trail, gpsStale = live && nav.gpsStale,
             cameraIdentity = presentation.cameraIdentity,
@@ -121,10 +141,10 @@ internal fun NavigationHomeContent(
             navigationLayout = true, members = members, onLocate = onLocate, onMapLongClick = onPin,
             navigationControlsTopInset = headerHeight + shortcutOffset + 24.dp,
             navigationControlsHorizontal = horizontalMapControls,
-            attributionBottomInset = if (showPlanner) maxHeight * .64f + 4.dp else 92.dp,
+            attributionBottomInset = if (dashboardBottomHeight > 0.dp) dashboardBottomHeight + 92.dp else if (showPlanner && !dashboardVisible) maxHeight * .64f + 4.dp else 92.dp,
             cameraViewportInsets = PaddingValues(start = 28.dp, top = panelsHeight + 24.dp, end = 84.dp,
-                bottom = if (showPlanner) maxHeight * .64f + 24.dp else 112.dp))
-        Column(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(12.dp)
+                bottom = if (dashboardBottomHeight > 0.dp) dashboardBottomHeight + 112.dp else if (showPlanner && !dashboardVisible) maxHeight * .64f + 24.dp else 112.dp + dashboardButtonHeight))
+        Column(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(end = dashboardSideWidth).padding(12.dp)
             .onSizeChanged { panelsMeasurement = panelsKey to with(density) { it.height.toDp() } }, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (showShortcuts) Box(Modifier.fillMaxWidth().onSizeChanged { shortcutMeasurement = shortcutKey to with(density) { it.height.toDp() } }) {
                 ShortcutDestinationsRow(shortcuts, !ui.busy, onShortcut)
@@ -146,7 +166,7 @@ internal fun NavigationHomeContent(
                     }
                 }
             }
-            if (!showPlanner && live) Surface(onClick = onManageSession, shape = RoundedCornerShape(20.dp), shadowElevation = 2.dp,
+            if (!showPlanner && !dashboardVisible && live) Surface(onClick = onManageSession, shape = RoundedCornerShape(20.dp), shadowElevation = 2.dp,
                 color = MaterialTheme.colorScheme.surface.copy(alpha = .98f), modifier = Modifier.fillMaxWidth().padding(end = 60.dp).testTag("live-guidance-card")
                     .semantics { onClick(label = "Yolculuk işlemlerini aç", action = null) }) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -184,7 +204,7 @@ internal fun NavigationHomeContent(
                         ?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                 }
             }
-            if (!showPlanner && nav.roadSpeed.visible) {
+            if (!showPlanner && !dashboardVisible && nav.roadSpeed.visible) {
                 val speed = roadSpeedPresentation(nav.roadSpeed)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.testTag("road-speed-panel")) {
                     SpeedReadout("Hızım", speed.ownText, "GPS", Modifier.width(100.dp))
@@ -195,17 +215,32 @@ internal fun NavigationHomeContent(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (current == null) HomeLocateChip(ui.locating, onLocate, Modifier.weight(1f, fill = false))
                 HomeWeatherChip(weatherLabel, onWeather, Modifier.weight(1f, fill = false))
-            } else if (!showPlanner && !live && current == null) HomeLocateChip(ui.locating, onLocate)
-            if (!showPlanner && ui.message != null) Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surface) {
+            } else if (!showPlanner && !dashboardVisible && !live && current == null) HomeLocateChip(ui.locating, onLocate)
+            if (!showPlanner && !dashboardVisible && ui.message != null) Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surface) {
                 Text(ui.message, Modifier.padding(10.dp), style = MaterialTheme.typography.bodySmall)
             }
-            if (!showPlanner && !shortIdle) HomeWeatherChip(weatherLabel, onWeather,
+            if (!showPlanner && !dashboardVisible && !shortIdle) HomeWeatherChip(weatherLabel, onWeather,
                 if (compact && live) Modifier.align(Alignment.End).widthIn(max = compactWeatherWidth) else Modifier)
         }
-        if (showPlanner) Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(.64f).padding(bottom = 88.dp),
+        if (showPlanner && !dashboardVisible) Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(.64f).padding(bottom = 88.dp),
             shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp), shadowElevation = 8.dp,
             color = MaterialTheme.colorScheme.surface) { planner() }
-        Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+        if (dashboardVisible) {
+            val panelModifier = if (dashboardAtSide) Modifier.align(Alignment.TopEnd).padding(top = 12.dp, bottom = 12.dp)
+                .width(desiredSideWidth).fillMaxHeight()
+            else Modifier.align(Alignment.BottomCenter).padding(bottom = 88.dp).fillMaxWidth().height(desiredBottomHeight)
+            Box(panelModifier.onSizeChanged { dashboardMeasurement = dashboardKey to it }) { dashboard?.invoke() }
+        }
+        if (dashboardButtonVisible) Box(Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 92.dp)) {
+            OutlinedButton(onClick = { onDashboard?.invoke() },
+                modifier = Modifier.sizeIn(minHeight = 48.dp).onSizeChanged {
+                    dashboardButtonMeasurement = dashboardButtonKey to with(density) { it.height.toDp() }
+                }.testTag("open-navigation-dashboard"),
+                colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Icon(Icons.Outlined.Dashboard, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Gösterge")
+            }
+        }
+        Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(end = dashboardSideWidth).padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
             shape = RoundedCornerShape(24.dp), shadowElevation = 6.dp, color = MaterialTheme.colorScheme.surface) {
             Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilledTonalButton(onRecord, Modifier.weight(1f).height(56.dp).testTag("home-record"), contentPadding = PaddingValues(6.dp)) {

@@ -6,18 +6,33 @@ Bu dosya telefon ve uyumlu bileşenlerin kaynak sürümlerini kaydeder. Dağıt�
 
 | Bileşen | versionName | versionCode | Dağıtım ve doğrulama kaydı |
 |---|---|---|---|
-| Telefon | 0.11.3 | 25 | Yayımlanmamış geliştirme adayı; henüz APK veya Release yok |
+| Telefon | 0.11.4 | 26 | Yayımlanmamış geliştirme adayı; APK/Release yayını yok |
 | Wear OS | 0.6.1 | 11 | Bu telefon kaynak sürümünde korunur |
 | Ortak iletişim | v6 | — | Bu telefon kaynak sürümünde korunur |
 
-## Telefon 0.11.3 / code 25 — F05/F09 geliştirme adayı
+## Telefon 0.11.4 / code 26 — harita üzerinde Gösterge paneli
 
-**Durum:** Uygulama çalışması sürüyor; bağımsız test ve UI/UX kabulü tamamlanmadı. 0.11.3 APK'sı veya Release yayımlandığı iddia edilmiyor. Adaya özgü güvenlik incelemesi ve koordinatörün son yayın kabulü beklemede. Wear OS **0.6.1 / code 11** ve iletişim **v6** korunur.
+**Durum:** Uygulama adayı hazırlanıyor. Bu belge anında hedefli masaüstü kontrolleri ve aday sonuçları çalıştırılmadı; son kaynak ve kabul sonuçları sabit adayda ayrı kaydedilecektir. 0.11.4 APK'sı veya Release yayımlandığı iddia edilmiyor. Telefon/native görünüm, güvenlik incelemesi ve koordinatörün son yayın kabulü beklemede. Wear OS **0.6.1 / code 11** ve iletişim **v6** değişmiyor.
+
+- **Yerleşim ve gezinme:** Tek mevcut harita ekranda kalır. **Gösterge** paneli dikeyde altta, yatayda yanda açılır. Geri paneli kapatır ve gerçek açan ekranı/aktif oturumu korur; panel açma veya kapama konum bulma, rota önizleme, kayıt ya da onaylı başka bir komutu yeniden çalıştırmaz.
+- **Bilgi sırası:** Hız ve varsa koşullu hız sınırı ilk sıradadır. Yönlendirme manevrası ve kritik uyarılar önde; mevcut sesi kapatma ve ayrı kayıt/yönlendirme/tüm oturum işlemleri erişilebilir kalır. Yönlendirmede Nereye? başlık yüksekliği 0 olarak korunur.
+- **Mevcut veriler ve korumalar:** Yalnız geçerli oturumun mevcut navigation, progress, roadSpeed, weather, group ve analysis snapshot'ları kullanılır. Yönlendirme/ilerleme yokken manevra, kalan rota veya ETA uydurulmaz; eski hız güncelmiş gibi sunulmaz. Tazelik, yanlış veri sahibi, hata ve gecikmiş durumlar açık kalır. Yeni üretici, harita, GPS/API isteği, zamanlayıcı, sorgu veya sensör başlatılmaz; yeni ETA/traffic hesabı, canlı trace/ağır istatistik veya ek motosiklet profili oluşturulmaz.
+- **Harita ve uyumluluk:** Mevcut kamera, elle harita tutuşu/recenter, ölçülen görünür alan ve atıf korunur. Wear OS **0.6.1 / code 11**, iletişim **v6**, veri/yedek biçimi, izinler ve bağımlılıklar değişmez. Masaüstü davranış kanıtı Compose/native yerleşim veya fiziksel telefon kabulü değildir; telefon/native kontrolü çalıştırılmadı.
+- **Devralınan davranış:** 0.11.3'teki F05 yedek içeriği açıklaması ile F09 yerel mekân taslağı ve OSM bağlantı teyitlerinin mevcut davranışı 0.11.4'te korunur; önceki uygulama ve kabul kayıtları yeni aday için kanıt sayılmaz.
+- **Aday kapıları:** Uygulama ve bağımsız test kabulü, UI/UX kaynak kabulü, aday bazlı güvenlik incelemesi ve koordinatörün son yayın kabulü beklemededir. 0.11.3/0.11.2 kanıtı 0.11.4 için otomatik kabul değildir.
+
+## Önceki aday — Telefon 0.11.3 / code 25 (tarihsel)
+
+**Tarihsel durum:** Önceki belge kontrol noktasında 0.11.3 yayımlanmamıştı; uygulama, bağımsız test ve UI/UX kabulü tamamlanmamış, aday güvenlik incelemesi ve son yayın kabulü beklemedeydi. Bu adayın sonuçları yalnız kendi kaynağına aittir ve 0.11.4 kabulü değildir. Wear OS **0.6.1 / code 11** ve iletişim **v6** korunur.
+
+**Sonraki tarihsel masaüstü teslim kontrolü:** 957 birim testi hata/başarısızlık/atlama olmadan geçti; Debug lint 0 hata/ölümcül hata ve 95 uyarı verdi; yerel Debug paketi üretildi ve UI/UX kaynak metin/akış incelemesi kabul edildi. Native/cihaz, dış güvenlik ve sürüm/yayın kabulü verilmedi. Bu güncellenmiş kayıt yalnız 0.11.3'e aittir.
+
+0.11.3 test ve kabul durumu kendi adayına aittir; 0.11.4 için kanıt veya kabul değildir.
 
 - **F05 — yedek içeriği açıklaması:** Yedekte yolculuklar, konum kayıtları, yerler, özel notlar ve fotoğraflar bulunur. Varsa deneysel yatış verileri, ham sensör kayıtları ve bunlarla ilişkili konum, zaman, hız ve kalibrasyon bilgisi de açıklanır. Sağlık ölçümleri varsayılan olarak eklenmez; bu tercih yatış/sensör verilerini etkilemez. Mevcut yedek içeriği, seçimi ve biçimi değişmez.
-- **F09 — yerel mekân taslağı:** Silme öncesi teyit gösterilir; Vazgeç/Geri/dışarı dokunma işlemi iptal eder ve yerel veri değişmez. Onaylanan işlem yalnızca güncel, değişmemiş ve silinebilir yerel taslağı hedefler; OSM'deki mekânlar değişmez. Teknik uygulama ve kabul henüz tamamlanmadı.
+- **F09 — yerel mekân taslağı:** Silme öncesi teyit gösterilir; Vazgeç/Geri/dışarı dokunma işlemi iptal eder ve yerel veri değişmez. Onaylanan işlem yalnızca güncel, değişmemiş ve silinebilir yerel taslağı hedefler; OSM'deki mekânlar değişmez. Uygulama sabit kaynakta tamamlandı; bağımsız uygulama ve cihaz/native kabulü bu tarihsel teslimde tamamlanmadı.
 - **F09 — OSM bağlantısını kesme:** Teyit yerel OSM oturumu ile temizlenecek topluluk kişileri/mesajları/taslaklarını açıklar; günlük, fotoğraf ve mekân taslaklarının korunduğunu, OSM hesabı ve OSM'deki içeriğin silinmediğini, başlamış gönderimlerin tamamlanabileceğini belirtir. İptal işlem yapmaz. Sunucu, kimlik doğrulama veya mevcut temizleme politikası değiştirilmez.
-- **Kabul durumu:** Uygulama davranışı, bağımsız test ve UI/UX değerlendirmesi beklemede; cihaz/native kontrolü çalıştırılmadı. 0.11.3 güvenlik incelemesi ve yayın kabulü adaya özgü olarak daha sonra yapılır. Yeni Undo, sağlık seçeneği, yedek/veritabanı biçimi, saklama politikası veya backend davranışı eklenmez.
+- **Kabul durumu:** Sabit kaynak teslimi ve UI/UX kaynak metin/akış incelemesi kabul edildi; 957 birim testi geçti. Cihaz/native kontrolü çalıştırılmadı; dış güvenlik incelemesi ve sürüm/yayın kabulü beklemede kaldı. Yeni Undo, sağlık seçeneği, yedek/veritabanı biçimi, saklama politikası veya backend davranışı eklenmez.
 
 ## Önceki aday — Telefon 0.11.2 / code 24 (yayımlanmamış, tarihsel kayıt)
 
@@ -37,7 +52,7 @@ APP-02 kaynak adayı 8b2160e06cc6fa5c5b3b141c50e070242e51afe7 üzerinde 934 biri
 
 ### 0.11.1 dönemi kanıtı — tarihsel, sonraki adayların kabulü değildir
 
-Önceki `b3` kaynağının tam birim turunda 860 testten 856'sı geçti, 4'ü başarısız oldu. Sonraki `7ade5c9` kaynağında seçilen dört düzeltme kontrolü geçti; lint 0 hata/ölümcül hata ve 92 uyarı verdi. Bunlar yalnız o kaynak ve kapsam için tarihsel kanıttır; 0.11.2 veya 0.11.3 kaynağında test/derleme sonucu değildir. 0.11.1 için native cihaz hedefi yoktu. README'deki ekran görüntüleri 0.9/0.10 döneminden tarihsel örneklerdir; 0.11.3 ekran görüntüsü değildir.
+Önceki `b3` kaynağının tam birim turunda 860 testten 856'sı geçti, 4'ü başarısız oldu. Sonraki `7ade5c9` kaynağında seçilen dört düzeltme kontrolü geçti; lint 0 hata/ölümcül hata ve 92 uyarı verdi. Bunlar yalnız o kaynak ve kapsam için tarihsel kanıttır; 0.11.2, 0.11.3 veya 0.11.4 kaynağında test/derleme sonucu değildir. 0.11.1 için native cihaz hedefi yoktu. README'deki ekran görüntüleri 0.9/0.10 döneminden tarihsel örneklerdir; 0.11.4 ekran görüntüsü değildir.
 
 ## Telefon 0.11.0 / code 22 — motosiklet sürüşü
 
@@ -156,7 +171,7 @@ Ayrıntılı görev ve teslim kuralları [AGENTS.md](../AGENTS.md) içindedir. �
 
 ## Sürüm numaralandırma ilkesi
 
-Güncel telefon kaynak hedefi **0.11.3 / code 25**'tir; bu sürüm yayımlanmamış geliştirme adayıdır, Release veya APK olarak sunulmamıştır. Önceki 0.11.2/code24 ayrı tarihsel aday kaydı olarak korunur; 0.11.1 ayrı bir telefon sürümü değildir. Yayımlanmış sürümlerin dosya ve dağıtım durumu [GitHub Releases](https://github.com/osmanatayozturk/iz-android/releases) bölümündedir. Wear OS **0.6.1 / code 11** ve iletişim **v6** modüller bazında ayrıca numaralandırılır; bu telefon adayı bunları değiştirmez.
+Güncel telefon kaynak hedefi **0.11.4 / code 26**'dır; yayımlanmamış geliştirme adayıdır ve Release/APK olarak sunulmamıştır. Önceki 0.11.3 ve 0.11.2 adayları kendi tarihsel kapsamlarında korunur; 0.11.1 ayrı telefon sürümü değildir. Yayımlanmış sürümlerin dosya ve dağıtım durumu [GitHub Releases](https://github.com/osmanatayozturk/iz-android/releases) bölümündedir. Wear OS **0.6.1 / code 11** ve iletişim **v6** modüller bazında ayrıca numaralandırılır; bu telefon adayı bunları değiştirmez.
 
 - Sürüm numarası gerçek kapsam ve son yayımlanmış sürüme göre belirlenir. Yeni uygulama yayını için ilgili modülün `versionCode` değeri artar; ardışık test derlemeleri ayrı sürüm sayılmaz.
 - Telefon ve saat bağımsız numaralandırılır. Değişmeyen modülün sürümü artırılmaz. Değerlerin kaynağı `app/build.gradle.kts` ve `wear/build.gradle.kts` dosyalarıdır.

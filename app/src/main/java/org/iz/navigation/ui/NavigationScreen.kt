@@ -254,6 +254,17 @@ internal fun NavigationScreen(
     val groupState by app.groups.state.collectAsStateWithLifecycle()
     val weather by app.weatherManager.state.collectAsStateWithLifecycle()
     var showPlanning by androidx.compose.runtime.saveable.rememberSaveable(entryId) { mutableStateOf(initiallyPlanning) }
+    val dashboardEntry = org.iz.navigation.ui.history.LocalUiEntryKey.current
+    var showDashboard by remember(dashboardEntry, nav.sessionId) { mutableStateOf(false) }
+    val dashboardOwner = DashboardOwner(dashboardEntry, nav.sessionId)
+    val dashboardRouteRevision = nav.routeRevision
+    val dashboardStillCurrent: () -> Boolean = {
+        val currentEntry = uiHistory?.current?.key ?: "standalone"
+        val currentNavigation = vm.navigation.state.value
+        dashboardOwnerCurrent(dashboardOwner, DashboardOwner(currentEntry, currentNavigation.sessionId)) &&
+            currentNavigation.routeRevision == dashboardRouteRevision && !vm.commandBusy.value && !vm.ui.value.starting
+    }
+    val dashboardAnalysis by remember(app) { org.iz.navigation.power.PostJourneyAnalysis.get(app).state }.collectAsStateWithLifecycle()
     var addingVia by remember(entryId) { mutableStateOf(false) }
     var recordDialog by remember { mutableStateOf(false) }
     var sessionActions by remember { mutableStateOf(false) }
@@ -353,6 +364,7 @@ internal fun NavigationScreen(
             onConfirm = { pendingEnd = null; vm.confirmEnd(it) })
     }
     BackHandler(enabled = showPlanning, onBack = ::closePlanner)
+    BackHandler(enabled = showDashboard) { showDashboard = false }
     var previousSession by remember { mutableStateOf(nav.sessionId) }
     LaunchedEffect(nav.sessionId) {
         if (previousSession != null && nav.sessionId == null && ui.originCurrent) vm.directions.useCurrentOrigin()
@@ -377,10 +389,95 @@ internal fun NavigationScreen(
         }
     }
 
+    val dashboardSpeed = org.iz.navigation.speed.roadSpeedPresentation(nav.roadSpeed)
+    val expectedDashboardWeatherOwner = dashboardWeatherOwner(nav.sessionId, nav.journey?.id, nav.recording, nav.simulation)
+    val dashboardWeatherMatches = expectedDashboardWeatherOwner != null && weather.journeyId == expectedDashboardWeatherOwner &&
+        nav.route?.id == weather.route?.id
+    val dashboardProgress = dashboardRemaining(nav.guidance, nav.route != null, nav.gpsStale,
+        nav.progress?.remainingMeters, nav.progress?.remainingSeconds)
+    // Only this new presenter withholds unverified progress; legacy instruction callers stay unchanged.
+    val dashboardManeuver = nav.route?.let { route ->
+        nav.progress?.takeIf {
+            dashboardProgress != null && !nav.arrived && !it.arrived && !it.offRoute &&
+                it.elapsedSeconds.isFinite() && it.elapsedSeconds >= 0.0 &&
+                it.distanceFromRouteMeters.isFinite() && it.distanceFromRouteMeters >= 0.0 &&
+                it.nextManeuverDistanceMeters.isFinite() && it.nextManeuverDistanceMeters >= 0.0
+        }?.let { route.maneuvers.getOrNull(it.maneuverIndex)?.instruction?.takeIf(String::isNotBlank) }
+    }
+    val dashboardWarnings = buildList {
+        if (ui.busy || ui.locating || nav.loading || commandBusy) add("İşlem sürüyor; mevcut durum korunuyor.")
+        if (nav.gpsStale) add("GPS konumu bekleniyor; son konum güncel değil.")
+        if (!nav.locationActive && !nav.simulation && (nav.sessionId != null || nav.guidance || nav.recording)) add("Konum bağlantısı kuruluyor.")
+        phoneVoiceFault(speechStatus, nav.guidance, nav.muted)?.let(::add)
+        nav.message?.let(::add)
+        ui.message?.let(::add)
+        if (showPlanning && ui.preview != null) add("Haritadaki rota önizlemedir; canlı rota ilerlemesi değildir.")
+    }.distinct()
+    val dashboardTemperature = weather.assessment?.samples?.firstOrNull()?.reading?.temperatureC?.takeIf { it.isFinite() }
+    val dashboardWeatherText = when {
+        !dashboardWeatherMatches -> if (expectedDashboardWeatherOwner == null) "Etkin oturuma bağlı hava verisi yok." else "Bu oturumun hava verisi bekleniyor."
+        weather.status == RideWeatherStatus.OFF -> "Hava takibi kapalı."
+        weather.status == RideWeatherStatus.LOADING -> "Tahmin hazırlanıyor."
+        weather.status == RideWeatherStatus.ERROR -> "Hava verisi alınamadı."
+        weather.refreshFailed -> "Önbellekteki tahmin; son güncelleme başarısız."
+        weather.gpsStale -> "Son tahmin; konum güncel değil."
+        else -> dashboardTemperature?.let { "${it.toInt()} °C · Hazır tahmin" } ?: "Hazır tahminde sıcaklık bilgisi yok."
+    }
+    val dashboardGroupText = when {
+        !groupState.configured -> "Grup hizmeti yapılandırılmadı."
+        groupState.groupId == null -> "Etkin grup yok."
+        !groupState.connected -> "Grup bağlantısı yok."
+        groupState.sharing -> "Grup bağlı · Konum paylaşımı açık."
+        else -> "Grup bağlı · Konum paylaşımı kapalı."
+    }
+    val dashboardGroupDetail = listOfNotNull(
+        if (groupState.configured && groupState.groupId != null) "${groupState.members.size} üye · ${groupState.markers.count { it.delayed }} gecikmiş konum" else null,
+        groupState.message).joinToString("\n").ifBlank { null }
+    val dashboardViewData = NavigationDashboardViewData(
+        speed = if (nav.roadSpeed.visible && !nav.gpsStale && !nav.simulation) dashboardSpeed.ownText else "—",
+        speedLimit = if (nav.roadSpeed.visible && !nav.gpsStale && !nav.simulation) dashboardSpeed.limitText else "—",
+        limitSource = if (nav.roadSpeed.visible && !nav.gpsStale && !nav.simulation) dashboardSpeed.sourceText else "Güncel sınır bilgisi yok",
+        status = (if (nav.arrived) {
+            if (nav.recording) "Varış noktasına ulaştın. Kayıt devam ediyor. · " else "Varış noktasına ulaştın. · "
+        } else "") + when {
+            nav.simulation -> "Simülasyon · Günlüğe kaydedilmez"
+            nav.guidance && nav.recording -> "Yol tarifi açık · Kayıt açık"
+            nav.guidance -> "Yol tarifi açık · Kayıt kapalı"
+            nav.recording -> "Yolculuk kaydı açık · Yönlendirme kapalı"
+            else -> "Yolculuk kaydı ve yönlendirme kapalı"
+        },
+        maneuver = dashboardManeuver,
+        remaining = dashboardProgress?.let { String.format(java.util.Locale.forLanguageTag("tr-TR"),
+            "Kalan %.1f km · %.0f dk", it.meters / 1000.0, kotlin.math.ceil(it.seconds / 60.0)) } ?: if (nav.guidance) "Güncel kalan yol ve süre bilgisi yok." else null,
+        warnings = dashboardWarnings,
+        weather = dashboardWeatherText,
+        weatherDetail = if (dashboardWeatherMatches) listOfNotNull(
+            if (weather.gpsStale) "Konum güncel değil; tahmin mevcut konumu doğrulamıyor." else null,
+            if (weather.refreshFailed) "Son hazır tahmin korunuyor." else null,
+            weather.message).joinToString("\n").ifBlank { null } else null,
+        group = dashboardGroupText,
+        groupDetail = dashboardGroupDetail,
+        analysis = dashboardAnalysis.label,
+        guidance = nav.guidance,
+        muted = nav.muted,
+        sessionActive = nav.sessionId != null || nav.guidance || nav.recording || nav.locationActive,
+    )
+    val dashboardContent: @Composable () -> Unit = {
+        NavigationDashboardPanel(dashboardViewData, commandBusy || ui.starting,
+            onClose = { showDashboard = false },
+            onMute = {
+                if (dashboardStillCurrent() && vm.navigation.state.value.guidance) vm.navigation.setMuted(!vm.navigation.state.value.muted,
+                    stillCurrent = { dashboardStillCurrent() && vm.navigation.state.value.guidance })
+            },
+            onManage = {
+                if (dashboardStillCurrent()) sessionActions = true
+            })
+    }
     NavigationHomeContent(ui = ui, nav = nav, points = points,
         shortcuts = shortcuts, onShortcut = { kind -> showPlanning = true; onPlannerOpened(); vm.shortcut(kind) },
         members = groupState.markers.map { org.iz.navigation.integration.RouteMapMember(it.userId, it.name, it.latitude, it.longitude, it.delayed) },
         showPlanner = showPlanning, voiceFault = phoneVoiceFault(speechStatus, nav.guidance, nav.muted),
+        showDashboard = showDashboard, onDashboard = { if (dashboardStillCurrent()) showDashboard = true }, dashboard = dashboardContent,
         weatherLabel = weather.assessment?.samples?.firstOrNull()?.reading?.temperatureC?.let { "${it.toInt()}° · Hava" } ?: "Hava durumu",
         onSearch = {
             val current = vm.navigation.state.value

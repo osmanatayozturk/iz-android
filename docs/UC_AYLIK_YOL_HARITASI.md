@@ -1,15 +1,21 @@
 # İz: üç aylık geliştirme yol haritası
 
-Bu belge, onaylı UX-0113 kapsamındaki kişisel kullanım odaklı üç aylık programı küçük, sıralı adaylara ayırır. İlk paket telefon 0.11.3/code25 geliştirme adayıdır; yayımlanmamıştır. 0.11.2/code24 önceki yayımlanmamış adayın tarihsel kapsamı ve doğrulama kaydı olarak aşağıda korunur; 0.11.1 ayrı telefon sürümü değildir. Haftalık aday ritmi planlama hedefidir, takvim veya yayımlama sözü değildir. Sonraki maddeler backlog'dur; uygulanmış/test edilmiş özellikler değildir ve ilk paket kabulünden önce paralel başlatılmaz.
+Bu belge, onaylı navigasyon/gösterge paneli kapsamındaki kişisel kullanım odaklı programı küçük, sıralı adaylara ayırır. İlk paket telefon 0.11.4/code26 geliştirme adayıdır; yayımlanmamıştır. 0.11.3 ve önceki 0.11.2 adaylarının kanıtları tarihsel bağlamda korunur, yeni adaya kabul olarak aktarılmaz. Haftalık aday ritmi planlama hedefidir, takvim veya yayımlama sözü değildir. Sonraki maddeler backlog'dur; uygulanmış/test edilmiş özellikler değildir ve ilk paket kabulünden önce paralel başlatılmaz.
 
-## İlk paket — Telefon 0.11.3 / code 25, F05/F09
+## İlk paket — Telefon 0.11.4 / code 26, harita üzerinde Gösterge
 
-Bu yayımlanmamış geliştirme adayı 0.11.2'nin mevcut telefon davranışını içerir ve buna aşağıdaki F05/F09 kapsamını ekler. 0.11.3 için uygulama, bağımsız test ve UI/UX kabulü tamamlanmadı; APK veya Release yayımlandığı iddia edilmiyor. 0.11.2'ye ait test/acceptance kanıtları otomatik olarak 0.11.3 kabulü sayılmaz. Wear OS **0.6.1 / code 11** ve iletişim **v6** değişmez.
+Bu yayımlanmamış aday, mevcut tek haritayı koruyarak adlandırılmış **Gösterge** panelini aynı ekranda açar. Dikey yerleşim altta, yatay yerleşim yandadır. Hız ve varsa koşullu hız sınırı ilk sırada; manevra ve kritik uyarılar önde kalır. Geri paneli kapatıp gerçek açan ekranı ve oturumu korur. Uygulama ve hedefli masaüstü sonuçları bu belge anında çalıştırılmadı; 0.11.4 APK'sı/Release yayımlandığı iddia edilmiyor. Wear OS **0.6.1 / code 11** ve iletişim **v6** değişmez.
 
-- **F05 — yedek içeriği:** Açıklama; yolculuklar, konum kayıtları, yerler, özel notlar ve fotoğraflara ek olarak varsa deneysel yatış verileri, ham sensör kayıtları ile ilişkili konum, zaman, hız ve kalibrasyon bilgilerini belirtir. Sağlık ölçümleri varsayılan olarak dışarıda kalır; bu tercih yatış/sensör kayıtlarını etkilemez. Yedek içeriği, sağlık seçeneğinin varsayılanı ve biçimi değişmez.
-- **F09 — mekân taslağı silme:** Yerel taslak silinmeden önce teyit sunulur; Vazgeç/Geri/dışarı dokunma değişiklik yapmaz. Kabul edilen silme yalnız beklenen, hâlâ değişmemiş ve silinebilir yerel taslağa uygulanır; OSM'deki mekânları değiştirmez.
-- **F09 — OSM bağlantısını kesme:** Teyit, yerel OSM oturumunun kapanacağını ve topluluk kişileri/mesajları/taslaklarının temizleneceğini açıklar; günlük, fotoğraf ve mekân taslaklarının korunacağını, OSM hesabı ve sunucu içeriğinin silinmeyeceğini ve başlamış gönderimlerin tamamlanabileceğini belirtir. İptal hiçbir değişiklik yapmaz.
-- **Kapsam dışı ve kabul:** Backend/auth, uzak silme/iptal, yedek/veritabanı biçimi, sağlık anahtarı, Undo ve saklama/temizleme politikası değişmez. Uygulama, bağımsız test, UI/UX kabulü, aday bazlı güvenlik incelemesi ve son yayın kabulü tamamlanmış sayılmaz; cihaz/native kontrolü çalıştırılmadı.
+- **Yerleşim ve Back:** Tek mevcut harita aynı ekranda kalır. Gösterge dikeyde alt panel, yatayda yan paneldir. Geri yalnız paneli kapatır ve gerçek açan ekran/oturum korunur; panel açma/kapama konum bulma, rota önizleme veya kayıt başlatmaz.
+- **Öncelik ve eylemler:** Hız ve varsa koşullu hız sınırı başta; yönlendirme varsa manevra ve kritik uyarılar önde kalır. Yönlendirme/ilerleme yokken manevra, kalan rota veya ETA uydurulmaz; eski hız güncelmiş gibi sunulmaz. Sesi kapatma ile kayıt, yönlendirme ve tüm oturum işlemleri ayrı kalır. Yönlendirme sırasında Nereye? başlığının yüksekliği 0'dır.
+- **Veri ve harita sahipliği:** Mevcut oturumun navigation/progress/speed/weather/group/analysis snapshot'ları ve sahiplik/güncellik etiketleri kullanılır. Yeni veri üreticisi, harita, GPS/API isteği, zamanlayıcı, sorgu, sensör, ETA/traffic hesabı veya ağır metrik yoktur. Kamera, manuel harita tutuşu/recenter, ölçülen viewport ve atıf korunur. Wear OS **0.6.1 / code 11**, iletişim **v6**, şema, izin ve bağımlılıklar değişmez.
+- **Kabul kapıları:** Uygulama, bağımsız test ve UI/UX kaynak kabulü; sabit adayla son teknik kontroller; aday bazlı güvenlik incelemesi ve son yayın kabulü birbirinden ayrıdır. Telefon/native yerleşim çalıştırılmadı; eski aday kanıtı bu kabulün yerine geçmez.
+
+## Önceki adaylar — telefon 0.11.3 ve 0.11.2 (tarihsel)
+
+0.11.3, F05/F09 yedek açıklaması ve OSM yerel işlemleri adayını; 0.11.2 önceki navigasyon/ekran davranışları adayını kaydeder. Bu sürümlerin test, kaynak ve kabul kanıtları kendi kapsamlarında kalır; 0.11.4 için doğrulama veya kabul değildir. Ayrıntılar [değişiklik geçmişindedir](../CHANGELOG.md).
+
+0.11.4, 0.11.3'teki F05 yedek içeriği açıklaması ve F09 yerel mekân/OSM işlem teyitlerinin mevcut davranışını korur. 0.11.3 tarihsel masaüstü tesliminde 957 birim testi sıfır hata/başarısızlık/atlama ile geçti; Debug lint 0 hata/ölümcül hata ve 95 uyarı verdi, yerel Debug paketi üretildi ve UI/UX kaynak incelemesi kabul edildi. Native/cihaz, dış güvenlik ve yayın kabulü verilmedi. Bunlar 0.11.3'e özgü tarihsel kayıtlardır.
 
 ## Önceki aday — telefon 0.11.2 / code 24 (yayımlanmamış, tarihsel)
 
@@ -21,9 +27,8 @@ APP-02 kaynak adayı 8b2160e06cc6fa5c5b3b141c50e070242e51afe7 üzerinde 934 biri
 
 ## Haftalar 1–4 — sonraki küçük adaylar
 
-Yalnız 0.11.3 kabulünden sonra, sırayla değerlendirilecek backlog başlıkları:
+Yalnız 0.11.4 kabulünden sonra, sırayla değerlendirilecek backlog başlıkları:
 
-- **Sonraki aday:** Tek Motosiklet modunu koruyarak daha sade navigasyon ile ayrıntılı gösterge paneli arasındaki sunumu ele almak.
 - **Sonraki aday:** Ekran kilitliyken ve interkomla kullanım tutarlılığını incelemek; saati bilgilendirici yüzey olarak tutmak ve Android Auto/Wear metinleriyle ilgili F06–F08 açıklama konularını değerlendirmek.
 
 Bu maddeler ürün davranışı için peşin kabul değildir; sonraki adayların sınırları ve kabul ölçütleri ayrı belirlenir.

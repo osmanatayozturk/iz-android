@@ -1,11 +1,25 @@
 # Değişiklik geçmişi
 
-## Telefon 0.11.3 / code 25 — F05/F09 açıklama ve teyitleri (yayımlanmamış geliştirme adayı)
+## Telefon 0.11.4 / code 26 — harita üzerinde Gösterge paneli (yayımlanmamış geliştirme adayı)
 
-**Durum:** Bu aday üzerinde uygulama çalışması sürüyor. Uygulama, bağımsız test ve UI/UX kabulü tamamlanmadı; 0.11.3 APK'sı veya Release yayımlandığı iddia edilmiyor. Adaya özgü güvenlik incelemesi ve koordinatörün son yayın kabulü beklemede. Wear OS **0.6.1 / code 11** ve telefon-saat iletişimi **v6** değişmiyor.
+**Durum:** Uygulama adayı hazırlanıyor; bu belge anında hedefli masaüstü kontrolleri ve aday sonuçları çalıştırılmadı. Sabit son kaynak, teknik ve UI/UX kabulü daha sonra kendi kanıtıyla bağlanacak; 0.11.4 APK'sı veya Release yayımlandığı iddia edilmiyor. Telefon/native görünüm, güvenlik incelemesi ve koordinatörün son yayın kabulü beklemede. Wear OS **0.6.1 / code 11** ve iletişim **v6** değişmiyor.
 
-- **F05 — yedek içeriği açıklaması:** Onaylı yolculuklar, konum kayıtları, yerler, özel notlar ve fotoğrafların yanı sıra varsa deneysel yatış verileri, ham sensör kayıtları ve bunlarla ilişkili konum, zaman, hız ve kalibrasyon bilgisinin de yedekte bulunabileceği açıklanacak. Sağlık ölçümleri varsayılan olarak dışarıda kalır; bu seçim yatış/sensör kayıtlarını etkilemez. Mevcut yedek içeriği ve biçimi değişiklik kapsamı dışındadır.
-- **F09 — mekân taslağı ve OSM bağlantısı:** Mekân taslağı silinmeden önce açık teyit istenir; iptal yerel veriyi değiştirmez ve OSM'deki mekânları etkilemez. OSM bağlantısını kesmeden önce yerel OSM oturumu ve topluluk önbelleği/taslaklarının temizleneceği, günlük/fotoğraf/mekân taslaklarının korunacağı, OSM hesabı veya sunucu içeriğinin silinmeyeceği ve başlamış gönderimlerin tamamlanabileceği açıklanır. İptal bağlantı veya veriyi değiştirmez. Mevcut yetkilendirme, veri saklama ve sunucu davranışları değişmez.
+- Tek mevcut harita ve gezinme/oturum sahipliği korunarak aynı ekranda **Gösterge** adlı panel açılması hedeflenir. Panelin dikey ekranda altta, yatay ekranda yanda açılması; Geri'nin yalnız paneli kapatıp gerçek açan ekranı/oturumu koruması hedeflenir.
+- Hedeflenen bilgi sırası hız ve varsa koşullu hız sınırıyla başlar; yönlendirme manevrası ile kritik uyarılar önde kalır. Kayıt, yönlendirme ve tüm oturum işlemleri birbirinden ayrı; ses kapatma erişilebilir tutulur.
+- Aday yalnız mevcut oturum/sürüş, yönlendirme ilerlemesi, hız, hava, grup ve analiz durumlarını kullanmayı hedefler. Yönlendirme/ilerleme yokken manevra, kalan rota veya ETA üretilmez; eski hız güncelmiş gibi gösterilmez. Yeni harita, veri üreticisi, GPS/API isteği, zamanlayıcı, sensör, ETA/traffic hesabı veya ek motosiklet profili eklenmez. Eski/eksik/veri sahibi uyuşmazlığı durumlarının açık gösterilmesi hedeflenir.
+- Manuel harita tutuşu, kamera/viewport, harita atfı ve mevcut Back/sonuç sahiplikleri korunur. Panel açma/kapama kayıt, konum bulma, rota önizleme veya onaylı bir komutu yeniden çalıştırmaz. Wear OS, iletişim protokolü, şema, izin ve bağımlılıklar bu adayda değişmeyecektir.
+- 0.11.4, 0.11.3'teki F05 yedek içeriği açıklaması ve F09 yerel mekân/OSM işlem teyitlerinin mevcut davranışını devralır. Bu geçmiş uygulama kaydı, 0.11.4 için yeni doğrulama veya kabul değildir.
+
+## Önceki aday — Telefon 0.11.3 / code 25 (yayımlanmamış, tarihsel)
+
+**Tarihsel durum:** Önceki belge kontrol noktasında bu aday yayımlanmamıştı; uygulama, bağımsız test ve UI/UX kabulü tamamlanmamış, adaya özgü güvenlik incelemesi ve son yayın kabulü beklemedeydi. Bu tarihsel kanıtlar ve kararlar yalnız 0.11.3'e aittir, 0.11.4 kabulü değildir. Wear OS **0.6.1 / code 11** ve telefon-saat iletişimi **v6** değişmiyor.
+
+**Tarihsel masaüstü teslim kontrolü:** Sonraki sabit kaynak tesliminde 957 birim testi geçti, hata/başarısızlık/atlama olmadı; Debug lint 0 hata/ölümcül hata ve 95 uyarı verdi; yerel Debug paketi üretildi. UI/UX kaynak metin/akış incelemesi kabul edildi. Native/cihaz, dış güvenlik ve sürüm/yayın kabulü verilmedi. Bu teslim kontrolü daha önceki belgesel durum özetini günceller; yalnız 0.11.3'e aittir.
+
+0.11.3'e ait kaynak/test kanıtları ve kabul durumu yalnız o adayın tarihsel kaydıdır; 0.11.4 için kabul değildir ve otomatik taşınmaz.
+
+- **F05 — yedek içeriği açıklaması:** Yedek içeriği açıklaması, onaylı yolculuklar, konum kayıtları, yerler, özel notlar ve fotoğrafların yanı sıra varsa deneysel yatış verileri, ham sensör kayıtları ve bunlarla ilişkili konum, zaman, hız ve kalibrasyon bilgisini belirtir. Sağlık ölçümleri varsayılan olarak dışarıda kalır; bu seçim yatış/sensör verilerini etkilemez. Mevcut yedek içeriği ve biçimi değişmez.
+- **F09 — mekân taslağı ve OSM bağlantısı:** Mekân taslağı silinmeden önce açık teyit gösterilir; iptal yerel veriyi değiştirmez ve OSM'deki mekânları etkilemez. OSM bağlantısını kesme teyidi, temizlenecek yerel OSM oturumu ve topluluk önbelleği/taslaklarını, korunacak günlük/fotoğraf/mekân taslaklarını ve OSM hesabı ya da sunucu içeriğinin silinmediğini açıklar; başlamış gönderimler tamamlanabilir. İptal bağlantı veya veriyi değiştirmez. Mevcut yetkilendirme, veri saklama ve sunucu davranışları değişmez.
 - **Sınırlar:** Yeni geri alma/Undo, yedek ya da veritabanı biçimi, ek sağlık seçeneği, temizleme/saklama politikası, backend veya uzak silme davranışı eklenmez. Uygulama ve kabul sonuçları doğrulanmadan tamamlanmış özellik gibi sunulmaz.
 
 ## Önceki aday — Telefon 0.11.2 / code 24 (yayımlanmamış, kabulü bekliyor)
