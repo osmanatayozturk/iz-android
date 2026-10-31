@@ -37,9 +37,11 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import org.iz.navigation.integration.osm.OsmAuthManager
 import org.iz.navigation.osmcommunity.*
 import org.iz.navigation.ui.history.LocalUiEntryKey
+import org.iz.navigation.ui.history.LocalUiHistory
 import org.iz.navigation.ui.history.LocalUiExitGuard
 import org.iz.navigation.ui.history.UiEditOwner
 import org.iz.navigation.ui.history.UiEditState
+import org.iz.navigation.ui.history.UiAsyncOwner
 
 @Composable
 internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = null,
@@ -49,11 +51,16 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
     val context = androidx.compose.ui.platform.LocalContext.current
     val auth = remember { OsmAuthManager.get(context) }
     val authState by auth.state.collectAsStateWithLifecycle()
+    val liveSession by auth.communitySessionSource.sessions.collectAsStateWithLifecycle()
     val community by vm.community.collectAsStateWithLifecycle()
     val rawUi by vm.ui.collectAsStateWithLifecycle()
     val editorState by vm.editorState.collectAsStateWithLifecycle()
     val exitGuard = LocalUiExitGuard.current
     val entryKey = LocalUiEntryKey.current
+    val history = LocalUiHistory.current
+    val disconnect = remember(entryKey) { OsmDestructiveConfirmation<Long> { it > 0 } }
+    val pendingDisconnect by disconnect.pending.collectAsStateWithLifecycle()
+    var disconnectLease by remember(entryKey) { mutableStateOf<UiAsyncOwner?>(null) }
     // Room/auth may emit before the VM observer: never render another account's detail for even one frame.
     val ui = if (rawUi.accountId == community.accountId && rawUi.cacheIdentity == community.cacheIdentity) rawUi
         else CommunityUiState(accountId = community.accountId, cacheIdentity = community.cacheIdentity)
@@ -70,6 +77,44 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
         if (vm.ui.value.busy || vm.editorState.value.saving || auth.state.value.busy ||
             vm.ui.value.accountId != vm.community.value.accountId || vm.ui.value.cacheIdentity != vm.community.value.cacheIdentity) return
         if (exitGuard == null) action() else exitGuard.requestExit(action)
+    }
+    fun disconnectOwner() = vm.community.value.let {
+        OsmConfirmationOwner(entryKey, it.accountId, it.cacheIdentity, auth.communitySessionSource.sessions.value, history)
+    }
+    fun disconnectBusy() = vm.ui.value.busy || vm.editorState.value.saving || auth.state.value.busy ||
+        vm.ui.value.accountId != vm.community.value.accountId || vm.ui.value.cacheIdentity != vm.community.value.cacheIdentity
+    fun disconnectTarget(): Long? {
+        val current = vm.community.value
+        val session = auth.communitySessionSource.sessions.value ?: return null
+        return current.accountId?.takeIf { it == session.userId && it == auth.state.value.user?.id &&
+            current.ready && current.cacheIdentity != null }
+    }
+    fun requestDisconnect() {
+        val target = disconnectTarget() ?: return
+        val lease = exitGuard?.captureAsyncOwner(entryKey)
+        if (exitGuard != null && lease == null) return
+        if (disconnect.request(target, disconnectOwner(), disconnectBusy()) != null) disconnectLease = lease
+    }
+    fun confirmDisconnect(request: OsmDestructiveRequest<Long>) {
+        if (disconnect.pending.value !== request || disconnectBusy()) return
+        val lease = disconnectLease
+        val permit = disconnect.take(request, disconnectOwner(), disconnectTarget(), disconnectBusy())
+        if (permit == null) { vm.reportError("Kayıt değişti. Güncel durumu kontrol et."); return }
+        exit {
+            if (exitGuard == null || exitGuard.acceptsAsyncOwner(lease, entryKey)) {
+                permit.applyIfCurrent(disconnectOwner(), disconnectTarget(), disconnectBusy()) {
+                    vm.closeEditor()
+                    auth.disconnect()
+                }
+            }
+        }
+    }
+    DisposableEffect(disconnect) { onDispose { disconnect.invalidate() } }
+    LaunchedEffect(entryKey, liveSession, authState.user?.id, community.accountId, community.cacheIdentity) {
+        disconnect.pending.value?.let { request ->
+            if (!request.owner.matches(disconnectOwner()) || disconnectTarget() != request.target)
+                disconnect.dismiss(request)
+        }
     }
     fun close() { vm.closeEditor(); onClose() }
     fun back() { exit { if (!vm.back()) close() } }
@@ -153,7 +198,7 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
                     { vm.compose(ui.person.id) }, ::openLink, { vm.back() })
             }
             ui.section == CommunitySection.ACCOUNT -> CommunityAccount(community, systemAllowed, ui.busy || authState.busy,
-                authState.clientIdConfigured, authState.user?.displayName, ::login, { exit { vm.closeEditor(); auth.disconnect() } },
+                authState.clientIdConfigured, authState.user?.displayName, ::login, ::requestDisconnect,
                 onOpenSettings, vm::notifications, {
                     val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
                     context.startActivity(intent)
@@ -168,6 +213,16 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
                 { id -> exit { vm.openMessage(id) } }, { draft -> exit { vm.editDraft(draft) } },
                 { exit { vm.compose() } }, vm::loadMore, ::login)
         }
+    }
+    pendingDisconnect?.let { request ->
+        OsmDestructiveDialog(
+            title = "OSM bağlantısı kesilsin mi?",
+            body = "İz’deki OSM oturumun kapanır. Not veya mekân göndermek için yeniden giriş yapman gerekir.\n\n" +
+                "Bu cihazdaki topluluk kişileri, mesajları ve topluluk taslakları temizlenir. Silinen topluluk taslakları geri alınamaz. Günlüğün, fotoğrafların ve mekân taslakların korunur.\n\n" +
+                "OSM hesabın ve OSM’deki içerikler silinmez. Başlamış OSM gönderimleri tamamlanabilir.",
+            confirmLabel = "Bağlantıyı kes", tag = "osm-disconnect", enabled = !disconnectBusy(),
+            onDismiss = { disconnect.dismiss(request) }, onConfirm = { confirmDisconnect(request) },
+        )
     }
 }
 

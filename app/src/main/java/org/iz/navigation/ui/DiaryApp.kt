@@ -853,13 +853,14 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     }) { Text("Geri yükle") } }, dismissButton = { TextButton(onClick = { restoreUri = null }) { Text("Vazgeç") } }) }
     if (showBackupOptions) AlertDialog(onDismissRequest = { showBackupOptions = false },
         title = { Text("Yedek içeriği") },
-        text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Yolculuklar, yerler, özel notlar ve fotoğraflar yedeklenir.")
+        text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Yolculuklar, konum kayıtları, yerler, özel notlar ve fotoğraflar yedeklenir.")
+            Text("Varsa deneysel yatış verileri, ham sensör kayıtları ve bunlara bağlı konum, zaman, hız ve kalibrasyon bilgileri de yedeklenir.")
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(includeHealthBackup, { includeHealthBackup = it })
                 Text("Sağlık ölçümlerini de ekle")
             }
-            Text("Sağlık ölçümleri varsayılan olarak yedeğe eklenmez.", style = MaterialTheme.typography.bodySmall)
+            Text("Sağlık ölçümleri varsayılan olarak eklenmez. Bu seçim yatış ve sensör kayıtlarını etkilemez.")
         } },
         confirmButton = { TextButton(onClick = {
             showBackupOptions = false

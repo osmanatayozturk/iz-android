@@ -1,8 +1,18 @@
 # Değişiklik geçmişi
 
-## Telefon 0.11.2 / code 24 — sesli yönlendirme ve ekran bağlamı
+## Telefon 0.11.3 / code 25 — F05/F09 açıklama ve teyitleri (yayımlanmamış geliştirme adayı)
+
+**Durum:** Bu aday üzerinde uygulama çalışması sürüyor. Uygulama, bağımsız test ve UI/UX kabulü tamamlanmadı; 0.11.3 APK'sı veya Release yayımlandığı iddia edilmiyor. Adaya özgü güvenlik incelemesi ve koordinatörün son yayın kabulü beklemede. Wear OS **0.6.1 / code 11** ve telefon-saat iletişimi **v6** değişmiyor.
+
+- **F05 — yedek içeriği açıklaması:** Onaylı yolculuklar, konum kayıtları, yerler, özel notlar ve fotoğrafların yanı sıra varsa deneysel yatış verileri, ham sensör kayıtları ve bunlarla ilişkili konum, zaman, hız ve kalibrasyon bilgisinin de yedekte bulunabileceği açıklanacak. Sağlık ölçümleri varsayılan olarak dışarıda kalır; bu seçim yatış/sensör kayıtlarını etkilemez. Mevcut yedek içeriği ve biçimi değişiklik kapsamı dışındadır.
+- **F09 — mekân taslağı ve OSM bağlantısı:** Mekân taslağı silinmeden önce açık teyit istenir; iptal yerel veriyi değiştirmez ve OSM'deki mekânları etkilemez. OSM bağlantısını kesmeden önce yerel OSM oturumu ve topluluk önbelleği/taslaklarının temizleneceği, günlük/fotoğraf/mekân taslaklarının korunacağı, OSM hesabı veya sunucu içeriğinin silinmeyeceği ve başlamış gönderimlerin tamamlanabileceği açıklanır. İptal bağlantı veya veriyi değiştirmez. Mevcut yetkilendirme, veri saklama ve sunucu davranışları değişmez.
+- **Sınırlar:** Yeni geri alma/Undo, yedek ya da veritabanı biçimi, ek sağlık seçeneği, temizleme/saklama politikası, backend veya uzak silme davranışı eklenmez. Uygulama ve kabul sonuçları doğrulanmadan tamamlanmış özellik gibi sunulmaz.
+
+## Önceki aday — Telefon 0.11.2 / code 24 (yayımlanmamış, kabulü bekliyor)
 
 Telefon 0.11.2, yönlendirme başlığı, günlük bitirme teyidi ve metin karşıtlığı iyileştirmelerini tek sürümde birleştirir; 0.11.1 ayrı bir telefon sürümü değildir. Bu kayıt sürüm davranışını ve doğrulanmış kaynak/host kapsamını açıklar. Wear OS **0.6.1 / code 11** ve telefon-saat iletişimi **v6** değişmez.
+
+**Tarihsel durum:** 0.11.2 / code 24 yayımlanmamıştır. Telefonda yapılan sınırlı Menü → Ayarlar kontrolü başarısız oldu; kök nedeni henüz belirlenmedi ve uygulama hatası olduğu doğrulanmadı. Tanılama test paketi üretildi ancak çalıştırılmadı. Native/UI/UX kabulü, bu adaya özgü güvenlik incelemesi ve koordinatörün son yayın kabulü beklemededir. APP-02/APP-03 test, lint ve paket sonuçları yalnız 0.11.2'nin kendi kaynaklarına aittir; 0.11.3 kabulü değildir. Native01 bulgusunun çözüldüğü veya kabul şartından feragat edildiği doğrulanmış değildir.
 
 ### Birleşik 0.11.1 kapsamı
 

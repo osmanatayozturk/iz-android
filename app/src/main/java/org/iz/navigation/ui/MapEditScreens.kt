@@ -22,6 +22,10 @@ import org.iz.navigation.data.*
 import org.iz.navigation.IzApplication
 import org.iz.navigation.integration.*
 import org.iz.navigation.integration.osm.*
+import org.iz.navigation.ui.history.LocalUiEntryKey
+import org.iz.navigation.ui.history.LocalUiHistory
+import org.iz.navigation.ui.history.LocalUiExitGuard
+import org.iz.navigation.ui.history.UiAsyncOwner
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -35,12 +39,23 @@ import kotlinx.coroutines.launch
 @Composable
 fun MapEditPage(onClose: () -> Unit) {
     val context = LocalContext.current
-    val osmReady = remember { (context.applicationContext as? IzApplication)?.osmReady }
+    val application = remember { context.applicationContext as? IzApplication }
+    val osmReady = remember { application?.osmReady }
     val repository = remember { DiaryRepository(context) }
     val auth = remember { OsmAuthManager.get(context) }
     val settings = remember { OsmServiceSettings(context) }
     val controller = remember { OsmMapEditController(repository, auth) { settings.read().overpass } }
     val session by auth.state.collectAsStateWithLifecycle()
+    val liveSession by auth.communitySessionSource.sessions.collectAsStateWithLifecycle()
+    val communityState = application?.community?.state?.collectAsStateWithLifecycle()
+    val entryKey = LocalUiEntryKey.current
+    val history = LocalUiHistory.current
+    val exitGuard = LocalUiExitGuard.current
+    val deletion = remember(entryKey) {
+        OsmDestructiveConfirmation<MapEditDraft> { it.status in setOf(MapEditStatus.DRAFT, MapEditStatus.FAILED) }
+    }
+    val pendingDeletion by deletion.pending.collectAsStateWithLifecycle()
+    var deletionLease by remember(entryKey) { mutableStateOf<UiAsyncOwner?>(null) }
     val drafts by repository.mapEdits.collectAsStateWithLifecycle(initialValue = emptyList())
     val scope = rememberCoroutineScope()
     var picker by rememberSaveable { mutableStateOf(false) }
@@ -57,6 +72,43 @@ fun MapEditPage(onClose: () -> Unit) {
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { message = "İşlem tamamlanamadı. Taslağını ve bağlantını kontrol et." }
             finally { busy = false }
+        }
+    }
+    fun deletionOwner() = OsmConfirmationOwner(entryKey, auth.state.value.user?.id,
+        application?.community?.state?.value?.cacheIdentity, auth.communitySessionSource.sessions.value, history)
+    fun deletionBusy() = busy || auth.state.value.busy
+    fun requestDeletion(draft: MapEditDraft) {
+        val lease = exitGuard?.captureAsyncOwner(entryKey)
+        if (exitGuard != null && lease == null) return
+        if (deletion.request(draft, deletionOwner(), deletionBusy()) != null) deletionLease = lease
+    }
+    fun confirmDeletion(request: OsmDestructiveRequest<MapEditDraft>) {
+        if (deletion.pending.value !== request || deletionBusy()) return
+        val lease = deletionLease
+        val permit = deletion.take(request, deletionOwner(), drafts.firstOrNull { it.id == request.target.id }, deletionBusy())
+        if (permit == null) { message = "Kayıt değişti. Güncel durumu kontrol et."; return }
+        val accepted = {
+            if (exitGuard == null || exitGuard.acceptsAsyncOwner(lease, entryKey)) {
+                permit.applyIfCurrent(deletionOwner(), drafts.firstOrNull { it.id == request.target.id }, deletionBusy()) { expected ->
+                    action {
+                        // action awaits startup recovery: recheck the owner after that suspension too.
+                        if (!request.owner.matches(deletionOwner()) || auth.state.value.busy ||
+                            (exitGuard != null && !exitGuard.acceptsAsyncOwner(lease, entryKey))) {
+                            "Kayıt değişti. Güncel durumu kontrol et."
+                        } else if (repository.deleteMapEditIfUnchanged(expected)) "Yerel taslak silindi."
+                        else "Kayıt değişti. Güncel durumu kontrol et."
+                    }
+                }
+            }
+            Unit
+        }
+        if (exitGuard == null) accepted() else exitGuard.requestExit(accepted)
+    }
+    DisposableEffect(deletion) { onDispose { deletion.invalidate() } }
+    LaunchedEffect(entryKey, liveSession, session.user?.id, communityState?.value?.cacheIdentity, drafts) {
+        deletion.pending.value?.let { request ->
+            if (!request.owner.matches(deletionOwner()) || drafts.firstOrNull { it.id == request.target.id } != request.target)
+                deletion.dismiss(request)
         }
     }
     Column(Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
@@ -86,13 +138,21 @@ fun MapEditPage(onClose: () -> Unit) {
                                 action { controller.close(draft.id).message }
                             }, enabled = !busy) { Text("Gönderimi kapat") }
                             if (draft.status in setOf(MapEditStatus.DRAFT, MapEditStatus.FAILED)) TextButton(onClick = {
-                                action { repository.deleteMapEdit(draft.id); "Yerel taslak silindi." }
-                            }, enabled = !busy) { Text("Taslağı sil") }
+                                requestDeletion(draft)
+                            }, enabled = !deletionBusy(), modifier = Modifier.testTag("map-draft-delete")) { Text("Taslağı sil") }
                         }
                     }
                 }
             }
         }
+    }
+    pendingDeletion?.let { request ->
+        OsmDestructiveDialog(
+            title = "Mekân taslağı silinsin mi?",
+            body = "Bu cihazdaki mekân taslağı kalıcı olarak silinir. OSM’deki mekânlar değişmez.",
+            confirmLabel = "Taslağı sil", tag = "map-draft-delete", enabled = !deletionBusy(),
+            onDismiss = { deletion.dismiss(request) }, onConfirm = { confirmDeletion(request) },
+        )
     }
     if (picker) MapEditLocationPicker(onClose = { picker = false }) { coordinate ->
         picker = false
@@ -269,4 +329,22 @@ private fun MapEditStatus.mapEditLabel() = when (this) {
     MapEditStatus.SENT -> "OSM'de yayımlandı"
     MapEditStatus.FAILED -> "Gönderilemedi"
     MapEditStatus.UNKNOWN -> "Sonuç kontrol edilmeli"
+}
+
+/** Shared presentation only; callers own target validation and the one-shot destructive action. */
+@Composable
+internal fun OsmDestructiveDialog(
+    title: String, body: String, confirmLabel: String, tag: String, enabled: Boolean,
+    onDismiss: () -> Unit, onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.testTag(tag + "-dialog"),
+        title = { Text(title) },
+        text = { Text(body, Modifier.verticalScroll(rememberScrollState()).testTag(tag + "-body")) },
+        confirmButton = { TextButton(onClick = onConfirm, enabled = enabled,
+            modifier = Modifier.testTag(tag + "-confirm")) { Text(confirmLabel) } },
+        dismissButton = { TextButton(onClick = onDismiss,
+            modifier = Modifier.testTag(tag + "-cancel")) { Text("Vazgeç") } },
+    )
 }

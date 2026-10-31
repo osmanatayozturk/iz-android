@@ -354,6 +354,13 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
         mapDao.delete(id)
     }
 
+    /** Compare and delete in one transaction; stale or no-longer-editable consent is a no-op. */
+    suspend fun deleteMapEditIfUnchanged(expected: MapEditDraft): Boolean = db.withTransaction {
+        if (!mapEditDeletionMatches(expected, mapDao.read(expected.id))) return@withTransaction false
+        mapDao.delete(expected.id)
+        true
+    }
+
     suspend fun recoverInterruptedMapEdits(): Int = mapDao.recoverInterrupted()
 
     /** Editing never turns an uncertain or sent public request back into a resendable draft. */
