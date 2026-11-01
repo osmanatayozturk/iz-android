@@ -6,13 +6,13 @@ Bu dosya telefon ve uyumlu bileşenlerin kaynak sürümlerini kaydeder. Dağıt�
 
 | Bileşen | versionName | versionCode | Dağıtım ve doğrulama kaydı |
 |---|---|---|---|
-| Telefon | 0.11.4 | 26 | Yayımlanmamış aday; yerel Debug APK doğrulandı, herkese açık APK/Release yok |
+| Telefon | 0.11.4 | 26 | G2 kaynak/belgeleri main dalında; imzalı Release APK/AAB yerelde doğrulandı; herkese açık APK/Release yok; IAS yüklemesi doğrulanmadı |
 | Wear OS | 0.6.1 | 11 | Bu telefon kaynak sürümünde korunur |
 | Ortak iletişim | v6 | — | Bu telefon kaynak sürümünde korunur |
 
 ## Telefon 0.11.4 / code 26 — harita üzerinde Gösterge paneli
 
-**Durum:** 0.11.4 / code 26 kaynak adayı tamamlandı. Son birim testinde 967 test başarısızlık/hata/atlama olmadan geçti; lint 0 hata/ölümcül hata ve 95 uyarı verdi. Yerel Debug derlemesi ile paket kimlik/imza okuması geçti. Bu aday için herkese açık APK veya Release yayımlanmadı. Wear OS **0.6.1 / code 11** ve iletişim **v6** değişmiyor.
+**Durum:** 0.11.4 / code 26 kaynak adayı tamamlandı; G2 kaynak ve belgeleri GitHub main dalında. Yerelde imzalanmış Release APK ve AAB için paket kimliği/imza doğrulaması geçti; herkese açık APK veya uygulama Release'i yayımlanmadı. Son birim testinde 967 test başarısızlık/hata/atlama olmadan geçti; lint 0 hata/ölümcül hata ve 95 uyarı verdi. Adaya özgü odaklı güvenlik incelemesi olumludur; koordinatör G2 kaynak/belge main aktarımını ve IAS hedefini kabul etti. Google Play IAS yüklemesi bu kayıtta doğrulanmadı. Wear OS **0.6.1 / code 11** ve iletişim **v6** değişmiyor.
 
 - **Yerleşim ve gezinme:** Tek mevcut harita ekranda kalır. **Gösterge** paneli dikeyde altta, yatayda yanda açılır. Geri paneli kapatır ve gerçek açan ekranı/aktif oturumu korur; panel açma veya kapama konum bulma, rota önizleme, kayıt ya da onaylı başka bir komutu yeniden çalıştırmaz.
 - **Bilgi sırası:** Hız ve varsa koşullu hız sınırı ilk sıradadır. Yönlendirme manevrası ve kritik uyarılar önde; mevcut sesi kapatma ve ayrı kayıt/yönlendirme/tüm oturum işlemleri erişilebilir kalır. Yönlendirmede Nereye? başlık yüksekliği 0 olarak korunur.
@@ -20,7 +20,7 @@ Bu dosya telefon ve uyumlu bileşenlerin kaynak sürümlerini kaydeder. Dağıt�
 - **Harita ve uyumluluk:** Mevcut kamera, elle harita tutuşu/recenter, ölçülen görünür alan ve atıf korunur. Wear OS **0.6.1 / code 11**, iletişim **v6**, veri/yedek biçimi, izinler ve bağımlılıklar değişmez. Dikey ve yatay Ana ekran/panel bileşen kontrolleri geçti; bu kapsam tam uygulama gezinme akışını, TalkBack'i veya yapılandırma/süreç geri yüklemesini kapsamaz.
 - **Devralınan davranış:** 0.11.3'teki F05 yedek içeriği açıklaması ile F09 yerel mekân taslağı ve OSM bağlantı teyitlerinin mevcut davranışı 0.11.4'te korunur; önceki uygulama ve kabul kayıtları yeni aday için kanıt sayılmaz.
 - **Sınırlı telefon QA:** Yalnızca test uygulamasındaki Ana ekran/panel sahnelerinin dikey ve yatay kontrolleri geçti; atanmış UI/UX kaynak incelemesi ile iki normal yazı boyutlu görüntünün görsel kabulü tamamlandı. Geçici QA kurulumları kaldırıldı; gündelik uygulama kurulumu değiştirilmedi.
-- **Kalan kabul kapıları:** Bu sınırlı sonuç tam uygulama gezinme davranışını, TalkBack'i veya yapılandırma/süreç geri yüklemesini kapsamaz; bu kontroller çalıştırılmadı. Aday bazlı dış güvenlik incelemesi ve koordinatörün son yayın kabulü beklemede. Önceki sürümlerin kanıtları 0.11.4 kabuline aktarılmaz.
+- **Kalan kabul kapıları:** Odaklı aday güvenlik incelemesi olumludur; koordinatör G2 kaynak/belge main aktarımını ve IAS hedefini kabul etti. Google Play IAS yüklemesi doğrulanmadı. Tam uygulama/cihaz ve dağıtım uyumluluğu ile tam geçişli kaynak/lisans kapsamı halen doğrulanmayı bekliyor; ayrıntılar aşağıdaki sürüm durumunda yer alır. Önceki sürümlerin kanıtları 0.11.4 kabuline aktarılmaz.
 
 ## Önceki aday — Telefon 0.11.3 / code 25 (tarihsel)
 
