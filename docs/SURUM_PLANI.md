@@ -6,11 +6,21 @@ Bu dosya telefon ve uyumlu bileşenlerin kaynak sürümlerini kaydeder. Dağıt�
 
 | Bileşen | versionName | versionCode | Dağıtım ve doğrulama kaydı |
 |---|---|---|---|
-| Telefon | 0.11.4 | 26 | G2 kaynak/belgeleri main dalında; imzalı Release APK/AAB yerelde doğrulandı; herkese açık APK/Release yok; IAS yüklemesi doğrulanmadı |
+| Telefon | 0.11.5 | 27 | Sabit kaynak adayı için yerel Debug birim/lint/assemble ve Debug APK kimlik/imza doğrulaması tamamlandı; Release/AAB ve cihaz doğrulaması yok |
 | Wear OS | 0.6.1 | 11 | Bu telefon kaynak sürümünde korunur |
 | Ortak iletişim | v6 | — | Bu telefon kaynak sürümünde korunur |
 
-## Telefon 0.11.4 / code 26 — harita üzerinde Gösterge paneli
+## Telefon 0.11.5 / code 27 — sesli yönlendirme ve interkom kontrolü
+
+**Durum:** Sabit kaynak adayı [`c593bfb`](https://github.com/osmanatayozturk/iz-android/commit/c593bfb739f1cd82ad994013e733a33e6c653bb8), 0.11.5 / code 27'dir. 967 Debug birim testi geçti (0 hata/başarısızlık/atlama); Debug lint 0 hata/ölümcül hata ve 95 uyarı verdi; `:app:assembleDebug` tamamlandı. `org.iz.navigation` Debug APK'sı versionCode 27/versionName 0.11.5, minSdk 29/targetSdk 36 ve debuggable olarak okundu; imza doğrulandı. Bu, yerel Debug kanıtıdır; Release/AAB, gerçek cihaz veya yayın kabulü değildir. Wear OS **0.6.1 / code 11** ve iletişim **v6** korunur.
+
+Debug kanıtı bağlantı verilen uygulama commit'ine aittir; belge güncellemesi ayrı bir commit'te izlenir.
+
+- **Kullanıcı yönergeleri:** Ses kontrolünü araç dururken yap; interkom varsa telefonun seçili ses çıkışını ve medya sesini kontrol et; ekranı elle kilitleyip yeniden açtığında anonsun duyulup duyulmadığını gözlemle. Ses motorunun hazır olması veya Bluetooth bağlantısı duyulabilir anonsu doğrulamaz. Ses duyulmuyorsa var olan “Tekrar dene” veya “Seslendirme ayarları” kontrolleri önerilir.
+- **Davranış ve uyumluluk:** Yalnız iki metin yönergesi eklendi; mevcut durum, callback, ses/oturum davranışı, veri biçimi, izinler ve bağımlılıklar değişmedi. Otomatik interkom algılama, duyulabilirlik veya ekran kilidi sürekliliği garantisi yoktur.
+- **Doğrulama kapsamı:** `:app:testDebugUnitTest`, `:app:lintDebug` ve `:app:assembleDebug` işleri `-PizTestBuildType=batteryCheck` yapılandırma geçersiz kılmasıyla çalıştırıldı. Bu ayar yalnız test hedefi içindir. AndroidTest kaynak lint'i, `batteryCheck` lint'i ve enstrümantasyon doğrulanmadı; bu paket QA/native sonucu değildir. Gerçek cihaz interkom/ekran kilidi, görünüm/TalkBack ve Release/AAB doğrulanmadı. APK'nın kimliği ve Debug imzası salt okunur paket incelemesinde doğrulandı.
+
+## Önceki aday — Telefon 0.11.4 / code 26 — harita üzerinde Gösterge paneli
 
 **Durum:** 0.11.4 / code 26 kaynak adayı tamamlandı; G2 kaynak ve belgeleri GitHub main dalında. Yerelde imzalanmış Release APK ve AAB için paket kimliği/imza doğrulaması geçti; herkese açık APK veya uygulama Release'i yayımlanmadı. Son birim testinde 967 test başarısızlık/hata/atlama olmadan geçti; lint 0 hata/ölümcül hata ve 95 uyarı verdi. Adaya özgü odaklı güvenlik incelemesi olumludur; koordinatör G2 kaynak/belge main aktarımını ve IAS hedefini kabul etti. Google Play IAS yüklemesi bu kayıtta doğrulanmadı. Wear OS **0.6.1 / code 11** ve iletişim **v6** değişmiyor.
 

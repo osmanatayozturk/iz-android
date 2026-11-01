@@ -1,6 +1,14 @@
 # Değişiklik geçmişi
 
-## Telefon 0.11.4 / code 26 — harita üzerinde Gösterge paneli (kaynak main'de; uygulama Release'i yayımlanmadı)
+## Telefon 0.11.5 / code 27 — sesli yönlendirme ve interkom kontrolü
+
+**Kaynak ve yerel doğrulama:** Sabit telefon kaynağı [`c593bfb`](https://github.com/osmanatayozturk/iz-android/commit/c593bfb739f1cd82ad994013e733a33e6c653bb8), 0.11.5 / code 27'dir. Debug birim testleri 967 geçti; hata, başarısızlık veya atlama yoktur. `:app:lintDebug` 0 hata/ölümcül hata ve 95 uyarı verdi; `:app:assembleDebug` geçti. Üretilen `org.iz.navigation` Debug APK'sı versionCode 27/versionName 0.11.5, minSdk 29/targetSdk 36 ve debuggable olarak doğrulandı; Debug imzası geçerlidir. Bunlar Release/AAB veya cihaz kabulü değildir.
+
+**Kapsam:** İki kısa yönerge, ses kontrolünü sürüş dururken yapmayı ve interkom kullanılıyorsa telefonun seçili ses çıkışı ile medya sesini kontrol etmeyi söyler. Ayrıca ekran elle kilitlenip yeniden açıldığında anonsun duyulup duyulmadığının kullanıcı tarafından gözlemlenmesini ister. Ses motorunun hazır olması veya Bluetooth bağlantısı interkomdan duyulabilir sesi kanıtlamaz; ses duyulmuyorsa mevcut “Tekrar dene” veya “Seslendirme ayarları” kontrollerine yönlendirir. Mevcut durum/callback ve ses davranışı korunmuştur; otomatik interkom algılama veya ses duyulduğu iddiası eklenmemiştir.
+
+**Doğrulama sınırları:** Build `-PizTestBuildType=batteryCheck` ile çalıştırılmış olsa da bu, yalnız enstrümantasyon hedefi yapılandırma geçersiz kılmasıdır; çalıştırılan işler `:app:testDebugUnitTest`, `:app:lintDebug` ve `:app:assembleDebug` olmuştur. AndroidTest kaynak lint'i, `batteryCheck` lint'i ve enstrümantasyon doğrulanmadı. Gerçek cihazda interkom/ekran kilidi sürekliliği ve duyulabilirlik, görünüm/TalkBack, Release/AAB kapsam dışıdır. Wear OS **0.6.1 / code 11** ve iletişim **v6** değişmiyor.
+
+## Önceki telefon adayı 0.11.4 / code 26 — harita üzerinde Gösterge paneli (tarihsel)
 
 **Durum:** Telefon 0.11.4 / code 26 kaynak adayı tamamlandı; G2 kaynak ve belgeleri GitHub main dalına normal fast-forward ile gönderildi. Yerelde imzalanmış Release APK ve AAB üretildi; paket kimliği ve imza doğrulaması geçti. Herkese açık APK veya uygulama Release'i yayımlanmadı. Yerel Debug derlemesi de doğrulandı. Son birim testinde 967 test başarısızlık, hata veya atlama olmadan geçti; lint 0 hata/ölümcül hata ve 95 uyarı verdi. Adaya özgü odaklı güvenlik incelemesi olumlu; koordinatör bu G2 kaynak ve belgelerinin main'e aktarımını ve IAS paylaşım hedefini kabul etti. Google Play Internal App Sharing yüklemesinin durumu bu kayıtta doğrulanmadı. Wear OS **0.6.1 / code 11** ve iletişim **v6** değişmiyor.
 

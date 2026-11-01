@@ -1,19 +1,17 @@
 # İz: üç aylık geliştirme yol haritası
 
-Bu belge, onaylı navigasyon/gösterge paneli kapsamındaki kişisel kullanım odaklı programı küçük, sıralı adaylara ayırır. Telefon 0.11.4/code26 kaynak adayı tamamlandı ve yerel doğrulamaları yapıldı; herkese açık APK veya Release yayımlanmadı. 0.11.3 ve önceki 0.11.2 adaylarının kanıtları tarihsel bağlamda korunur, yeni adaya kabul olarak aktarılmaz. Haftalık aday ritmi planlama hedefidir, takvim veya yayımlama sözü değildir. Sonraki backlog maddeleri yalnızca 0.11.4 kabulünden sonra sırayla ele alınır; bu belge yeni aday başlatmaz.
+Bu belge, onaylı kişisel kullanım odaklı programı küçük, sıralı adaylara ayırır. Telefon 0.11.5/code27 sabit kaynak adayı için yerel Debug birim/lint/assemble ve Debug APK kimlik/imza kontrolleri tamamlandı. Bu sonuç Release/AAB, cihaz veya yayın kabulü değildir. Haftalık aday ritmi planlama hedefidir, takvim veya yayımlama sözü değildir. Sonraki backlog başlıkları yalnızca 0.11.5 kabulünden sonra sırayla değerlendirilir; bu belge yeni aday başlatmaz.
 
-## İlk paket — Telefon 0.11.4 / code 26, harita üzerinde Gösterge
+## İlk paket — Telefon 0.11.5 / code 27, sesli yönlendirme yönergeleri
 
-Kaynak adayı, mevcut tek haritayı koruyarak **Gösterge** panelini aynı ekranda açar. Dikey yerleşim altta, yatay yerleşim yandadır. Hız ve varsa koşullu hız sınırı ilk sırada; manevra ve kritik uyarılar önde kalır. Geri paneli kapatıp gerçek açan ekranı ve oturumu korur. Kaynak adayında 967 birim testi geçti, lint 0 hata/ölümcül hata ve 95 uyarı verdi; yerel Debug derleme/paket kimliği doğrulandı. Yalnızca test uygulamasındaki Ana ekran/panel sahnelerinin dikey ve yatay kontrolleri geçti; atanmış UI/UX kaynak incelemesi ile iki normal yazı boyutlu görüntünün görsel kabulü tamamlandı. Bu sınırlı kontroller tam uygulama gezinme akışı, TalkBack veya yapılandırma/süreç geri yükleme kabulü değildir. Aday herkese açık olarak yayımlanmadı. Wear OS **0.6.1 / code 11** ve iletişim **v6** değişmez.
+İki kısa Türkçe yönerge hatırlatıcıdır: ses kontrolünü araç dururken yap, interkom kullanılıyorsa seçili ses çıkışı ile medya sesini kontrol et ve ekranı elle kilitleyip yeniden açtığında anonsun duyulup duyulmadığını gözlemle. Motor hazırlığı veya Bluetooth bağlantısı duyulabilir sesi kanıtlamaz; ses duyulmazsa mevcut “Tekrar dene” ya da “Seslendirme ayarları” kontrolü önerilir. Kaynak adayı [`c593bfb`](https://github.com/osmanatayozturk/iz-android/commit/c593bfb739f1cd82ad994013e733a33e6c653bb8) üzerinde 967 Debug birim testi geçti, lint 0 hata/ölümcül hata ve 95 uyarı verdi; Debug assemble ve APK kimlik/imza doğrulaması tamamlandı. `-PizTestBuildType=batteryCheck` yalnız test hedefi yapılandırmasıdır; AndroidTest-source lint, `batteryCheck` lint ve enstrümantasyon doğrulanmadı. Native/gerçek cihaz interkom sesi, kilit ekranı sürekliliği, TalkBack ve Release/AAB kabulü yoktur. Wear OS **0.6.1 / code 11** ve iletişim **v6** değişmez.
 
-- **Yerleşim ve Back:** Tek mevcut harita aynı ekranda kalır. Gösterge dikeyde alt panel, yatayda yan paneldir. Geri yalnız paneli kapatır ve gerçek açan ekran/oturum korunur; panel açma/kapama konum bulma, rota önizleme veya kayıt başlatmaz.
-- **Öncelik ve eylemler:** Hız ve varsa koşullu hız sınırı başta; yönlendirme varsa manevra ve kritik uyarılar önde kalır. Yönlendirme/ilerleme yokken manevra, kalan rota veya ETA uydurulmaz; eski hız güncelmiş gibi sunulmaz. Sesi kapatma ile kayıt, yönlendirme ve tüm oturum işlemleri ayrı kalır. Yönlendirme sırasında Nereye? başlığının yüksekliği 0'dır.
-- **Veri ve harita sahipliği:** Mevcut oturumun navigation/progress/speed/weather/group/analysis snapshot'ları ve sahiplik/güncellik etiketleri kullanılır. Yeni veri üreticisi, harita, GPS/API isteği, zamanlayıcı, sorgu, sensör, ETA/traffic hesabı veya ağır metrik yoktur. Kamera, manuel harita tutuşu/recenter, ölçülen viewport ve atıf korunur. Wear OS **0.6.1 / code 11**, iletişim **v6**, şema, izin ve bağımlılıklar değişmez.
-- **Kabul kapıları:** Uygulama, bağımsız test ve UI/UX kaynak kabulü; sabit adayla son teknik kontroller; aday bazlı güvenlik incelemesi ve son yayın kabulü birbirinden ayrıdır. İki sınırlı Ana ekran/panel sahnesi geçti; tam uygulama gezinme akışı, TalkBack ve yapılandırma/süreç geri yüklemesi çalıştırılmadı. Eski aday kanıtı bu kabulün yerine geçmez.
+- **Kaynak kapsamı:** İki metin eklemesi mevcut ses testi, tekrar deneme, seslendirme ayarları veya ses/oturum durum davranışını değiştirmez. Wear OS **0.6.1 / code 11** ve iletişim **v6** değişmez.
+- **Kabul sınırları:** Yerel Debug birim/lint/assemble ve paket kimlik/imza kontrolleri geçti. AndroidTest-source lint, `batteryCheck` lint, enstrümantasyon, gerçek cihaz interkom/ekran kilidi sesi ve görünüm/TalkBack doğrulanmadı. Bu yol haritası cihaz veya yayın kabulü vermez.
 
-## Önceki adaylar — telefon 0.11.3 ve 0.11.2 (tarihsel)
+## Önceki paket — Telefon 0.11.4 / code 26, harita üzerinde Gösterge (tarihsel)
 
-0.11.3, F05/F09 yedek açıklaması ve OSM yerel işlemleri adayını; 0.11.2 önceki navigasyon/ekran davranışları adayını kaydeder. Bu sürümlerin test, kaynak ve kabul kanıtları kendi kapsamlarında kalır; 0.11.4 için doğrulama veya kabul değildir. Ayrıntılar [değişiklik geçmişindedir](../CHANGELOG.md).
+Bu önceki adayın davranış ve doğrulama kaydı [değişiklik geçmişindedir](../CHANGELOG.md). Daha eski telefon adayları aşağıda tarihsel bağlamda korunur; kanıtları 0.11.5'e aktarılmaz.
 
 0.11.4, 0.11.3'teki F05 yedek içeriği açıklaması ve F09 yerel mekân/OSM işlem teyitlerinin mevcut davranışını korur. 0.11.3 tarihsel masaüstü tesliminde 957 birim testi sıfır hata/başarısızlık/atlama ile geçti; Debug lint 0 hata/ölümcül hata ve 95 uyarı verdi, yerel Debug paketi üretildi ve UI/UX kaynak incelemesi kabul edildi. Native/cihaz, dış güvenlik ve yayın kabulü verilmedi. Bunlar 0.11.3'e özgü tarihsel kayıtlardır.
 
@@ -27,7 +25,7 @@ APP-02 kaynak adayı 8b2160e06cc6fa5c5b3b141c50e070242e51afe7 üzerinde 934 biri
 
 ## Haftalar 1–4 — sonraki küçük adaylar
 
-Yalnız 0.11.4 kabulünden sonra, sırayla değerlendirilecek backlog başlıkları:
+Yalnız 0.11.5 kabulünden sonra, sırayla değerlendirilecek backlog başlıkları:
 
 - **Sonraki aday:** Ekran kilitliyken ve interkomla kullanım tutarlılığını incelemek; saati bilgilendirici yüzey olarak tutmak ve Android Auto/Wear metinleriyle ilgili F06–F08 açıklama konularını değerlendirmek.
 
