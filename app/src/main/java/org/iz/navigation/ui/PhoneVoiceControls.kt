@@ -18,8 +18,10 @@ internal fun PhoneVoiceControls(status: SpeechStatus, muted: Boolean, notice: St
         Text(text.readiness)
         text.requestFailure?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         notice?.let { Text(it) }
+        Text("Ses kontrolünü dururken yap. İnterkom kullanıyorsan telefonun seçili ses çıkışını ve medya sesini kontrol et. Ekranı elle kilitlediğinde ve yeniden açtığında anonsun duyulup duyulmadığını da kontrol et.", style = MaterialTheme.typography.bodySmall)
         OutlinedButton(onClick = onTest, modifier = Modifier.sizeIn(minHeight = 48.dp).testTag("navigation-test-voice")) { Text("Sesi test et") }
         OutlinedButton(onClick = onRetry, modifier = Modifier.sizeIn(minHeight = 48.dp).testTag("navigation-retry-voice")) { Text("Tekrar dene") }
         TextButton(onClick = onSettings, modifier = Modifier.sizeIn(minHeight = 48.dp).testTag("navigation-voice-settings")) { Text("Seslendirme ayarları") }
+        Text("Ses motorunun hazır olması veya Bluetooth bağlantısı, anonsun interkomdan duyulduğunu doğrulamaz. “Sesi test et” ile dene. Ses duyulmuyorsa “Tekrar dene”yi veya “Seslendirme ayarları”nı kullan.", style = MaterialTheme.typography.bodySmall)
     }
 }
