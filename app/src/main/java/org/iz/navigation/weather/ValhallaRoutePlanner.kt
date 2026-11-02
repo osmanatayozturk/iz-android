@@ -24,7 +24,18 @@ class ValhallaRoutePlanner(
     private val storageDirectory: File,
     client: OkHttpClient,
     private val clock: () -> Long = System::currentTimeMillis,
-) : RoutePlanner {
+) : RoutePlanner, RouteModificationPlanner {
+    override suspend fun planModified(request: RouteModificationRequest): PlannedRoute {
+        val snapshot = request.copy(stops = request.stops.toList(), avoidAreas = request.avoidAreas.toList())
+        val context = coroutineContext
+        val route = this.request(snapshot.stops, snapshot.departureAt, snapshot.transport,
+            snapshot.travelSpeedKmh, snapshot.preferences, false, snapshot.avoidAreas).routes.first()
+        context.ensureActive()
+        try { requireAvoidedAreas(route, snapshot.avoidAreas) { context.ensureActive() } }
+        catch (_: IllegalArgumentException) { throw RouteServiceException("Seçili bölüm yeni rotadan çıkarılamadı. Mevcut rota korundu.") }
+        return route.copy(avoidAreas = snapshot.avoidAreas)
+    }
+
     private val client = singleAttemptHttpClient(client)
 
     constructor(context: Context, endpoint: String = DEFAULT_ROUTE_ENDPOINT) : this(
@@ -48,6 +59,7 @@ class ValhallaRoutePlanner(
         travelSpeedKmh: Double?,
         preferences: RoutePreferences,
         alternatives: Boolean,
+        avoidAreas: List<RouteAvoidArea> = emptyList(),
     ): RouteAlternatives = withContext(Dispatchers.IO) {
         require(stops.size in 2..6) { "Rota 2 ile 6 durak içermelidir." }
         val effectiveSpeed = routeTravelSpeedKmh(transport, travelSpeedKmh)
@@ -87,9 +99,21 @@ class ValhallaRoutePlanner(
             .put("units", "kilometers")
             .put("language", "tr-TR")
             .put("directions_type", "instructions")
+        if (avoidAreas.isNotEmpty()) bodyJson.put("exclude_polygons", JSONArray().apply {
+            avoidAreas.forEach { area ->
+                put(JSONArray().apply {
+                    put(JSONArray().put(area.west).put(area.south))
+                    put(JSONArray().put(area.east).put(area.south))
+                    put(JSONArray().put(area.east).put(area.north))
+                    put(JSONArray().put(area.west).put(area.north))
+                    put(JSONArray().put(area.west).put(area.south))
+                })
+            }
+        })
         val requestAlternates = alternatives && stops.size == 2
         if (requestAlternates) bodyJson.put("alternates", 2)
         val request = weatherRequest(endpoint.toHttpUrl().toString())
+            .header("X-Client-Id", "org.iz.navigation")
             .post(bodyJson.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
             .build()
         try {

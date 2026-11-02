@@ -43,14 +43,17 @@ class NavigationSpeech private constructor(context: Context) {
         Toast.makeText(app, "Ses denemesi tamamlanamadı. Ses durumunu ve telefonun seslendirme ayarlarını kontrol et.", Toast.LENGTH_LONG).show()
     })
     val status: StateFlow<SpeechStatus> = controller.status
-    fun prepareGuidance() = post { controller.prepareGuidance() }
+    fun prepareGuidance(mode: GuidanceVoiceMode = GuidanceVoiceMode.DEFAULT) = post { controller.prepareGuidance(mode) }
     fun retry() = post { controller.retry() }
+    /** Coordinator verifies the ending owner and invokes on the serialized main owner. */
+    fun endGuidanceVoice() = post { controller.endGuidanceVoice() }
     /** UI callers are on main; background weather callers use the posted compatible wrapper below. */
     fun testVoice(): SpeechTestResult {
         check(Looper.myLooper() == Looper.getMainLooper())
         return controller.testVoice()
     }
     fun speakTurn(text: String) = post { controller.speakTurn(text) }
+    fun speakTurn(request: NavigationCueRequest) = post { controller.speakTurn(request) }
     fun speakWeather(text: String) = post { controller.speakWeather(text) }
     fun testWeather() = post {
         when (controller.testVoice(SpeechChannel.WEATHER)) {
@@ -76,10 +79,23 @@ class NavigationSpeech private constructor(context: Context) {
                 val engine = voice ?: return@post
                 val readiness = runCatching {
                     if (result != TextToSpeech.SUCCESS) EngineReadiness.ENGINE_ERROR
-                    else when (val language = engine.setLanguage(Locale.forLanguageTag("tr-TR"))) {
-                        TextToSpeech.LANG_MISSING_DATA -> EngineReadiness.LANGUAGE_MISSING
-                        TextToSpeech.LANG_NOT_SUPPORTED -> EngineReadiness.LANGUAGE_UNSUPPORTED
-                        else -> if (language >= TextToSpeech.LANG_AVAILABLE) EngineReadiness.READY else EngineReadiness.ENGINE_ERROR
+                    else {
+                        // setLanguage/setVoice may trigger data download for notInstalled voices.
+                        // Preserve a valid selected Turkish voice; select only catalog-proven installed data.
+                        val catalog = voiceCatalog()
+                        if (catalog?.current?.turkishInstalled == true) EngineReadiness.READY
+                        else {
+                            val available = catalog?.voices?.filter { it.turkishInstalled }
+                                ?.sortedWith(compareBy<SpeechVoice> { it.requiresNetwork != false }.thenBy { it.name })?.firstOrNull()
+                            if (available != null) {
+                                if (selectVoice(available.name) && voiceCatalog()?.current?.turkishInstalled == true)
+                                    EngineReadiness.READY else EngineReadiness.ENGINE_ERROR
+                            } else when (engine.isLanguageAvailable(Locale.forLanguageTag("tr-TR"))) {
+                                TextToSpeech.LANG_MISSING_DATA -> EngineReadiness.LANGUAGE_MISSING
+                                TextToSpeech.LANG_NOT_SUPPORTED -> EngineReadiness.LANGUAGE_UNSUPPORTED
+                                else -> if (catalog?.voices == null) EngineReadiness.ENGINE_ERROR else EngineReadiness.LANGUAGE_MISSING
+                            }
+                        }
                     }
                 }.getOrDefault(EngineReadiness.ENGINE_ERROR)
                 if (readiness != EngineReadiness.READY) { onReady(readiness); return@post }
@@ -99,6 +115,27 @@ class NavigationSpeech private constructor(context: Context) {
                 }.getOrDefault(false)
                 onReady(if (configured) EngineReadiness.READY else EngineReadiness.ENGINE_ERROR)
             } }
+        }
+        override fun voiceCatalog(): SpeechVoiceCatalog? {
+            if (closed) return null
+            val engine = voice ?: return null
+            fun describe(value: android.speech.tts.Voice): SpeechVoice {
+                val features = value.features
+                return SpeechVoice(value.name, value.locale.language, value.locale.country,
+                    value.isNetworkConnectionRequired,
+                    features?.let { TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED !in it })
+            }
+            return SpeechVoiceCatalog(
+                runCatching { engine.voices?.map(::describe) }.getOrNull(),
+                runCatching { engine.voice?.let(::describe) }.getOrNull())
+        }
+        override fun selectVoice(name: String): Boolean {
+            if (closed) return false
+            val engine = voice ?: return false
+            val candidate = engine.voices?.firstOrNull { it.name == name } ?: return false
+            val features = candidate.features ?: return false
+            if (candidate.locale.language != "tr" || TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED in features) return false
+            return engine.setVoice(candidate) == TextToSpeech.SUCCESS && engine.voice?.name == name
         }
         override fun speak(text: String, id: String) =
             !closed && voice?.speak(text, TextToSpeech.QUEUE_FLUSH, null, id) == TextToSpeech.SUCCESS

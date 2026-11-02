@@ -55,6 +55,38 @@ class CarWeatherPresentationTest {
         assertEquals("Tahmin verisi yok", carWeatherPresentation(ready().copy(assessment = null), now).summary)
     }
 
+    @Test fun actualPausedLoadingWithNoForecastDoesNotClaimANetworkRequestOrCurrentEta() {
+        // Matches RideWeatherManager.evaluate's actual pause publication.
+        val paused = ready().copy(status = RideWeatherStatus.LOADING, paused = true,
+            assessment = null, arrivalAt = null, remainingSeconds = null, timingUpdatedAt = null,
+            routeRevision = 2L,
+            message = "Yönlendirme duraklatıldı; varış zamanı ve ilerideki yolun hava tahmini bekletiliyor.")
+        val value = carWeatherPresentation(paused, now)
+        assertEquals("Yönlendirme duraklatıldı", value.summary)
+        assertTrue(value.detail.contains("Duraklama nedeniyle ilerideki varış saatleri belirsiz."))
+        assertFalse(value.detail.contains("Tahmin alınıyor"))
+        assertFalse(value.detail.contains("GPS güncel değil"))
+        assertFalse(paused.gpsStale)
+        assertNull(paused.arrivalAt)
+        assertTrue(value.detail.contains(checkNotNull(paused.message)))
+        val stale = carWeatherPresentation(paused.copy(gpsStale = true), now)
+        assertEquals("GPS güncel değil", stale.summary)
+        assertTrue(stale.detail.contains(checkNotNull(paused.message)))
+        assertEquals("Tahmin alınıyor", carWeatherPresentation(paused.copy(paused = false), now).summary)
+    }
+
+    @Test fun pausedStateCannotPresentCachedRouteReadingsAsCurrentRoadAheadWeather() {
+        val paused = ready().copy(status = RideWeatherStatus.LOADING, paused = true,
+            arrivalAt = now + 60_000L, remainingSeconds = 60.0, timingUpdatedAt = now)
+        val value = carWeatherPresentation(paused, now)
+        assertEquals("Yönlendirme duraklatıldı", value.summary)
+        assertTrue(value.detail.contains("Duraklama nedeniyle ilerideki varış saatleri belirsiz."))
+        assertFalse(value.detail.contains("18-23"))
+        assertFalse(value.detail.contains("%35"))
+        assertFalse(value.detail.contains("Hamle 20"))
+        assertFalse(value.detail.contains("Tahmin alınıyor"))
+    }
+
     @Test fun failedRefreshRetainsCachedValuesAndShowsFailure() {
         val value = carWeatherPresentation(ready().copy(refreshFailed = true), now)
         assertTrue(value.summary.startsWith("Tahmin yenilenemedi"))

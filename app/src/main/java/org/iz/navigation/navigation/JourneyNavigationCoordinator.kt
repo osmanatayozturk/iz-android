@@ -14,7 +14,8 @@ import org.iz.navigation.gpx.*
 import org.iz.navigation.power.PowerDiagnostics
 
 /** Side effects are isolated so concurrent car/phone/watch commands can be tested without a host. */
-interface NavigationRuntime {
+interface NavigationRuntime : NavigationCueRuntime {
+    override fun speakCue(request: NavigationCueRequest) { request.finish(CueDelivery.REJECTED) }
     val journeys: Flow<List<Journey>>
     suspend fun activeJourney(): Journey?
     suspend fun start(transport: Transport, stillCurrent: () -> Boolean = { true }): String
@@ -75,6 +76,8 @@ interface NavigationRuntime {
     fun prepareSpeech() {}
     fun speak(text: String)
     fun cancelSpeech()
+    /** Ends only guidance voice policy; adapters must not initialize speech for cleanup. */
+    fun endGuidanceSpeech() { cancelSpeech() }
 }
 
 /** A real pending manual start is never discarded as an automatic candidate or orphan. */
@@ -93,10 +96,12 @@ class JourneyNavigationCoordinator(
     private val clock: () -> Long = System::currentTimeMillis,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
     private val trackFollowStore: TrackFollowSessionStore? = null,
+    monotonicClock: () -> Long = { System.nanoTime() / 1_000_000L },
 ) {
     constructor(context: Context) : this(AndroidNavigationRuntime(context.applicationContext),
         NavigationRouteCache(java.io.File(context.applicationContext.noBackupFilesDir, "navigation")),
-        trackFollowStore = TrackFollowSessionStore(java.io.File(context.applicationContext.noBackupFilesDir, "navigation")))
+        trackFollowStore = TrackFollowSessionStore(java.io.File(context.applicationContext.noBackupFilesDir, "navigation")),
+        monotonicClock = android.os.SystemClock::elapsedRealtime)
 
     private val mutableState = MutableStateFlow(NavigationState())
     val state = mutableState.asStateFlow()
@@ -114,8 +119,12 @@ class JourneyNavigationCoordinator(
     private val markerLock = Mutex()
     @Volatile private var markerRevision = 0L
     private var markerProblem: String? = null
-    private val cues = NavigationCuePolicy()
+    private val cues = NavigationCuePolicy(monotonicClock)
     private var rerouteJob: Job? = null
+    private var editJob: Job? = null
+    private var editSequence = 0L
+    private val mutableEdits = MutableStateFlow(RouteEditState())
+    val edits = mutableEdits.asStateFlow()
     private var simulationJob: Job? = null
     private var speedRefreshJob: Job? = null
     private var lastSpeedRefresh = Long.MIN_VALUE
@@ -349,8 +358,26 @@ class JourneyNavigationCoordinator(
         activate(route, true, recordJourney, replaceTrackFollow, expectedTrackFollowKey)
     suspend fun activateRoute(route: PlannedRoute, replaceTrackFollow: Boolean = false): String = activate(route, false, true, replaceTrackFollow)
 
+    /** Exact prepared geometry: never asks a planner for a connector or replacement. */
+    suspend fun startPreparedGuidance(route: PlannedRoute, fingerprint: String, recordJourney: Boolean = true,
+        stillPrepared: () -> Boolean = { true }, stillCurrent: () -> Boolean = { true }): String {
+        val before = state.value
+        val ownerEpoch = epoch
+        val startCurrent = { epoch == ownerEpoch && state.value.sessionId == before.sessionId &&
+            state.value.routeRevision == before.routeRevision && state.value.trackReplacementKey() == before.trackReplacementKey() && stillCurrent() }
+        check(stillPrepared() && startCurrent()) { "Hazır rota veya yolculuk durumu değişti." }
+        require(fingerprint.matches(Regex("[a-fA-F0-9]{64}"))) { "Hazır rota kimliği geçersiz." }
+        val fix = currentLocation()
+        val match = PreparedRouteStart.inspect(route, fix, clock())
+        require(match.ready) { match.message }
+        return activate(route, true, recordJourney, false, preparedFingerprint = fingerprint,
+            preparedFix = fix, stillPrepared = stillPrepared, startStillCurrent = startCurrent)
+    }
+
     private suspend fun activate(route: PlannedRoute, guidance: Boolean, recordJourney: Boolean, replaceTrackFollow: Boolean,
-        expectedTrackFollowKey: String? = null): String = commands.withLock {
+        expectedTrackFollowKey: String? = null, preparedFingerprint: String? = null,
+        preparedFix: NavigationFix? = null, stillPrepared: () -> Boolean = { true },
+        startStillCurrent: () -> Boolean = { true }): String = commands.withLock {
         route.requireUsablePreferences()
         check(expectedTrackFollowKey == null || mutableState.value.trackReplacementKey() == expectedTrackFollowKey) {
             "GPX takibi değişti. Rotayı başlatmak için yeniden onayla."
@@ -361,11 +388,19 @@ class JourneyNavigationCoordinator(
         val simulated = simulationEnabled && guidance
         check(!mutableState.value.simulation || simulated) { "Önce deneme sürüşünü bitir." }
         check(!simulationEnabled || guidance) { "Deneme modunda gerçek kayıt başlatılamaz." }
+        check(startStillCurrent() && stillPrepared()) { "Başlatma isteği artık güncel değil." }
         val activationEpoch = epoch
         check(!simulated || runtime.activeJourney() == null) { "Deneme sürüşü için önce gerçek yolculuğu bitir." }
         check(activationEpoch == epoch) { "Başlatma işlemi iptal edildi." }
         val sessionId = if (simulated) "simulation-${UUID.randomUUID()}" else ensureSession(route.transport, recordJourney)
         val journey = if (simulated) Journey(id = sessionId, transport = route.transport, startedAt = clock()) else mutableState.value.journey
+        check(activationEpoch == epoch && stillPrepared()) { "Hazır rota veya yolculuk durumu değişti." }
+        val initialFix = if (preparedFingerprint != null) {
+            val candidate = mutableState.value.fix?.takeIf { fresh(it, clock()) } ?: preparedFix
+            val match = PreparedRouteStart.inspect(route, candidate, clock())
+            require(match.ready) { match.message }
+            candidate
+        } else null
         clearRoute()
         freeDrive = false
         engine = NavigationEngine(route)
@@ -373,14 +408,21 @@ class JourneyNavigationCoordinator(
         cues.reset()
         publish(mutableState.value.copy(journey = journey, recording = journey != null, route = route,
             sessionId = sessionId, sessionTransport = route.transport,
-            guidance = guidance, arrived = false, progress = null, routeRevision = epoch,
+            guidance = guidance, arrived = false, progress = null, progressUpdatedAt = null, routeRevision = epoch,
             loading = false, message = if (simulated) "Deneme sürüşü · günlüğe kaydedilmez" else null,
-            simulation = simulated))
+            simulation = simulated, paused = false, preparedRouteFingerprint = preparedFingerprint))
         // Voice availability cannot undo the already committed visual guidance/session.
-        if (guidance) runCatching { runtime.prepareSpeech() }
+        if (guidance) runCatching {
+            val voice = runtime as? NavigationVoiceRuntime
+            if (voice != null) voice.prepareSpeech(if (preparedFingerprint != null) GuidanceVoiceMode.PREPARED_LOCAL else GuidanceVoiceMode.DEFAULT)
+            else runtime.prepareSpeech()
+        }
         if (!simulated) saveRoute(route)
         if (simulated) startSimulation(route, requireNotNull(journey))
-        else mutableState.value.fix?.takeIf { fresh(it, clock()) }?.let { onAcceptedLocation(sessionId, it) }
+        else (initialFix ?: mutableState.value.fix)?.takeIf { fresh(it, clock()) }?.let { fix ->
+            if (initialFix != null) publish(mutableState.value.copy(fix = fix, gpsStale = false, progress = engine?.update(fix, clock()), progressUpdatedAt = clock()))
+            else onAcceptedLocation(sessionId, fix)
+        }
         sessionId
     }
 
@@ -603,6 +645,10 @@ class JourneyNavigationCoordinator(
         }
         if (before.sessionId != id && before.journey?.id != id || !fresh(fix, now)) return
         if (before.fix?.let { fix.recordedAt <= it.recordedAt } == true) return
+        if (before.paused) {
+            publish(before.copy(fix = fix, gpsStale = false, locationActive = runtime.locationActive()))
+            return
+        }
         val currentEngine = engine
         val currentTrackEngine = trackEngine
         val token = epoch
@@ -619,9 +665,11 @@ class JourneyNavigationCoordinator(
         val arrived = progress?.arrived == true
         val next = mutableState.value.copy(fix = fix, gpsStale = false, progress = progress ?: before.progress,
             guidance = before.guidance && !arrived, arrived = arrived || before.arrived,
+            progressUpdatedAt = if (progress != null) fix.recordedAt else before.progressUpdatedAt,
             message = when {
                 arrived -> if (before.recording) "Hedefe vardın. Yolculuk kaydı devam ediyor." else "Hedefe vardın."
-                progress?.offRoute == true -> "Rota dışındasın. Yeni rota hesaplanıyor."
+                progress?.offRoute == true -> if (before.preparedRouteFingerprint != null)
+                    "Hazır rotanın dışındasın. Yeni rota için internet gerekir." else "Rota dışındasın. Yeni rota hesaplanıyor."
                 before.simulation -> "Deneme sürüşü · günlüğe kaydedilmez"
                 else -> null
             })
@@ -629,15 +677,142 @@ class JourneyNavigationCoordinator(
         if (arrived && !before.arrived && before.guidance && !before.muted) {
             runtime.cancelSpeech(); runtime.speak(if (before.recording) "Hedefe vardın. Yolculuk kaydı devam ediyor." else "Hedefe vardın.")
         } else if (before.guidance && progress != null && !progress.offRoute && !before.muted) {
-            before.route?.let { cues.cue(it, progress, fix) }?.let(runtime::speak)
+            before.route?.let { route ->
+                if (preparedVoiceReady(mutableState.value)) cues.offer(route, progress, fix) { request ->
+                    val current = mutableState.value
+                    val currentProgress = current.progress
+                    val currentFix = current.fix
+                    token == epoch && current.sessionId == before.sessionId && current.route?.id == route.id &&
+                        current.routeRevision == before.routeRevision && current.guidance && !current.paused &&
+                        !current.muted && !current.gpsStale && !current.arrived && preparedVoiceReady(current) &&
+                        currentProgress != null && !currentProgress.offRoute && !currentProgress.arrived &&
+                        currentFix != null && fresh(currentFix, clock()) && cues.isEligible(request, route, currentProgress, currentFix)
+                }?.let(runtime::speakCue)
+            }
         } else if (progress?.offRoute == true) runtime.cancelSpeech()
         if (progress?.offRoute == true && !arrived) requestReroute()
+    }
+
+    fun remainingStopIndices(expected: RouteEditOwner): List<Int> =
+        if (expected.matches(state.value)) engine?.remainingStopIndices().orEmpty() else emptyList()
+
+    /** A provider result is a preview only. Recorder and active geometry remain untouched. */
+    suspend fun previewEdit(action: RouteEditAction, expected: RouteEditOwner): String? = coroutineScope {
+        val captured = commands.withLock {
+            val before = state.value
+            require(expected.matches(before) && before.guidance && !before.paused && !before.simulation && !before.arrived &&
+                !before.loading && !before.gpsStale) { "Rota durumu değişti. Yeniden seç." }
+            val route = requireNotNull(before.route)
+            val fix = requireNotNull(before.fix)
+            require(fresh(fix, clock())) { "Rota değişikliği için güncel konum bekleniyor." }
+            val progress = requireNotNull(before.progress)
+            require(!progress.offRoute) { "Önce güncel rota konumunu bekle." }
+            val request = RouteEditPolicy.prepare(route, progress.elapsedSeconds, fix.coordinate, clock(), action,
+                requireNotNull(engine).remainingStopIndices())
+            invalidateEdits()
+            val id = UUID.randomUUID().toString()
+            val sequence = editSequence
+            editJob = currentCoroutineContext()[Job]
+            mutableEdits.value = RouteEditState(sequence, true, id)
+            Triple(id, sequence, request)
+        }
+        val (id, sequence, request) = captured
+        try {
+            val replacement = planModified(request).requireUsablePreferences()
+            require(replacement.transport == request.transport && replacement.preferences == request.preferences &&
+                routeTravelSpeedKmh(replacement.transport, replacement.travelSpeedKmh) ==
+                    routeTravelSpeedKmh(request.transport, request.travelSpeedKmh) && replacement.stops == request.stops &&
+                replacement.avoidAreas == request.avoidAreas && replacement.maneuvers.isNotEmpty()) { "Rota koşulları korunamadı." }
+            val ownerContext = currentCoroutineContext()
+            requireAvoidedAreas(replacement, request.avoidAreas) { ownerContext.ensureActive() }
+            commands.withLock {
+                if (sequence != editSequence || !expected.matches(state.value) || state.value.paused) return@withLock null
+                mutableEdits.value = RouteEditState(sequence, preview = RouteEditPreview(id, expected, action, request, replacement))
+                id
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) {
+            commands.withLock {
+                if (sequence == editSequence && expected.matches(state.value)) mutableEdits.value = RouteEditState(sequence,
+                    error = "Yeni rota alınamadı veya seçili koşullar sağlanamadı. Mevcut rota korunuyor.")
+            }
+            null
+        } finally {
+            if (sequence == editSequence) { editJob = null; mutableEdits.value = mutableEdits.value.copy(loading = false) }
+        }
+    }
+
+    suspend fun commitEdit(expected: RouteEditOwner, previewId: String): Boolean = commands.withLock {
+        val before = state.value
+        val preview = edits.value.preview ?: return@withLock false
+        if (preview.id != previewId || preview.owner != expected || !expected.matches(before) || before.paused ||
+            !before.guidance || before.arrived || before.gpsStale) return@withLock false
+        val fix = before.fix ?: return@withLock false
+        require(fresh(fix, clock()) && WeatherEngine.distanceMeters(fix.coordinate, preview.request.stops.first().coordinate) <= 100) {
+            "Konum değişti. Rota önizlemesini yenile."
+        }
+        val replacementEngine = NavigationEngine(preview.route)
+        val progress = replacementEngine.update(fix, clock())
+        require(progress != null && !progress.offRoute && progress.distanceFromRouteMeters <= kotlin.math.max(40.0, fix.accuracyMeters * 2.0)) {
+            "Yeni rotaya geçiş konumu doğrulanamadı. Mevcut rota korundu."
+        }
+        requireAvoidedAreas(preview.route, preview.request.avoidAreas)
+        epoch++
+        rerouteJob?.cancel(); rerouteJob = null
+        invalidateEdits()
+        engine = replacementEngine; cues.reset(); runtime.cancelSpeech()
+        publish(before.copy(route = preview.route, progress = progress, routeRevision = epoch,
+            loading = false, message = null, preparedRouteFingerprint = null, progressUpdatedAt = clock()))
+        (runtime as? NavigationVoiceRuntime)?.prepareSpeech(GuidanceVoiceMode.DEFAULT)
+        lastTrafficCheckAt = clock(); saveRoute(preview.route)
+        true
+    }
+
+    suspend fun cancelEdit(expected: RouteEditOwner, requestId: String): Boolean = commands.withLock {
+        val current = edits.value
+        if (!expected.matches(state.value) || requestId != (current.preview?.id ?: current.requestId)) return@withLock false
+        invalidateEdits(); true
+    }
+
+    private fun invalidateEdits() {
+        editSequence++
+        editJob?.cancel(); editJob = null
+        mutableEdits.value = RouteEditState(editSequence)
+    }
+    private suspend fun planModified(request: RouteModificationRequest): PlannedRoute {
+        val planner = runtime as? RouteModificationPlanner
+        if (planner != null) return planner.planModified(request)
+        require(request.avoidAreas.isEmpty()) { "Bu rota sağlayıcısı hariç tutmayı desteklemiyor." }
+        return runtime.plan(request.stops, request.transport, request.preferences, request.travelSpeedKmh)
+    }
+
+    private fun preparedVoiceReady(state: NavigationState): Boolean {
+        if (state.preparedRouteFingerprint == null) return true
+        val status = (runtime as? NavigationVoiceRuntime)?.speechStatus?.value ?: return false
+        return status.readiness == EngineReadiness.READY && status.voiceMode == GuidanceVoiceMode.PREPARED_LOCAL &&
+            status.localVoice == LocalVoiceCapability.AVAILABLE
+    }
+
+    /** Guidance pause retains recorder/GPS/session ownership. */
+    suspend fun setPaused(expected: NavigationStopSnapshot, paused: Boolean): Boolean = commands.withLock {
+        val before = mutableState.value
+        if (NavigationStopSnapshot.from(before) != expected || !before.guidance || before.arrived || before.simulation ||
+            before.route == null || before.paused == paused) return@withLock false
+        if (!paused) require(before.fix?.let { fresh(it, clock()) } == true) { "Devam etmek için güncel GPS konumu bekleniyor." }
+        epoch++
+        rerouteJob?.cancel(); rerouteJob = null
+        invalidateEdits()
+        runtime.cancelSpeech()
+        val progress = if (!paused) engine?.update(requireNotNull(before.fix), clock()) ?: before.progress else before.progress
+        publish(before.copy(paused = paused, routeRevision = epoch, loading = false, progress = progress, progressUpdatedAt = if (paused) null else clock(),
+            message = if (paused) "Yönlendirme duraklatıldı. Yolculuk kaydı ve konum takibi devam eder." else null))
+        true
     }
 
     private fun requestTrafficRefresh() {
         val before = mutableState.value
         val route = before.route ?: return
-        if (!before.guidance || before.sessionId == null || before.simulation || before.arrived || before.gpsStale) return
+        if (!before.guidance || before.paused || before.preparedRouteFingerprint != null || before.sessionId == null || before.simulation || before.arrived || before.gpsStale) return
         val now = clock()
         if (now - (lastTrafficCheckAt ?: route.createdAt) < 120_000L) return
         lastTrafficCheckAt = now
@@ -649,7 +824,7 @@ class JourneyNavigationCoordinator(
         val route = before.route ?: return
         val fix = before.fix ?: return
         val remaining = engine?.remainingStops().orEmpty()
-        if (before.simulation || before.arrived || before.sessionId == null || !fresh(fix, clock()) || remaining.isEmpty() || rerouteJob?.isActive == true) return
+        if (before.paused || before.preparedRouteFingerprint != null || before.simulation || before.arrived || before.sessionId == null || !fresh(fix, clock()) || remaining.isEmpty() || rerouteJob?.isActive == true) return
         val now = clock()
         if (lastRerouteAttempt?.let { now - it in 0 until 15_000 } == true) return
         lastRerouteAttempt = now
@@ -658,28 +833,34 @@ class JourneyNavigationCoordinator(
         rerouteJob = scope.launch {
             val started = System.nanoTime()
             try {
-                val replacement = runtime.plan(listOf(RouteStop("Mevcut konum", fix.coordinate)) + remaining,
-                    route.transport, route.preferences, route.travelSpeedKmh).requireUsablePreferences()
+                val request = RouteModificationRequest(listOf(RouteStop("Mevcut konum", fix.coordinate)) + remaining,
+                    clock(), route.transport, route.travelSpeedKmh, route.preferences, route.avoidAreas)
+                val replacement = planModified(request).requireUsablePreferences()
+                require(replacement.avoidAreas == route.avoidAreas) { "Hariç tutulan alanlar korunamadı." }
+                val ownerContext = currentCoroutineContext()
+                requireAvoidedAreas(replacement, request.avoidAreas) { ownerContext.ensureActive() }
                 check(replacement.transport == route.transport && replacement.preferences == route.preferences &&
-                    replacement.travelSpeedKmh == route.travelSpeedKmh) { "Yeni rota seçili yol tercihleriyle eşleşmedi." }
+                    routeTravelSpeedKmh(replacement.transport, replacement.travelSpeedKmh) ==
+                    routeTravelSpeedKmh(route.transport, route.travelSpeedKmh)) { "Yeni rota seçili yol tercihleriyle eşleşmedi." }
                 val activeJourney = runtime.activeJourney()
                 if (token != epoch || mutableState.value.route?.id != route.id || mutableState.value.sessionId != before.sessionId ||
                     before.journey != null && activeJourney?.id != before.journey.id) return@launch
                 check(!before.guidance || replacement.maneuvers.isNotEmpty()) { "Dönüş talimatı alınamadı." }
                 epoch++
+                invalidateEdits()
                 engine = NavigationEngine(replacement); cues.reset(); runtime.cancelSpeech()
-                publish(mutableState.value.copy(route = replacement, routeRevision = epoch, progress = null, loading = false, message = null))
+                publish(mutableState.value.copy(route = replacement, routeRevision = epoch, progress = null, progressUpdatedAt = null, loading = false, message = null))
                 lastTrafficCheckAt = clock()
                 saveRoute(replacement)
                 mutableState.value.fix?.let { latest ->
                     val updated = withContext(Dispatchers.Default) { engine?.update(latest, clock()) }
-                    if (mutableState.value.route?.id == replacement.id) publish(mutableState.value.copy(progress = updated))
+                    if (mutableState.value.route?.id == replacement.id) publish(mutableState.value.copy(progress = updated, progressUpdatedAt = clock()))
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) {
                 if (token == epoch) publish(mutableState.value.copy(loading = false,
                     message = if (trafficRefresh) "Trafik güncellenemedi. Mevcut rota korunuyor; son trafik bilgisi eski olabilir."
-                        else "Yeni rota alınamadı. Bağlantı bekleniyor. ${error.message.orEmpty().take(120)}"))
+                        else "Yeni rota alınamadı. Mevcut rota korunuyor; bağlantıyı ve rota koşullarını kontrol et."))
             } finally {
                 PowerDiagnostics.count(if (trafficRefresh) PowerDiagnostics.Metric.TRAFFIC_REFRESH else PowerDiagnostics.Metric.OFF_ROUTE_PLAN,
                     System.nanoTime() - started)
@@ -700,13 +881,14 @@ class JourneyNavigationCoordinator(
         epoch++
         rerouteJob?.cancel(); rerouteJob = null
         simulationJob?.cancel(); simulationJob = null
+        invalidateEdits()
         engine = null; cues.reset(); lastRerouteAttempt = null; lastTrafficCheckAt = null
         trackEngine = null
         if (mutableState.value.trackFollow != null) updateTrackMarker(false)
         markerProblem = null
-        runtime.cancelSpeech()
+        runtime.endGuidanceSpeech()
         publish(mutableState.value.copy(route = null, guidance = false, arrived = false, progress = null,
-            loading = false, routeRevision = epoch, message = null, trackFollow = null))
+            loading = false, routeRevision = epoch, message = null, trackFollow = null, paused = false, preparedRouteFingerprint = null, progressUpdatedAt = null))
     }
 
     private fun publish(value: NavigationState, refreshSpeed: Boolean = true) {

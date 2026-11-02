@@ -2,6 +2,10 @@ package org.iz.navigation.ui
 
 import org.iz.navigation.data.*
 import org.iz.navigation.navigation.NavigationState
+import org.iz.navigation.navigation.NavigationFix
+import org.iz.navigation.navigation.NavigationProgress
+import org.iz.navigation.navigation.RouteEditOwner
+import org.iz.navigation.navigation.RouteEditPreview
 import org.iz.navigation.weather.*
 import org.junit.Assert.*
 import org.junit.Test
@@ -33,5 +37,91 @@ class NavigationMapPresentationTest {
         assertTrue(result.stops.isEmpty())
         assertTrue(result.trail.isEmpty())
         assertFalse(result.sessionActive)
+    }
+
+    private val c = RouteStop("Fuel", WeatherCoordinate(41.15, 29.25))
+    private val editedRoute = route.copy(id = "edit", stops = listOf(a, c, b),
+        vertices = listOf(RouteVertex(a.coordinate, 0.0), RouteVertex(c.coordinate, 40.0), RouteVertex(b.coordinate, 120.0)),
+        distanceMeters = 1800.0, durationSeconds = 120.0, transport = Transport.MOTORCYCLE)
+    private fun editPreview(nav: NavigationState, requestId: String = "request-1") = RouteEditPreview(
+        requestId, requireNotNull(RouteEditOwner.from(nav)), RouteEditAction.AddStop(c),
+        RouteModificationRequest(editedRoute.stops, 1L, Transport.MOTORCYCLE, null, editedRoute.preferences), editedRoute)
+    private fun activeNavigation() = NavigationState(sessionId = "live", guidance = true, recording = true,
+        route = route, routeRevision = 7, sessionTransport = Transport.MOTORCYCLE)
+
+    @Test fun stopPreviewDisplaysReturnedGeometryAndStopsBeforeCommit() {
+        val nav = activeNavigation()
+        val ui = PhoneDirectionsState(preview = route)
+        val preview = editPreview(nav)
+        val shown = navigationMapPresentation(ui, nav, emptyList(), true, preview)
+        assertSame(editedRoute, shown.route)
+        assertEquals(listOf(a, c, b), shown.stops)
+        assertEquals(c.coordinate, shown.route!!.vertices[1].coordinate)
+        assertEquals("Yeni rota önizlemesi · Onay bekleniyor", shown.editPreviewLabel)
+        assertEquals(preview.id, shown.editPreviewId)
+        assertSame(route, nav.route)
+        assertTrue(nav.recording)
+        assertSame(route, ui.preview)
+        assertTrue(shown.trail.isEmpty())
+        assertFalse(phoneDrivingCameraEnabled(nav, true))
+    }
+
+    @Test fun staleOrIneligibleEditCannotOverrideTheCurrentPlanner() {
+        val nav = activeNavigation()
+        val preview = editPreview(nav)
+        val plannerRoute = route.copy(id = "planner")
+        val ui = PhoneDirectionsState(preview = plannerRoute)
+        val stale = listOf(
+            preview.copy(owner = preview.owner.copy(sessionId = "other")),
+            preview.copy(owner = preview.owner.copy(routeId = "other")),
+            preview.copy(owner = preview.owner.copy(routeRevision = 8)),
+            preview.copy(id = ""),
+        )
+        stale.forEach { candidate ->
+            val shown = navigationMapPresentation(ui, nav, emptyList(), true, candidate)
+            assertSame(plannerRoute, shown.route)
+            assertNull(shown.editPreviewId)
+            assertNull(shown.editPreviewLabel)
+        }
+        listOf(nav.copy(paused = true), nav.copy(arrived = true), nav.copy(simulation = true),
+            nav.copy(guidance = false)).forEach { changed ->
+            assertSame(plannerRoute, navigationMapPresentation(ui, changed, emptyList(), true, preview).route)
+        }
+    }
+
+    @Test fun editCameraFitsNewRequestsWithoutResettingOnFixOrProgressTicks() {
+        val nav = activeNavigation()
+        val preview = editPreview(nav)
+        val first = navigationMapPresentation(PhoneDirectionsState(), nav, emptyList(), true, preview)
+        val moved = nav.copy(fix = NavigationFix(c.coordinate, 2L, 5f),
+            progress = NavigationProgress(10.0, 110.0, 1700.0, 0.0, 0, 50.0))
+        val tick = navigationMapPresentation(PhoneDirectionsState(), moved, emptyList(), true, preview)
+        assertEquals(first.cameraIdentity, tick.cameraIdentity)
+        assertNotEquals(first.cameraIdentity, navigationMapPresentation(PhoneDirectionsState(), nav,
+            emptyList(), true, preview.copy(id = "request-2")).cameraIdentity)
+    }
+
+    @Test fun closingPlannerRestoresLiveGeometryAndDrivingCamera() {
+        val nav = activeNavigation()
+        val shown = navigationMapPresentation(PhoneDirectionsState(), nav, emptyList(), false, editPreview(nav))
+        assertSame(route, shown.route)
+        assertNull(shown.editPreviewLabel)
+        assertNull(shown.editPreviewId)
+        assertEquals("session:live", shown.cameraIdentity)
+        assertTrue(phoneDrivingCameraEnabled(nav, false))
+    }
+
+    @Test fun onlineEditNeverBorrowsTheActivePreparedMapEvenWithAnEqualRoute() {
+        val nav = activeNavigation().copy(preparedRouteFingerprint = "a".repeat(64))
+        val live = navigationMapPresentation(PhoneDirectionsState(), nav, emptyList(), false)
+        assertTrue(preparedNavigationMapApplies(live, nav))
+        val equalRoutePreview = editPreview(nav).copy(route = route)
+        val edit = navigationMapPresentation(PhoneDirectionsState(), nav, emptyList(), true, equalRoutePreview)
+        assertFalse(preparedNavigationMapApplies(edit, nav))
+        val equalIdDifferentGeometry = navigationMapPresentation(PhoneDirectionsState(preview = editedRoute.copy(id = route.id)),
+            nav, emptyList(), true)
+        assertFalse(preparedNavigationMapApplies(equalIdDifferentGeometry, nav))
+        assertFalse(preparedNavigationMapApplies(live, nav.copy(preparedRouteFingerprint = null)))
+        assertFalse(preparedNavigationMapApplies(live, nav.copy(guidance = false)))
     }
 }

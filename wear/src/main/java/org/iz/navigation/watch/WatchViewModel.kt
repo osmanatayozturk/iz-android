@@ -42,12 +42,9 @@ internal class WatchViewModel(application: Application) : AndroidViewModel(appli
         try {
             dataClient.addListener(dataListener).await()
             messageClient.addListener(messageListener).await()
-            capabilityClient.addListener(capabilityListener, WearProtocol.PHONE_CAPABILITY).await()
-            capabilityClient.addListener(capabilityListener, WearProtocol.V2_PHONE_CAPABILITY).await()
-            capabilityClient.addListener(capabilityListener, WearProtocol.V3_PHONE_CAPABILITY).await()
-            capabilityClient.addListener(capabilityListener, WearProtocol.V4_PHONE_CAPABILITY).await()
-            capabilityClient.addListener(capabilityListener, WearProtocol.V5_PHONE_CAPABILITY).await()
-            capabilityClient.addListener(capabilityListener, WearProtocol.V6_PHONE_CAPABILITY).await()
+            (1..WearProtocol.CURRENT_VERSION).forEach { version ->
+                capabilityClient.addListener(capabilityListener, WearProtocol.phoneCapability(version)).await()
+            }
             launch {
                 while (isActive) {
                     refreshNow()
@@ -67,12 +64,9 @@ internal class WatchViewModel(application: Application) : AndroidViewModel(appli
             withContext(NonCancellable) {
                 runCatching { dataClient.removeListener(dataListener).await() }
                 runCatching { messageClient.removeListener(messageListener).await() }
-                runCatching { capabilityClient.removeListener(capabilityListener, WearProtocol.PHONE_CAPABILITY).await() }
-                runCatching { capabilityClient.removeListener(capabilityListener, WearProtocol.V2_PHONE_CAPABILITY).await() }
-                runCatching { capabilityClient.removeListener(capabilityListener, WearProtocol.V3_PHONE_CAPABILITY).await() }
-                runCatching { capabilityClient.removeListener(capabilityListener, WearProtocol.V4_PHONE_CAPABILITY).await() }
-                runCatching { capabilityClient.removeListener(capabilityListener, WearProtocol.V5_PHONE_CAPABILITY).await() }
-                runCatching { capabilityClient.removeListener(capabilityListener, WearProtocol.V6_PHONE_CAPABILITY).await() }
+                (1..WearProtocol.CURRENT_VERSION).forEach { version ->
+                    runCatching { capabilityClient.removeListener(capabilityListener, WearProtocol.phoneCapability(version)).await() }
+                }
             }
         }
     }
@@ -131,20 +125,13 @@ internal class WatchViewModel(application: Application) : AndroidViewModel(appli
     }
 
     private fun choosePhone(capabilities: Map<String, CapabilityInfo>) {
-        val v6 = capabilities[WearProtocol.V6_PHONE_CAPABILITY]?.nodes.orEmpty()
-        val v5 = capabilities[WearProtocol.V5_PHONE_CAPABILITY]?.nodes.orEmpty()
-        val v4 = capabilities[WearProtocol.V4_PHONE_CAPABILITY]?.nodes.orEmpty()
-        val v3 = capabilities[WearProtocol.V3_PHONE_CAPABILITY]?.nodes.orEmpty()
-        val v2 = capabilities[WearProtocol.V2_PHONE_CAPABILITY]?.nodes.orEmpty()
-        val nodes = (capabilities[WearProtocol.PHONE_CAPABILITY]?.nodes.orEmpty() + v2 + v3 + v4 + v5 + v6).distinctBy { it.id }
-        fun version(id: String?): Int = when {
-            v6.any { it.id == id } -> 6
-            v5.any { it.id == id } -> 5
-            v4.any { it.id == id } -> 4
-            v3.any { it.id == id } -> 3
-            v2.any { it.id == id } -> 2
-            else -> 1
+        val byVersion = (1..WearProtocol.CURRENT_VERSION).associateWith { version ->
+            capabilities[WearProtocol.phoneCapability(version)]?.nodes.orEmpty()
         }
+        val nodes = byVersion.values.flatten().distinctBy { it.id }
+        fun version(id: String?): Int = byVersion.keys.filter { version ->
+            byVersion.getValue(version).any { it.id == id }
+        }.maxOrNull() ?: 1
         val reader = mutableSurfaceState.value
         // Cached source truth and command destination move together, including after process recreation.
         val selectedId = reader.commandPhone(nodes.map { it.id }.toSet())

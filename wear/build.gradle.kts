@@ -11,8 +11,8 @@ android {
         applicationId = "org.iz.navigation"
         minSdk = 30
         targetSdk = 35
-        versionCode = 11
-        versionName = "0.6.1"
+        versionCode = 12
+        versionName = "0.7.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true }

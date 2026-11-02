@@ -92,7 +92,9 @@ class WatchSurfaceListener : WearableListenerService() {
             for (request in requests) {
                 val data = WatchSurfaceReader.read(this@WatchSurfaceListener)
                 val s = data.snapshot
-                val transition = "${data.phoneId}:${s?.journeyId}:${s?.recording}:${s?.temporary}:${s?.navigation?.sessionId}:${s?.navigation?.guidance}:${s?.navigation?.gpsStale}:${s?.navigation?.arrived}:${s?.navigation?.offRoute}:${s?.daily?.localDate}:${s?.statsDeferred}:${s?.statisticsStatus}:${s?.completed?.journeyId}"
+                val advisory = s?.takeIf { data.connected && WearProtocol.isFreshSnapshot(it, System.currentTimeMillis()) }
+                    ?.let { WatchSurfacePolicy.ownerAdvisory(it) }
+                val transition = "${data.phoneId}:${s?.journeyId}:${s?.recording}:${s?.temporary}:${s?.navigation?.sessionId}:${s?.navigation?.guidance}:${s?.navigation?.gpsStale}:${s?.navigation?.arrived}:${s?.navigation?.offRoute}:${s?.daily?.localDate}:${s?.statsDeferred}:${s?.statisticsStatus}:${s?.completed?.journeyId}:${s?.navigation?.loading}:$advisory"
                 WatchSurfaceUpdates.request(this@WatchSurfaceListener, transition)
             }
         }

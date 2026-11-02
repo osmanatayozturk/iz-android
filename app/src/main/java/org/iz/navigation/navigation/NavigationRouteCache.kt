@@ -29,7 +29,7 @@ class NavigationRouteCache(private val directory: File) {
                 output.toByteArray()
             }
             val json = JSONObject(bytes.toString(Charsets.UTF_8))
-            val version = json.getInt("version"); require(version in 1..3)
+            val version = json.getInt("version"); require(version in 1..4)
             val transport = Transport.valueOf(json.optString("transport", Transport.MOTORCYCLE.name))
             val stops = json.getJSONArray("stops").bounded(6).map { item ->
                 RouteStop(item.getString("label"), item.coordinate())
@@ -59,6 +59,10 @@ class NavigationRouteCache(private val directory: File) {
                 } + if (version < 3 && routePreferences(json.optJSONObject("preferences"),
                     RoutePreferences.defaults(transport)).avoidUnpaved)
                     listOf("Eski rota için yol yüzeyi doğrulanmadı; yeniden hesaplayın.") else emptyList(),
+                avoidAreas = if (version < 4) emptyList() else json.getJSONArray("avoidAreas").bounded(3).map { item ->
+                    RouteAvoidArea(item.getDouble("south"), item.getDouble("west"),
+                        item.getDouble("north"), item.getDouble("east"))
+                },
             ).requireUsablePreferences().also(::validate)
         }
     } catch (_: Exception) { null }
@@ -69,7 +73,7 @@ class NavigationRouteCache(private val directory: File) {
             return
         }
         validate(route)
-        val json = JSONObject().put("version", 3).put("id", route.id).put("distance", route.distanceMeters)
+        val json = JSONObject().put("version", 4).put("id", route.id).put("distance", route.distanceMeters)
             .put("preferences", route.preferences.json()).put("hasHighway", route.hasHighway ?: JSONObject.NULL)
             .put("selectionLocked", route.selectionLocked).put("providerWarnings", JSONArray(route.providerWarnings))
             .put("duration", route.durationSeconds).put("createdAt", route.createdAt).put("transport", route.transport.name)
@@ -77,6 +81,10 @@ class NavigationRouteCache(private val directory: File) {
             .put("stops", JSONArray().apply { route.stops.forEach { put(it.coordinate.json().put("label", it.label)) } })
             .put("vertices", JSONArray().apply { route.vertices.forEach { put(it.coordinate.json().put("elapsed", it.elapsedSeconds)) } })
             .put("stopTimes", JSONArray(route.stopElapsedSeconds))
+            .put("avoidAreas", JSONArray().apply { route.avoidAreas.forEach { area ->
+                put(JSONObject().put("south", area.south).put("west", area.west)
+                    .put("north", area.north).put("east", area.east))
+            } })
             .put("maneuvers", JSONArray().apply {
                 route.maneuvers.forEach { m -> put(JSONObject().put("type", m.type).put("instruction", m.instruction)
                     .put("verbal", m.verbalInstruction).put("streets", JSONArray(m.streetNames))
@@ -98,6 +106,7 @@ class NavigationRouteCache(private val directory: File) {
     }
 
     private fun validate(route: PlannedRoute) {
+        require(route.avoidAreas.size <= 3)
         require(route.id.length <= 300 && route.vertices.size <= 100_000 && route.maneuvers.size <= 10_000)
         require(route.providerWarnings.size <= 100 && route.providerWarnings.all { it.length <= 2000 })
         route.maneuvers.forEach { m ->

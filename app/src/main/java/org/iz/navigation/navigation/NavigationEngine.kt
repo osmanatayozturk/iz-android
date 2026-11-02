@@ -41,9 +41,11 @@ class NavigationEngine(private val route: PlannedRoute) {
         }
     }
 
-    fun remainingStops(): List<RouteStop> = route.stops.drop(1).filterIndexed { index, _ ->
-        index == route.stops.size - 2 || stopDistances[index + 1] > travelled + 5.0
+    fun remainingStopIndices(): List<Int> = (1..route.stops.lastIndex).filter { index ->
+        index == route.stops.lastIndex || stopDistances[index] > travelled + 5.0
     }
+
+    fun remainingStops(): List<RouteStop> = remainingStopIndices().map { route.stops[it] }
 
     fun update(fix: NavigationFix, now: Long): NavigationProgress? {
         if (fix.recordedAt > now || now - fix.recordedAt > 10_000 ||
@@ -127,13 +129,65 @@ class NavigationEngine(private val route: PlannedRoute) {
 }
 
 /** Two bounded cues per maneuver; TomTom generic instructions retain provider text. */
-class NavigationCuePolicy {
+class NavigationCuePolicy(private val clock: () -> Long = { System.nanoTime() / 1_000_000L }) {
     private var routeId: String? = null
     private val spoken = mutableSetOf<Pair<Int, Boolean>>()
-    fun reset() { routeId = null; spoken.clear() }
-
-    fun cue(route: PlannedRoute, progress: NavigationProgress, fix: NavigationFix): String? {
+    private val pending = mutableMapOf<Pair<Int, Boolean>, NavigationCueRequest>()
+    private data class Budget(val firstAt: Long, var lastAt: Long, var attempts: Int)
+    private val budgets = mutableMapOf<Pair<Int, Boolean>, Budget>()
+    private data class Candidate(val key: Pair<Int, Boolean>, val text: String)
+    fun reset() { routeId = null; spoken.clear(); pending.clear(); budgets.clear() }
+    private fun useRoute(route: PlannedRoute) {
         if (routeId != route.id) { reset(); routeId = route.id }
+    }
+
+    /** Legacy immediate-consumption API; tracked production guidance uses offer + receipts. */
+    fun cue(route: PlannedRoute, progress: NavigationProgress, fix: NavigationFix): String? {
+        useRoute(route)
+        val candidate = candidate(route, progress, fix) ?: return null
+        if (blocked(candidate.key)) return null
+        consume(candidate.key)
+        return candidate.text
+    }
+
+    fun offer(route: PlannedRoute, progress: NavigationProgress, fix: NavigationFix,
+        stillCurrent: (NavigationCueRequest) -> Boolean = { true }): NavigationCueRequest? {
+        useRoute(route)
+        val candidate = candidate(route, progress, fix) ?: return null
+        val key = candidate.key
+        if (blocked(key)) return null
+        val now = clock()
+        val budget = budgets[key]
+        if (budget != null && (now < budget.lastAt || now - budget.firstAt >= 15_000L ||
+                budget.attempts >= 3 || now - budget.lastAt < 1_000L)) return null
+        val admitted = budget ?: Budget(now, now, 0).also { budgets[key] = it }
+        admitted.lastAt = now
+        admitted.attempts++
+        lateinit var request: NavigationCueRequest
+        request = NavigationCueRequest(candidate.text, admitted.firstAt + 15_000L, stillCurrent) { result ->
+            if (pending[key] === request) {
+                pending.remove(key)
+                if (result != CueDelivery.REJECTED) consume(key)
+            }
+        }
+        pending[key] = request
+        return request
+    }
+
+    /** Recompute phase from the current fix; never compare localized cue text or reset history. */
+    fun isEligible(request: NavigationCueRequest, route: PlannedRoute, progress: NavigationProgress,
+        fix: NavigationFix): Boolean {
+        if (routeId != route.id || clock() >= request.expiresAtMillis) return false
+        val key = candidate(route, progress, fix)?.key ?: return false
+        return pending[key] === request
+    }
+    private fun blocked(key: Pair<Int, Boolean>) = key in spoken || key in pending ||
+        (!key.second && (key.first to true) in pending)
+    private fun consume(key: Pair<Int, Boolean>) {
+        spoken.add(key)
+        if (key.second) spoken.add(key.first to false)
+    }
+    private fun candidate(route: PlannedRoute, progress: NavigationProgress, fix: NavigationFix): Candidate? {
         if (progress.offRoute || progress.arrived || !fix.accuracyMeters.isFinite() || fix.accuracyMeters !in 0f..50f ||
             progress.distanceFromRouteMeters > max(40.0, 2.0 * fix.accuracyMeters)) return null
         val maneuver = route.maneuvers.getOrNull(progress.maneuverIndex) ?: return null
@@ -171,8 +225,6 @@ class NavigationCuePolicy {
         if (!distance.isFinite() || distance < 0 || distance > max(180.0, speed * 15).coerceAtMost(800.0)) return null
         val now = distance <= max(20.0, speed * 2).coerceAtMost(60.0)
         val key = progress.maneuverIndex to now
-        if (!spoken.add(key)) return null
-        if (now) spoken.add(progress.maneuverIndex to false)
-        return if (now) "Şimdi $instruction." else "${(round(distance / 50) * 50).toInt().coerceAtLeast(50)} metre sonra $instruction."
+        return Candidate(key, if (now) "Şimdi $instruction." else "${(round(distance / 50) * 50).toInt().coerceAtLeast(50)} metre sonra $instruction.")
     }
 }

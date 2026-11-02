@@ -15,6 +15,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import org.json.JSONArray
 
@@ -31,7 +33,19 @@ class TomTomRoutePlanner internal constructor(
     private val clock: () -> Long,
     private val gate: TrafficRequestGate,
     private val ensureAuthorized: () -> Unit = {},
-) : RoutePlanner {
+) : RoutePlanner, RouteModificationPlanner {
+    override suspend fun planModified(request: RouteModificationRequest): PlannedRoute {
+        val snapshot = request.copy(stops = request.stops.toList(), avoidAreas = request.avoidAreas.toList())
+        val context = coroutineContext
+        val route = this.request(snapshot.stops, snapshot.departureAt, snapshot.transport,
+            snapshot.travelSpeedKmh, snapshot.preferences, false, snapshot.avoidAreas).routes.first()
+        context.ensureActive(); ensureAuthorized()
+        try { requireAvoidedAreas(route, snapshot.avoidAreas) { context.ensureActive() } }
+        catch (_: IllegalArgumentException) { throw RouteServiceException("Seçili bölüm yeni rotadan çıkarılamadı. Mevcut rota korundu.") }
+        ensureAuthorized()
+        return route.copy(avoidAreas = snapshot.avoidAreas)
+    }
+
     private val endpoint = endpoint.toHttpUrl().also {
         require(it.toString() == ENDPOINT || it.host in setOf("localhost", "127.0.0.1", "::1"))
         require(it.username.isEmpty() && it.password.isEmpty() && it.query == null && it.fragment == null)
@@ -59,7 +73,7 @@ class TomTomRoutePlanner internal constructor(
         request(stops, departureAt, transport, travelSpeedKmh, preferences, true)
 
     private suspend fun request(stops: List<RouteStop>, departureAt: Long, transport: Transport,
-        travelSpeedKmh: Double?, preferences: RoutePreferences, alternatives: Boolean): RouteAlternatives = withContext(Dispatchers.IO) {
+        travelSpeedKmh: Double?, preferences: RoutePreferences, alternatives: Boolean, avoidAreas: List<RouteAvoidArea> = emptyList()): RouteAlternatives = withContext(Dispatchers.IO) {
         require(stops.size in 2..6)
         routeTravelSpeedKmh(transport, travelSpeedKmh)
         val mode = when (transport) {
@@ -94,7 +108,16 @@ class TomTomRoutePlanner internal constructor(
                         // https://docs.tomtom.com/routing-api/documentation/tomtom-maps/v1/calculate-route
                         if (preferences.avoidUnpaved) addQueryParameter("avoid", "unpavedRoads")
                     }.build()
-                val request = weatherRequest(url.toString()).header("Cache-Control", "no-store").build()
+                val builder = weatherRequest(url.toString()).header("Cache-Control", "no-store")
+                if (avoidAreas.isNotEmpty()) {
+                    val body = JSONObject().put("avoidAreas", JSONObject().put("rectangles", JSONArray().apply {
+                        avoidAreas.forEach { area -> put(JSONObject()
+                            .put("southWestCorner", JSONObject().put("latitude", area.south).put("longitude", area.west))
+                            .put("northEastCorner", JSONObject().put("latitude", area.north).put("longitude", area.east))) }
+                    }))
+                    builder.post(body.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+                }
+                val request = builder.build()
                 // A key may have been removed while this request waited for the shared gate.
                 // Keep this last authorization check adjacent to the cancellable HTTP enqueue.
                 ensureAuthorized()

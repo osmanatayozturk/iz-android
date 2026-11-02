@@ -19,6 +19,8 @@ class IzApplication : Application() {
         org.iz.navigation.integration.osm.OsmAuthManager.get(this).communitySessionSource) }
     internal val healthManager by lazy { org.iz.navigation.health.HealthConnectManager(this, org.iz.navigation.data.DiaryRepository(this)) }
     val navigation by lazy { org.iz.navigation.navigation.JourneyNavigationCoordinator(this) }
+    val preparedRoutes by lazy { org.iz.navigation.navigation.PreparedRouteManager(this, navigation) }
+    val routeOperations by lazy { org.iz.navigation.navigation.RouteOperationsController(this, navigation) }
     val groups by lazy { org.iz.navigation.group.GroupCoordinator(this, navigation) }
     val weatherManager by lazy { org.iz.navigation.weather.RideWeatherManager(this, navigation = navigation) }
     override fun onCreate() {

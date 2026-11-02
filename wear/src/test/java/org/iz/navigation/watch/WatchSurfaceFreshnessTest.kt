@@ -24,8 +24,10 @@ class WatchSurfaceFreshnessTest {
     }
     @Test fun dailyCacheSurvivesSnapshotTtlButExpiresAtPhoneMidnight() {
         val state = WearSnapshot(now, daily = day())
-        assertEquals("4200", WatchSurfacePolicy.frame(state, false, now + 100_000).compact)
-        assertEquals("İz’i aç", WatchSurfacePolicy.frame(state, false, 86_400_000).compact)
+        val cached = WatchSurfacePolicy.frame(state, false, now + 100_000)
+        assertEquals("Telefon bağlı değil", cached.lines.first())
+        assertTrue(cached.lines.any { it.contains("Son günlük özet") && it.contains("4200") })
+        assertFalse(WatchSurfacePolicy.frame(state, false, 86_400_000).lines.any { it.contains("4200") })
     }
     @Test fun disconnectedRecordingNeverExtrapolates() {
         val state = WearSnapshot(now, journeyId = "j", recording = true, elapsedMillis = 120_000)

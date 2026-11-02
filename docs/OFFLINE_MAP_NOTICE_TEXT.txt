@@ -1,0 +1,142 @@
+İz çevrimdışı harita bildirimi
+Profil: iz-offline-labelled-latin-v1
+
+Görünür harita atfı
+OpenFreeMap · © OpenMapTiles · © OpenStreetMap contributors
+OpenFreeMap: https://openfreemap.org/
+OpenMapTiles: https://openmaptiles.org/
+OpenStreetMap telif ve ODbL: https://www.openstreetmap.org/copyright
+
+Seçili profil ve değişiklikler
+Bu İz profili, OpenFreeMap Styles Liberty stilinden türetilmiş azaltılmış, etiketli bir vektör haritadır. İz uyarlaması yol ve yer adlarını korumak üzere etiket katmanlarını kullanır; yerel Carlito Regular tabanlı SDF glyph stack'i “Iz Offline Latin Regular” adıyla üretilir. Stil kodu ve tasarım kökenine ait bildirimler aşağıda korunmuştur.
+
+Liberty tasarım bildirimi OSM Bright / Mapbox Open Styles kaynaklı CC BY 3.0 tasarım kökenini ve OpenMapTiles CC BY 4.0 tasarım atfını belirtir. Kaynak ve lisans bilgileri yukarıdaki bağlantılarda yer alır; bu İz uyarlamasının kaynak Liberty stiline göre azaltılmış ve etiket/font kullanımı için değiştirilmiş olduğu belirtilir. OpenMapTiles ve OpenStreetMap atfı haritada görünür olmalıdır. OSM verisi ODbL kapsamındadır.
+
+OpenFreeMap Styles — repo MIT lisansı
+Kaynak: LICENSE.md, OpenFreeMap Styles commit 006ea5796803ba2df4330888836cb0a8f17473b4, satır 35–56.
+Git blob: 2b0594fa3cdac5633f0e880aefe3aa3ea7fd502f
+Kaynak: https://github.com/hyperknot/openfreemap-styles/blob/006ea5796803ba2df4330888836cb0a8f17473b4/LICENSE.md
+
+MIT License
+
+Copyright (c) 2023 Zsolt Ero
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Liberty — BSD kod lisansı ve tasarım atfı
+Kaynak: styles/liberty/LICENSE.md, aynı commit, satır 1–20.
+Git blob: b862282f05eec17ab52a5ce253d2b892fedd6c1c
+Kaynak: https://github.com/hyperknot/openfreemap-styles/blob/006ea5796803ba2df4330888836cb0a8f17473b4/styles/liberty/LICENSE.md
+
+## Code License
+
+The Mapbox GL Style JSON file is originally derived from [OSM Bright from Mapbox Open Styles](https://github.com/mapbox/mapbox-gl-styles/blob/master/LICENSE.md). The modified Mapbox GL Style JSON retains the same BSD license.
+
+> Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+> * Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+* Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+* Neither the name of Mapbox nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+
+> THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+## Design License
+
+The look and feel of the OSM liberty map design is also derived (although heavily altered) from [OSM Bright from Mapbox Open Styles](https://github.com/mapbox/mapbox-gl-styles/blob/master/LICENSE.md) which is licensed under the Creative Commons Attribution 3.0 license.
+
+The map is displaying and styling the data from [OpenMapTiles](https://openmaptiles.org/) with [CC-BY 4.0 design license](https://github.com/openmaptiles/openmaptiles/blob/master/LICENSE.md).
+
+The products or services using this map style need to visibly credit "OpenMapTiles.org" or reference "OpenMapTiles" with a link to http://openmaptiles.org/. For a browsable electronic map based on OpenMapTiles and OpenStreetMap data, the credit should appear in the corner of the map. For example:
+
+[© OpenMapTiles](https://openmaptiles.org/)
+[© OpenStreetMap contributors](https://www.openstreetmap.org/copyright)
+
+For printed and static maps a similar attribution should be made in a textual description near the image, in the same fashion as if you cite a photograph.
+
+Bright — BSD kod lisansı ve CC BY 4.0 tasarım bildirimi
+Kaynak: styles/bright/LICENSE.md, aynı commit, satır 1–55.
+Git blob: 714b1bbc8f8837bab08ffc3cb5d3f702143f728a
+Kaynak: https://github.com/hyperknot/openfreemap-styles/blob/006ea5796803ba2df4330888836cb0a8f17473b4/styles/bright/LICENSE.md
+
+Copyright (c) 2016, KlokanTech.com & OpenMapTiles contributors.  
+Copyright (c) 2014, Mapbox.  
+All rights reserved.
+
+Modifications by KlokanTech.com & OpenMapTiles contributors.  
+Derived from "Mapbox Open Styles" https://github.com/mapbox/mapbox-gl-styles
+
+# Code license: BSD 3-Clause License
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice, this
+  list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* Neither the name of the copyright holder nor the names of its
+  contributors may be used to endorse or promote products derived from
+  this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# Design license: CC-BY 4.0
+
+The visual design features of the style (also known as the "look and feel" of
+the map) are licensed under the Creative Commons Attribution 4.0 license.
+
+To view a copy of the license, visit http://creativecommons.org/licenses/by/4.0/.
+
+Attribution for the design defined in this repository needs not to be provided
+on map images, but should be reasonably accessible from maps based on this style
+(for example, in a webpage linked from copyright notice on the map).
+
+Products or services using maps derived from OpenMapTiles schema need to visibly
+credit "OpenMapTiles.org" or reference "OpenMapTiles" with a link to
+http://openmaptiles.org/.
+
+For a browsable electronic map based on OpenMapTiles and OpenStreetMap data, the
+credit should appear in the corner of the map. For example:
+
+[© OpenMapTiles](http://openmaptiles.org/)
+[© OpenStreetMap contributors](http://www.openstreetmap.org/copyright)
+
+For printed and static maps a similar attribution should be made in a textual
+description near the image, in the same fashion as if you cite a photograph.
+
+Exceptions to OpenMapTiles attribution requirement can be in a written form granted
+by Klokan Technologies GmbH (info@klokantech.com).  
+The project contributors grant Klokan Technologies GmbH the license to give such
+exceptions on a commercial basis.
+
+Carlito notice assets
+Carlito Regular source and the complete original OFL.txt and AUTHORS.txt are supplied as separate byte-preserved files with the font handoff; this text does not replace or retype those files. The selected profile uses the derived name “Iz Offline Latin Regular”. Original source revision: https://github.com/googlefonts/carlito/tree/3a810cab78ebd6e2e4eed42af9e8453c4f9b850a . Copyright 2013 The Carlito Project Authors; Reserved Font Name: Carlito.

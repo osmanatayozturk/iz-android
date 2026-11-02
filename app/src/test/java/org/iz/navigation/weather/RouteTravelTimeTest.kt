@@ -48,4 +48,22 @@ class RouteTravelTimeTest {
     @Test fun hugeRouteDurationCannotWrapArrivalIntoThePast() {
         assertEquals(Long.MAX_VALUE, RouteTravelTime.plannedArrival(1_000_000, Double.MAX_VALUE))
     }
+    @Test fun explicitIndefinitePauseRemovesArrivalWithoutPretendingGpsWasLost() {
+        val live = RouteTravelTime.advance(null, 900.0, 1_000_000, 1_000_000)
+        val paused = RouteTravelTime.advance(live, 900.0, 1_030_000, 1_030_000, paused = true)
+        assertNull(paused.arrivalAt)
+        assertTrue(paused.paused)
+        assertFalse(paused.gpsStale)
+        assertEquals(900.0, paused.remainingSeconds, 0.0)
+    }
+
+    @Test fun resumeRebasesFromNowWithoutAddingHistoricalPauseAgain() {
+        val paused = RouteTravelTiming(900.0, null, null, gpsStale = false, paused = true)
+        val resumed = RouteTravelTime.advance(paused, 800.0, 1_100_000, 1_100_000)
+        assertFalse(resumed.paused)
+        assertEquals(1_900_000L, resumed.arrivalAt)
+        val noFix = RouteTravelTime.advance(paused, 800.0, null, 1_100_000)
+        assertNull(noFix.arrivalAt)
+        assertTrue(noFix.gpsStale)
+    }
 }

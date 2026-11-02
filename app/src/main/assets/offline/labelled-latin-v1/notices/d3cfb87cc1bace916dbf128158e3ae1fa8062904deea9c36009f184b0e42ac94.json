@@ -1,0 +1,22 @@
+{
+  "schema": "iz.offline.notices.v1",
+  "profileId": "iz-offline-labelled-latin-v1",
+  "fontBundleSha256": "c19e8462bc293b89a780aa1a0d246f71d07fe30dd07e8e61abf4f2f6ce0aedc0",
+  "files": [
+    {
+      "sha256": "2f54d8afce21896c863cb48c6d8b1f0ac1b786b94e63e81b2cfa554c1630da48",
+      "bytes": 9408,
+      "path": "notices/2f54d8afce21896c863cb48c6d8b1f0ac1b786b94e63e81b2cfa554c1630da48.txt"
+    },
+    {
+      "sha256": "58402f82a7c332a700294988fe7554fbb0a63a8d27ccc1ee3bbc640311990a00",
+      "bytes": 4424,
+      "path": "notices/58402f82a7c332a700294988fe7554fbb0a63a8d27ccc1ee3bbc640311990a00.txt"
+    },
+    {
+      "sha256": "127a5f8f8e10214b4cce882d921c24d183656fd2220d7ad4185136f3a0eadfd3",
+      "bytes": 265,
+      "path": "notices/127a5f8f8e10214b4cce882d921c24d183656fd2220d7ad4185136f3a0eadfd3.txt"
+    }
+  ]
+}

@@ -7,6 +7,7 @@ internal data class RouteTravelTiming(
     val arrivalAt: Long?,
     val updatedAt: Long?,
     val gpsStale: Boolean,
+    val paused: Boolean = false,
 )
 
 /** Route costing supplies the remaining duration; no learned speed or traffic data is implied. */
@@ -17,9 +18,11 @@ internal object RouteTravelTime {
         return departureAt + millis
     }
 
-    fun advance(previous: RouteTravelTiming?, remainingSeconds: Double, lastFixAt: Long?, now: Long): RouteTravelTiming {
+    fun advance(previous: RouteTravelTiming?, remainingSeconds: Double, lastFixAt: Long?, now: Long, paused: Boolean = false): RouteTravelTiming {
         require(remainingSeconds.isFinite() && remainingSeconds >= 0)
         val fresh = lastFixAt?.let { RideWeatherTiming.gpsFresh(it, now) } ?: false
+        if (paused) return RouteTravelTiming(remainingSeconds, null, null, gpsStale = !fresh, paused = true)
+        if (previous?.paused == true && !fresh) return RouteTravelTiming(remainingSeconds, null, null, gpsStale = true)
         if (!fresh) return previous?.copy(gpsStale = true)
             ?: RouteTravelTiming(remainingSeconds, null, null, gpsStale = true)
         return RouteTravelTiming(remainingSeconds, plannedArrival(now, remainingSeconds), now, gpsStale = false)

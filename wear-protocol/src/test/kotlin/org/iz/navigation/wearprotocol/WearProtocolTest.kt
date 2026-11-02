@@ -196,11 +196,14 @@ class WearProtocolTest {
         rejectIncomplete(frame, WearProtocol::decodeSnapshot)
     }
 
-    @Test fun versionSixCanNegotiateWithoutChangingLegacyCommandPayloads() {
-        assertEquals(6, WearProtocol.CURRENT_VERSION)
+    @Test fun supportedChannelsPreserveLegacyCommandPayloads() {
         val command = WearCommand("request", WearAction.REFRESH, 1000L)
-        assertEquals(command, WearProtocol.decodeCommand(WearProtocol.encodeCommand(command, 4)))
-        assertEquals(command, WearProtocol.decodeCommand(WearProtocol.encodeCommand(command, 1)))
+        for (version in 1..7) {
+            val frame = WearProtocol.encodeCommand(command, version)
+            assertEquals(command, WearProtocol.decodeCommand(frame))
+            assertArrayEquals(hex("0007726571756573740200000000000003e80000"), frame.copyOfRange(6, frame.size))
+            assertEquals(version, WearProtocol.frameVersion(frame))
+        }
     }
     @Test fun allFiveModesSurviveStartCommandTransfer() {
         for (mode in WearMode.entries) {

@@ -73,12 +73,3 @@ internal data class WatchUiState(
         copy(pending = null, needsPhone = false, snapshot = null, message = "İstek süresi doldu. Telefon durumunu yenile.")
     } else this
 }
-
-internal fun WearMode.label(): String = when (this) {
-    WearMode.CAR -> "Araba"
-    WearMode.MOTORCYCLE -> "Motosiklet"
-    WearMode.BICYCLE -> "Bisiklet"
-    WearMode.WALK -> "Yürüyüş"
-    WearMode.PASSENGER -> "Yolcu"
-    WearMode.RUN -> "Koşu"
-}

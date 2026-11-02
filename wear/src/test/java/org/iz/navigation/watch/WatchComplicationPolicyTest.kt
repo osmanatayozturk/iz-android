@@ -8,13 +8,15 @@ class WatchComplicationPolicyTest {
     private val now = 1_000_000L
     private fun nav() = WearNavigationSummary("n", true, now, false, false, false, false, false,
         10, "Sağa dön", 150.0, 2200.0, now + 600000, "Ev")
-    @Test fun frozenReportedEtaSurvivesShortGpsWindowButExpiresAtFiveMinutes() {
+    @Test fun reportedEtaRequiresBothCurrentPhoneAndCurrentGps() {
         val snapshot = WearSnapshot(now, navigation = nav())
         val original = WatchSurfacePolicy.complication(snapshot, true, now)
         assertNotEquals("İz’i aç", original.compact)
-        assertEquals(original.compact, WatchSurfacePolicy.complication(snapshot, false, now + 299999).compact)
-        assertEquals("İz’i aç", WatchSurfacePolicy.complication(snapshot, false, now + 300000).compact)
-        assertEquals("İz’i aç", WatchSurfacePolicy.frame(snapshot, false, now + 60000).compact)
+        assertEquals(original.compact, WatchSurfacePolicy.complication(snapshot, true, now + 29_999).compact)
+        assertEquals("İz’i aç", WatchSurfacePolicy.complication(snapshot, false, now + 1).compact)
+        assertEquals("İz’i aç", WatchSurfacePolicy.complication(snapshot, true, now + 30_000).compact)
+        assertEquals("Telefon bilgisi güncel değil",
+            WatchSurfacePolicy.complication(snapshot, true, now + 30_000).lines.first())
     }
     @Test fun staleGpsAndTerminalReportImmediatelyInvalidatePreviousEta() {
         for (nav in listOf(nav().copy(gpsStale = true), nav().copy(arrived = true), nav().copy(offRoute = true), nav().copy(simulation = true))) {

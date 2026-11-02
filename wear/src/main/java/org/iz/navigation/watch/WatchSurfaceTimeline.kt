@@ -8,13 +8,13 @@ internal object WatchSurfaceTimeline {
         val result = mutableListOf<WatchSurfaceSegment>()
         var start = now
         var frame = first
-        // At most: current live heart -> measured recording -> expired. Daily and GPS need two entries.
+        // At most: current GPS -> GPS expired -> phone report expired. Preserve the observed link state.
         repeat(3) {
             val end = frame.validUntil?.takeIf { it > start }
             result += WatchSurfaceSegment(frame, start, end)
             if (end == null) return result
             start = end
-            frame = WatchSurfacePolicy.frame(snapshot, false, start)
+            frame = WatchSurfacePolicy.frame(snapshot, connected, start)
         }
         return result
     }

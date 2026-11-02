@@ -32,6 +32,11 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import org.iz.navigation.data.GeoCoordinate
 import okhttp3.Cache
 import okhttp3.OkHttpClient
+import okhttp3.Call
+import okhttp3.Dispatcher
+import org.iz.navigation.offline.OfflineMapHttpRouter
+import org.iz.navigation.offline.OfflineWireBudget
+import org.iz.navigation.weather.singleAttemptHttpClient
 import org.json.JSONArray
 import org.json.JSONObject
 import org.maplibre.android.MapLibre
@@ -59,6 +64,8 @@ internal fun OsmMapView(
     attributionBottomInset: Dp = 4.dp,
     attributionAtStart: Boolean = false,
     maxFps: Int? = null,
+    mapAttribution: String = "© OpenStreetMap contributors",
+    onAttributionClick: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -68,6 +75,7 @@ internal fun OsmMapView(
     val fps by rememberUpdatedState(maxFps)
     val click by rememberUpdatedState(onClick)
     val longClick by rememberUpdatedState(onLongClick)
+    val attributionClick by rememberUpdatedState(onAttributionClick)
     val mapView = remember(context, styleJson) {
         OsmMapRuntime.initialize(context)
         MapView(context, MapLibreMapOptions.createFromAttributes(context)
@@ -126,11 +134,14 @@ internal fun OsmMapView(
     Box(modifier) {
         key(mapView) { AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize()) }
         Text(
-            "© OpenStreetMap contributors",
+            mapAttribution,
             modifier = Modifier.align(if (attributionAtStart) Alignment.BottomStart else Alignment.BottomEnd)
                 .padding(start = 4.dp, end = 4.dp, bottom = attributionBottomInset)
                 .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.93f))
-                .clickable { uriHandler.openUri("https://www.openstreetmap.org/copyright") }
+                .clickable {
+                    val handler = attributionClick
+                    if (handler != null) handler() else uriHandler.openUri("https://www.openstreetmap.org/copyright")
+                }
                 .padding(horizontal = 6.dp, vertical = 3.dp),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurface,
@@ -140,6 +151,25 @@ internal fun OsmMapView(
 
 internal object OsmMapRuntime {
     private var initialized = false
+    private var offlineRouter: OfflineMapHttpRouter? = null
+    private var boundedBase: OkHttpClient? = null
+
+    /** Explicit offline job only. Constructing/restoring its owner must not call this method. */
+    @Synchronized fun beginOfflineTransfer(context: Context, calls: Call.Factory, retire: () -> Unit): AutoCloseable {
+        check(android.os.Looper.myLooper() == android.os.Looper.getMainLooper())
+        initialize(context)
+        return checkNotNull(offlineRouter).install(calls, retire)
+    }
+    @Synchronized fun localOfflineResources(context: Context): org.iz.navigation.offline.OfflineLocalResources {
+        check(android.os.Looper.myLooper() == android.os.Looper.getMainLooper())
+        initialize(context)
+        return checkNotNull(offlineRouter).localResources
+    }
+    @Synchronized fun offlineClient(context: Context): OkHttpClient {
+        check(android.os.Looper.myLooper() == android.os.Looper.getMainLooper())
+        initialize(context)
+        return checkNotNull(boundedBase)
+    }
     @Synchronized fun initialize(context: Context) {
         if (initialized) return
         MapLibre.getInstance(context.applicationContext)
@@ -155,7 +185,13 @@ internal object OsmMapRuntime {
                     response.newBuilder().header("Cache-Control", "public, max-age=604800").build()
                 } else response
             }.build()
-        HttpRequestUtil.setOkHttpClient(client)
+        boundedBase = singleAttemptHttpClient(client).newBuilder()
+            .cache(null)
+            .dispatcher(Dispatcher().apply { maxRequests = 4; maxRequestsPerHost = 4 })
+            .addNetworkInterceptor(OfflineWireBudget.interceptor())
+            .build()
+        offlineRouter = OfflineMapHttpRouter(client)
+        HttpRequestUtil.setOkHttpClient(offlineRouter)
         HttpRequestUtil.setLogEnabled(false)
         HttpRequestUtil.setPrintRequestUrlOnFailure(false)
         initialized = true

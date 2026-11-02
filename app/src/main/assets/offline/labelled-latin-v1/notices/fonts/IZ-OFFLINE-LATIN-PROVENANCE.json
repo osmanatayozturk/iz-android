@@ -1,0 +1,174 @@
+{
+  "name": "Iz Offline Latin Regular",
+  "modification": "Static Carlito Regular TTF converted to separately named SDF PBF font software; full original OFL and AUTHORS retained.",
+  "fontLicense": "OFL-1.1",
+  "generatedUtc": "2026-11-02T02:13:53.058Z",
+  "sources": [
+    {
+      "id": "font_ttf",
+      "repository": "googlefonts/carlito",
+      "commit": "3a810cab78ebd6e2e4eed42af9e8453c4f9b850a",
+      "path": "fonts/ttf/Carlito-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/googlefonts/carlito/3a810cab78ebd6e2e4eed42af9e8453c4f9b850a/fonts/ttf/Carlito-Regular.ttf",
+      "gitBlobSha1": "427b95989fee609ab683d800ad00e22a4b14ecad",
+      "bytes": 628032,
+      "sha256": "F6418F708BAEDE9789DAEF5D458C0F53D2A888AF9820E8062934E504FEDC6595"
+    },
+    {
+      "id": "font_ofl",
+      "repository": "googlefonts/carlito",
+      "commit": "3a810cab78ebd6e2e4eed42af9e8453c4f9b850a",
+      "path": "OFL.txt",
+      "url": "https://raw.githubusercontent.com/googlefonts/carlito/3a810cab78ebd6e2e4eed42af9e8453c4f9b850a/OFL.txt",
+      "gitBlobSha1": "8d6b170e4d9a5580a34471dc4ac3e8fc5fbbd712",
+      "bytes": 4424,
+      "sha256": "58402F82A7C332A700294988FE7554FBB0A63A8D27CCC1EE3BBC640311990A00"
+    },
+    {
+      "id": "font_authors",
+      "repository": "googlefonts/carlito",
+      "commit": "3a810cab78ebd6e2e4eed42af9e8453c4f9b850a",
+      "path": "AUTHORS.txt",
+      "url": "https://raw.githubusercontent.com/googlefonts/carlito/3a810cab78ebd6e2e4eed42af9e8453c4f9b850a/AUTHORS.txt",
+      "gitBlobSha1": "8b620756ad3daa04ec42dfc95195894fa8409bb1",
+      "bytes": 265,
+      "sha256": "127A5F8F8E10214B4CCE882D921C24D183656FD2220D7AD4185136F3A0EADFD3"
+    },
+    {
+      "id": "tool_js",
+      "repository": "maplibre/font-maker",
+      "commit": "bab9b243413cb17b66b158d629a4bac2d7299786",
+      "path": "sdfglyph.js",
+      "url": "https://raw.githubusercontent.com/maplibre/font-maker/bab9b243413cb17b66b158d629a4bac2d7299786/sdfglyph.js",
+      "gitBlobSha1": "1d41d17ac07f550dfc63c00ff352fba455031288",
+      "bytes": 220444,
+      "sha256": "2D5CCE9E20511E3E1798A696B496CFB4FB9C55CD9CCEAA73FD77849E1C3D7A64"
+    },
+    {
+      "id": "tool_wasm",
+      "repository": "maplibre/font-maker",
+      "commit": "bab9b243413cb17b66b158d629a4bac2d7299786",
+      "path": "sdfglyph.wasm",
+      "url": "https://raw.githubusercontent.com/maplibre/font-maker/bab9b243413cb17b66b158d629a4bac2d7299786/sdfglyph.wasm",
+      "gitBlobSha1": "9befced36392e39f17cf18cb9c796b1109e0af29",
+      "bytes": 893164,
+      "sha256": "DE2986E66201499DE76F21BB3A649E1F27D7D68AF21CB2616DC3A7B25BADE691"
+    },
+    {
+      "id": "source_main.cpp",
+      "repository": "maplibre/font-maker",
+      "commit": "714ccaea67d384717890a3c2c27143dfdd4189b7",
+      "path": "main.cpp",
+      "url": "https://raw.githubusercontent.com/maplibre/font-maker/714ccaea67d384717890a3c2c27143dfdd4189b7/main.cpp",
+      "gitBlobSha1": "43cce790fcd142a5508c61d0950e00120157e913",
+      "bytes": 9001,
+      "sha256": "81666F41982A058B4A052A1C734DC1ECA881B5E3095B51330D1B6B442E24D913"
+    },
+    {
+      "id": "source_LICENSE.txt",
+      "repository": "maplibre/font-maker",
+      "commit": "714ccaea67d384717890a3c2c27143dfdd4189b7",
+      "path": "LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/maplibre/font-maker/714ccaea67d384717890a3c2c27143dfdd4189b7/LICENSE.txt",
+      "gitBlobSha1": "6defeb5ea7abe80ebe949e0f4af1b5aa967f85d4",
+      "bytes": 1552,
+      "sha256": "FAA89D5C4A6F17829FBD8BE4E21A384BA18AEEC795F2A6A2B1CEDA7A1BF487EF"
+    },
+    {
+      "id": "source_build_wasm.sh",
+      "repository": "maplibre/font-maker",
+      "commit": "714ccaea67d384717890a3c2c27143dfdd4189b7",
+      "path": "build_wasm.sh",
+      "url": "https://raw.githubusercontent.com/maplibre/font-maker/714ccaea67d384717890a3c2c27143dfdd4189b7/build_wasm.sh",
+      "gitBlobSha1": "828ae60924a6a92c84bfa8ba2ce3f68df64bdcfe",
+      "bytes": 526,
+      "sha256": "C6BD66544EB2DE3A7ACF03BD378955E28FC82993A82E0F833821CA324D858DB6"
+    },
+    {
+      "id": "source_.github_workflows_actions.yml",
+      "repository": "maplibre/font-maker",
+      "commit": "714ccaea67d384717890a3c2c27143dfdd4189b7",
+      "path": ".github/workflows/actions.yml",
+      "url": "https://raw.githubusercontent.com/maplibre/font-maker/714ccaea67d384717890a3c2c27143dfdd4189b7/.github/workflows/actions.yml",
+      "gitBlobSha1": "2c39927bbbc166c76f7f99778cc69296e74d86bb",
+      "bytes": 1330,
+      "sha256": "344D33BBCC5116D0FB987478F288495D8A21F199E2DEE1B17231E270B64BD4DC"
+    },
+    {
+      "id": "source_.gitmodules",
+      "repository": "maplibre/font-maker",
+      "commit": "714ccaea67d384717890a3c2c27143dfdd4189b7",
+      "path": ".gitmodules",
+      "url": "https://raw.githubusercontent.com/maplibre/font-maker/714ccaea67d384717890a3c2c27143dfdd4189b7/.gitmodules",
+      "gitBlobSha1": "3db75b2d7bf8719a301a5c429ea8f8f4f3d28c4c",
+      "bytes": 436,
+      "sha256": "02489992E442A85B961ED7C1F17040FF2591398C019E3E744D47CFBACA8D126B"
+    },
+    {
+      "id": "source_app_public_worker.js",
+      "repository": "maplibre/font-maker",
+      "commit": "714ccaea67d384717890a3c2c27143dfdd4189b7",
+      "path": "app/public/worker.js",
+      "url": "https://raw.githubusercontent.com/maplibre/font-maker/714ccaea67d384717890a3c2c27143dfdd4189b7/app/public/worker.js",
+      "gitBlobSha1": "d38c7669ae38cb6b1b5ab9a22ca88a8e7caa83a7",
+      "bytes": 2027,
+      "sha256": "8FC46082BFE2C8BD87EBBF0FF8665E4A1B8C90951813FAC8F80A8790B5CE5868"
+    },
+    {
+      "id": "source_CONTRIBUTING.md",
+      "repository": "maplibre/font-maker",
+      "commit": "714ccaea67d384717890a3c2c27143dfdd4189b7",
+      "path": "CONTRIBUTING.md",
+      "url": "https://raw.githubusercontent.com/maplibre/font-maker/714ccaea67d384717890a3c2c27143dfdd4189b7/CONTRIBUTING.md",
+      "gitBlobSha1": "7012583c6a41537d2a782a6f05fa57b12e3bbe56",
+      "bytes": 1038,
+      "sha256": "07529F525DC88600E7E65A0EF532348371242AE61DDB03F98AB91FBDC8DD2783"
+    },
+    {
+      "id": "source_README.md",
+      "repository": "maplibre/font-maker",
+      "commit": "714ccaea67d384717890a3c2c27143dfdd4189b7",
+      "path": "README.md",
+      "url": "https://raw.githubusercontent.com/maplibre/font-maker/714ccaea67d384717890a3c2c27143dfdd4189b7/README.md",
+      "gitBlobSha1": "1e210d5b076c34cd814be5906b1a51bc3368cd1a",
+      "bytes": 2068,
+      "sha256": "F423CA0689AFFAB11D59C72878FE17185F90CDF3588AA1A3489C92880E175322"
+    },
+    {
+      "id": "source_glyph_foundry",
+      "repository": "mapbox/sdf-glyph-foundry",
+      "commit": "6ed4f2099009fc8a1a324626345ceb29dcd5277c",
+      "path": "include/mapbox/glyph_foundry_impl.hpp",
+      "url": "https://raw.githubusercontent.com/mapbox/sdf-glyph-foundry/6ed4f2099009fc8a1a324626345ceb29dcd5277c/include/mapbox/glyph_foundry_impl.hpp",
+      "gitBlobSha1": "864fd050b50e1d1dfbf7cf87bce3063495417834",
+      "bytes": 12454,
+      "sha256": "D7A87FB7916513D48E3D68D2855240704A845C5AC50C27ACD7BC5C9BD407BE0F"
+    }
+  ],
+  "sourceCommit": "714ccaea67d384717890a3c2c27143dfdd4189b7",
+  "artifactCommit": "bab9b243413cb17b66b158d629a4bac2d7299786",
+  "runtime": {
+    "version": "v24.22.1",
+    "sha256": "B59FEB2088F80E1FA431C8F9C316861E660E5936F968FD97B802E550FED356C5"
+  },
+  "wrapperSha256": "C7B9EA9C28FF6D854BCF03E2FE5464C5376DD20F004A5B3F95E3761B6F101EFB",
+  "settings": {
+    "name": "Iz Offline Latin Regular",
+    "pixelsPerEm": 24,
+    "buffer": 3,
+    "cutoff": 0.25,
+    "first": 0,
+    "last": 65535,
+    "rangeSize": 256,
+    "rangeCount": 256,
+    "encoding": "identity",
+    "maxRangeBytes": 4194304,
+    "maxTotalPbfBytes": 67108864,
+    "maxWasmBytesAfterCall": 268435456,
+    "maxRssBytesAfterCall": 2147483648,
+    "deadlineMs": 600000
+  },
+  "scope": "Turkish/Latin glyph identity and metrics only; no universal shaping/native readability claim",
+  "nativeRendering": "NOT_RUN",
+  "generatorBundledIntoApk": false
+}

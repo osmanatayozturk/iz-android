@@ -1,6 +1,7 @@
 package org.iz.navigation.car
 
 import androidx.car.app.model.Distance
+import androidx.car.app.model.CarText
 import androidx.car.app.navigation.model.*
 import org.iz.navigation.navigation.NavigationState
 import org.iz.navigation.weather.RouteManeuver
@@ -35,8 +36,13 @@ internal fun carManeuverType(type: Int): Int = when (type) {
     else -> Maneuver.TYPE_UNKNOWN
 }
 
-internal fun carStep(maneuver: RouteManeuver): Step = Step.Builder(maneuver.instruction.ifBlank { "Rotayı takip edin" })
-    .setManeuver(Maneuver.Builder(carManeuverType(maneuver.type)).build()).build()
+internal fun carStep(maneuver: RouteManeuver, simulation: Boolean = false, voiceWarning: String? = null): Step {
+    val cue = CarText.Builder(carManeuverCue(maneuver.instruction, simulation, voiceWarning)).apply {
+        // Narrow hosts retain the maneuver. Warning visibility requires actual host verification.
+        if (voiceWarning != null) addVariant(carManeuverCue(maneuver.instruction, simulation))
+    }.build()
+    return Step.Builder(cue).setManeuver(Maneuver.Builder(carManeuverType(maneuver.type)).build()).build()
+}
 
 internal fun carDistance(meters: Double): Distance = Distance.create(meters.coerceAtLeast(0.0), Distance.UNIT_METERS)
 
@@ -45,15 +51,15 @@ internal fun carEstimate(meters: Double, seconds: Double): TravelEstimate = Trav
     .setRemainingTimeSeconds(seconds.toLong().coerceAtLeast(0)).build()
 
 internal fun carTrip(state: NavigationState): Trip {
-    val route = state.route ?: return Trip.Builder().setLoading(true).build()
-    val progress = state.progress
-    if (state.gpsStale || state.loading || progress == null || progress.offRoute) {
+    if (!carCanPresentProgress(state)) {
         return Trip.Builder().setLoading(true).build()
     }
+    val route = checkNotNull(state.route)
+    val progress = checkNotNull(state.progress)
     val builder = Trip.Builder().addDestination(Destination.Builder().setName(route.stops.last().label).build(),
         carEstimate(progress.remainingMeters, progress.remainingSeconds))
     route.maneuvers.getOrNull(progress.maneuverIndex)?.let { maneuver ->
-        builder.addStep(carStep(maneuver), carEstimate(progress.nextManeuverDistanceMeters,
+        builder.addStep(carStep(maneuver, state.simulation), carEstimate(progress.nextManeuverDistanceMeters,
             (maneuver.beginElapsedSeconds - progress.elapsedSeconds).coerceAtLeast(0.0)))
         // Upcoming street_names describe the turn's road, not the current matched segment.
     }

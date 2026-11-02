@@ -67,9 +67,10 @@ internal fun NavigationHomeContent(
     showDashboard: Boolean = false,
     onDashboard: (() -> Unit)? = null,
     dashboard: (@Composable () -> Unit)? = null,
+    editPreview: org.iz.navigation.navigation.RouteEditPreview? = null,
     planner: @Composable () -> Unit,
 ) {
-    val presentation = navigationMapPresentation(ui, nav, points, showPlanner)
+    val presentation = navigationMapPresentation(ui, nav, points, showPlanner, editPreview)
     val live = presentation.sessionActive
     val route = presentation.route
     val current = presentation.coordinate
@@ -101,7 +102,7 @@ internal fun NavigationHomeContent(
         val speedText = roadSpeedPresentation(nav.roadSpeed)
         val layoutKey = listOf(maxWidth, maxHeight, density.density, density.fontScale, showPlanner, dashboardVisible, dashboardAtSide, dashboardSideWidth, dashboardBottomHeight, dashboardButtonHeight,
             showDestinationHeader, live, nav.guidance, nav.recording, nav.simulation, nav.gpsStale,
-            nav.locationActive, nav.sessionTransport, nav.message, ui.message, weatherLabel, current == null, ui.locating, voiceFault,
+            nav.locationActive, nav.sessionTransport, nav.message, ui.message, weatherLabel, current == null, ui.locating, voiceFault, presentation.editPreviewLabel,
             if (nav.guidance) navigationInstruction(nav) else null,
             if (nav.guidance) nav.progress?.nextManeuverDistanceMeters else null,
             nav.roadSpeed.visible, speedText.ownText, speedText.limitText, speedText.sourceText,
@@ -124,7 +125,8 @@ internal fun NavigationHomeContent(
         val panelsHeight = panelsMeasurement?.takeIf { it.first == panelsKey }?.second ?: 0.dp
         // Never draw controls with a provisional offset when their own row/header changed.
         val controlsReady = (!showDestinationHeader || headerMeasurement?.first == headerKey) &&
-            (!showShortcuts || shortcutMeasurement?.first == shortcutKey)
+            (!showShortcuts || shortcutMeasurement?.first == shortcutKey) &&
+            (presentation.editPreviewLabel == null || panelsMeasurement?.first == panelsKey)
         val dashboardReady = !dashboardVisible || measuredDashboard != null
         val dashboardButtonReady = !dashboardButtonVisible || dashboardButtonMeasurement?.first == dashboardButtonKey
         val viewportReady = panelsMeasurement?.first == panelsKey && controlsReady && dashboardReady && dashboardButtonReady
@@ -136,16 +138,24 @@ internal fun NavigationHomeContent(
             expandable = false, stops = presentation.stops, liveCoordinate = current,
             recordedPoints = presentation.trail, gpsStale = live && nav.gpsStale,
             cameraIdentity = presentation.cameraIdentity,
+            preparedRoutes = if (preparedNavigationMapApplies(presentation, nav))
+                (androidx.compose.ui.platform.LocalContext.current.applicationContext as? org.iz.navigation.IzApplication)?.preparedRoutes else null,
             drivingCamera = phoneDriveCameraInput(nav, showPlanner, android.os.SystemClock.elapsedRealtime()),
             cameraViewportReady = viewportReady, navigationControlsReady = controlsReady,
             navigationLayout = true, members = members, onLocate = onLocate, onMapLongClick = onPin,
-            navigationControlsTopInset = headerHeight + shortcutOffset + 24.dp,
+            navigationControlsTopInset = if (presentation.editPreviewLabel != null)
+                panelsHeight + 24.dp else headerHeight + shortcutOffset + 24.dp,
             navigationControlsHorizontal = horizontalMapControls,
             attributionBottomInset = if (dashboardBottomHeight > 0.dp) dashboardBottomHeight + 92.dp else if (showPlanner && !dashboardVisible) maxHeight * .64f + 4.dp else 92.dp,
             cameraViewportInsets = PaddingValues(start = 28.dp, top = panelsHeight + 24.dp, end = 84.dp,
                 bottom = if (dashboardBottomHeight > 0.dp) dashboardBottomHeight + 112.dp else if (showPlanner && !dashboardVisible) maxHeight * .64f + 24.dp else 112.dp + dashboardButtonHeight))
         Column(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(end = dashboardSideWidth).padding(12.dp)
             .onSizeChanged { panelsMeasurement = panelsKey to with(density) { it.height.toDp() } }, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            presentation.editPreviewLabel?.let { label ->
+                Surface(Modifier.fillMaxWidth().testTag("navigation-edit-preview-label"), shape = MaterialTheme.shapes.medium) {
+                    Text(label, Modifier.padding(12.dp), style = MaterialTheme.typography.labelLarge)
+                }
+            }
             if (showShortcuts) Box(Modifier.fillMaxWidth().onSizeChanged { shortcutMeasurement = shortcutKey to with(density) { it.height.toDp() } }) {
                 ShortcutDestinationsRow(shortcuts, !ui.busy, onShortcut)
             }

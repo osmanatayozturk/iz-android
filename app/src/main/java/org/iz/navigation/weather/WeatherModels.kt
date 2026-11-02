@@ -53,10 +53,12 @@ data class PlannedRoute(
     val hasHighway: Boolean? = null,
     val providerWarnings: List<String> = emptyList(),
     val selectionLocked: Boolean = false,
+    val avoidAreas: List<RouteAvoidArea> = emptyList(),
 ) {
     init {
         routeTravelSpeedKmh(transport, travelSpeedKmh)
         require(id.isNotBlank()) { "Rota kimliği boş olamaz." }
+        require(avoidAreas.size <= 3) { "En fazla üç bölüm hariç tutulabilir." }
         require(stops.size in 2..6) { "Rota 2 ile 6 durak içermelidir." }
         require(vertices.isNotEmpty()) { "Rota geometrisi boş olamaz." }
         require(distanceMeters.isFinite() && distanceMeters >= 0.0) { "Rota mesafesi geçersiz." }

@@ -16,17 +16,17 @@ internal object WearNavigationFactory {
         val arrived = state.arrived || progress?.arrived == true
         val validProgress = progress != null && listOf(progress.remainingSeconds,
             progress.remainingMeters, progress.nextManeuverDistanceMeters).all { it.isFinite() && it >= 0.0 }
-        val usable = state.guidance && !state.loading && !stale && !offRoute && !arrived && validProgress
+        val usable = state.guidance && !state.paused && !state.loading && !stale && !offRoute && !arrived && validProgress
         val maneuver = if (usable) state.route?.maneuvers?.getOrNull(progress!!.maneuverIndex) else null
         val arrival = if (usable) {
             val millis = progress!!.remainingSeconds * 1_000
-            if (millis < Long.MAX_VALUE.toDouble()) runCatching { Math.addExact(fixAt!!, millis.toLong()) }.getOrNull() else null
+            if (millis < Long.MAX_VALUE.toDouble()) runCatching { Math.addExact(state.progressUpdatedAt?.takeIf { it in fixAt!!..now } ?: fixAt!!, millis.toLong()) }.getOrNull() else null
         } else null
         return WearNavigationSummary(
             sessionId = session, guidance = state.guidance, fixAt = fixAt, gpsStale = stale,
             loading = state.loading, offRoute = offRoute, arrived = arrived, simulation = state.simulation,
             maneuverType = maneuver?.type?.takeIf { it >= 0 },
-            instruction = if (usable) wireText(maneuver?.instruction.orEmpty()) else "",
+            instruction = if (state.paused) "Yönlendirme duraklatıldı" else if (usable) wireText(maneuver?.instruction.orEmpty()) else "",
             nextManeuverMeters = progress?.nextManeuverDistanceMeters?.takeIf { usable },
             remainingMeters = progress?.remainingMeters?.takeIf { usable }, arrivalAt = arrival,
             destination = wireText(state.route?.stops?.lastOrNull()?.label.orEmpty())

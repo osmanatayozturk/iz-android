@@ -15,6 +15,17 @@ internal fun carWeatherPresentation(weather: RideWeatherLiveState, now: Long = S
         return CarWeatherPresentation("Hava durumu", "Hava takibi kapalı",
             "Hava takibi kapalı. Telefonda bir yolculuk başlatın veya hava takibini etkinleştirin.")
     }
+    if (weather.paused) {
+        val status = if (weather.gpsStale) "GPS güncel değil" else "Yönlendirme duraklatıldı"
+        val detail = buildList {
+            add(status)
+            if (weather.gpsStale) add("GPS güncel değil; konuma bağlı uyarılar duraklatıldı.")
+            add("Duraklama nedeniyle ilerideki varış saatleri belirsiz.")
+            // Keep the owner's reason without presenting a retained forecast or ETA as current.
+            weather.message?.takeIf { it.isNotBlank() }?.let { add(it.replace(Regex("\\s+"), " ").take(180)) }
+        }.distinct().joinToString("\n")
+        return CarWeatherPresentation(title, status, detail)
+    }
     val assessment = weather.assessment
     val hasReadings = assessment != null && listOf(
         assessment.minTemperatureC, assessment.maxTemperatureC,
@@ -22,8 +33,8 @@ internal fun carWeatherPresentation(weather: RideWeatherLiveState, now: Long = S
     ).any { it != null }
     val fresh = RideWeatherTiming.forecastFresh(assessment?.fetchedAt, now)
     val status = when {
-        weather.status == RideWeatherStatus.LOADING -> "Tahmin alınıyor"
         weather.gpsStale -> "GPS güncel değil"
+        weather.status == RideWeatherStatus.LOADING -> "Tahmin alınıyor"
         weather.refreshFailed || weather.status == RideWeatherStatus.ERROR -> if (hasReadings) "Tahmin yenilenemedi" else "Tahmin alınamadı"
         assessment == null || assessment.fetchedAt == null -> "Tahmin verisi yok"
         !fresh -> "Tahmin güncel değil"

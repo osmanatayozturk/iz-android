@@ -214,6 +214,32 @@ class TomTomRoutePlannerTest {
         }
     }
 
+    @Test fun modifiedRouteRejectsProviderGeometryCrossingTheExcludedArea() {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setBody(tomTomFixture()))
+            val request = RouteModificationRequest(trafficStops(), 1L, Transport.CAR, null, RoutePreferences(),
+                listOf(RouteAvoidArea(-0.0001, 0.0009, 0.0001, 0.0011)))
+            assertThrows(RouteServiceException::class.java) {
+                runBlocking { planner(server).planModified(request) }
+            }
+            assertEquals(1, server.requestCount)
+        }
+    }
+    @Test fun modifiedRouteUsesActualPostAvoidRectanglesAndNoStore() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setBody(tomTomFixture()))
+            val area = RouteAvoidArea(1.0, 1.0, 1.01, 1.01)
+            val result = planner(server).planModified(RouteModificationRequest(
+                trafficStops(), 1L, Transport.CAR, null, RoutePreferences(), listOf(area)))
+            val sent = server.takeRequest()
+            assertEquals("POST", sent.method)
+            assertEquals("no-store", sent.getHeader("Cache-Control"))
+            val rectangle = org.json.JSONObject(sent.body.readUtf8()).getJSONObject("avoidAreas").getJSONArray("rectangles").getJSONObject(0)
+            assertEquals(area.west, rectangle.getJSONObject("southWestCorner").getDouble("longitude"), 0.0)
+            assertEquals(area.north, rectangle.getJSONObject("northEastCorner").getDouble("latitude"), 0.0)
+            assertEquals(listOf(area), result.avoidAreas)
+        }
+    }
     private fun planner(server: MockWebServer) = TomTomRoutePlanner("fictional-key", server.url("/routing/1/calculateRoute/").toString(), OkHttpClient(), { 500_000L }, TrafficRequestGate())
 }
 

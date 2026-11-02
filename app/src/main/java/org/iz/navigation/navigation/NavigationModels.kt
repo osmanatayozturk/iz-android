@@ -44,6 +44,10 @@ data class NavigationState(
     val roadSpeed: org.iz.navigation.speed.RoadSpeedState = org.iz.navigation.speed.RoadSpeedState(),
     val trackFollow: org.iz.navigation.gpx.TrackFollowState? = null,
     val interruptedTrackFollow: Boolean = false,
+    val paused: Boolean = false,
+    val preparedRouteFingerprint: String? = null,
+    /** Actual progress/rebase event, never a transport publication timestamp. */
+    val progressUpdatedAt: Long? = null,
 )
 /** Ephemeral confirmation identity; changing fixes, progress and messages do not invalidate it. */
 data class NavigationStopSnapshot(

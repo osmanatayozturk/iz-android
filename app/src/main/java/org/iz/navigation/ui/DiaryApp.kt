@@ -995,6 +995,7 @@ private fun JourneyDetail(journey: Journey, state: DiaryState, now: Long, onEdit
             item { Notice("Otomatik kayıt için 500 metre bekleniyor · Sıfırlanmaya ${countdown(deadline - now)}") }
         }
         item { JourneyHealthPanel(journey, state, now) }
+        item { RecordedCurvePanel(journey, state) }
         item { LeanJourneyReportPanel(journey) }
         if (journey.endedAt != null && journey.status == JourneyStatus.CONFIRMED) item { OutlinedButton(onClick = onExportGpx, modifier = Modifier.fillMaxWidth()) { Text("GPX rotasını dışa aktar") } }
         if (journey.note.isNotBlank()) item { Text(journey.note) }

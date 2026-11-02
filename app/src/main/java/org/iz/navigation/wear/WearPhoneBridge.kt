@@ -104,6 +104,19 @@ internal class WearPhoneBridge(private val context: Context) {
             org.iz.navigation.health.DailyActivityManager.get(context).currentDataFlow.filterNotNull().collect { publish() }
         }
         scope.launch {
+            val app = application as org.iz.navigation.IzApplication
+            app.navigation.state.map { nav -> listOf(nav.sessionId, nav.routeRevision, nav.guidance, nav.loading,
+                nav.paused, nav.muted, nav.gpsStale, nav.preparedRouteFingerprint) }.distinctUntilChanged().collect { publish() }
+        }
+        scope.launch {
+            org.iz.navigation.navigation.NavigationSpeech.get(context).status.collect { publish() }
+        }
+        scope.launch {
+            val app = application as org.iz.navigation.IzApplication
+            app.preparedRoutes.state.map { prepared -> listOf(prepared.fingerprint, prepared.pack?.status,
+                prepared.pack?.generation, prepared.pack?.error) }.distinctUntilChanged().collect { publish() }
+        }
+        scope.launch {
             // Project before distinct: GPS invalidations do not become per-point Data Layer publications.
             analysis.state.map { Triple(it.phase, it.pending, it.cacheRevision) }.distinctUntilChanged().collect { publish() }
         }
@@ -237,7 +250,13 @@ internal class WearPhoneBridge(private val context: Context) {
         val active = repository.activeJourney()
         val now = System.currentTimeMillis()
         val app = context.applicationContext as org.iz.navigation.IzApplication
-        val navigation = WearNavigationFactory.create(app.navigation.state.value, now)
+        val navigationState = app.navigation.state.value
+        val navigation = WearNavigationFactory.create(navigationState, now)
+        val advisory = navigation?.let {
+            WearGuidanceAdvisoryFactory.create(navigationState,
+                org.iz.navigation.navigation.NavigationSpeech.get(context).status.value,
+                preparedMapAvailability(app, navigationState))
+        }
         val state = analysis.state.value
         val busy = active != null || TrackingService.isRunning || app.navigation.state.value.let {
             it.guidance || it.loading || it.locationActive || it.recording
@@ -253,14 +272,30 @@ internal class WearPhoneBridge(private val context: Context) {
                 else -> state.label
             }
             return WearSnapshotFactory.deferred(active, now, TrackingService.runningJourneyId.takeIf { TrackingService.isRunning },
-                status, active?.let { app.weatherManager.wearWeather(it.id) }, navigation)
+                status, active?.let { app.weatherManager.wearWeather(it.id) }, navigation).copy(advisory = advisory)
         }
         val entry = state.entries.values.filter { it.journey.endedAt != null }.maxByOrNull { it.journey.endedAt!! }
         // These values are already prepared. Never call snapshot()/journeyPoints()/healthSummaries here.
-        return WearSnapshot(generatedAt = now, navigation = navigation,
+        return WearSnapshot(generatedAt = now, navigation = navigation, advisory = advisory,
             daily = org.iz.navigation.health.DailyActivityManager.get(context).currentDataFlow.value,
             statisticsStatus = if (entry != null) "İstatistikler hazır" else "",
             completed = entry?.let { WearSnapshotFactory.completed(it.journey, it.stats, it.health, it.watch) })
+    }
+
+    private fun preparedMapAvailability(app: org.iz.navigation.IzApplication,
+        nav: org.iz.navigation.navigation.NavigationState): WearMapAvailability {
+        val fingerprint = nav.preparedRouteFingerprint ?: return WearMapAvailability.UNKNOWN
+        val route = nav.route ?: return WearMapAvailability.UNKNOWN
+        val owner = app.preparedRoutes
+        val prepared = owner.state.value
+        val pack = owner.maps.state.value ?: return WearMapAvailability.NO_PACK
+        if (prepared.fingerprint != fingerprint || prepared.route?.id != route.id ||
+            pack.request.routeId != route.id || pack.request.sourceFingerprint != fingerprint) return WearMapAvailability.NO_PACK
+        if (!owner.maps.mapReady(route.id, fingerprint)) return WearMapAvailability.PARTIAL
+        val fix = nav.fix
+        return if (!nav.gpsStale && fix != null && !owner.maps.covers(
+                org.iz.navigation.offline.OfflinePoint(fix.coordinate.latitude, fix.coordinate.longitude), pack.request.minZoom.toDouble()))
+            WearMapAvailability.OUTSIDE else WearMapAvailability.READY
     }
 
     /** True legacy metrics only for reachable legacy nodes or fresh legacy commands; v6 never pays this cost. */
@@ -292,11 +327,8 @@ internal class WearPhoneBridge(private val context: Context) {
                 try {
                     val state = withTimeout(3_000) { snapshot() }
                     publishVersion(state, WearProtocol.CURRENT_VERSION)
-                    val legacyVersions = legacyVersions()
-                    if (legacyVersions.isNotEmpty()) {
-                        val legacy = withTimeout(3_000) { legacySnapshot() }
-                        legacyVersions.forEach { publishVersion(legacy, it) }
-                    }
+                    publishCompatibleWearSnapshots(state, compatibilityVersions(), WearProtocol.CURRENT_VERSION,
+                        legacySnapshot = { withTimeout(3_000) { legacySnapshot() } }, publish = ::publishVersion)
                 } catch (cancelled: CancellationException) {
                     if (cancelled !is TimeoutCancellationException) throw cancelled
                 } catch (_: Exception) { /* Watch marks a missed snapshot stale; recording continues. */ }
@@ -309,7 +341,7 @@ internal class WearPhoneBridge(private val context: Context) {
     }
 
     /** Under publishMutex: one lookup/minute, except a real capability/node change. */
-    private suspend fun legacyVersions(): List<Int> {
+    private suspend fun compatibilityVersions(): List<Int> {
         val elapsed = SystemClock.elapsedRealtime()
         val generation = capabilityGeneration.get()
         val checkedAt = capabilityCheckedAt
@@ -319,30 +351,22 @@ internal class WearPhoneBridge(private val context: Context) {
             advertisedWatchVersions = try {
                 withTimeout(2_000) {
                     val capabilities = capabilityClient.getAllCapabilities(CapabilityClient.FILTER_REACHABLE).await()
-                    val versions = linkedMapOf<String, Int>()
-                    var overflow = false
-                    for ((index, capability) in WATCH_CAPABILITIES.withIndex()) {
-                        for (node in capabilities[capability]?.nodes.orEmpty()) {
-                            if (node.id !in versions && versions.size >= MAX_PEERS) { overflow = true; break }
-                            versions[node.id] = index + 1
-                        }
-                        if (overflow) break
-                    }
-                    if (overflow) emptyMap() else versions
+                    highestReachableWatchVersions(WATCH_CAPABILITIES.mapIndexed { index, capability ->
+                        (index + 1) to capabilities[capability]?.nodes.orEmpty().asSequence().map { it.id }.asIterable()
+                    }, WearProtocol.CURRENT_VERSION, MAX_PEERS)
                 }
             } catch (cancelled: CancellationException) {
                 if (cancelled !is TimeoutCancellationException) throw cancelled
                 emptyMap()
             } catch (_: Exception) { emptyMap() }
         }
-        val versions = advertisedWatchVersions.toMutableMap()
         val now = System.currentTimeMillis()
-        synchronized(peers) {
+        val recent = synchronized(peers) {
             peers.entries.removeAll { now - it.value.requestedAt !in 0 until LEGACY_PEER_TTL_MS }
-            peers.forEach { (node, peer) -> versions[node] = maxOf(versions[node] ?: 0, peer.version) }
+            peers.mapValues { it.value.version }
         }
-        // v6 nodes also advertise older capabilities; never treat them as legacy peers.
-        return versions.values.filter { it in 1..5 }.distinct().sorted()
+        // Highest v6/v7 peers keep deferred data even when they also advertise old capabilities.
+        return wearCompatibilityVersions(advertisedWatchVersions, recent, WearProtocol.CURRENT_VERSION)
     }
 
     private suspend fun publishVersion(state: WearSnapshot, version: Int) {
@@ -386,7 +410,7 @@ internal class WearPhoneBridge(private val context: Context) {
         private const val MAX_PEERS = 32
         private val WATCH_CAPABILITIES = listOf(WearProtocol.WATCH_CAPABILITY, WearProtocol.V2_WATCH_CAPABILITY,
             WearProtocol.V3_WATCH_CAPABILITY, WearProtocol.V4_WATCH_CAPABILITY, WearProtocol.V5_WATCH_CAPABILITY,
-            WearProtocol.V6_WATCH_CAPABILITY)
+            WearProtocol.V6_WATCH_CAPABILITY, WearProtocol.V7_WATCH_CAPABILITY)
         private const val CHANNEL = "watch_start"
         private const val NOTIFICATION_ID = 4050
         fun get(context: Context): WearPhoneBridge = (context.applicationContext as org.iz.navigation.IzApplication).wearBridge

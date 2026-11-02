@@ -17,12 +17,28 @@ import org.iz.navigation.data.*
 import org.iz.navigation.integration.OsmPlaces
 import org.iz.navigation.navigation.NavigationState
 import org.iz.navigation.navigation.DriveCameraMode
+import org.iz.navigation.navigation.SpeechStatus
+import org.iz.navigation.navigation.NavigationSpeech
 import org.iz.navigation.power.PostJourneyAnalysis
 import org.iz.navigation.weather.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import java.util.Locale
+
+/** Each visible consumer owns its subscription; stopped screens do not receive queued notices. */
+internal fun observeCarVoiceNotice(scope: CoroutineScope, lifecycle: Lifecycle,
+    speech: StateFlow<SpeechStatus>, navigation: StateFlow<NavigationState>, onNotice: (String) -> Unit): Job = scope.launch {
+    lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+        combine(speech, navigation.map { it.muted }.distinctUntilChanged()) { status, muted ->
+            carVoiceNotice(status, muted)
+        }.distinctUntilChanged().collect { onNotice(it) }
+    }
+}
 
 internal abstract class CarScreen(context: CarContext) : Screen(context) {
     protected val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -45,6 +61,16 @@ internal abstract class CarScreen(context: CarContext) : Screen(context) {
             }
         }
     }
+    protected val currentVoiceNotice get() = carVoiceNotice(NavigationSpeech.get(app).status.value, navigation.state.value.muted)
+    protected fun observeVoice() {
+        observeCarVoiceNotice(scope, lifecycle, NavigationSpeech.get(app).status, navigation.state) { safeInvalidate() }
+    }
+    protected fun preparedNotice(route: PlannedRoute? = null): CarPreparedPresentation =
+        carPreparedPresentation(app.preparedRoutes.state.value, route, app.preparedRoutes.mapReady())
+    protected fun observePrepared(route: PlannedRoute? = null) {
+        observeCarPreparedNotice(scope, lifecycle, app.preparedRoutes.state, route,
+            { app.preparedRoutes.mapReady() }) { safeInvalidate() }
+    }
     protected fun action(title: String, click: () -> Unit) = Action.Builder().setTitle(title).setOnClickListener { display(click) }.build()
     protected fun row(title: String, text: String = "", click: (() -> Unit)? = null): Row = Row.Builder()
         .setTitle(title.take(150)).apply {
@@ -56,6 +82,7 @@ internal abstract class CarScreen(context: CarContext) : Screen(context) {
 }
 
 internal class CarHomeScreen(context: CarContext, private val surface: CarMapSurface) : CarScreen(context) {
+    init { observePrepared() }
     private var state = navigation.state.value
     private var error: String? = null
     private var planning = false
@@ -63,6 +90,7 @@ internal class CarHomeScreen(context: CarContext, private val surface: CarMapSur
     private val busy get() = planning || starting
     private val targetRequests = LatestCarRequest(scope)
     private var idleLocationJob: Job? = null
+    private var speechStatus = SpeechStatus()
     var selectedMode = Transport.CAR
     val mode get() = effectiveCarMode(state, selectedMode)
     private val analysis = PostJourneyAnalysis.get(context)
@@ -74,6 +102,10 @@ internal class CarHomeScreen(context: CarContext, private val surface: CarMapSur
         else it.label
     }
     fun refresh(value: NavigationState) { state = value; surface.update(state); safeInvalidate() }
+    fun refreshSpeech(value: SpeechStatus) {
+        if (speechStatus != value) { speechStatus = value; safeInvalidate() }
+    }
+    val voiceNotice get() = carVoiceNotice(speechStatus, state.muted)
     val cameraMode get() = surface.cameraMode
     val overviewAvailable get() = surface.overviewAvailable
     fun setCameraMode(value: DriveCameraMode) { surface.cameraMode(value) }
@@ -143,6 +175,7 @@ internal class CarHomeScreen(context: CarContext, private val surface: CarMapSur
                 .addAction(action("Yenile") { requestIdleLocation(); safeInvalidate() }).build()
         }
         val controls = mapActions()
+        val notice = carNavigationNotice(state)
         if (state.guidance && state.route != null) {
             val progress = state.progress
             val step = progress?.let { state.route!!.maneuvers.getOrNull(it.maneuverIndex) }
@@ -152,27 +185,28 @@ internal class CarHomeScreen(context: CarContext, private val surface: CarMapSur
                     .addAction(action(if (state.muted) "Sesi aç" else "Sessiz") { navigation.setMuted(!state.muted) })
                     .addAction(action("Rotayı bitir") { navigation.stopGuidance() }).build())
                 .setPanModeListener { display { surface.panMode(it) } }
-            if (state.gpsStale || state.loading || progress == null || progress.offRoute || step == null) {
-                builder.setNavigationInfo(MessageInfo.Builder(when {
-                    state.gpsStale -> "GPS bekleniyor — yönlendirme duraklatıldı"
-                    progress?.offRoute == true -> state.message ?: "Rota dışında — yeni rota bekleniyor"
-                    state.loading -> state.message ?: "Rota hazırlanıyor"
-                    else -> state.message ?: "Rotayı takip edin"
-                }).build())
+            if (notice != null) {
+                val title = (if (state.simulation) "Simülasyon • telefonda · " else "") + notice
+                builder.setNavigationInfo(MessageInfo.Builder(title).setText(voiceNotice).build())
             } else {
-                builder.setNavigationInfo(RoutingInfo.Builder().setCurrentStep(carStep(step),
-                    carDistance(progress.nextManeuverDistanceMeters)).build())
-                builder.setDestinationTravelEstimate(carEstimate(progress.remainingMeters, progress.remainingSeconds))
+                val currentProgress = checkNotNull(progress)
+                builder.setNavigationInfo(RoutingInfo.Builder().setCurrentStep(carStep(checkNotNull(step), state.simulation,
+                    carVoiceWarning(state, speechStatus)),
+                    carDistance(currentProgress.nextManeuverDistanceMeters)).build())
+                builder.setDestinationTravelEstimate(carEstimate(currentProgress.remainingMeters, currentProgress.remainingSeconds))
             }
             return builder.build()
         }
+        val prepared = preparedNotice()
         val temporary = state.journey?.status == JourneyStatus.TEMPORARY
         val currentSpeed = state.fix?.speedMps?.takeIf { !state.gpsStale && it.isFinite() && it in 0f..100f }
             ?.let { "${(it * 3.6).toInt()} km/sa" } ?: "— km/sa"
-        val title = when { state.simulation -> "Simülasyon • Günlüğe yazılmaz"; temporary -> "Geçici sürüş • ${modeLabel(mode)}"; state.recording -> "Serbest sürüş • ${modeLabel(mode)}"; else -> "İz • ${modeLabel(mode)}" }
+        val title = when { state.simulation -> "Simülasyon • telefonda • Günlüğe yazılmaz"; temporary -> "Geçici sürüş • ${modeLabel(mode)}"; state.recording -> "Serbest sürüş • ${modeLabel(mode)}"; else -> "İz • ${modeLabel(mode)}" }
         val pane = Pane.Builder().addRow(row(if (state.recording) "$currentSpeed • Kayıt sürüyor" else "Hedef seçmeden sürüşe başlayın",
-            error ?: state.message ?: if (temporary) "Geçici kayıt: 500 m / 15 dk kuralı. Kaydetmek için sürüşü başlatın." else if (state.arrived) "Hedefe ulaştınız. Sürüş kaydı devam ediyor." else if (state.gpsStale) "GPS bekleniyor" else if (state.recording) "İstatistikler kayıt ve navigasyon bitince hazırlanacak" else "Hedef seçin veya sürüşe başlayın"))
+            error ?: notice ?: state.message ?: if (temporary) "Geçici kayıt: 500 m / 15 dk kuralı. Kaydetmek için sürüşü başlatın." else if (state.recording) "İstatistikler kayıt ve navigasyon bitince hazırlanacak" else "Hedef seçin veya sürüşe başlayın"))
             .addRow(row("Hava durumu", carWeatherPresentation(app.weatherManager.state.value).summary))
+            .addRow(row("Ses durumu", voiceNotice))
+            .addRow(row("Telefondaki hazırlık", "${prepared.route} ${prepared.map}"))
             .addAction(action(if (busy) "Bekleyin…" else if (temporary) "Sürüşü kaydet" else if (state.recording) "Sürüşü bitir" else "Sürüşe başla") {
                 if (state.recording && !temporary) state.journey?.id?.let { id ->
                     screenManager.push(CarFinishScreen(carContext, id))
@@ -186,16 +220,17 @@ internal class CarHomeScreen(context: CarContext, private val surface: CarMapSur
 }
 
 internal class CarMenuScreen(context: CarContext, private val home: CarHomeScreen) : CarScreen(context) {
-    init { observeWeather() }
+    init { observeWeather(); observeVoice(); observePrepared() }
     override fun onGetTemplate(): Template {
         val rows = mutableListOf(
             row("Hedef ara", "Ad veya adres; arama yalnızca gönderince yapılır") { screenManager.push(CarSearchScreen(carContext, home)) },
             row(if (home.mode == Transport.MOTORCYCLE) "Ev / İş ve kayıtlı yerler" else "Kayıtlı ve son yerler") {
                 screenManager.push(CarPlacesScreen(carContext, home))
             },
-            row("Sürüş ve harita", modeLabel(home.mode)) { screenManager.push(CarDrivingOptionsScreen(carContext, home)) },
+            row("Sürüş ve harita", "${modeLabel(home.mode)} • $currentVoiceNotice") { screenManager.push(CarDrivingOptionsScreen(carContext, home)) },
         )
-        rows.add(row("Hazır rotalar ve telefon planı") { screenManager.push(CarRoutesScreen(carContext, home)) })
+        val prepared = preparedNotice()
+        rows.add(row("Hazır rotalar ve telefon planı", "${prepared.route} ${prepared.map}") { screenManager.push(CarRoutesScreen(carContext, home)) })
         if (navigation.state.value.recording) rows.add(row("Sürüş istatistikleri") {
             screenManager.push(CarStatisticsScreen(carContext, home))
         })
@@ -208,10 +243,12 @@ internal class CarMenuScreen(context: CarContext, private val home: CarHomeScree
 }
 
 internal class CarDrivingOptionsScreen(context: CarContext, private val home: CarHomeScreen) : CarScreen(context) {
+    init { observeVoice() }
     override fun onGetTemplate(): Template = ListTemplate.Builder().setTitle("Sürüş ve harita").setHeaderAction(Action.BACK)
         .setSingleList(ItemList.Builder()
             .addItem(row("Sürüş türü", modeLabel(home.mode)) { screenManager.push(CarModeScreen(carContext, home)) })
-            .addItem(row("Harita görünümü") { screenManager.push(CarCameraScreen(carContext, home)) }).build()).build()
+            .addItem(row("Harita görünümü") { screenManager.push(CarCameraScreen(carContext, home)) })
+            .addItem(row("Ses durumu", "$currentVoiceNotice Ayrıntılar ve ses ayarları telefonda.")).build()).build()
 }
 
 internal class CarCameraScreen(context: CarContext, private val home: CarHomeScreen) : CarScreen(context) {
@@ -229,8 +266,11 @@ internal class CarCameraScreen(context: CarContext, private val home: CarHomeScr
 }
 
 internal class CarRoutesScreen(context: CarContext, private val home: CarHomeScreen) : CarScreen(context) {
+    init { observePrepared() }
     override fun onGetTemplate(): Template = ListTemplate.Builder().setTitle("Rotalar").setHeaderAction(Action.BACK)
         .setSingleList(ItemList.Builder().setNoItemsMessage("Telefonda plan oluşturun veya hedef arayın").apply {
+            val prepared = preparedNotice()
+            addItem(row("Telefondaki rota ve harita", "${prepared.route} ${prepared.map}"))
             (navigation.state.value.route ?: navigation.lastRoute)?.let { route ->
                 addItem(row("Yüklenmiş rota", route.stops.last().label) { home.preview(route) })
             }
@@ -280,7 +320,7 @@ internal class CarSearchScreen(context: CarContext, private val home: CarHomeScr
     }).setHeaderAction(Action.BACK).setInitialSearchText(query).setSearchHint("Yer veya adres")
         .setLoading(searching).apply {
             if (!searching) setItemList(ItemList.Builder().setNoItemsMessage(message).apply {
-                results.take(listLimit()).forEach { place -> addItem(row(place.name) {
+                results.take(listLimit()).forEach { place -> addItem(row(place.name, carSearchSubtitle(place)) {
                     home.plan(RouteStop(place.name.take(300), WeatherCoordinate(place.latitude, place.longitude)))
                 }) }
             }.build())
@@ -348,15 +388,25 @@ internal class CarPreviewScreen(context: CarContext, private val home: CarHomeSc
     private var busy = false
     private var error: String? = null
     init {
+        observePrepared(route)
         display { surface.preview(route) }
         lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onDestroy(owner: LifecycleOwner) { display { surface.preview(null) } }
         })
+        if (route.traffic != null) scope.launch {
+            lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (isActive) { delay(30_000); safeInvalidate() }
+            }
+        }
     }
     override fun onGetTemplate(): Template {
+        val information = carRoutePreviewPresentation(route, System.currentTimeMillis())
+        val prepared = preparedNotice(route)
         val pane = Pane.Builder().addRow(row(route.stops.last().label,
             "${km(route.distanceMeters)} km • ${(route.durationSeconds / 60).toInt()} dk • ${modeLabel(route.transport)}"))
-            .addRow(row(error ?: "Trafik bilgisi içermez", "Yüklenmiş rota çevrimdışı izlenebilir; harita yalnızca önbellekteki alanlarda görünür."))
+            .addRow(row("Kaynak ve trafik", information.source))
+            .apply { information.warnings?.let { addRow(row("Rota uyarıları", it)) } }
+            .addRow(row("Rota ve harita bilgisi", "${prepared.map} ${error ?: prepared.route}"))
             .addAction(action(if (busy) "Bekleyin…" else "Yönlendirmeyi başlat") {
                 if (!busy) {
                     busy = true; safeInvalidate()

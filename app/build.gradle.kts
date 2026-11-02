@@ -37,8 +37,8 @@ android {
         applicationId = "org.iz.navigation"
         minSdk = 29
         targetSdk = 36
-        versionCode = 27
-        versionName = "0.11.5"
+        versionCode = 28
+        versionName = "0.12.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "GROUP_SUPABASE_URL", groupBuildString(groupSupabaseUrl))
         buildConfigField("String", "GROUP_SUPABASE_KEY", groupBuildString(groupSupabaseKey))
@@ -126,4 +126,11 @@ dependencies {
 // including on the first build after a database version change.
 tasks.matching { it.name == "mergeDebugAndroidTestAssets" }.configureEach {
     dependsOn("kspDebugKotlin")
+}
+
+// The Wear contract test reads the real source manifest; track manifest-only changes.
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    inputs.file(layout.projectDirectory.file("src/main/AndroidManifest.xml"))
+        .withPropertyName("wearCommandSourceManifest")
+        .withPathSensitivity(org.gradle.api.tasks.PathSensitivity.RELATIVE)
 }

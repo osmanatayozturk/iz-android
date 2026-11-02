@@ -12,23 +12,37 @@ class WatchComplicationService : SuspendingTimelineComplicationDataSourceService
         val data = WatchSurfaceReader.read(this)
         val now = System.currentTimeMillis()
         val frame = WatchSurfacePolicy.complication(data.snapshot, data.connected, now)
-        val fallback = when {
-            WatchSurfacePolicy.statisticsDeferred(data.snapshot) && frame.route != WatchSurfaceRoute.NAVIGATION ->
-                complication(request.complicationType, frame.compact, "Durum", frame.route, frame.lines.joinToString(". "))
-            frame.route == WatchSurfaceRoute.SUMMARY ->
-                complication(request.complicationType, "Hazır", "Özet", frame.route, "İstatistikler hazır. Yolculuk özetini aç")
-            else -> complication(request.complicationType, "İz’i aç", "İz", frame.route, "Güncel ayrıntılar için İz’i aç")
+        // Match the full surface's GPS/report expiry and always retain a non-current fallback.
+        // https://developer.android.com/reference/androidx/wear/watchface/complications/datasource/TimeInterval
+        val segments = WatchSurfaceTimeline.segments(data.snapshot, data.connected, now, frame)
+        fun render(value: WatchSurfaceFrame, at: Long): ComplicationData {
+            val phone = WatchSurfacePolicy.phoneState(data.snapshot, data.connected, at)
+            val estimate = value.route == WatchSurfaceRoute.NAVIGATION &&
+                WatchSurfacePolicy.navigationEstimate(data.snapshot, data.connected, at)
+            val title = when (phone) {
+                WatchPhoneState.NO_DATA -> "Veri"
+                WatchPhoneState.DISCONNECTED -> "Bağlı değil"
+                WatchPhoneState.EXPIRED -> "Eski veri"
+                WatchPhoneState.CURRENT -> when (value.route) {
+                    WatchSurfaceRoute.NAVIGATION -> if (estimate) "Varış" else "Rota"
+                    WatchSurfaceRoute.RECORDING -> "Durum"
+                    WatchSurfaceRoute.SUMMARY -> "Özet"
+                    WatchSurfaceRoute.DAILY -> if (WatchSurfacePolicy.statisticsDeferred(data.snapshot)) "Durum" else "Adım"
+                }
+            }
+            val text = if (request.complicationType == ComplicationType.LONG_TEXT && !estimate)
+                value.lines.firstOrNull() ?: value.compact else value.compact
+            return complication(request.complicationType, text, title, value.route,
+                (listOf(value.title) + value.lines).joinToString(". "))
         }
-        val until = frame.compactUntil
-        val sourceAt = if (frame.route == WatchSurfaceRoute.DAILY) data.snapshot?.daily?.healthCheckedAt else data.snapshot?.generatedAt
-        val sourceLabel = if (frame.route == WatchSurfaceRoute.DAILY) "Samsung Health" else "Son bildirilen ölçüm"
-        val partial = if (frame.route == WatchSurfaceRoute.DAILY && data.snapshot?.daily?.stepsStatus == org.iz.navigation.wearprotocol.WearDailyHealthStatus.PARTIAL) "Kısmi veri." else ""
-        val active = if (until != null && until > now && frame.compact != "İz’i aç") listOf(
-            TimelineEntry(TimeInterval(Instant.ofEpochMilli(now), Instant.ofEpochMilli(until)),
-                complication(request.complicationType, frame.compact,
-                    when (frame.route) { WatchSurfaceRoute.NAVIGATION -> "Varış"; WatchSurfaceRoute.RECORDING -> "Son süre"; else -> "Adım" },
-                    frame.route, "${frame.title}. ${frame.compact}. $sourceLabel. $partial Kontrol ${sourceAt?.let { WatchSurfacePolicy.clock(it, data.snapshot?.daily?.zoneId) } ?: "—"}")))
-            else emptyList()
+        val fallbackSegment = segments.last()
+        val fallback = render(fallbackSegment.frame, fallbackSegment.start)
+        val active = segments.mapNotNull { segment ->
+            segment.end?.let { end ->
+                TimelineEntry(TimeInterval(Instant.ofEpochMilli(segment.start), Instant.ofEpochMilli(end)),
+                    render(segment.frame, segment.start))
+            }
+        }
         return ComplicationDataTimeline(fallback, active)
     }
     override fun getPreviewData(type: ComplicationType): ComplicationData = complication(type, "4200", "Adım",

@@ -195,8 +195,9 @@ class WatchHealthService : Service() {
             if (!dataListening) { dataClient.addListener(dataListener).await(); dataListening = true }
             if (!messageListening) { messageClient.addListener(messageListener).await(); messageListening = true }
             if (!capabilityListening) {
-                capabilityClient.addListener(capabilityListener, WearProtocol.V4_PHONE_CAPABILITY).await()
-                capabilityClient.addListener(capabilityListener, WearProtocol.V6_PHONE_CAPABILITY).await()
+                (4..WearProtocol.CURRENT_VERSION).forEach { version ->
+                    capabilityClient.addListener(capabilityListener, WearProtocol.phoneCapability(version)).await()
+                }
                 capabilityListening = true
             }
         }
@@ -384,8 +385,9 @@ class WatchHealthService : Service() {
     override fun onDestroy() {
         observing = false; capture.detach(); sensorController.update(false, SystemClock.elapsedRealtimeNanos()); if (lock?.isHeld == true) lock?.release()
         dataClient.removeListener(dataListener); messageClient.removeListener(messageListener)
-        capabilityClient.removeListener(capabilityListener, WearProtocol.V4_PHONE_CAPABILITY)
-        capabilityClient.removeListener(capabilityListener, WearProtocol.V6_PHONE_CAPABILITY)
+        (4..WearProtocol.CURRENT_VERSION).forEach { version ->
+            capabilityClient.removeListener(capabilityListener, WearProtocol.phoneCapability(version))
+        }
         scope.cancel(); outbox.close()
         val wasRunning = WatchHealthRuntime.running
         WatchHealthRuntime.running = false

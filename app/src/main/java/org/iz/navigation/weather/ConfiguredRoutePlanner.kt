@@ -12,13 +12,68 @@ class ConfiguredRoutePlanner internal constructor(
     private val settings: () -> TrafficCredentials,
     private val fallback: (Transport) -> RoutePlanner,
     private val trafficPlanner: (String, () -> Unit) -> RoutePlanner,
-) : RoutePlanner {
+) : RoutePlanner, RouteModificationPlanner {
+    override suspend fun planModified(request: RouteModificationRequest): PlannedRoute = withContext(Dispatchers.IO) {
+        val input = request.copy(stops = request.stops.toList(), avoidAreas = request.avoidAreas.toList())
+        val snapshot = settings()
+        val context = coroutineContext
+        fun current() {
+            context.ensureActive()
+            if (settings().revision != snapshot.revision) throw CancellationException("Rota ayarları değişti.")
+        }
+        fun authorized() {
+            current()
+            val now = settings()
+            if (!now.enabled || !now.freePlanAcknowledged || now.apiKey.isNullOrBlank())
+                throw CancellationException("Trafik yetkisi değişti.")
+        }
+        suspend fun modified(delegate: RoutePlanner): PlannedRoute {
+            current()
+            return if (delegate is RouteModificationPlanner) delegate.planModified(input)
+            else {
+                if (input.avoidAreas.isNotEmpty()) throw RouteServiceException("Bu sağlayıcı seçili bölümü hariç tutmayı desteklemiyor.")
+                // Skipping/adding a stop with no exclusions still calculates an actual new route.
+                delegate.plan(input.stops, input.departureAt, input.transport, input.travelSpeedKmh, input.preferences)
+            }
+        }
+        fun checked(route: PlannedRoute): PlannedRoute {
+            current()
+            check(route.transport == input.transport && route.preferences == input.preferences &&
+                route.travelSpeedKmh == routeTravelSpeedKmh(input.transport, input.travelSpeedKmh))
+            try { requireAvoidedAreas(route, input.avoidAreas) { context.ensureActive() } }
+            catch (_: IllegalArgumentException) { throw RouteServiceException("Seçili bölüm yeni rotadan çıkarılamadı. Mevcut rota korundu.") }
+            current()
+            return route.copy(avoidAreas = input.avoidAreas)
+        }
+        val reason = when {
+            input.transport !in TRAFFIC_MODES -> "Bu ulaşım türünde trafik verisi kullanılmaz; trafiksiz rota."
+            snapshot.apiKey.isNullOrBlank() -> "Kişisel TomTom anahtarı eklenmedi; trafiksiz rota."
+            !snapshot.enabled -> "Trafik kapalı; trafiksiz rota."
+            !snapshot.freePlanAcknowledged -> "Ücretsiz kullanım onayı verilmedi; trafiksiz rota."
+            else -> null
+        }
+        if (reason == null) {
+            try {
+                val route = modified(trafficPlanner(requireNotNull(snapshot.apiKey), ::authorized))
+                authorized()
+                val accepted = checked(route)
+                authorized()
+                return@withContext accepted
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { current() }
+        }
+        current()
+        checked(modified(fallback(input.transport))).copy(provider = RouteProvider.VALHALLA, traffic = null,
+            trafficUnavailableReason = reason ?: "TomTom trafik verisine ulaşılamadı; trafiksiz rota.")
+    }
+
     constructor(context: Context) : this(
         settings = TrafficSettingsStore(context.applicationContext)::credentials,
         fallback = { transport ->
             val settings = WeatherSettingsStore(context.applicationContext).read(transport)
             val delegate = ValhallaRoutePlanner(context.applicationContext, settings.routeEndpoint)
-            object : RoutePlanner {
+            object : RoutePlanner, RouteModificationPlanner {
+                override suspend fun planModified(request: RouteModificationRequest) = delegate.planModified(request)
                 override suspend fun alternatives(stops: List<RouteStop>, departureAt: Long, transport: Transport,
                     travelSpeedKmh: Double?, preferences: RoutePreferences) =
                     delegate.alternatives(stops, departureAt, transport, travelSpeedKmh, preferences)
@@ -96,7 +151,19 @@ class ConfiguredRoutePlanner internal constructor(
 }
 
 /** Explicit verification never silently substitutes another provider. */
-internal class VerifiedTomTomRoutePlanner(private val credentials: () -> TrafficCredentials) : RoutePlanner {
+internal class VerifiedTomTomRoutePlanner(private val credentials: () -> TrafficCredentials) : RoutePlanner, RouteModificationPlanner {
+    override suspend fun planModified(request: RouteModificationRequest): PlannedRoute {
+        val snapshot = credentials()
+        val authorize = {
+            val current = credentials()
+            if (current.revision != snapshot.revision || !current.enabled || !current.freePlanAcknowledged || current.apiKey.isNullOrBlank())
+                throw CancellationException("Trafik yetkisi değişti.")
+        }
+        authorize()
+        val result = TomTomRoutePlanner(requireNotNull(snapshot.apiKey), authorize).planModified(request)
+        authorize()
+        return result
+    }
     constructor(context: Context) : this(TrafficSettingsStore(context.applicationContext)::credentials)
 
     override suspend fun alternatives(stops: List<RouteStop>, departureAt: Long, transport: Transport,

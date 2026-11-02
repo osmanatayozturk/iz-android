@@ -17,3 +17,4 @@ gradlew text eol=lf
 *.webp binary
 *.jpg binary
 *.jpeg binary
+app/src/main/assets/offline/** -text

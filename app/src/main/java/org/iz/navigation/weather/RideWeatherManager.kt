@@ -29,6 +29,8 @@ data class RideWeatherLiveState(
     val timingUpdatedAt: Long? = null,
     // An in-process display signal; cached forecasts can remain READY after a failed refresh.
     val refreshFailed: Boolean = false,
+    val paused: Boolean = false,
+    val routeRevision: Long = 0,
 )
 
 interface RideWeatherJourneySource {
@@ -104,6 +106,7 @@ class RideWeatherManager(
     private data class Fix(val journeyId: String, val coordinate: WeatherCoordinate, val recordedAt: Long, val accuracy: Float)
     private class Session(val journeyId: String, var route: PlannedRoute, var forecasts: List<LocationForecast>, val activatedAt: Long) {
         var routeRevision = 0L
+        var paused = false
         var freeDrive = false
         // Advance only when a forecast response covers the current position, never on each GPS fix.
         var freeDriveWeatherCoordinate = route.vertices.first().coordinate
@@ -163,10 +166,11 @@ class RideWeatherManager(
             reset()
             Session(ownerId, route, emptyList(), clock()).also { next ->
                 next.routeRevision = value.routeRevision
+                next.paused = value.paused
                 next.freeDrive = value.route == null
                 next.lastFetchAttemptAt = Long.MIN_VALUE / 2
                 session = next
-                mutableState.value = RideWeatherLiveState(RideWeatherStatus.LOADING, ownerId, value.route)
+                mutableState.value = RideWeatherLiveState(RideWeatherStatus.LOADING, ownerId, value.route, routeRevision = value.routeRevision)
                 val token = generation
                 tickJob = scope.launch {
                     while (isActive && isCurrent(next, token)) {
@@ -177,6 +181,7 @@ class RideWeatherManager(
                 }
             }
         } else requireNotNull(existing)
+        current.paused = value.paused
         value.fix?.let { current.lastFix = Fix(ownerId, it.coordinate, it.recordedAt, it.accuracyMeters) }
         value.progress?.let {
             current.progress = RouteProgress(it.elapsedSeconds, it.remainingSeconds,
@@ -337,6 +342,14 @@ class RideWeatherManager(
         val wasGpsStale = mutableState.value.gpsStale
         val timing = publishTiming(current, now)
         val gpsFresh = !timing.gpsStale
+        if (current.paused) {
+            runCatching { output.suspendVoice() }
+            mutableState.update { it.copy(status = RideWeatherStatus.LOADING, journeyId = current.journeyId,
+                route = current.route.takeUnless { current.freeDrive }, routeRevision = current.routeRevision, assessment = null,
+                arrivalAt = null, timingUpdatedAt = null, paused = true,
+                message = "Yönlendirme duraklatıldı; varış zamanı ve ilerideki yolun hava tahmini bekletiliyor.") }
+            return
+        }
         val preferences = settings.read(current.transport)
         if (!preferences.alertsEnabled && current.lastSettings?.alertsEnabled != false) runCatching { output.clear() }
         if (!preferences.voiceEnabled || !RideWeatherTiming.forecastFresh(mutableState.value.assessment?.fetchedAt,now)) runCatching { output.suspendVoice() }
@@ -367,7 +380,7 @@ class RideWeatherManager(
         mutableState.update { it.copy(
             status = if (assessment.samples.isEmpty() || current.problem != null && assessment.fetchedAt == null)
                 RideWeatherStatus.ERROR else RideWeatherStatus.READY,
-            journeyId = current.journeyId, route = current.route.takeUnless { current.freeDrive }, assessment = assessment,
+            journeyId = current.journeyId, route = current.route.takeUnless { current.freeDrive }, routeRevision = current.routeRevision, assessment = assessment,
             refreshFailed = current.problem != null,
             message = if (current.freeDrive) "Mevcut konum havası; ilerideki yol için tahmin değildir." + (message?.let { " $it" } ?: "") else message,
         ) }
@@ -384,7 +397,7 @@ class RideWeatherManager(
     private fun publishTiming(current: Session, now: Long): RouteTravelTiming {
         val sharedStale = navigationSource != null && sharedNavigation?.gpsStale != false
         val timing = RouteTravelTime.advance(current.timing, current.progress.remainingSeconds,
-            current.lastFix?.recordedAt?.takeUnless { sharedStale }, now)
+            current.lastFix?.recordedAt?.takeUnless { sharedStale }, now, paused = current.paused)
         // State collectors may resume on another thread as soon as gpsStale is published.
         // Cancel pending automatic speech first, so stale state never precedes cancellation.
         if (timing.gpsStale) runCatching { output.suspendVoice() }
@@ -396,7 +409,7 @@ class RideWeatherManager(
         current.timing = timing
         mutableState.update { it.copy(remainingMeters = current.progress.remainingMeters,
             remainingSeconds = timing.remainingSeconds, arrivalAt = timing.arrivalAt,
-            timingUpdatedAt = timing.updatedAt, gpsStale = timing.gpsStale) }
+            timingUpdatedAt = timing.updatedAt, gpsStale = timing.gpsStale, paused = current.paused) }
         return timing
     }
 
@@ -404,7 +417,7 @@ class RideWeatherManager(
         WeatherEngine.distanceMeters(current.freeDriveWeatherCoordinate, current.route.vertices.first().coordinate) > 100.0
 
     private fun requestNetwork(current: Session, reroute: Boolean, force: Boolean) {
-        if (session !== current || networkJob?.isActive == true) return
+        if (session !== current || current.paused || networkJob?.isActive == true) return
         if (navigationSource != null && reroute) return
         val now = clock()
         val minInterval = if (force) 60_000L else RideWeatherTiming.REFRESH_MS
@@ -488,6 +501,8 @@ class RideWeatherManager(
         } else if (value.journeyId != journeyId) return null
         val now = clock()
         val cachedAt = value.assessment?.fetchedAt
+        if (value.paused) return WearRouteWeather(WearWeatherStatus.LOADING, now, now,
+            value.remainingMeters, null, headline = "Yönlendirme duraklatıldı", detail = "Varış zamanı ve yol havası bekletiliyor.")
         if (value.gpsStale) return WearRouteWeather(WearWeatherStatus.ERROR, cachedAt ?: now,
             cachedAt?.let { it + RideWeatherTiming.FORECAST_TTL_MS } ?: now,
             value.remainingMeters, value.arrivalAt, headline = "Konum bekleniyor", detail = "Hava uyarıları duraklatıldı.")

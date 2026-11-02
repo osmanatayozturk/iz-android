@@ -86,12 +86,13 @@ fun WeatherRouteMap(
     drivingCamera: DriveCameraInput? = null,
     cameraViewportReady: Boolean = true,
     navigationControlsReady: Boolean = true,
+    preparedRoutes: org.iz.navigation.navigation.PreparedRouteManager? = null,
     overlay: @Composable BoxScope.() -> Unit = {},
 ) {
     ExpandableMap(modifier = modifier, title = title, expandable = expandable) { mapModifier ->
         Box(mapModifier) {
             WeatherRouteMapContent(route, assessment, Modifier.fillMaxSize(), onSampleClick,
-                onMapLongClick, stops, liveCoordinate, recordedPoints, gpsStale, singleStopLabel, cameraIdentity, navigationLayout, members, onLocate, attributionBottomInset, cameraViewportInsets, navigationControlsTopInset, navigationControlsHorizontal, drivingCamera, cameraViewportReady, navigationControlsReady)
+                onMapLongClick, stops, liveCoordinate, recordedPoints, gpsStale, singleStopLabel, cameraIdentity, navigationLayout, members, onLocate, attributionBottomInset, cameraViewportInsets, navigationControlsTopInset, navigationControlsHorizontal, drivingCamera, cameraViewportReady, navigationControlsReady, preparedRoutes)
             overlay()
         }
     }
@@ -120,6 +121,7 @@ private fun WeatherRouteMapContent(
     drivingCamera: DriveCameraInput?,
     cameraViewportReady: Boolean,
     navigationControlsReady: Boolean,
+    preparedRoutes: org.iz.navigation.navigation.PreparedRouteManager?,
 ) {
     val context = LocalContext.current
     val tileUrl = remember(context) { OsmServiceSettings(context).read().tileUrl }
@@ -133,6 +135,27 @@ private fun WeatherRouteMapContent(
             {"id":"directions-fix-layer","type":"circle","source":"$FIX_SOURCE","paint":{"circle-color":["case",["get","stale"],"#78828A","#1976D2"],"circle-stroke-color":"#FFFFFF","circle-stroke-width":3,"circle-radius":7}}
         """.trimIndent())
     }
+    val preparedState = preparedRoutes?.state?.collectAsState()?.value
+    val preparedDisplay = preparedRoutes != null
+    val preparedStyle = remember(style, preparedState?.fingerprint, preparedState?.pack, route?.id) {
+        if (preparedRoutes != null && preparedState?.route?.id == route?.id && preparedRoutes.mapReady())
+            runCatching { preparedRoutes.maps.renderStyle(style) }.getOrNull() else null
+    }
+    // No standard OSM raster URL is retained in a prepared-route fallback.
+    val displayStyle = remember(style, preparedDisplay, preparedStyle) {
+        preparedStyle ?: if (!preparedDisplay) style else JSONObject(style).apply {
+            getJSONObject("sources").remove("osm-tiles")
+            val localLayers = getJSONArray("layers")
+            put("layers", JSONArray().apply { for (i in 0 until localLayers.length()) {
+                val layer = localLayers.getJSONObject(i)
+                if (layer.optString("source") != "osm-tiles") put(layer)
+            } })
+        }.toString()
+    }
+    var preparedCenterCovered by remember { mutableStateOf(false) }
+    var showOfflineNotices by remember(preparedRoutes) { mutableStateOf(false) }
+    if (showOfflineNotices && preparedRoutes != null)
+        org.iz.navigation.ui.OfflineMapNoticesDialog(preparedRoutes.maps) { showOfflineNotices = false }
     var showRoute by remember { mutableStateOf(true) }
     var showMembers by remember { mutableStateOf(true) }
     var layersOpen by remember { mutableStateOf(false) }
@@ -169,6 +192,19 @@ private fun WeatherRouteMapContent(
         route?.vertices.orEmpty().map { GeoCoordinate(it.coordinate.latitude, it.coordinate.longitude) } +
             stops.map { GeoCoordinate(it.coordinate.latitude, it.coordinate.longitude) }
     }
+    DisposableEffect(map, preparedRoutes, preparedState?.pack) {
+        val target = map
+        fun updateCoverage() {
+            val camera = target?.cameraPosition
+            val point = camera?.target
+            preparedCenterCovered = point != null && preparedRoutes?.maps?.covers(
+                org.iz.navigation.offline.OfflinePoint(point.latitude, point.longitude), camera?.zoom ?: Double.NaN) == true
+        }
+        val listener = MapLibreMap.OnCameraIdleListener { updateCoverage() }
+        target?.addOnCameraIdleListener(listener)
+        updateCoverage()
+        onDispose { target?.removeOnCameraIdleListener(listener) }
+    }
     val fix = liveCoordinate?.let { GeoCoordinate(it.latitude, it.longitude) }
     val coordinates = if (routeCoordinates.isNotEmpty()) routeCoordinates else listOfNotNull(fix)
     // A live session supplies stable identity: rerouting moves its origin but must keep user pan.
@@ -204,9 +240,13 @@ private fun WeatherRouteMapContent(
         }
     }
     Box(modifier.clipToBounds().onSizeChanged { mapSize = it }) {
-        OsmMapView(styleJson = style, modifier = Modifier.fillMaxSize(),
+        OsmMapView(styleJson = displayStyle, modifier = Modifier.fillMaxSize(),
             onReady = { ready ->
                 map = ready
+                if (preparedStyle != null) preparedState?.pack?.request?.let { request ->
+                    ready.setMinZoomPreference(request.minZoom.toDouble())
+                    ready.setMaxZoomPreference(request.maxZoom.toDouble())
+                }
                 styleRevision++
                 projectStops(ready)
             },
@@ -219,7 +259,17 @@ private fun WeatherRouteMapContent(
             onLongClick = onMapLongClick,
             attributionBottomInset = attributionBottomInset, attributionAtStart = navigationLayout,
             maxFps = if (drivingCamera != null) 30 else null,
+            mapAttribution = if (preparedStyle != null) org.iz.navigation.offline.OfflineCorridorSession.MAP_ATTRIBUTION else "© OpenStreetMap contributors",
+            onAttributionClick = if (preparedDisplay) ({ showOfflineNotices = true }) else null,
         )
+        if (preparedDisplay) Surface(Modifier.align(Alignment.BottomCenter).padding(bottom = attributionBottomInset + 28.dp, start = 12.dp, end = 12.dp),
+            color = MaterialTheme.colorScheme.surface) {
+            Text(when {
+                preparedStyle == null -> "Hazır rota · Harita paketi kullanılamıyor; rota çizgisi gösteriliyor."
+                preparedCenterCovered -> "Hazır harita · Merkez seçili alanda; ekranın tamamı için kapsam garantisi yok."
+                else -> "Hazır rota · Harita merkezi kayıtlı alanın dışında."
+            }, Modifier.padding(8.dp), style = MaterialTheme.typography.labelSmall)
+        }
         // Sprite images can be registered/queryable yet absent from the native GPU atlas.
         // Geographic Compose badges keep endpoint labels visible and accessible above the live fix.
         stops.forEachIndexed { index, stop ->

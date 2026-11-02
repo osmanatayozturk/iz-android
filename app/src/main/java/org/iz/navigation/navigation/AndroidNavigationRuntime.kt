@@ -13,7 +13,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.sync.withLock
 import org.iz.navigation.speed.*
 
-internal class AndroidNavigationRuntime(private val context: Context) : NavigationRuntime {
+internal class AndroidNavigationRuntime(private val context: Context) : NavigationRuntime, NavigationCueRuntime, NavigationVoiceRuntime, RouteModificationPlanner {
     private val repository = DiaryRepository(context)
     private val tracker = TrackingController(context)
     private val notifications = NavigationNotifications(context)
@@ -118,6 +118,8 @@ internal class AndroidNavigationRuntime(private val context: Context) : Navigati
     override suspend fun plan(stops: List<RouteStop>, transport: Transport, preferences: RoutePreferences,
         travelSpeedKmh: Double?): PlannedRoute = ConfiguredRoutePlanner(context).plan(
             stops, System.currentTimeMillis(), transport, travelSpeedKmh, preferences)
+    override suspend fun planModified(request: RouteModificationRequest): PlannedRoute =
+        ConfiguredRoutePlanner(context).planModified(request)
     override fun trafficRefreshEnabled(route: PlannedRoute): Boolean {
         if (route.transport !in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE)) return false
         return TrafficSettingsStore(context).read().let { it.enabled && it.hasKey && it.freePlanAcknowledged }
@@ -143,6 +145,10 @@ internal class AndroidNavigationRuntime(private val context: Context) : Navigati
         }
     }
     override fun prepareSpeech() { NavigationSpeech.get(context).prepareGuidance() }
+    override fun prepareSpeech(mode: GuidanceVoiceMode) { NavigationSpeech.get(context).prepareGuidance(mode) }
+    override val speechStatus get() = NavigationSpeech.get(context).status
+    override fun speakCue(request: NavigationCueRequest) { NavigationSpeech.get(context).speakTurn(request) }
     override fun speak(text: String) { NavigationSpeech.get(context).speakTurn(text) }
     override fun cancelSpeech() { NavigationSpeech.get(context).cancelTurns() }
+    override fun endGuidanceSpeech() { NavigationSpeech.get(context).endGuidanceVoice() }
 }

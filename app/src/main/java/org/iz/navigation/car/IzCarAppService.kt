@@ -11,6 +11,7 @@ import androidx.lifecycle.LifecycleOwner
 import org.iz.navigation.BuildConfig
 import org.iz.navigation.IzApplication
 import org.iz.navigation.data.DiaryRepository
+import org.iz.navigation.navigation.NavigationSpeech
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 
@@ -57,6 +58,8 @@ internal class IzCarSession : Session() {
         }
         // Auto shares the phone CPU: neither real nor simulated recording subscribes to full tracks.
         scope.launch { app.weatherManager.state.collect { displayUpdate { home.safeInvalidate() } } }
+        // Observe the existing phone owner; reading status never prepares TTS or acquires focus.
+        scope.launch { NavigationSpeech.get(app).status.collect { displayUpdate { home.refreshSpeech(it) } } }
         lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) { displayUpdate { surface.setActive(true); home.requestIdleLocation() } }
             override fun onStop(owner: LifecycleOwner) { displayUpdate { surface.setActive(false) } }

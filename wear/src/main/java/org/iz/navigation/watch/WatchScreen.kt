@@ -88,12 +88,10 @@ internal fun WatchScreen(
                 item {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("İz", color = Leaf, fontSize = 29.sp, fontWeight = FontWeight.Bold)
-                        Text(when {
-                            state.phoneId == null -> "Telefon bağlı değil"
-                            snapshot == null -> "Telefon verisi bekleniyor"
-                            !fresh -> "Veri güncel değil"
-                            else -> "Telefon bağlı"
-                        }, color = if (fresh) Leaf else Quiet, textAlign = TextAlign.Center, fontSize = 12.sp)
+                        Text(WatchSurfacePolicy.phoneLabel(snapshot, state.phoneId != null, now),
+                            color = if (fresh) Leaf else Quiet, textAlign = TextAlign.Center, fontSize = 12.sp)
+                        snapshot?.let { Text(WatchSurfacePolicy.phoneAge(it, now),
+                            fontSize = 10.sp, color = Quiet, textAlign = TextAlign.Center) }
                         state.phoneName?.let { Text(it, fontSize = 10.sp, color = Quiet, maxLines = 2, textAlign = TextAlign.Center) }
                     }
                 }
@@ -106,9 +104,8 @@ internal fun WatchScreen(
                         label = { Text("Bugünün özeti") }, modifier = Modifier.fillMaxWidth()) }
                 }
                 if (!fresh) item {
-                    Note(if (state.phoneId == null) "İz açık olan eşleşmiş telefonunu yaklaştır. Kayıt telefon üzerinden yapılır."
-                        else if (snapshot == null) "Başlatmadan önce telefonun güncel durumu bekleniyor."
-                        else "Son ölçümler gösteriliyor. Bağlantı yenilenene kadar başlatma ve bitirme kapalı.")
+                    Note(if (snapshot == null) "Başlatmadan önce telefonun güncel durumu bekleniyor. Telefonda İz’i kontrol et."
+                        else "Son alınan bilgi gösteriliyor. Güncel telefon bilgisi gelene kadar başlatma ve bitirme kapalı.")
                 }
                 state.message?.let { message -> item { Note(message, highlighted = state.needsPhone) } }
                 if (state.pending != null) item {
@@ -132,12 +129,12 @@ internal fun WatchScreen(
                     }
                 } else if (snapshot?.journeyId != null) {
                     item { Text(snapshot.mode?.label() ?: "Yolculuk", fontSize = 20.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center) }
-                    if (!snapshot.recording) item { Note("Telefonun kaydı etkin değil. Telefonda İz'i kontrol et.") }
-                    item { Note(if (!snapshot.recording) "Kayıt durumu doğrulanıyor · İstatistikler yolculuk sonunda hazırlanacak"
-                        else if (!fresh) "Son kayıt durumu · Güncel bilgi için bağlantıyı yenile"
+                    if (fresh && !snapshot.recording) item { Note("Telefonun kaydı etkin değil. Telefonda İz'i kontrol et.") }
+                    item { Note(if (!fresh) "Son kayıt durumu · Güncel bilgi için bağlantıyı yenile"
+                        else if (!snapshot.recording) "Telefon kaydı etkin değil · İstatistikler yolculuk sonunda hazırlanacak"
                         else if (snapshot.temporary) "Algılama sürüyor · İstatistikler yolculuk sonunda hazırlanacak"
                         else "Kayıt sürüyor · İstatistikler yolculuk sonunda hazırlanacak", highlighted = true) }
-                    snapshot.weather?.let { weather -> item { WeatherCard(weather, now, fresh) } }
+                    snapshot.weather?.let { weather -> item { WeatherCard(weather, now, fresh, WatchSurfacePolicy.ownerAdvisory(snapshot)?.paused == true) } }
                     if (snapshot.temporary) item { Note("Kesinleşen yolculukta ham ölçümler korunur. Algılama durumunu telefonda görebilirsin.") }
                     item {
                         Chip(onClick = { confirmingId = activeId }, label = { Text("Yolculuğu bitir") },
@@ -146,10 +143,12 @@ internal fun WatchScreen(
                     }
                 } else {
                     if (WatchSurfacePolicy.statisticsDeferred(snapshot)) item {
-                        Note(snapshot?.statisticsStatus?.ifBlank { "İstatistikler hazırlanacak" } ?: "İstatistikler hazırlanacak", highlighted = true)
+                        Note(if (fresh) snapshot?.statisticsStatus?.ifBlank { "İstatistikler hazırlanacak" } ?: "İstatistikler hazırlanacak"
+                            else "Son alınan bilgi · İstatistiklerin güncel durumu bilinmiyor.", highlighted = true)
                     }
                     snapshot?.completed?.takeUnless { WatchSurfacePolicy.statisticsDeferred(snapshot) }?.let { summary ->
-                        item { Text("İstatistikler hazır", color = Leaf, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center) }
+                        item { Text(if (fresh) "İstatistikler hazır" else "Son hazırlanmış yolculuk",
+                            color = if (fresh) Leaf else Quiet, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center) }
                         item { Metric("Tamamlanan yolculuk", "${duration(summary.elapsedMillis)} · ${WatchSurfacePolicy.km(summary.distanceMeters)}") }
                         item { Chip(onClick = { onSurface(WatchSurfaceRoute.SUMMARY) }, label = { Text("Yolculuk özetini aç") },
                             modifier = Modifier.fillMaxWidth().testTag("completed-summary")) }
@@ -210,7 +209,7 @@ internal fun WatchScreen(
 }
 
 @Composable
-private fun WeatherCard(weather: WearRouteWeather, now: Long, connectionFresh: Boolean) {
+private fun WeatherCard(weather: WearRouteWeather, now: Long, connectionFresh: Boolean, paused: Boolean) {
     val readyAndFresh = connectionFresh && weather.status == WearWeatherStatus.READY && now < weather.validUntil
     val accent = if (readyAndFresh && weather.threshold == WearWeatherThreshold.EXCEEDED) {
         MaterialTheme.colors.error
@@ -233,6 +232,12 @@ private fun WeatherCard(weather: WearRouteWeather, now: Long, connectionFresh: B
                 Text("Geçerlilik: ${measurementTime(weather.validUntil)}", color = Quiet,
                     fontSize = 10.sp, textAlign = TextAlign.Center)
             }
+            paused && weather.status == WearWeatherStatus.LOADING -> {
+                Text(weather.headline.ifBlank { "Yönlendirme duraklatıldı" }, color = Quiet,
+                    fontSize = 15.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+                Text(weather.detail.ifBlank { "Varış zamanı ve yol havası bekletiliyor." }, color = Quiet,
+                    fontSize = 11.sp, textAlign = TextAlign.Center)
+            }
             weather.status == WearWeatherStatus.LOADING -> {
                 Text(weather.headline.ifBlank { "Hava hazırlanıyor" }, color = Quiet,
                     fontSize = 15.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
@@ -253,6 +258,12 @@ private fun WeatherCard(weather: WearRouteWeather, now: Long, connectionFresh: B
                     fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
                 Text("Tahmin süresi doldu", color = Quiet, fontSize = 11.sp, textAlign = TextAlign.Center)
                 Text("Tahmin: ${measurementTime(weather.calculatedAt)}", color = Quiet,
+                    fontSize = 10.sp, textAlign = TextAlign.Center)
+            }
+            paused -> {
+                Text("Duraklama nedeniyle ilerideki varış saatleri belirsiz.", color = Quiet,
+                    fontSize = 12.sp, textAlign = TextAlign.Center)
+                Text("Son tahmin: ${measurementTime(weather.calculatedAt)}", color = Quiet,
                     fontSize = 10.sp, textAlign = TextAlign.Center)
             }
             else -> {
@@ -293,11 +304,6 @@ private fun Note(text: String, highlighted: Boolean = false) {
         modifier = Modifier.fillMaxWidth().padding(horizontal = 5.dp, vertical = 3.dp))
 }
 
-internal fun duration(milliseconds: Long): String {
-    val seconds = milliseconds.coerceAtLeast(0) / 1_000
-    return if (seconds >= 3_600) String.format(Locale.ROOT, "%d:%02d:%02d", seconds / 3_600, seconds / 60 % 60, seconds % 60)
-    else String.format(Locale.ROOT, "%d:%02d", seconds / 60, seconds % 60)
-}
 
 private fun speed(value: Double?): String = value?.let { String.format(Locale.forLanguageTag("tr"), "%.1f km/sa", it) } ?: "Ölçüm yok"
 

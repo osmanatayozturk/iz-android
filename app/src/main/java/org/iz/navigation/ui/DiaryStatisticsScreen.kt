@@ -29,6 +29,7 @@ internal fun DiaryStatisticsScreen(state: DiaryState, now: Long, onJourney: (Jou
             } else Text(state.analysisLabel, style = MaterialTheme.typography.bodyMedium)
             Text("Ayrıntılı hız, süre ve sağlık verileri için bir yolculuğu seç.", style = MaterialTheme.typography.bodySmall)
         }
+        item { JourneyComparisonPanel(state) }
         if (journeys.isEmpty()) item { Text("İlk yolculuğunu kaydettiğinde istatistiklerin burada görünecek.") }
         items(journeys, key = { it.id }) { journey ->
             OutlinedCard(onClick = { onJourney(journey) }, modifier = Modifier.fillMaxWidth()) {

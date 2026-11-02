@@ -107,6 +107,132 @@ internal class PhoneNavigationViewModel(application: Application) : AndroidViewM
         credentialRevision = { TrafficSettingsStore(application).read().revision })
     val ui = directions.state
     val permissionGate = DirectionsPermissionGate()
+
+    val preparedRoutes get() = getApplication<IzApplication>().preparedRoutes
+    private fun preparedSnapshot() = preparedRoutes.state.value.copy(pack = preparedRoutes.maps.state.value)
+    private fun ownsPrepared(entryId: Long, token: PreparedRouteUiToken): Boolean =
+        currentUiEntry == entryId && token == preparedRouteToken(entryId, directions.revisionToken,
+            ui.value, navigation.state.value, preparedSnapshot())
+    fun canPreparedAction(entryId: Long, token: PreparedRouteUiToken, action: PreparedRouteUiAction): Boolean =
+        !commandBusy.value && ownsPrepared(entryId, token) && action in preparedRouteData(token, ui.value,
+            navigation.state.value, preparedSnapshot(), false, preparedRoutes.mapReady()).allowedActions
+
+    /** Commands share the existing VM lock and outlive closing the planner. No permission callback owns a stale start. */
+    fun preparedAction(entryId: Long, token: PreparedRouteUiToken, action: PreparedRouteUiAction,
+        selection: PreparedCorridorUiSelection? = null) {
+        if (!canPreparedAction(entryId, token, action)) return
+        if (action == PreparedRouteUiAction.SET_CORRIDOR && (selection == null ||
+                selection.halfWidthMeters !in 50.0..1000.0)) {
+            directions.reportMessage("Koridor genişliği yolun her yanında 50–1000 m olmalı.")
+            return
+        }
+        val candidate = preparedRouteCandidate(ui.value, navigation.state.value)
+        val inputRevision = directions.revisionToken
+        val recordJourney = ui.value.recordJourney
+        work.mutate {
+            if (!ownsPrepared(entryId, token) || action !in preparedRouteData(token, ui.value,
+                    navigation.state.value, preparedSnapshot(), false, preparedRoutes.mapReady()).allowedActions) return@mutate
+            when (action) {
+                PreparedRouteUiAction.PREPARE_ROUTE -> {
+                    if (candidate == null || candidate != preparedRouteCandidate(ui.value, navigation.state.value)) return@mutate
+                    preparedRoutes.prepareRoute(candidate, token.generation)
+                }
+                PreparedRouteUiAction.SET_CORRIDOR -> {
+                    val corridor = selection ?: return@mutate
+                    preparedRoutes.selectCorridor(org.iz.navigation.navigation.PreparedCorridorSelection(
+                        corridor.fromMeters, corridor.toMeters, corridor.halfWidthMeters), token.generation)
+                }
+                PreparedRouteUiAction.USE_PREPARED -> {
+                    preparedRoutes.start(token.generation, recordJourney) { ownsPrepared(entryId, token) && !ui.value.busy }
+                    if (currentUiEntry == entryId && directions.revisionToken == inputRevision) directions.sessionStarted()
+                }
+                else -> {
+                    val command = when (action) {
+                        PreparedRouteUiAction.DOWNLOAD_MAP -> "download"
+                        PreparedRouteUiAction.PAUSE_DOWNLOAD -> "pause"
+                        PreparedRouteUiAction.RESUME_DOWNLOAD -> "resume"
+                        PreparedRouteUiAction.CANCEL_DOWNLOAD -> "cancel"
+                        PreparedRouteUiAction.DELETE_MAP -> "delete"
+                        else -> return@mutate
+                    }
+                    check(preparedRoutes.mapCommand(token.generation, command)) {
+                        "İşlem bu durumda başlatılamadı. Güncel harita durumunu kontrol et."
+                    }
+                }
+            }
+        }
+    }
+
+    val routeOperations get() = getApplication<IzApplication>().routeOperations
+    private fun currentRouteOperationData(entryId: Long, locked: Boolean = commandBusy.value): RouteOperationsPanelData {
+        val nav = navigation.state.value
+        val owner = org.iz.navigation.navigation.RouteEditOwner.from(nav)
+        return routeOperationsData(entryId, nav, navigation.edits.value, routeOperations.lookup.value,
+            routeOperations.online.value, locked, owner?.let(navigation::remainingStopIndices).orEmpty())
+    }
+    private fun ownsRouteOperation(entryId: Long, token: RouteOperationsUiToken): Boolean =
+        currentUiEntry == entryId && token == routeOperationsToken(entryId, navigation.state.value,
+            navigation.edits.value, routeOperations.lookup.value)
+
+    /** Explicit requests use cancellable read work; only confirm/pause/resume change navigation. */
+    fun routeOperation(entryId: Long, token: RouteOperationsUiToken, action: RouteOperationUiAction,
+        targetId: String? = null, requestId: String? = null, previewRouteId: String? = null) {
+        if (!ownsRouteOperation(entryId, token) || action !in currentRouteOperationData(entryId).allowedActions) return
+        suspend fun execute() {
+            if (!ownsRouteOperation(entryId, token)) return
+            val data = currentRouteOperationData(entryId, locked = false)
+            if (action !in data.allowedActions) return
+            val owner = org.iz.navigation.navigation.RouteEditOwner.from(navigation.state.value) ?: return
+            when (action) {
+                RouteOperationUiAction.AVOID -> {
+                    val index = targetId?.toIntOrNull() ?: return
+                    if (data.maneuvers.none { it.id == targetId }) return
+                    navigation.previewEdit(RouteEditAction.AvoidManeuver(index), owner)
+                }
+                RouteOperationUiAction.SKIP -> {
+                    val index = targetId?.toIntOrNull() ?: return
+                    if (data.intermediateStops.none { it.id == targetId }) return
+                    navigation.previewEdit(RouteEditAction.SkipStop(index), owner)
+                }
+                RouteOperationUiAction.LOOKUP_FUEL, RouteOperationUiAction.LOOKUP_REST ->
+                    routeOperations.lookup(owner, if (action == RouteOperationUiAction.LOOKUP_FUEL)
+                        org.iz.navigation.navigation.RouteStopLookupKind.FUEL else org.iz.navigation.navigation.RouteStopLookupKind.REST)
+                RouteOperationUiAction.SELECT_POI -> {
+                    val id = targetId ?: return
+                    val request = requestId ?: return
+                    if (data.poi?.let { it.requestId == request && it.results.any { result -> result.id == id } } != true) return
+                    routeOperations.select(owner, request, id)
+                }
+                RouteOperationUiAction.CONFIRM -> {
+                    val preview = navigation.edits.value.preview ?: return
+                    if (preview.id != requestId || preview.route.id != previewRouteId || preview.owner != owner) return
+                    check(navigation.commitEdit(owner, preview.id)) { "Rota durumu değişti. İşlemi yeniden seç." }
+                }
+                RouteOperationUiAction.CANCEL -> {
+                    val id = requestId ?: return
+                    if (data.pendingRequestId != id) return
+                    val edit = navigation.edits.value
+                    if (id == (edit.preview?.id ?: edit.requestId)) {
+                        check(navigation.cancelEdit(owner, id)) { "Rota isteği değişti. Güncel durumu kontrol et." }
+                    } else {
+                        val lookup = routeOperations.lookup.value
+                        if (lookup.owner == owner && lookup.requestId == id) routeOperations.cancelLookup()
+                    }
+                }
+                RouteOperationUiAction.PAUSE, RouteOperationUiAction.RESUME -> {
+                    val snapshot = org.iz.navigation.navigation.NavigationStopSnapshot.from(navigation.state.value) ?: return
+                    check(navigation.setPaused(snapshot, action == RouteOperationUiAction.PAUSE)) {
+                        "Duraklama durumu değişti. Güncel durumu kontrol et."
+                    }
+                }
+            }
+        }
+        if (action in setOf(RouteOperationUiAction.CANCEL, RouteOperationUiAction.PAUSE, RouteOperationUiAction.RESUME)) {
+            work.newTarget()
+            work.mutate { execute() }
+        } else if (action == RouteOperationUiAction.CONFIRM) work.mutate { execute() }
+        else work.read { current -> if (current()) execute() }
+    }
     val places = repository.places.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     private val shortcutLibrary = TravelLibraryRepository(application)
     val shortcuts = shortcutLibrary.destinationShortcuts.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -222,6 +348,7 @@ internal fun NavigationScreen(
     val ui by vm.ui.collectAsStateWithLifecycle()
     androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) { vm.directions.refreshCredentials() }
     val nav by vm.navigation.state.collectAsStateWithLifecycle()
+    val routeEdits by vm.navigation.edits.collectAsStateWithLifecycle()
     // Live recording and simulation intentionally publish position only, never a colored trail.
     val points = emptyList<TrackPoint>()
     val places by vm.places.collectAsStateWithLifecycle()
@@ -338,6 +465,41 @@ internal fun NavigationScreen(
         }
         if (required.isEmpty()) vm.perform(action)
         else if (vm.permissionGate.request(action, entryId, vm.directions.revisionToken)) requestPermissions(required.toTypedArray(), forAction = true)
+    }
+
+    fun requestPreparedStart(token: PreparedRouteUiToken) {
+        if (!vm.canPreparedAction(entryId, token, PreparedRouteUiAction.USE_PREPARED)) return
+        val route = vm.preparedRoutes.state.value.route ?: return
+        val required = buildList {
+            if (!hasFineLocation()) {
+                add(Manifest.permission.ACCESS_COARSE_LOCATION)
+                add(Manifest.permission.ACCESS_FINE_LOCATION)
+            }
+            if (vm.ui.value.recordJourney && route.transport.supportsSteps &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) != PackageManager.PERMISSION_GRANTED)
+                add(Manifest.permission.ACTIVITY_RECOGNITION)
+            if (Build.VERSION.SDK_INT >= 33 &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+                add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (required.isEmpty()) {
+            vm.preparedAction(entryId, token, PreparedRouteUiAction.USE_PREPARED)
+            return
+        }
+        val callback = org.iz.navigation.ui.history.UiPermissionReturn(onResult = {
+            if (vm.canPreparedAction(entryId, token, PreparedRouteUiAction.USE_PREPARED)) {
+                val precise = ContextCompat.checkSelfPermission(vm.getApplication<Application>(),
+                    Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                if (precise) vm.preparedAction(entryId, token, PreparedRouteUiAction.USE_PREPARED)
+                else vm.directions.reportMessage("Hazır rotayı başlatmak için hassas konum izni gerekli. İzinleri ayarlayıp yeniden dene.")
+            }
+        }, onStale = {})
+        try {
+            if (openPermissions?.invoke(required.toTypedArray(), callback) != true)
+                vm.directions.reportMessage("İzin ekranı açılamadı. Hazır rota başlatılmadı.")
+        } catch (error: Exception) {
+            vm.directions.reportMessage(error.message ?: "İzin ekranı açılamadı. Hazır rota başlatılmadı.")
+        }
     }
     fun select(stop: RouteStop) {
         if (addingVia) { vm.directions.addVia(stop); addingVia = false }
@@ -477,6 +639,7 @@ internal fun NavigationScreen(
         shortcuts = shortcuts, onShortcut = { kind -> showPlanning = true; onPlannerOpened(); vm.shortcut(kind) },
         members = groupState.markers.map { org.iz.navigation.integration.RouteMapMember(it.userId, it.name, it.latitude, it.longitude, it.delayed) },
         showPlanner = showPlanning, voiceFault = phoneVoiceFault(speechStatus, nav.guidance, nav.muted),
+        editPreview = routeEdits.preview?.takeIf { it.owner.matches(nav) },
         showDashboard = showDashboard, onDashboard = { if (dashboardStillCurrent()) showDashboard = true }, dashboard = dashboardContent,
         weatherLabel = weather.assessment?.samples?.firstOrNull()?.reading?.temperatureC?.let { "${it.toInt()}° · Hava" } ?: "Hava durumu",
         onSearch = {
@@ -497,7 +660,13 @@ internal fun NavigationScreen(
         onLocate = { requestAction(DirectionsAction.CURRENT_ORIGIN) }, onPin = onPin,
     ) {
     PhoneDirectionsContent(
-        ui = ui, nav = nav, points = points, commandBusy = commandBusy, commandErrorVersion = commandErrorVersion, voiceControls = voiceControls,
+        ui = ui, nav = nav, points = points, commandBusy = commandBusy, commandErrorVersion = commandErrorVersion, voiceControls = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                voiceControls()
+                PreparedRouteControls(vm, entryId, ui, nav, commandBusy, speechStatus, ::requestPreparedStart)
+                RouteOperationsControls(vm, entryId, nav, commandBusy, weather)
+            }
+        },
         onClose = ::closePlanner, onMap = ::goToMap,
         chooseOrigin = { addingVia = false; pickerOrigin = true; showSource = true },
         chooseDestination = { addingVia = false; pickerOrigin = false; showSource = true },

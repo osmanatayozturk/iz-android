@@ -1,0 +1,2352 @@
+{
+  "schema": "iz.offline-font.bundle.v1",
+  "name": "Iz Offline Latin Regular",
+  "fontstack": "Iz Offline Latin Regular",
+  "rangeCount": 256,
+  "rangeSize": 256,
+  "first": 0,
+  "last": 65535,
+  "contentEncoding": "identity",
+  "license": "OFL-1.1",
+  "files": [
+    {
+      "path": "glyphs/Iz Offline Latin Regular/0-255.pbf",
+      "kind": "glyph-range",
+      "start": 0,
+      "end": 255,
+      "bytes": 65077,
+      "sha256": "864DEE4F317451FC0AA35092CB1795D700151D64DE1738CE37B76BF70698049A",
+      "glyphCount": 192
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/256-511.pbf",
+      "kind": "glyph-range",
+      "start": 256,
+      "end": 511,
+      "bytes": 107836,
+      "sha256": "12AE0B87E9EB66B74984C140F4C7DDA823152B4E11CC14A8C2977BB962789585",
+      "glyphCount": 256
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/512-767.pbf",
+      "kind": "glyph-range",
+      "start": 512,
+      "end": 767,
+      "bytes": 81390,
+      "sha256": "3B9C88EA69DBBFCFF9A3813396527F1284C0E776AE2A0FBADED6A35149D958AB",
+      "glyphCount": 251
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/768-1023.pbf",
+      "kind": "glyph-range",
+      "start": 768,
+      "end": 1023,
+      "bytes": 58592,
+      "sha256": "1C898B9E5C2B05CC52AE5B9E09DD3EF641322CE862B0E621C8C0074FE6FD4FD4",
+      "glyphCount": 204
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/1024-1279.pbf",
+      "kind": "glyph-range",
+      "start": 1024,
+      "end": 1279,
+      "bytes": 103934,
+      "sha256": "759575C0BFE678F141A89D090FC460F27F9B3312B5C38EA44BCA6F648D5F46B3",
+      "glyphCount": 254
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/1280-1535.pbf",
+      "kind": "glyph-range",
+      "start": 1280,
+      "end": 1535,
+      "bytes": 8810,
+      "sha256": "7E7191A8E3A16E6429120DA39B6A4B1AD545D32DEC00012CDAF89D4CDBC19978",
+      "glyphCount": 20
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/1536-1791.pbf",
+      "kind": "glyph-range",
+      "start": 1536,
+      "end": 1791,
+      "bytes": 39,
+      "sha256": "9AA41867904EA1844AEE471A4A664FFE3CC49A1101D4132AF07A68BDC3905342",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/1792-2047.pbf",
+      "kind": "glyph-range",
+      "start": 1792,
+      "end": 2047,
+      "bytes": 39,
+      "sha256": "11DE563A17F8E8FB0C1DFE24AC9B8D0FED826499679314C36BB760D8D15B0030",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/2048-2303.pbf",
+      "kind": "glyph-range",
+      "start": 2048,
+      "end": 2303,
+      "bytes": 39,
+      "sha256": "3A08C8DB5F5440110DF53C47185419E4C4316B88026B8C6D7416814E3280FC77",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/2304-2559.pbf",
+      "kind": "glyph-range",
+      "start": 2304,
+      "end": 2559,
+      "bytes": 39,
+      "sha256": "3EE1B91B4032262B7E7B81C47A3CC9ACD9DB7F4979B549877310E084F74A48D8",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/2560-2815.pbf",
+      "kind": "glyph-range",
+      "start": 2560,
+      "end": 2815,
+      "bytes": 39,
+      "sha256": "4A3DC0C1207178E344EAAB0CFB37ABC248024601D4524CC28D041B585909C791",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/2816-3071.pbf",
+      "kind": "glyph-range",
+      "start": 2816,
+      "end": 3071,
+      "bytes": 39,
+      "sha256": "7B1A671040F257E9A6824ECF7D6B1AC5E9009A670D6C526ABD4753B75FAF919B",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/3072-3327.pbf",
+      "kind": "glyph-range",
+      "start": 3072,
+      "end": 3327,
+      "bytes": 39,
+      "sha256": "9A9A8917FB544DBDEB0EF6E0B58ADA662739804094C287DE460BF027D38334B6",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/3328-3583.pbf",
+      "kind": "glyph-range",
+      "start": 3328,
+      "end": 3583,
+      "bytes": 39,
+      "sha256": "A1AAB86226558D69820D3B24A6D6E5A4642F1A7C19332256ED5CBA27755C57AB",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/3584-3839.pbf",
+      "kind": "glyph-range",
+      "start": 3584,
+      "end": 3839,
+      "bytes": 507,
+      "sha256": "8E8894CC245D0A6957FDC80FA6C2BBDBDC4D42F892E45D01E8872E533EF245D1",
+      "glyphCount": 1
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/3840-4095.pbf",
+      "kind": "glyph-range",
+      "start": 3840,
+      "end": 4095,
+      "bytes": 39,
+      "sha256": "787D0CC74ADF31C5621E73ABF3D358F541D360A62EE8D506D5AE5E417A142454",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/4096-4351.pbf",
+      "kind": "glyph-range",
+      "start": 4096,
+      "end": 4351,
+      "bytes": 39,
+      "sha256": "94E902A00B0B07EDD265AE61FBBB3992153A36564854821A52FE370198F09984",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/4352-4607.pbf",
+      "kind": "glyph-range",
+      "start": 4352,
+      "end": 4607,
+      "bytes": 39,
+      "sha256": "2500A6E5830C4BA1488DAC5EC7FEB803CE51F02DE1E2D08E4680AFE1577B5CCB",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/4608-4863.pbf",
+      "kind": "glyph-range",
+      "start": 4608,
+      "end": 4863,
+      "bytes": 39,
+      "sha256": "5ECE37CE7EC9507EC4AA06065A8F31CA7731881A5B333CC13675CB4022C39FCB",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/4864-5119.pbf",
+      "kind": "glyph-range",
+      "start": 4864,
+      "end": 5119,
+      "bytes": 39,
+      "sha256": "18A4B5C2DEDDF2FD7F00DFBB265138C2AA06531D62A321354120A59DEAEC9236",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/5120-5375.pbf",
+      "kind": "glyph-range",
+      "start": 5120,
+      "end": 5375,
+      "bytes": 39,
+      "sha256": "4AF06E89856DB71F33435C9B6A49CBA040289FB16C9C859589C67FED19381E26",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/5376-5631.pbf",
+      "kind": "glyph-range",
+      "start": 5376,
+      "end": 5631,
+      "bytes": 39,
+      "sha256": "ABD2BB1B1F220921D8FB397FE3DEA2347B1F330869A4B0CEC3CDE1DE29E6411B",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/5632-5887.pbf",
+      "kind": "glyph-range",
+      "start": 5632,
+      "end": 5887,
+      "bytes": 39,
+      "sha256": "2870F58DEA08206E61B4AA809B1E94F507B40936AE62E2B1CA23C5E655EB330F",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/5888-6143.pbf",
+      "kind": "glyph-range",
+      "start": 5888,
+      "end": 6143,
+      "bytes": 39,
+      "sha256": "FCA5CB779DA26369BF30F8A96994931AAE75E6381F1334DEAC6D244CA5A86704",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/6144-6399.pbf",
+      "kind": "glyph-range",
+      "start": 6144,
+      "end": 6399,
+      "bytes": 39,
+      "sha256": "00B11C9D02F30E6C5BA94533A3815ACE74725A4CB80ABD4D1A4BBB573F051E3B",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/6400-6655.pbf",
+      "kind": "glyph-range",
+      "start": 6400,
+      "end": 6655,
+      "bytes": 39,
+      "sha256": "32BB8F7A27626A0196997601643F43733CD03D45979BB8BED809D1F1C8904A62",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/6656-6911.pbf",
+      "kind": "glyph-range",
+      "start": 6656,
+      "end": 6911,
+      "bytes": 39,
+      "sha256": "A505DB9CF813C77FED01E2C8917336BD42F64460071D13BDAD6342A3D8002CEF",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/6912-7167.pbf",
+      "kind": "glyph-range",
+      "start": 6912,
+      "end": 7167,
+      "bytes": 39,
+      "sha256": "D6817A1C8A53415B4C407EEBA30CEBFE81665DE21F2369F9CDB5697A4321A0FC",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/7168-7423.pbf",
+      "kind": "glyph-range",
+      "start": 7168,
+      "end": 7423,
+      "bytes": 39,
+      "sha256": "6EE99AE7255F7E8D96A469CD2120BA4931E34755886D74344BA9F85BB6217889",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/7424-7679.pbf",
+      "kind": "glyph-range",
+      "start": 7424,
+      "end": 7679,
+      "bytes": 50058,
+      "sha256": "3918B000139E29173E549864738F24B76FC2EA64B1B7F7EA3C5B789F472E7796",
+      "glyphCount": 203
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/7680-7935.pbf",
+      "kind": "glyph-range",
+      "start": 7680,
+      "end": 7935,
+      "bytes": 111268,
+      "sha256": "DF2F81724A3A8A5F102CDE4AD34105D313B0FB49A5F79108F9A64002CB93942E",
+      "glyphCount": 247
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/7936-8191.pbf",
+      "kind": "glyph-range",
+      "start": 7936,
+      "end": 8191,
+      "bytes": 106085,
+      "sha256": "39A5EEFA567A53A9FE51E48978BC014911C72BB7244834356258331B25D6978C",
+      "glyphCount": 232
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/8192-8447.pbf",
+      "kind": "glyph-range",
+      "start": 8192,
+      "end": 8447,
+      "bytes": 25553,
+      "sha256": "BE3FF2F09E2E560559CF5197B24E35E27AD05B8A5E9AF6AEFCD400E211AC3A4C",
+      "glyphCount": 106
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/8448-8703.pbf",
+      "kind": "glyph-range",
+      "start": 8448,
+      "end": 8703,
+      "bytes": 16930,
+      "sha256": "6185F7E2889C6ADDF6926A6B9173AF5F0FD41B29C670F0485839B16F0D97F23F",
+      "glyphCount": 37
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/8704-8959.pbf",
+      "kind": "glyph-range",
+      "start": 8704,
+      "end": 8959,
+      "bytes": 5848,
+      "sha256": "7DBD7E1A080FFC538884F680D480DFBE0032E951697F544138082847FB22E80B",
+      "glyphCount": 16
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/8960-9215.pbf",
+      "kind": "glyph-range",
+      "start": 8960,
+      "end": 9215,
+      "bytes": 1536,
+      "sha256": "B9664FF6634BBCDE8144548123ADE141D28AF93C34E3C77348183940AB421A53",
+      "glyphCount": 4
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/9216-9471.pbf",
+      "kind": "glyph-range",
+      "start": 9216,
+      "end": 9471,
+      "bytes": 28489,
+      "sha256": "E6D0B879AB7C2FA91CB6DEB552B8FDFD8D3C87AB0BBBE9EAC9BFA431AB19D3B9",
+      "glyphCount": 32
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/9472-9727.pbf",
+      "kind": "glyph-range",
+      "start": 9472,
+      "end": 9727,
+      "bytes": 3746,
+      "sha256": "1F26CFBE04101883FA8D0473E20CAF732672AA19D7C2992A55E76E84233AFC22",
+      "glyphCount": 14
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/9728-9983.pbf",
+      "kind": "glyph-range",
+      "start": 9728,
+      "end": 9983,
+      "bytes": 1151,
+      "sha256": "B083C187D58ED52828EC360C187DABC443EEE8690514EAB5B47A29969947765E",
+      "glyphCount": 3
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/9984-10239.pbf",
+      "kind": "glyph-range",
+      "start": 9984,
+      "end": 10239,
+      "bytes": 8931,
+      "sha256": "EF23706AC696547B7ED6DAEA8005D93FF05375A254207888DDD1F6D03FC21AA9",
+      "glyphCount": 10
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/10240-10495.pbf",
+      "kind": "glyph-range",
+      "start": 10240,
+      "end": 10495,
+      "bytes": 41,
+      "sha256": "84EFCCB69A2B962AC61719267137B7971A9A52F6E56CD5CDF32EC7A6F77110A5",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/10496-10751.pbf",
+      "kind": "glyph-range",
+      "start": 10496,
+      "end": 10751,
+      "bytes": 41,
+      "sha256": "18F81DBE5C0EDC15856CC75858E3B928ACB87B3E5FC9DD1F24E6123C2964C32A",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/10752-11007.pbf",
+      "kind": "glyph-range",
+      "start": 10752,
+      "end": 11007,
+      "bytes": 41,
+      "sha256": "36079556B811E840F16DC103D76FBC383BBBC36737AA308F4DE2690467439037",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/11008-11263.pbf",
+      "kind": "glyph-range",
+      "start": 11008,
+      "end": 11263,
+      "bytes": 41,
+      "sha256": "3A89EDF01646C1EFE766577F2FD8289AE9C982388D4C3CAB09BA768D95C537D3",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/11264-11519.pbf",
+      "kind": "glyph-range",
+      "start": 11264,
+      "end": 11519,
+      "bytes": 6617,
+      "sha256": "3C06C1D8F0867E6F8A3C60246AA6DC50E90B0338FB172EE9AC02070FAB9274B6",
+      "glyphCount": 17
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/11520-11775.pbf",
+      "kind": "glyph-range",
+      "start": 11520,
+      "end": 11775,
+      "bytes": 41,
+      "sha256": "428886C33B9D3AE0E6970C443244E29600AD078321A368310C0B34BB6B5EE2C8",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/11776-12031.pbf",
+      "kind": "glyph-range",
+      "start": 11776,
+      "end": 12031,
+      "bytes": 181,
+      "sha256": "8F4B67142C94C346D70F412DE5C2A350FF8957D4057A89C7E97D9E57F766E4B0",
+      "glyphCount": 1
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/12032-12287.pbf",
+      "kind": "glyph-range",
+      "start": 12032,
+      "end": 12287,
+      "bytes": 41,
+      "sha256": "AA161092576107A233B02E97B94C0FDB3A591863372D0D99D894F4A2B9FB57E2",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/12288-12543.pbf",
+      "kind": "glyph-range",
+      "start": 12288,
+      "end": 12543,
+      "bytes": 41,
+      "sha256": "061BDB95097A84DC021A57E80B0324D5513B781C72E9FC60C54137182F5C27B4",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/12544-12799.pbf",
+      "kind": "glyph-range",
+      "start": 12544,
+      "end": 12799,
+      "bytes": 41,
+      "sha256": "942C76C57B03544CC53822595CF5D4A78D6FAC10B74BD13175BD075110D486A4",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/12800-13055.pbf",
+      "kind": "glyph-range",
+      "start": 12800,
+      "end": 13055,
+      "bytes": 41,
+      "sha256": "CDDFB2CF5F67D46EA49845535AE840FA506D25C084294A7C5D3CB49CDF088A97",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/13056-13311.pbf",
+      "kind": "glyph-range",
+      "start": 13056,
+      "end": 13311,
+      "bytes": 41,
+      "sha256": "771D8D2ACA97B603D02CC0FD258DB798D118B1610B8B6002A66910B7EEDEB150",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/13312-13567.pbf",
+      "kind": "glyph-range",
+      "start": 13312,
+      "end": 13567,
+      "bytes": 41,
+      "sha256": "D5B46001BA536971087C0640C06690CFD9AAC0FBC49D52104EF8C89785A8CFC7",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/13568-13823.pbf",
+      "kind": "glyph-range",
+      "start": 13568,
+      "end": 13823,
+      "bytes": 41,
+      "sha256": "C5289ADAB90A48842632D914D66544087FBBC5347C8F14FA5ACC1C963A3AA412",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/13824-14079.pbf",
+      "kind": "glyph-range",
+      "start": 13824,
+      "end": 14079,
+      "bytes": 41,
+      "sha256": "0C5255AE6BA1942A6B8C44D35580A048C1C2F06FEE973822662E5D39A7D05AC2",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/14080-14335.pbf",
+      "kind": "glyph-range",
+      "start": 14080,
+      "end": 14335,
+      "bytes": 41,
+      "sha256": "4F9B0A3E3C4EC9EE446263D17361D0990902B37336384BB12C78F0ACA2BE9E68",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/14336-14591.pbf",
+      "kind": "glyph-range",
+      "start": 14336,
+      "end": 14591,
+      "bytes": 41,
+      "sha256": "960AD44888ADD3BF16A6EF4663EFCD48A3D5C66687700D7BB783167782E3F8FC",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/14592-14847.pbf",
+      "kind": "glyph-range",
+      "start": 14592,
+      "end": 14847,
+      "bytes": 41,
+      "sha256": "D806AA53F371B8654697DD4B7A5D14974C0B48FEC9F36EE5288DA44E071608C9",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/14848-15103.pbf",
+      "kind": "glyph-range",
+      "start": 14848,
+      "end": 15103,
+      "bytes": 41,
+      "sha256": "B4440625647B53A12EF83F51DC1F26D235D75CE78C06E9005F3B4C8E2BCCD0F7",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/15104-15359.pbf",
+      "kind": "glyph-range",
+      "start": 15104,
+      "end": 15359,
+      "bytes": 41,
+      "sha256": "A110B5BB44599C604562AD528BF8A46832E9C10D5D7B3C68307DAF8B555AA4E7",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/15360-15615.pbf",
+      "kind": "glyph-range",
+      "start": 15360,
+      "end": 15615,
+      "bytes": 41,
+      "sha256": "D0BB54A07A07C23BFABD4E5D576FA308D3396D7F18DB99FEAE7220D7FF7A9538",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/15616-15871.pbf",
+      "kind": "glyph-range",
+      "start": 15616,
+      "end": 15871,
+      "bytes": 41,
+      "sha256": "05B6070B9304A141B0C1EAE5122F15A5EB0BC83C3682A081EBE93EC611D7EAE5",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/15872-16127.pbf",
+      "kind": "glyph-range",
+      "start": 15872,
+      "end": 16127,
+      "bytes": 41,
+      "sha256": "F10C14DF9E426D76CBA050B1090C9899DCF63935A09B35BCECA162E5934B901A",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/16128-16383.pbf",
+      "kind": "glyph-range",
+      "start": 16128,
+      "end": 16383,
+      "bytes": 41,
+      "sha256": "477FA782D168CCF7F2D22C4954632900A217443E9BD5824CB7A8FAF0446E9A42",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/16384-16639.pbf",
+      "kind": "glyph-range",
+      "start": 16384,
+      "end": 16639,
+      "bytes": 41,
+      "sha256": "BF486414E1AE604BA1ECA47751E2052ADCD51F042F3A63949C450FF6F565AD7B",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/16640-16895.pbf",
+      "kind": "glyph-range",
+      "start": 16640,
+      "end": 16895,
+      "bytes": 41,
+      "sha256": "5560AB7C0E88FAD741BC00CD7D678E4A124F27ED2E2CC14E5C4BB811EE5FB78F",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/16896-17151.pbf",
+      "kind": "glyph-range",
+      "start": 16896,
+      "end": 17151,
+      "bytes": 41,
+      "sha256": "0D83C8C4116BBF15DAA34D031972A722369425A0CA2BE75C33434C573290C3D6",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/17152-17407.pbf",
+      "kind": "glyph-range",
+      "start": 17152,
+      "end": 17407,
+      "bytes": 41,
+      "sha256": "D10619DD698E2068A07AE7A703E697D1F6C62A6CAF73A122F98D769F53368497",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/17408-17663.pbf",
+      "kind": "glyph-range",
+      "start": 17408,
+      "end": 17663,
+      "bytes": 41,
+      "sha256": "8A7B0874847E13189A17AD131C863C238405B1681DCA9F32756FC4CEBF71D4AD",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/17664-17919.pbf",
+      "kind": "glyph-range",
+      "start": 17664,
+      "end": 17919,
+      "bytes": 41,
+      "sha256": "D9E22080261BC64AFE895535E6C91F44B9E1F54411D43E9C40B72CF7842D0DD5",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/17920-18175.pbf",
+      "kind": "glyph-range",
+      "start": 17920,
+      "end": 18175,
+      "bytes": 41,
+      "sha256": "A04834958E34998E87C98E3812969D20BAD717A84E87014D1CABBBD5065D854F",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/18176-18431.pbf",
+      "kind": "glyph-range",
+      "start": 18176,
+      "end": 18431,
+      "bytes": 41,
+      "sha256": "A02D345699F4EA192A01CEAD6D474BE19235E69392DFDD3F28F1104F6F3623A0",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/18432-18687.pbf",
+      "kind": "glyph-range",
+      "start": 18432,
+      "end": 18687,
+      "bytes": 41,
+      "sha256": "BEC87FEE77DBD4EFD595262CB597E51F9B4EA2263A2439883F462813E0370158",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/18688-18943.pbf",
+      "kind": "glyph-range",
+      "start": 18688,
+      "end": 18943,
+      "bytes": 41,
+      "sha256": "2B5A093F4BD4B500AAFB839BB9A929D0F7529BB947357D12C45DDCAB8C0E9E88",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/18944-19199.pbf",
+      "kind": "glyph-range",
+      "start": 18944,
+      "end": 19199,
+      "bytes": 41,
+      "sha256": "C4A0BCCC7C2A50EC0DBB655D8654845F4723892B04FF7297E37D327F3BF00B57",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/19200-19455.pbf",
+      "kind": "glyph-range",
+      "start": 19200,
+      "end": 19455,
+      "bytes": 41,
+      "sha256": "F248A4F4FAF8C7D05D788F67A2227BA38CD95F4BD5461ACF366B41D617E90B4A",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/19456-19711.pbf",
+      "kind": "glyph-range",
+      "start": 19456,
+      "end": 19711,
+      "bytes": 41,
+      "sha256": "B098A49B6AF22AB1D5E0C9D89111715DE4B19980816955570A6B64DAE3C4C9D4",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/19712-19967.pbf",
+      "kind": "glyph-range",
+      "start": 19712,
+      "end": 19967,
+      "bytes": 41,
+      "sha256": "798668A1EA09A549B9116FA8E09CA7F7001C0939FADA6607354D428EE77B902F",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/19968-20223.pbf",
+      "kind": "glyph-range",
+      "start": 19968,
+      "end": 20223,
+      "bytes": 41,
+      "sha256": "6DA6BDDAB80916942427E16172E80E673419AEFD0DEF22DE052350C4CE7AAC04",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/20224-20479.pbf",
+      "kind": "glyph-range",
+      "start": 20224,
+      "end": 20479,
+      "bytes": 41,
+      "sha256": "14452B1EF67ED4157D96A28A84AD493B5003FADA43062E6D78EDA5B760286517",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/20480-20735.pbf",
+      "kind": "glyph-range",
+      "start": 20480,
+      "end": 20735,
+      "bytes": 41,
+      "sha256": "2BA2EC3E72A9A5F794909FECF2786CC964F35932808D2E9CE78CEA696117F4F5",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/20736-20991.pbf",
+      "kind": "glyph-range",
+      "start": 20736,
+      "end": 20991,
+      "bytes": 41,
+      "sha256": "86DE192DA3B086E6ACEA867C048D7E2174E6DFEA7822674BCE1A7F4F5246D1F3",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/20992-21247.pbf",
+      "kind": "glyph-range",
+      "start": 20992,
+      "end": 21247,
+      "bytes": 41,
+      "sha256": "52D516C1C69C0B6CB3AFFD7B62640071F18F08FD53AB5D871B3523E27AEA87D9",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/21248-21503.pbf",
+      "kind": "glyph-range",
+      "start": 21248,
+      "end": 21503,
+      "bytes": 41,
+      "sha256": "72BA8FE305283B057239D9FA7DE3988488CC45D039D5B4CA4585AABE134EC414",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/21504-21759.pbf",
+      "kind": "glyph-range",
+      "start": 21504,
+      "end": 21759,
+      "bytes": 41,
+      "sha256": "2DCDD888409FDC7E1E54651ABF9104177B03A7A5453103ECC7D7D176BC476F0E",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/21760-22015.pbf",
+      "kind": "glyph-range",
+      "start": 21760,
+      "end": 22015,
+      "bytes": 41,
+      "sha256": "A1186D4ACFA063F6B19403BAC2013C5E3AB6CE0FF70061F86526FE5D952939F8",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/22016-22271.pbf",
+      "kind": "glyph-range",
+      "start": 22016,
+      "end": 22271,
+      "bytes": 41,
+      "sha256": "92F5FD1C7165DD3DFCBCBE6A0C77FEA80639D56381D69AD40F1C12491B57C8DE",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/22272-22527.pbf",
+      "kind": "glyph-range",
+      "start": 22272,
+      "end": 22527,
+      "bytes": 41,
+      "sha256": "0662E7D24C29641344532CA9530FAE6B4D75B7275F22F09A7A4B89E834547189",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/22528-22783.pbf",
+      "kind": "glyph-range",
+      "start": 22528,
+      "end": 22783,
+      "bytes": 41,
+      "sha256": "798642400719519D4A61235E587BDE6EA7D92389FE737BF7DEACFC35F4321A47",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/22784-23039.pbf",
+      "kind": "glyph-range",
+      "start": 22784,
+      "end": 23039,
+      "bytes": 41,
+      "sha256": "658D8793A778C0E7DC3D6A8DCC69758D9FD66538FD41585E4C02CED8F38EE954",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/23040-23295.pbf",
+      "kind": "glyph-range",
+      "start": 23040,
+      "end": 23295,
+      "bytes": 41,
+      "sha256": "E33C8C456BF313FDD6ADF3EBB9997AA7059A3239DDDC149489739353F8A65096",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/23296-23551.pbf",
+      "kind": "glyph-range",
+      "start": 23296,
+      "end": 23551,
+      "bytes": 41,
+      "sha256": "1C553E95E924DFDF05FCB3FA3DC32AAB7B35DFBD4CCB2A271F3A540F67B3A395",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/23552-23807.pbf",
+      "kind": "glyph-range",
+      "start": 23552,
+      "end": 23807,
+      "bytes": 41,
+      "sha256": "D514DD464BF99921FA61DC4A08772E431D791AF95953E5A4C6AC3FFAB3445AEC",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/23808-24063.pbf",
+      "kind": "glyph-range",
+      "start": 23808,
+      "end": 24063,
+      "bytes": 41,
+      "sha256": "DA3C5192B67AE943E3B42B80CD8FC3724DE03A9358957F09E82361004A8D5CDF",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/24064-24319.pbf",
+      "kind": "glyph-range",
+      "start": 24064,
+      "end": 24319,
+      "bytes": 41,
+      "sha256": "F51E82EF6D09725A02A23939453CE87421CF3BAD3D11320B04CCA48E558EBE52",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/24320-24575.pbf",
+      "kind": "glyph-range",
+      "start": 24320,
+      "end": 24575,
+      "bytes": 41,
+      "sha256": "163789E712448D5990A3B0452C3E7CC9046D09D7BE52E7B8ED5EB3863B8D9F3D",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/24576-24831.pbf",
+      "kind": "glyph-range",
+      "start": 24576,
+      "end": 24831,
+      "bytes": 41,
+      "sha256": "458E510A3760777FE651D0E4EA1E9279280051693F640AECC56A13407E5A491D",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/24832-25087.pbf",
+      "kind": "glyph-range",
+      "start": 24832,
+      "end": 25087,
+      "bytes": 41,
+      "sha256": "C768D0A27F1A16D5247A140D2C5FD941233EF629F6F826ABA4866957AAF2682C",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/25088-25343.pbf",
+      "kind": "glyph-range",
+      "start": 25088,
+      "end": 25343,
+      "bytes": 41,
+      "sha256": "E18C15570E6CF81263ACDB9E8FECCD0E9550056FF1FE87D572E54BBF2BFE1794",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/25344-25599.pbf",
+      "kind": "glyph-range",
+      "start": 25344,
+      "end": 25599,
+      "bytes": 41,
+      "sha256": "9DD458C805B114CE9DA7ED16C307CA052491825BCDF64B06852CCB287B92091B",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/25600-25855.pbf",
+      "kind": "glyph-range",
+      "start": 25600,
+      "end": 25855,
+      "bytes": 41,
+      "sha256": "3350E4FF6726F3C4FFE38A9F2FE7E671F26B30789D1ED582BFDF316ADD74F9A6",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/25856-26111.pbf",
+      "kind": "glyph-range",
+      "start": 25856,
+      "end": 26111,
+      "bytes": 41,
+      "sha256": "761F74E84ACF1858DFDA667A0AF153DA3524E2FF81D17216184711ED05E634F8",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/26112-26367.pbf",
+      "kind": "glyph-range",
+      "start": 26112,
+      "end": 26367,
+      "bytes": 41,
+      "sha256": "38251547513BAF1362BBF584AE71DD02B217D54BBE9DDEBFF939957D08D589B5",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/26368-26623.pbf",
+      "kind": "glyph-range",
+      "start": 26368,
+      "end": 26623,
+      "bytes": 41,
+      "sha256": "4F1A366937037DDABAF1D873DBB7805A4816D8E7F6681B20220D56F8E996EF17",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/26624-26879.pbf",
+      "kind": "glyph-range",
+      "start": 26624,
+      "end": 26879,
+      "bytes": 41,
+      "sha256": "05428F8F0AC348BAF70AAB41A4DB56679C0D2D9398FA7D309843A18A4A9CECEA",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/26880-27135.pbf",
+      "kind": "glyph-range",
+      "start": 26880,
+      "end": 27135,
+      "bytes": 41,
+      "sha256": "0B0DFDC7E9B35C9496F180656783EA065AE988954B6B0E8A21BC2B1D82AA7F46",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/27136-27391.pbf",
+      "kind": "glyph-range",
+      "start": 27136,
+      "end": 27391,
+      "bytes": 41,
+      "sha256": "66ECC729C567101649E3136A5A8F1ECB8623A3F35360EB6F12A0B0214AFF7C09",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/27392-27647.pbf",
+      "kind": "glyph-range",
+      "start": 27392,
+      "end": 27647,
+      "bytes": 41,
+      "sha256": "EDEFDEF436F9508977792702C5900D8CA7278A69DEF04B3BE5A5798A91AD8BE0",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/27648-27903.pbf",
+      "kind": "glyph-range",
+      "start": 27648,
+      "end": 27903,
+      "bytes": 41,
+      "sha256": "565F76C17418BB675EFC202E9DA158E6ED9EF5375129662783117AF645C52CAA",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/27904-28159.pbf",
+      "kind": "glyph-range",
+      "start": 27904,
+      "end": 28159,
+      "bytes": 41,
+      "sha256": "D1B4BEB7CEE8DE11222D9EF2BB852C92115CAD6C24C6D4C7CCD90936AF8E6291",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/28160-28415.pbf",
+      "kind": "glyph-range",
+      "start": 28160,
+      "end": 28415,
+      "bytes": 41,
+      "sha256": "B627780A778B7A99A100378302050417C44123ADC114781C17BF7BF95EC06DEA",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/28416-28671.pbf",
+      "kind": "glyph-range",
+      "start": 28416,
+      "end": 28671,
+      "bytes": 41,
+      "sha256": "8B9092692F0EB2813B7A3974C334FCDC4E579E41F87EA87F7C3B43D91A4F1DE1",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/28672-28927.pbf",
+      "kind": "glyph-range",
+      "start": 28672,
+      "end": 28927,
+      "bytes": 41,
+      "sha256": "E0C0C14BD9BACD30C325A0A56EB86EF088070E84B9107647F6E18FB2E30BA7F1",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/28928-29183.pbf",
+      "kind": "glyph-range",
+      "start": 28928,
+      "end": 29183,
+      "bytes": 41,
+      "sha256": "2C635D2009C8D1194DB50D78FB7FF7A7AB3E4E51017A8404D783CC100493FCC1",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/29184-29439.pbf",
+      "kind": "glyph-range",
+      "start": 29184,
+      "end": 29439,
+      "bytes": 41,
+      "sha256": "7D37F5ED3993D722A26C9A2BCECBF855E516563AC2D87C8540EB47F82FF55DB0",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/29440-29695.pbf",
+      "kind": "glyph-range",
+      "start": 29440,
+      "end": 29695,
+      "bytes": 41,
+      "sha256": "461C34DA8D02E42758576E9880CCF3F8CBEE7329C8BDD301E3231A09AB1A06C3",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/29696-29951.pbf",
+      "kind": "glyph-range",
+      "start": 29696,
+      "end": 29951,
+      "bytes": 41,
+      "sha256": "50FA6C5AECAA9DBC55FCF35C5B41390CD2DD201C670CAA1D6AD8979E01E82865",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/29952-30207.pbf",
+      "kind": "glyph-range",
+      "start": 29952,
+      "end": 30207,
+      "bytes": 41,
+      "sha256": "3F387F1F4AE338BE4D79DFF9E918486E24E0B090F707CFE74C868E5480C15DC1",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/30208-30463.pbf",
+      "kind": "glyph-range",
+      "start": 30208,
+      "end": 30463,
+      "bytes": 41,
+      "sha256": "E08C633FE634AB9063A9D290CF771717197809F6AB0C5DC05ECE6A93D2F0143D",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/30464-30719.pbf",
+      "kind": "glyph-range",
+      "start": 30464,
+      "end": 30719,
+      "bytes": 41,
+      "sha256": "3A52E1CB5C58CEB845CA7900388EAD5B4518562BC487DF5478AA7FD4E2616AEE",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/30720-30975.pbf",
+      "kind": "glyph-range",
+      "start": 30720,
+      "end": 30975,
+      "bytes": 41,
+      "sha256": "8CEBD1C8103F75967A3971D7B1D06464AAF4DC3B61B01BBF7652F3906C0A3803",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/30976-31231.pbf",
+      "kind": "glyph-range",
+      "start": 30976,
+      "end": 31231,
+      "bytes": 41,
+      "sha256": "1D629AAB92D1299207E6E5C199C8BBA5E771D90FA40E7F1AFCFB453E45A7F32E",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/31232-31487.pbf",
+      "kind": "glyph-range",
+      "start": 31232,
+      "end": 31487,
+      "bytes": 41,
+      "sha256": "CAE8F1577547C6CD79B4F23E100D850DA48FB15447F543F08AB5C97911160137",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/31488-31743.pbf",
+      "kind": "glyph-range",
+      "start": 31488,
+      "end": 31743,
+      "bytes": 41,
+      "sha256": "E5268B0DE3B17F418064AF8E0E294C0760C7E83420AC71620FE21AE9FAB14A36",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/31744-31999.pbf",
+      "kind": "glyph-range",
+      "start": 31744,
+      "end": 31999,
+      "bytes": 41,
+      "sha256": "890D1376D09B19992816A80BA385369B187C0D09BAC8B3216123A34A17E08932",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/32000-32255.pbf",
+      "kind": "glyph-range",
+      "start": 32000,
+      "end": 32255,
+      "bytes": 41,
+      "sha256": "94F42A697DEE6CA62FF2E78D99B955BE862B03317C27C7755792C3E4BC5D3D6F",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/32256-32511.pbf",
+      "kind": "glyph-range",
+      "start": 32256,
+      "end": 32511,
+      "bytes": 41,
+      "sha256": "25D718C7F09E9C14E1B0725ABF6EE66F99F2882FA07D2BD55C02710259A7B40D",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/32512-32767.pbf",
+      "kind": "glyph-range",
+      "start": 32512,
+      "end": 32767,
+      "bytes": 41,
+      "sha256": "50EC043C15DE1AE9525AE5F2520C69FEC7F57BFE774A1AB932241721F5FC72E7",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/32768-33023.pbf",
+      "kind": "glyph-range",
+      "start": 32768,
+      "end": 33023,
+      "bytes": 41,
+      "sha256": "59DFFE5378047C2C3CA269BD06650741BA267B32DE477B4ECC5EAC9018CBE9C6",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/33024-33279.pbf",
+      "kind": "glyph-range",
+      "start": 33024,
+      "end": 33279,
+      "bytes": 41,
+      "sha256": "1633CDC68897FB5C5B1F8CFF74E9331484B6A70F05C254961C25C71391F6A297",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/33280-33535.pbf",
+      "kind": "glyph-range",
+      "start": 33280,
+      "end": 33535,
+      "bytes": 41,
+      "sha256": "19E156254111D2A38296A5D440B018BBC9EFA04293BB2FD951EDD690ECD23F12",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/33536-33791.pbf",
+      "kind": "glyph-range",
+      "start": 33536,
+      "end": 33791,
+      "bytes": 41,
+      "sha256": "E69C428620EB92ACA0EBFCB909846F5910B06256F5EA4D5984347B7F28E7E107",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/33792-34047.pbf",
+      "kind": "glyph-range",
+      "start": 33792,
+      "end": 34047,
+      "bytes": 41,
+      "sha256": "0AEAFBECD5589FE32A19E78911986E4320F91AEF83B3D0B5E08FFD93C9909AD2",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/34048-34303.pbf",
+      "kind": "glyph-range",
+      "start": 34048,
+      "end": 34303,
+      "bytes": 41,
+      "sha256": "44FD2AA02801B7A18D88DDC725DEE08738304A0686538B50A2A63DA211ADD476",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/34304-34559.pbf",
+      "kind": "glyph-range",
+      "start": 34304,
+      "end": 34559,
+      "bytes": 41,
+      "sha256": "01B1C6D42B14E44A308DA4FD6A313614DF93A4566B153A34795FC4477763E137",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/34560-34815.pbf",
+      "kind": "glyph-range",
+      "start": 34560,
+      "end": 34815,
+      "bytes": 41,
+      "sha256": "D41D7D1E85D81DF5DF90BAE37A518B08DEF2ED5F7D09694903F0B1FFDFC95917",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/34816-35071.pbf",
+      "kind": "glyph-range",
+      "start": 34816,
+      "end": 35071,
+      "bytes": 41,
+      "sha256": "53AFCF5BE339E50A727F717634B5758B1B370452C992A8FD28E152EEE89DBCA7",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/35072-35327.pbf",
+      "kind": "glyph-range",
+      "start": 35072,
+      "end": 35327,
+      "bytes": 41,
+      "sha256": "BC9502027BAF15B9F9D39B8F321879BB722DB3A014E6FFD67FD3086A41F40832",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/35328-35583.pbf",
+      "kind": "glyph-range",
+      "start": 35328,
+      "end": 35583,
+      "bytes": 41,
+      "sha256": "D6662477656D1BB5AEED869C55EE877435D027F055DBEC354491AE4035C13F31",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/35584-35839.pbf",
+      "kind": "glyph-range",
+      "start": 35584,
+      "end": 35839,
+      "bytes": 41,
+      "sha256": "F3C9DA0F7B7ECCDCFA3BB4D53810408B6CC8792CC6C8B9272483410A17A4FB03",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/35840-36095.pbf",
+      "kind": "glyph-range",
+      "start": 35840,
+      "end": 36095,
+      "bytes": 41,
+      "sha256": "05BBAF79264FFEEAC454A25F31B5A9DE9E2695B09F326F9F2DC5199EB20C8560",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/36096-36351.pbf",
+      "kind": "glyph-range",
+      "start": 36096,
+      "end": 36351,
+      "bytes": 41,
+      "sha256": "9349C9CCF6BEDC38A760076021E88B622969970C131A8B100E1A53FEDDFABC7F",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/36352-36607.pbf",
+      "kind": "glyph-range",
+      "start": 36352,
+      "end": 36607,
+      "bytes": 41,
+      "sha256": "484AD66AEF2B6716E81B33EA605B3F69721DB28BFCA7778DA08652E84A5373F3",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/36608-36863.pbf",
+      "kind": "glyph-range",
+      "start": 36608,
+      "end": 36863,
+      "bytes": 41,
+      "sha256": "02EC823481E268815756EE4B3955568B38A6306B1C7B4CDE110D5A210E567715",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/36864-37119.pbf",
+      "kind": "glyph-range",
+      "start": 36864,
+      "end": 37119,
+      "bytes": 41,
+      "sha256": "156ED130716170CFBA2943FE8155775F07B945A5AEFF9A61DB986244F3A886DE",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/37120-37375.pbf",
+      "kind": "glyph-range",
+      "start": 37120,
+      "end": 37375,
+      "bytes": 41,
+      "sha256": "16378775D55543F2423EA739815C470A6F5EFB2E06AEF583E1D6263588F1F723",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/37376-37631.pbf",
+      "kind": "glyph-range",
+      "start": 37376,
+      "end": 37631,
+      "bytes": 41,
+      "sha256": "C9A03972487198D2629BB263A57DB1870105E4444B952D5C413F4C16EC0ACD0E",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/37632-37887.pbf",
+      "kind": "glyph-range",
+      "start": 37632,
+      "end": 37887,
+      "bytes": 41,
+      "sha256": "3C172E274B5044F90C818B66BAACD95FF57F1DB3922E7414BE4B368B3260B200",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/37888-38143.pbf",
+      "kind": "glyph-range",
+      "start": 37888,
+      "end": 38143,
+      "bytes": 41,
+      "sha256": "820195C47C2F8C22FB27793F5402DD00752D004A808AC739D49A50260BDB384F",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/38144-38399.pbf",
+      "kind": "glyph-range",
+      "start": 38144,
+      "end": 38399,
+      "bytes": 41,
+      "sha256": "F4DADD136D77594F36DB8FDEC4C52DCBA9C42A7B17F02DE463A8FD26AFBBE564",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/38400-38655.pbf",
+      "kind": "glyph-range",
+      "start": 38400,
+      "end": 38655,
+      "bytes": 41,
+      "sha256": "D8488C9674C621ABC9A63B14278BF5AFA25BAEFDA7595888E350C37771B203A8",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/38656-38911.pbf",
+      "kind": "glyph-range",
+      "start": 38656,
+      "end": 38911,
+      "bytes": 41,
+      "sha256": "F133A94497C97E8A57B739C69188B7474EEF45BC10371F96E3F1F38DB6B1A287",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/38912-39167.pbf",
+      "kind": "glyph-range",
+      "start": 38912,
+      "end": 39167,
+      "bytes": 41,
+      "sha256": "1F200E1242758D483D071752B747666E1B35066A33DDCB88BC9A654DBB2ABE8B",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/39168-39423.pbf",
+      "kind": "glyph-range",
+      "start": 39168,
+      "end": 39423,
+      "bytes": 41,
+      "sha256": "0856BC0A63A3C46A340D0492D9DACB56C1995527DB426644FA1CE8B349D68342",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/39424-39679.pbf",
+      "kind": "glyph-range",
+      "start": 39424,
+      "end": 39679,
+      "bytes": 41,
+      "sha256": "8C9AB285F225E1082E7F042CC5058EE1186F6938795D91DCC0BEEF154186AA06",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/39680-39935.pbf",
+      "kind": "glyph-range",
+      "start": 39680,
+      "end": 39935,
+      "bytes": 41,
+      "sha256": "443C35F3E864E1740C2D01F8311D54DAFC6DE771EAA03D6EEF1125626ACF03D8",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/39936-40191.pbf",
+      "kind": "glyph-range",
+      "start": 39936,
+      "end": 40191,
+      "bytes": 41,
+      "sha256": "11E0D35B95AE9E5CA412C3D305C824833036C74267032D009790E004322FBAE3",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/40192-40447.pbf",
+      "kind": "glyph-range",
+      "start": 40192,
+      "end": 40447,
+      "bytes": 41,
+      "sha256": "41EC3C2F387C8DE25EB4E80FA2A97BBAA03108C7E80E5490142743AFCBAF229D",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/40448-40703.pbf",
+      "kind": "glyph-range",
+      "start": 40448,
+      "end": 40703,
+      "bytes": 41,
+      "sha256": "C5866C19464BAD7E3AE3A9B560B634D2C2AF38B5E0F64C5D6D436B4E7025236B",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/40704-40959.pbf",
+      "kind": "glyph-range",
+      "start": 40704,
+      "end": 40959,
+      "bytes": 41,
+      "sha256": "A5C32F08CBE1E7A428E0F2AC3BBB81D5022E58A9D936D13F25ADCD8B5675A364",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/40960-41215.pbf",
+      "kind": "glyph-range",
+      "start": 40960,
+      "end": 41215,
+      "bytes": 41,
+      "sha256": "8E46CEDFB5150BA4C7C78585D9B475C974F08F77A9464945419BF4798E7F5190",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/41216-41471.pbf",
+      "kind": "glyph-range",
+      "start": 41216,
+      "end": 41471,
+      "bytes": 41,
+      "sha256": "01B99DED6845B66A73033901AC624748B07380E33A9DB4C97705D80BEAB252FB",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/41472-41727.pbf",
+      "kind": "glyph-range",
+      "start": 41472,
+      "end": 41727,
+      "bytes": 41,
+      "sha256": "8796D0F6C0BC446CC7BC54CCBA031443356C57D5A9092E78FB6D68E417257C5C",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/41728-41983.pbf",
+      "kind": "glyph-range",
+      "start": 41728,
+      "end": 41983,
+      "bytes": 41,
+      "sha256": "B83BED9916DE76DB74C8E60F9BED2C9FB2043D7906F32E9D382E0ABC5AB17E32",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/41984-42239.pbf",
+      "kind": "glyph-range",
+      "start": 41984,
+      "end": 42239,
+      "bytes": 41,
+      "sha256": "0EBCCFB3737BBC402E799AB2FA51EA468580EA828BDC6DEE22D00C492CFEA41C",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/42240-42495.pbf",
+      "kind": "glyph-range",
+      "start": 42240,
+      "end": 42495,
+      "bytes": 41,
+      "sha256": "EC66860288779D61F3F8F3475D1E063F450C7276E0D23C9A5860D6911D99261D",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/42496-42751.pbf",
+      "kind": "glyph-range",
+      "start": 42496,
+      "end": 42751,
+      "bytes": 41,
+      "sha256": "667525BE7D2FFB7AF092C71953A80399121E8907C76CEDA71D43008971973ACC",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/42752-43007.pbf",
+      "kind": "glyph-range",
+      "start": 42752,
+      "end": 43007,
+      "bytes": 1316,
+      "sha256": "C244BC5A9E20175A1FF4732942BA2F3E74A1A7D7542DB7537BC523EFC537C75A",
+      "glyphCount": 6
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/43008-43263.pbf",
+      "kind": "glyph-range",
+      "start": 43008,
+      "end": 43263,
+      "bytes": 41,
+      "sha256": "D7B7436EA12DABC10551A2DFAA12A221354DD50D31CE9A1B7A5E796DC0F7C9BB",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/43264-43519.pbf",
+      "kind": "glyph-range",
+      "start": 43264,
+      "end": 43519,
+      "bytes": 41,
+      "sha256": "EA69A83C38078AC08ABDA28EE5D2D4634EFFE63AB2C155E8C7B1D52D1E17A056",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/43520-43775.pbf",
+      "kind": "glyph-range",
+      "start": 43520,
+      "end": 43775,
+      "bytes": 41,
+      "sha256": "A493AC90E9E3317A459E670E67D6D0C5B400415A8D22A80DE5D46B058B242CAE",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/43776-44031.pbf",
+      "kind": "glyph-range",
+      "start": 43776,
+      "end": 44031,
+      "bytes": 41,
+      "sha256": "1414C178B9910C1180C72FDCA749589E9385992BD8400ABC0698307EA78A954C",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/44032-44287.pbf",
+      "kind": "glyph-range",
+      "start": 44032,
+      "end": 44287,
+      "bytes": 41,
+      "sha256": "0ECF64C28678B310D4C362FFEBE48C1226C5825009F4B4088A8C697D7D42FB49",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/44288-44543.pbf",
+      "kind": "glyph-range",
+      "start": 44288,
+      "end": 44543,
+      "bytes": 41,
+      "sha256": "B6FF0B1356629C197417EF533EAB4172D934360E4F2D10C1246E23CB2D5FDA70",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/44544-44799.pbf",
+      "kind": "glyph-range",
+      "start": 44544,
+      "end": 44799,
+      "bytes": 41,
+      "sha256": "7E060B5D0AE3FFDAFFF3AB3663B07550F63557DB935AEB84D4BB5BCCAA210DA9",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/44800-45055.pbf",
+      "kind": "glyph-range",
+      "start": 44800,
+      "end": 45055,
+      "bytes": 41,
+      "sha256": "57BEF08BE42A27BDDA07E6F1B20E71D301A756BC8561E3CCDE6B58F3CDA767C6",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/45056-45311.pbf",
+      "kind": "glyph-range",
+      "start": 45056,
+      "end": 45311,
+      "bytes": 41,
+      "sha256": "BD2C0886058B3FD5737D733674BE7E1C4D13D2CF9CD9DB191396973AAAFFEB7B",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/45312-45567.pbf",
+      "kind": "glyph-range",
+      "start": 45312,
+      "end": 45567,
+      "bytes": 41,
+      "sha256": "477B1337B8DCF5006940FA813000457DB12194AF30EC2ABCB5FC2ED650354530",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/45568-45823.pbf",
+      "kind": "glyph-range",
+      "start": 45568,
+      "end": 45823,
+      "bytes": 41,
+      "sha256": "949CCFB6B75A3554B24C8F06815E47A1216FC426E423E8D617729240762DCC4B",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/45824-46079.pbf",
+      "kind": "glyph-range",
+      "start": 45824,
+      "end": 46079,
+      "bytes": 41,
+      "sha256": "C8F73DE045DF5A05EB68D48EB5F4B92CC6616B753FF76F973E67E8E045497539",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/46080-46335.pbf",
+      "kind": "glyph-range",
+      "start": 46080,
+      "end": 46335,
+      "bytes": 41,
+      "sha256": "730284EF7E9855503A1FF3078D60A61897C1D838ABE7EEE8F69A71A8496F87A5",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/46336-46591.pbf",
+      "kind": "glyph-range",
+      "start": 46336,
+      "end": 46591,
+      "bytes": 41,
+      "sha256": "5686739FAA6BC550BCBFC8D5DA886E893EF34B68D1D4A8748F2B53AAD961E176",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/46592-46847.pbf",
+      "kind": "glyph-range",
+      "start": 46592,
+      "end": 46847,
+      "bytes": 41,
+      "sha256": "EDF5D2F7B3A65FAEE0CDDF87F31751445AA61F417D292675FA5F381D15F9EFD9",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/46848-47103.pbf",
+      "kind": "glyph-range",
+      "start": 46848,
+      "end": 47103,
+      "bytes": 41,
+      "sha256": "6AD60D29D6B95879DDDF71AC1E9E285843FE07223A6E5D85E44191A185FB74C6",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/47104-47359.pbf",
+      "kind": "glyph-range",
+      "start": 47104,
+      "end": 47359,
+      "bytes": 41,
+      "sha256": "50C7239D70D66F540ADDF2A2E07850EB5779FF03D1AE7C395B26D279A8648CC6",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/47360-47615.pbf",
+      "kind": "glyph-range",
+      "start": 47360,
+      "end": 47615,
+      "bytes": 41,
+      "sha256": "AECF645908A288E28D0177BA7C7DCD5F3477473A9C8447FD9909B509D3389DBA",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/47616-47871.pbf",
+      "kind": "glyph-range",
+      "start": 47616,
+      "end": 47871,
+      "bytes": 41,
+      "sha256": "D9838A8C88A9218261056A197519D16BFC7CAD0AC3D9591ADE4B8B62570E7514",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/47872-48127.pbf",
+      "kind": "glyph-range",
+      "start": 47872,
+      "end": 48127,
+      "bytes": 41,
+      "sha256": "D0CE9AD6CE7E8E9956932F3ADCAC844E96F484AE960C7FF1FE61B68BD69B1724",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/48128-48383.pbf",
+      "kind": "glyph-range",
+      "start": 48128,
+      "end": 48383,
+      "bytes": 41,
+      "sha256": "18D59706DA7449CF8E26DBE85A308AB5A8904A0D7629548399F250E12645DC66",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/48384-48639.pbf",
+      "kind": "glyph-range",
+      "start": 48384,
+      "end": 48639,
+      "bytes": 41,
+      "sha256": "90493A9A2A96B571F0C34C75B7901B5D2FE16C051C38BFD45037166E48A55A49",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/48640-48895.pbf",
+      "kind": "glyph-range",
+      "start": 48640,
+      "end": 48895,
+      "bytes": 41,
+      "sha256": "0D58A2F9F7B368994F793E6ED2E898267A33D52FB2831D491FEBF5B9CCD5DDA5",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/48896-49151.pbf",
+      "kind": "glyph-range",
+      "start": 48896,
+      "end": 49151,
+      "bytes": 41,
+      "sha256": "FFB18E2021EEF866E1F026A298F894C800D722C16B0B83AACAB1CD52C770EE19",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/49152-49407.pbf",
+      "kind": "glyph-range",
+      "start": 49152,
+      "end": 49407,
+      "bytes": 41,
+      "sha256": "CA3D22FDBBE0A2CC50DFC3C0164198CDDFFF104076B5673D4DB033472D7FEC42",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/49408-49663.pbf",
+      "kind": "glyph-range",
+      "start": 49408,
+      "end": 49663,
+      "bytes": 41,
+      "sha256": "A1E21B896865D956CDADDBBE06303E41F33FE800300EA83A563A61B4D98D1C8F",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/49664-49919.pbf",
+      "kind": "glyph-range",
+      "start": 49664,
+      "end": 49919,
+      "bytes": 41,
+      "sha256": "50844D3E7AF32FD3DFCAEAF6C1A2DBBFAEAA8A816B3440F30CC479C67E6D3F56",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/49920-50175.pbf",
+      "kind": "glyph-range",
+      "start": 49920,
+      "end": 50175,
+      "bytes": 41,
+      "sha256": "B3C9A4CD66C789902EE53451EAFE4C09A29C8744E2331CC84120F94DD394D957",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/50176-50431.pbf",
+      "kind": "glyph-range",
+      "start": 50176,
+      "end": 50431,
+      "bytes": 41,
+      "sha256": "14981CFDE5C941322E1788185B911063279CCB66E4965263760520E474492C2D",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/50432-50687.pbf",
+      "kind": "glyph-range",
+      "start": 50432,
+      "end": 50687,
+      "bytes": 41,
+      "sha256": "FF59A4DF266F2E356EF67947C7672FB23ED2ACB77059617F8F5F575FFF264C1F",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/50688-50943.pbf",
+      "kind": "glyph-range",
+      "start": 50688,
+      "end": 50943,
+      "bytes": 41,
+      "sha256": "9C57D9FFCB95E46A0901A841BD75C767F192EA14D3EBC32935C914C3EC80251E",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/50944-51199.pbf",
+      "kind": "glyph-range",
+      "start": 50944,
+      "end": 51199,
+      "bytes": 41,
+      "sha256": "9F01397126E516124E62E650D904FDF3A04FE74DC00CA2371A058864D923D31C",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/51200-51455.pbf",
+      "kind": "glyph-range",
+      "start": 51200,
+      "end": 51455,
+      "bytes": 41,
+      "sha256": "DABBD9FEBFA17F0733DD73B114C0ED39D327906B36E89F9B3D245D4AFA948763",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/51456-51711.pbf",
+      "kind": "glyph-range",
+      "start": 51456,
+      "end": 51711,
+      "bytes": 41,
+      "sha256": "45B6E10D27593C4A75016F0CD9C5A492CFCF9030FA9B68DCAC290CE1945B45A5",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/51712-51967.pbf",
+      "kind": "glyph-range",
+      "start": 51712,
+      "end": 51967,
+      "bytes": 41,
+      "sha256": "F2923A5924270F7675E3E0ED7DA704D3505E4541783E98519182A7F2D1377C41",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/51968-52223.pbf",
+      "kind": "glyph-range",
+      "start": 51968,
+      "end": 52223,
+      "bytes": 41,
+      "sha256": "8647B856B20A6FC77A1393640E5ABD7160B9E4C778F66240B92840EA8D0DA0B3",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/52224-52479.pbf",
+      "kind": "glyph-range",
+      "start": 52224,
+      "end": 52479,
+      "bytes": 41,
+      "sha256": "7FEC209077475652D91107AEBF4134A7654EF09ECCC2B2D6C60A5F6DCF42AC75",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/52480-52735.pbf",
+      "kind": "glyph-range",
+      "start": 52480,
+      "end": 52735,
+      "bytes": 41,
+      "sha256": "BD85066E6CFB31A62E7820F69B0DC39A9DAB8B9EB30F2B93A5451D3491EDC508",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/52736-52991.pbf",
+      "kind": "glyph-range",
+      "start": 52736,
+      "end": 52991,
+      "bytes": 41,
+      "sha256": "C1AEB844E32717A71695507207A0A6C08436315B8F3643DA0E412AB9DC71093A",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/52992-53247.pbf",
+      "kind": "glyph-range",
+      "start": 52992,
+      "end": 53247,
+      "bytes": 41,
+      "sha256": "2FF37FEFFCF3D1327F85A40060BA70EA81DB8938882B4BF3A058F34AF028424A",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/53248-53503.pbf",
+      "kind": "glyph-range",
+      "start": 53248,
+      "end": 53503,
+      "bytes": 41,
+      "sha256": "61ED3DC5618AA61A86D3146D47E45D6D0DC693BC7E65310DADCEA3DDE25C7C30",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/53504-53759.pbf",
+      "kind": "glyph-range",
+      "start": 53504,
+      "end": 53759,
+      "bytes": 41,
+      "sha256": "59D41F855786001FF08CA4F769027108EB0B56BF8CCDFF79065AECFC441C517C",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/53760-54015.pbf",
+      "kind": "glyph-range",
+      "start": 53760,
+      "end": 54015,
+      "bytes": 41,
+      "sha256": "7B335A47979BDAB948F6B82F5A314098D59B9D35AF235B170A54D16DA7D3432F",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/54016-54271.pbf",
+      "kind": "glyph-range",
+      "start": 54016,
+      "end": 54271,
+      "bytes": 41,
+      "sha256": "691EE18FE16F228222C21A83D10C5CD7E6CB2444F2C8577E58B157F91ED8A6F6",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/54272-54527.pbf",
+      "kind": "glyph-range",
+      "start": 54272,
+      "end": 54527,
+      "bytes": 41,
+      "sha256": "4EE0AA0B77C125A1FBC1557C3F4F22AC04721EDC3B9E40A10D2A250CE9A50992",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/54528-54783.pbf",
+      "kind": "glyph-range",
+      "start": 54528,
+      "end": 54783,
+      "bytes": 41,
+      "sha256": "D157D6FF983ABE60525468CB9DA9676978D4932FE1BCDCA4AE357BE7BD7AD675",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/54784-55039.pbf",
+      "kind": "glyph-range",
+      "start": 54784,
+      "end": 55039,
+      "bytes": 41,
+      "sha256": "5B5070691FE3DB8913B77043A6EF52C8A7395AB67CFE0AA83D5E8A8D11BC8FFB",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/55040-55295.pbf",
+      "kind": "glyph-range",
+      "start": 55040,
+      "end": 55295,
+      "bytes": 41,
+      "sha256": "85B6B6462CC01D3A88C103C610D9FE7E130E5F032B498B38DF8E5A8E1B4F6D4E",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/55296-55551.pbf",
+      "kind": "glyph-range",
+      "start": 55296,
+      "end": 55551,
+      "bytes": 41,
+      "sha256": "777D9DAE2978AB8537FCFCEC8EBB37FC03423C10CDB86E9F9114F22320AA7324",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/55552-55807.pbf",
+      "kind": "glyph-range",
+      "start": 55552,
+      "end": 55807,
+      "bytes": 41,
+      "sha256": "11FAC0CF64D0726029D37A9DC1DF1930BF232279B2F7071A0239DE5B8ADAC9CA",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/55808-56063.pbf",
+      "kind": "glyph-range",
+      "start": 55808,
+      "end": 56063,
+      "bytes": 41,
+      "sha256": "D08F3AADCAE3EEA584876BCC9065DEB93CFE916EEACD9395A5AF926AF7A55A7E",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/56064-56319.pbf",
+      "kind": "glyph-range",
+      "start": 56064,
+      "end": 56319,
+      "bytes": 41,
+      "sha256": "7B884776EA0A34A628D813F8508A210D23F943A833618031CBAF89C7495F3396",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/56320-56575.pbf",
+      "kind": "glyph-range",
+      "start": 56320,
+      "end": 56575,
+      "bytes": 41,
+      "sha256": "8AFE383FF65F464A24C10D5F435B0D34AC568A613FDF225624EE8AA57791B793",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/56576-56831.pbf",
+      "kind": "glyph-range",
+      "start": 56576,
+      "end": 56831,
+      "bytes": 41,
+      "sha256": "ED263D8F6EEFBC3F53772AE8AEB778F0D7026A71E2D5FC105792CA9E6919EEE4",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/56832-57087.pbf",
+      "kind": "glyph-range",
+      "start": 56832,
+      "end": 57087,
+      "bytes": 41,
+      "sha256": "36BBE5EEC8BE838236DEC76DAEB3AF12647CCF3E6FFA61DA9F65E7C5DCD8990B",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/57088-57343.pbf",
+      "kind": "glyph-range",
+      "start": 57088,
+      "end": 57343,
+      "bytes": 41,
+      "sha256": "0B79106DC6204758BF64399652E3002152C279F1F4AA27662DB43ABACA10B189",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/57344-57599.pbf",
+      "kind": "glyph-range",
+      "start": 57344,
+      "end": 57599,
+      "bytes": 41,
+      "sha256": "B0506C80D5696AE8B6E66A29036F393486946354C6A5BC8781DDD88BED8DD879",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/57600-57855.pbf",
+      "kind": "glyph-range",
+      "start": 57600,
+      "end": 57855,
+      "bytes": 41,
+      "sha256": "12BA1F0155EAEF71D55531206567D39A4219777ADD9A4C62107980AAF5765B92",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/57856-58111.pbf",
+      "kind": "glyph-range",
+      "start": 57856,
+      "end": 58111,
+      "bytes": 41,
+      "sha256": "3AA10CC9F540B8D526EFF17D255FEE4CACE01C617A55686C4629257591F7215E",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/58112-58367.pbf",
+      "kind": "glyph-range",
+      "start": 58112,
+      "end": 58367,
+      "bytes": 41,
+      "sha256": "E9E681DAA4ABF9255350C304CDE2D501ACB0CA6339811D2AD5644768A9D784EF",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/58368-58623.pbf",
+      "kind": "glyph-range",
+      "start": 58368,
+      "end": 58623,
+      "bytes": 41,
+      "sha256": "7073F8F22DDFEC695AFE6C509B81A8923FF9772BDFCCD1A71412D8D8D97F8B3B",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/58624-58879.pbf",
+      "kind": "glyph-range",
+      "start": 58624,
+      "end": 58879,
+      "bytes": 41,
+      "sha256": "DEF31FF5E192FC34C6119C847CC4D2CA4EE9434E445F3AB580B7DCB84E5C0CEA",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/58880-59135.pbf",
+      "kind": "glyph-range",
+      "start": 58880,
+      "end": 59135,
+      "bytes": 41,
+      "sha256": "A2B88BADF03DB032DC87193F3EA3D6AD6984BDBFFA82287CB95839C5340AD196",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/59136-59391.pbf",
+      "kind": "glyph-range",
+      "start": 59136,
+      "end": 59391,
+      "bytes": 41,
+      "sha256": "863BF797B7D59A4FE5773B57049BADE4585D9424D229C8FEF28E07FE39417551",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/59392-59647.pbf",
+      "kind": "glyph-range",
+      "start": 59392,
+      "end": 59647,
+      "bytes": 41,
+      "sha256": "79A585D5203F47CF9E03E887B0CC3BCCEFEBC5007D58F852DFA0ADC0FA3AD813",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/59648-59903.pbf",
+      "kind": "glyph-range",
+      "start": 59648,
+      "end": 59903,
+      "bytes": 41,
+      "sha256": "128FE7E7CA7113E0A8F59AEFC96E304DA6F2568BC8A3F11B0DAFDAE735D5CA7F",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/59904-60159.pbf",
+      "kind": "glyph-range",
+      "start": 59904,
+      "end": 60159,
+      "bytes": 41,
+      "sha256": "246B781EB83AC611D04E3FDA5791A6D9227791B10AF169BF6CB4E76C3D2E6D2A",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/60160-60415.pbf",
+      "kind": "glyph-range",
+      "start": 60160,
+      "end": 60415,
+      "bytes": 41,
+      "sha256": "A762D6B5CCC5FB782F6D76DBDE3C299943F5C662576CF6805196972F35D7DA01",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/60416-60671.pbf",
+      "kind": "glyph-range",
+      "start": 60416,
+      "end": 60671,
+      "bytes": 41,
+      "sha256": "402B7A0AEFFA5640ADE2A27B59456303238F7B32CFD2EB58B97DAE39E63E596F",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/60672-60927.pbf",
+      "kind": "glyph-range",
+      "start": 60672,
+      "end": 60927,
+      "bytes": 41,
+      "sha256": "3B6A636FBB398CE1F8E4CFCA0B22935026D88DB3A4CB8ECDEB8BF2C8CE45DDE3",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/60928-61183.pbf",
+      "kind": "glyph-range",
+      "start": 60928,
+      "end": 61183,
+      "bytes": 41,
+      "sha256": "8F605332EE0D065083A5CAAE556EA2EB0FEA0E1A766046E752CE9D6CF38BF781",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/61184-61439.pbf",
+      "kind": "glyph-range",
+      "start": 61184,
+      "end": 61439,
+      "bytes": 41,
+      "sha256": "DA2DC593490E5DA7C5746C325C75AD69F62F3DA2305D4EFCBD5EFEBBCB0174C2",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/61440-61695.pbf",
+      "kind": "glyph-range",
+      "start": 61440,
+      "end": 61695,
+      "bytes": 41,
+      "sha256": "9383FB6A0AA58BFC37C0A7E11D2BAC53556F9F5A1003A5084D649773E5F16FD0",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/61696-61951.pbf",
+      "kind": "glyph-range",
+      "start": 61696,
+      "end": 61951,
+      "bytes": 41,
+      "sha256": "656D43CA5CF281D1132F28D7340DE78B98E6D1BC0FD71ACBEDB5472E31F3BF19",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/61952-62207.pbf",
+      "kind": "glyph-range",
+      "start": 61952,
+      "end": 62207,
+      "bytes": 41,
+      "sha256": "1EE014613AFFEE280DCD813671D8C372AA90C6A2A78348E975601CB72B3EC7BA",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/62208-62463.pbf",
+      "kind": "glyph-range",
+      "start": 62208,
+      "end": 62463,
+      "bytes": 41,
+      "sha256": "63A5F5C95195554CB5ADE6795C51F54D19BEDBE1569FB782A461B1DC3D727B51",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/62464-62719.pbf",
+      "kind": "glyph-range",
+      "start": 62464,
+      "end": 62719,
+      "bytes": 41,
+      "sha256": "C05047746A7756BE3A3A385BDF8A40731B14DD511CCFCE12E3DD68E89724947C",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/62720-62975.pbf",
+      "kind": "glyph-range",
+      "start": 62720,
+      "end": 62975,
+      "bytes": 41,
+      "sha256": "8E8D637FBE0BEC19BDC4D10B450DC58D5660F89D1DC707B3B725E6DA079AAD28",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/62976-63231.pbf",
+      "kind": "glyph-range",
+      "start": 62976,
+      "end": 63231,
+      "bytes": 41,
+      "sha256": "C771066672005BD3FA6555532BA253D5475711C357EF7AC85483B96D463C19EB",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/63232-63487.pbf",
+      "kind": "glyph-range",
+      "start": 63232,
+      "end": 63487,
+      "bytes": 41,
+      "sha256": "5F8D96C17AF463F1F791B176CE13A557764BCE656B8B0CB494B1BEE1E8DC2147",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/63488-63743.pbf",
+      "kind": "glyph-range",
+      "start": 63488,
+      "end": 63743,
+      "bytes": 612,
+      "sha256": "4912B839EE5E1594521329A909CBADF8B4D03084618B90650FC45D05F7B95BC9",
+      "glyphCount": 1
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/63744-63999.pbf",
+      "kind": "glyph-range",
+      "start": 63744,
+      "end": 63999,
+      "bytes": 41,
+      "sha256": "237DC9AA704CF84E1A4297A437236848F104117CDB61FC323D3FAD38CFDCE698",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/64000-64255.pbf",
+      "kind": "glyph-range",
+      "start": 64000,
+      "end": 64255,
+      "bytes": 41,
+      "sha256": "CBCA2C5C421738E8CE640257A41ACFAD47566E84E83F7179084846667FDDE158",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/64256-64511.pbf",
+      "kind": "glyph-range",
+      "start": 64256,
+      "end": 64511,
+      "bytes": 2488,
+      "sha256": "088A2CE0D06F90BCA4C75FB337DCDBC3CFF1509537E287A154157EC80F3864E9",
+      "glyphCount": 5
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/64512-64767.pbf",
+      "kind": "glyph-range",
+      "start": 64512,
+      "end": 64767,
+      "bytes": 41,
+      "sha256": "37984D00BEC82A78790529CD9B6BF022D7FD98B32831703088ADA2977B2E787C",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/64768-65023.pbf",
+      "kind": "glyph-range",
+      "start": 64768,
+      "end": 65023,
+      "bytes": 41,
+      "sha256": "D7C1A37D852E72702F6313DEBD0AD2536A45CF4AFA113897F7914C59F6B0D6E3",
+      "glyphCount": 0
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/65024-65279.pbf",
+      "kind": "glyph-range",
+      "start": 65024,
+      "end": 65279,
+      "bytes": 784,
+      "sha256": "EBD3AE100D4625AC9527D189D394AB61F10D4333E59FE94AA7F4EA424FDC4C92",
+      "glyphCount": 5
+    },
+    {
+      "path": "glyphs/Iz Offline Latin Regular/65280-65535.pbf",
+      "kind": "glyph-range",
+      "start": 65280,
+      "end": 65535,
+      "bytes": 41,
+      "sha256": "E8858E3788AD85D8230069E5F97367DB3A3CAFBE6A671E7FA8E2E53BF4A449CE",
+      "glyphCount": 0
+    },
+    {
+      "path": "notices/fonts/carlito/OFL.txt",
+      "kind": "notice-or-inventory",
+      "bytes": 4424,
+      "sha256": "58402F82A7C332A700294988FE7554FBB0A63A8D27CCC1EE3BBC640311990A00"
+    },
+    {
+      "path": "notices/fonts/carlito/AUTHORS.txt",
+      "kind": "notice-or-inventory",
+      "bytes": 265,
+      "sha256": "127A5F8F8E10214B4CCE882D921C24D183656FD2220D7AD4185136F3A0EADFD3"
+    },
+    {
+      "path": "notices/fonts/IZ-OFFLINE-LATIN-PROVENANCE.json",
+      "kind": "notice-or-inventory",
+      "bytes": 7921,
+      "sha256": "824BA6FF0D975BAC73583C87E937B266D63036B08204CCA7DAD14EBB47776360"
+    },
+    {
+      "path": "GLYPH-INVENTORY.json",
+      "kind": "notice-or-inventory",
+      "bytes": 889887,
+      "sha256": "78680F8ECABDB22B87E5DA181F03C7E8E2368E7189062D39EB8018FE7F4F2E93"
+    }
+  ],
+  "conversion": {
+    "pixelsPerEm": 24,
+    "buffer": 3,
+    "cutoff": 0.25,
+    "sourceFontSha256": "F6418F708BAEDE9789DAEF5D458C0F53D2A888AF9820E8062934E504FEDC6595",
+    "sourceFontUrl": "https://raw.githubusercontent.com/googlefonts/carlito/3a810cab78ebd6e2e4eed42af9e8453c4f9b850a/fonts/ttf/Carlito-Regular.ttf",
+    "toolSourceCommit": "714ccaea67d384717890a3c2c27143dfdd4189b7",
+    "toolArtifactCommit": "bab9b243413cb17b66b158d629a4bac2d7299786"
+  },
+  "scope": "Turkish/Latin; native rendering NOT_RUN",
+  "generatorIncluded": false
+}

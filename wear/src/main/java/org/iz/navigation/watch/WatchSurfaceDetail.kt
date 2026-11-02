@@ -73,7 +73,6 @@ internal fun WatchSurfaceDetail(data: WatchSurfaceData, route: WatchSurfaceRoute
                         item { Text("Toplam enerji dinlenmeyi içerir; Samsung Health aktarımı gecikebilir.", fontSize = 12.sp, textAlign = TextAlign.Center) }
                     }
                 }
-                if (!data.connected) item { Text("Telefon bağlı değil · son alınan veri", textAlign = TextAlign.Center, fontSize = 12.sp) }
                 item { Chip(onClick = onControls, label = { Text("Kayıt ve ayarlar") }, modifier = Modifier.fillMaxWidth().testTag("surface-controls")) }
             }
         }

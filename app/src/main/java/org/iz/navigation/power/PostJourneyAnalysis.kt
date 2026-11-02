@@ -309,7 +309,7 @@ internal class PostJourneyAnalysis private constructor(context: Context) {
                     fingerprint(track); fingerprint(healthSamples); fingerprint(checks); fingerprint(direct)
                     val fingerprint = hash.digest().joinToString("") { "%02x".format(it) }
                     val previous = cache.entry(journey.id, fingerprint)
-                    if (previous != null && cache.hasTrail(journey.id, fingerprint) && cache.hasHealthSamples(journey.id, fingerprint)) {
+                    if (previous != null && cache.hasTrail(journey.id, fingerprint) && cache.hasHealthSamples(journey.id, fingerprint) && cache.hasCurves(journey.id, fingerprint)) {
                         entries[journey.id] = previous; continue
                     }
                     val stats = JourneyStatistics.calculate(journey, track, now, ::checkAllowed)
@@ -320,6 +320,8 @@ internal class PostJourneyAnalysis private constructor(context: Context) {
                     val trail = recordedSpeedTrail(track, ::checkAllowed)
                     cache.saveTrail(journey.id, fingerprint, trail, ::checkAllowed)
                     cache.saveHealthSamples(journey.id, fingerprint, chartSamples, ::checkAllowed)
+                    val curves = RecordedCurves.prepare(journey, track, fingerprint, ::checkAllowed)
+                    cache.saveCurves(journey.id, fingerprint, curves, ::checkAllowed)
                     val entry = AnalysisEntry(fingerprint, stats, health, watchHealth, journey)
                     cache.saveEntry(journey.id, entry, ::checkAllowed)
                     entries[journey.id] = entry

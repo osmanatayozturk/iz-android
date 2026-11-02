@@ -1,5 +1,7 @@
 package org.iz.navigation.ui
 
+import org.iz.navigation.power.preparedRecorded
+
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -27,6 +29,7 @@ data class DiaryState(
     val analysisLabel: String get() = if (analysis.phase == org.iz.navigation.power.AnalysisPhase.READY)
         "Ayrıntılar hazırlanıyor" else analysis.label
     fun prepared(journey: Journey): AnalysisEntry? = analysis.ready(journey.id)?.takeIf { it.matches(journey) }
+    internal fun preparedRecorded(journey: Journey) = analysis.preparedRecorded(journey)
     fun active(now: Long) = journeys.firstOrNull { it.endedAt == null && (it.expiresAt == null || it.expiresAt > now) }
     fun currentRoute(now: Long): List<TrackPoint> {
         val journeyId = active(now)?.id ?: return emptyList()

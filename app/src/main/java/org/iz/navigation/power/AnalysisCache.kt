@@ -109,6 +109,36 @@ internal class AnalysisCache(private val directory: File, private val onReadFail
         return result
     }
     @Synchronized fun hasTrail(id: String, fingerprint: String) = asset("trail", id, fingerprint).let { it.isFile && it.length() > 0 }
+    @Synchronized fun saveCurves(id: String, fingerprint: String, details: RecordedCurveDetails, checkActive: () -> Unit = {}) {
+        require(details.journeyId == id && details.sourceFingerprint == fingerprint)
+        write(asset("curves", id, fingerprint), RecordedCurveCodec.encode(details), checkActive)
+    }
+    /** Prepared GPS facts only. No raw query or geometry calculation occurs on a UI read. */
+    @Synchronized fun curves(id: String, fingerprint: String): RecordedCurveDetails? {
+        val file = runCatching { asset("curves", id, fingerprint) }.getOrNull() ?: return null
+        val result = readCurveText(file)?.let { RecordedCurveCodec.decode(it, id, fingerprint) }
+        if (result == null) failedAsset(file)
+        return result
+    }
+    /** Worker validation never invokes the UI repair callback or invalidates its own generation. */
+    @Synchronized fun hasCurves(id: String, fingerprint: String): Boolean = runCatching {
+        readCurveText(asset("curves", id, fingerprint))?.let { RecordedCurveCodec.decode(it, id, fingerprint) } != null
+    }.getOrDefault(false)
+    private fun readCurveText(file: File): String? = try {
+        if (!file.isFile && !File(file.path + ".bak").isFile) null else AtomicFile(file).openRead().use { input ->
+            val output = java.io.ByteArrayOutputStream()
+            val buffer = ByteArray(8192)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                require(output.size() + count <= RecordedCurveCodec.MAX_BYTES)
+                output.write(buffer, 0, count)
+            }
+            Charsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                .decode(java.nio.ByteBuffer.wrap(output.toByteArray())).toString()
+        }
+    } catch (_: Exception) { null }
     @Synchronized fun saveHealthSamples(id: String, fingerprint: String, samples: List<JourneyHealthSample>, checkActive: () -> Unit = {}) {
         val items = JSONArray()
         samples.forEachIndexed { index, sample ->
@@ -168,12 +198,13 @@ internal class AnalysisCache(private val directory: File, private val onReadFail
         val ids = entries.keys.map(::key).toSet()
         directory.listFiles()?.forEach { file ->
             checkActive()
-            val name = file.name
+            val name = purgeBaseName(file.name)
             if (!name.endsWith(".json")) return@forEach
-            if (name.startsWith("heatmap-") && !name.startsWith("heatmap-$revision-")) AtomicFile(file).delete()
-            if (name.startsWith("entry-") && name.removePrefix("entry-").removeSuffix(".json") !in ids) AtomicFile(file).delete()
-            if ((name.startsWith("trail-") || name.startsWith("heart-")) &&
-                name.removePrefix("trail-").removePrefix("heart-").removeSuffix(".json") !in assets) AtomicFile(file).delete()
+            val base = File(directory, name)
+            if (name.startsWith("heatmap-") && !name.startsWith("heatmap-$revision-")) purgeDelete(base)
+            if (name.startsWith("entry-") && name.removePrefix("entry-").removeSuffix(".json") !in ids) purgeDelete(base)
+            if ((name.startsWith("trail-") || name.startsWith("heart-") || name.startsWith("curves-")) &&
+                name.removePrefix("trail-").removePrefix("heart-").removePrefix("curves-").removeSuffix(".json") !in assets) purgeDelete(base)
         }
     }
     /** Privacy deletion is synchronous and independent of the expensive-analysis battery gate.
@@ -191,7 +222,7 @@ internal class AnalysisCache(private val directory: File, private val onReadFail
             val affected = journeyIds.mapTo(linkedSetOf(), ::key)
             val globalHealth = health && journeyIds.isEmpty()
             val entryPattern = Regex("entry-([a-f0-9]{64})[.]json")
-            val assetPattern = Regex("(heart|trail)-([a-f0-9]{64})-([a-f0-9]{64})[.]json")
+            val assetPattern = Regex("(heart|trail|curves)-([a-f0-9]{64})-([a-f0-9]{64})[.]json")
             fun keyFor(name: String): String? = entryPattern.matchEntire(name)?.groupValues?.get(1)
                 ?: assetPattern.matchEntire(name)?.groupValues?.get(2)
             // Read every representation independently: openRead() would recover/rename a backup
@@ -251,7 +282,7 @@ internal class AnalysisCache(private val directory: File, private val onReadFail
                 if (name == "pending" || name == index.name) continue
                 val journeyKey = keyFor(name)
                 val remove = all || name.startsWith("heatmap-") || journeyKey != null && journeyKey in affected &&
-                    (name.startsWith("entry-") || name.startsWith("heart-") || !health && name.startsWith("trail-"))
+                    (name.startsWith("entry-") || name.startsWith("heart-") || !health && (name.startsWith("trail-") || name.startsWith("curves-")))
                 if (remove) purgeDelete(File(directory, name))
             }
             // Removing old siblings BEFORE writing prevents AtomicFile recovery from resurrecting

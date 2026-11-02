@@ -193,6 +193,33 @@ class ValhallaRoutePlannerTest {
         }
     }
 
+    @Test fun modifiedRouteSerializesSelectedClosedAreaAndRetainsItForReroute() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(successfulRoute())
+            val area = RouteAvoidArea(1.0, 1.0, 1.01, 1.01)
+            val result = planner(server, temporary.newFolder()).planModified(RouteModificationRequest(
+                stops(), 1L, Transport.CAR, null, RoutePreferences(), listOf(area)))
+            val body = JSONObject(server.takeRequest().body.readUtf8())
+            org.junit.Assert.assertNotNull("Selected area must be serialized, not silently dropped", body.optJSONArray("exclude_polygons"))
+            val ring = body.getJSONArray("exclude_polygons").getJSONArray(0)
+            assertEquals(5, ring.length())
+            assertEquals(area.west, ring.getJSONArray(0).getDouble(0), 0.0)
+            assertEquals(area.south, ring.getJSONArray(0).getDouble(1), 0.0)
+            assertEquals(ring.getJSONArray(0).toString(), ring.getJSONArray(4).toString())
+            assertEquals(listOf(area), result.avoidAreas)
+        }
+    }
+    @Test fun modifiedRouteRejectsProviderGeometryCrossingTheExcludedArea() {
+        MockWebServer().use { server ->
+            server.enqueue(successfulRoute())
+            val request = RouteModificationRequest(stops(), 1L, Transport.CAR, null, RoutePreferences(),
+                listOf(RouteAvoidArea(-0.0001, 0.0009, 0.0001, 0.0011)))
+            assertThrows(RouteServiceException::class.java) {
+                runBlocking { planner(server, temporary.newFolder()).planModified(request) }
+            }
+            assertEquals(1, server.requestCount)
+        }
+    }
     private fun planner(server: MockWebServer, directory: File) = ValhallaRoutePlanner(
         endpoint = server.url("/route").toString(),
         storageDirectory = directory,
