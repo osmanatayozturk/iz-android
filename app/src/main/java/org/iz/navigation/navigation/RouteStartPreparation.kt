@@ -5,6 +5,7 @@ import org.iz.navigation.weather.WeatherCoordinate
 import org.iz.navigation.weather.WeatherEngine
 import org.iz.navigation.weather.PlannedRoute
 import org.iz.navigation.weather.RoutePlanner
+import org.iz.navigation.weather.RouteSchedule
 import org.iz.navigation.weather.RoutePreferences
 import org.iz.navigation.weather.requireUsablePreferences
 import org.iz.navigation.weather.revalidateSelection
@@ -17,9 +18,12 @@ suspend fun prepareRouteStart(planner: RoutePlanner, planned: PlannedRoute, curr
         if (originUsesCurrentLocation) it[0] = RouteStop("Mevcut konum", current)
     }
     val stops = prepareRouteStartStops(userStops, current)
-    return if (planned.selectionLocked) planner.revalidateSelection(planned, stops, departureAt,
+    val route = if (planned.selectionLocked) planner.revalidateSelection(planned, stops, departureAt,
         planned.transport, travelSpeedKmh, preferences)
     else planner.plan(stops, departureAt, planned.transport, travelSpeedKmh, preferences).requireUsablePreferences()
+    require(stops.none { it.plannedBreakSeconds > 0 } || route.stops == stops) { "Planlanan molalar başlangıç rotasında korunamadı." }
+    RouteSchedule.planned(route, departureAt)
+    return route
 }
 
 /** Shared boundary for attaching a fresh fix to a user-selected itinerary. */

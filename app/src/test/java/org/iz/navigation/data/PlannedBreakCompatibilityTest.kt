@@ -2,6 +2,8 @@ package org.iz.navigation.data
 
 import org.iz.navigation.weather.*
 import org.iz.navigation.navigation.NavigationRouteCache
+import org.iz.navigation.navigation.prepareRouteStart
+import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Rule
@@ -31,6 +33,18 @@ class PlannedBreakCompatibilityTest {
         val cache=NavigationRouteCache(temp.newFolder());cache.write(route)
         assertEquals(route,cache.read())
         assertEquals(0,RouteStop("Legacy",points[0]).plannedBreakSeconds)
+    }
+    @Test fun freshStartRejectsProviderThatDropsSavedBreaks() {
+        val original=PlannedRoute("saved-start",stops(),points.mapIndexed{i,p->RouteVertex(p,i*60.0)},2200.0,120.0,1000,
+            stopElapsedSeconds=listOf(0.0,60.0,120.0),transport=Transport.CAR)
+        val planner=object:RoutePlanner {
+            override suspend fun plan(stops:List<RouteStop>,departureAt:Long,transport:Transport,
+                travelSpeedKmh:Double?,preferences:RoutePreferences):PlannedRoute =
+                original.copy(stops=stops.map{it.copy(plannedBreakSeconds=0)})
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            runBlocking { prepareRouteStart(planner,original,points.first(),1000L) }
+        }
     }
     @Test fun badOptionalValuesAndEndpointBreaksAreRejected() {
         val draft=SavedWeatherPlan(stops(),1000,Transport.CAR)
