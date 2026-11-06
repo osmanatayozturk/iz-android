@@ -1,9 +1,11 @@
 package org.iz.navigation.integration
 
+import android.annotation.SuppressLint
 import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.res.Configuration
 import android.os.Bundle
+import android.view.MotionEvent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -55,6 +57,7 @@ import java.util.UUID
 
 /** SDK lifecycle belongs to the composition, including removal while its Activity stays resumed. */
 @Composable
+@SuppressLint("ClickableViewAccessibility") // The optional listener only observes; MapLibre handles the whole gesture.
 internal fun OsmMapView(
     styleJson: String,
     modifier: Modifier = Modifier,
@@ -66,6 +69,8 @@ internal fun OsmMapView(
     maxFps: Int? = null,
     mapAttribution: String = "© OpenStreetMap contributors",
     onAttributionClick: (() -> Unit)? = null,
+    onMapTouchActive: ((Boolean) -> Unit)? = null,
+    onMapDisposing: (MapLibreMap) -> Unit = {},
 ) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -76,6 +81,8 @@ internal fun OsmMapView(
     val click by rememberUpdatedState(onClick)
     val longClick by rememberUpdatedState(onLongClick)
     val attributionClick by rememberUpdatedState(onAttributionClick)
+    val touchActive by rememberUpdatedState(onMapTouchActive)
+    val mapDisposing by rememberUpdatedState(onMapDisposing)
     val mapView = remember(context, styleJson) {
         OsmMapRuntime.initialize(context)
         MapView(context, MapLibreMapOptions.createFromAttributes(context)
@@ -85,6 +92,7 @@ internal fun OsmMapView(
     }
     DisposableEffect(mapView, lifecycle, registry) {
         var active = true
+        var ownedMap: MapLibreMap? = null
         var started = false
         var resumed = false
         fun start() { if (!started) { mapView.onStart(); started = true } }
@@ -117,18 +125,32 @@ internal fun OsmMapView(
             map.setStyle(Style.Builder().fromJson(styleJson)) {
                 if (active) {
                     fps?.let { mapView.setMaximumFps(it.coerceIn(1, 30)) }
+                    ownedMap = map
                     ready(map)
                 }
             }
         }
         onDispose {
             active = false
+            if (touchActive != null) mapView.setOnTouchListener(null)
+            ownedMap?.let(mapDisposing)
             lifecycle.removeObserver(observer)
             context.unregisterComponentCallbacks(callbacks)
             provider?.unregister()
             stop()
             mapView.onDestroy()
         }
+    }
+    DisposableEffect(mapView, onMapTouchActive != null) {
+        val observing = onMapTouchActive != null
+        if (observing) mapView.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> touchActive?.invoke(true)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> touchActive?.invoke(false)
+            }
+            false
+        }
+        onDispose { if (observing) mapView.setOnTouchListener(null) }
     }
     val uriHandler = LocalUriHandler.current
     Box(modifier) {

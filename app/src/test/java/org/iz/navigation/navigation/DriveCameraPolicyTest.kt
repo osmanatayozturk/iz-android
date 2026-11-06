@@ -23,9 +23,74 @@ class DriveCameraPolicyTest {
         assertEquals(point, target.coordinate)
         assertEquals(45.0, target.pitch, 0.0)
         assertEquals(80.0, target.bearing, 0.0)
-        assertEquals(listOf(20.0, 232.0, 30.0, 120.0), target.padding)
+        assertEquals(4, target.padding.size)
+        listOf(20.0, 232.0, 30.0, 120.0).zip(target.padding).forEach { (expected, actual) ->
+            assertEquals(expected, actual, 1e-9)
+        }
         val anchorY = (target.padding[1] + viewport.heightPx - target.padding[3]) / 2.0
         assertEquals(40.0 + .65 * 640.0, anchorY, 1e-9)
+    }
+
+    private fun anchorFraction(target: DriveCameraTarget, area: DriveCameraViewport = viewport): Double {
+        val anchorY = (target.padding[1] + area.heightPx - target.padding[3]) / 2.0
+        return (anchorY - area.topPx) / (area.heightPx - area.topPx - area.bottomPx)
+    }
+
+    @Test fun anchorUsesSmoothstepOnlyBetweenThirtyAndNinetyAndCapsAtSeventyPercent() {
+        for ((speed, anchor) in listOf(0.0 to .65, 30.0 to .65, 45.0 to .6578125,
+            60.0 to .675, 75.0 to .6921875, 90.0 to .70, 160.0 to .70)) {
+            val target = DriveCameraPolicy().update(input(speed = speed), viewport)!!
+            assertEquals("speed=$speed", anchor, anchorFraction(target), 1e-9)
+            assertEquals("Bias must not invent a forward GPS position", point, target.coordinate)
+        }
+    }
+
+    @Test fun anchorUsesTwoSecondFilterForAccelerationAndDeceleration() {
+        val policy = DriveCameraPolicy()
+        policy.update(input(speed = 30.0), viewport)
+        val alpha = 1.0 - exp(-.5)
+        val up = policy.update(input(1000, 90.0), viewport)!!
+        val expectedUp = .65 + .05 * alpha
+        assertEquals(expectedUp, anchorFraction(up), 1e-9)
+        val down = policy.update(input(2000, 0.0), viewport)!!
+        assertEquals(expectedUp + (.65 - expectedUp) * alpha, anchorFraction(down), 1e-9)
+    }
+
+    @Test fun changedViewportRecomputesPaddingFromHeldNormalizedBias() {
+        val policy = DriveCameraPolicy()
+        val previous = policy.update(input(speed = 90.0), viewport)!!
+        val resized = DriveCameraViewport(900, 1200, 35, 80, 45, 200)
+        val target = policy.update(input(1000, speed = null), resized)!!
+        assertEquals(.70, anchorFraction(target, resized), 1e-9)
+        assertEquals(4, target.padding.size)
+        listOf(35.0, 448.0, 45.0, 200.0).zip(target.padding).forEach { (expected, actual) ->
+            assertEquals(expected, actual, 1e-9)
+        }
+        assertEquals(previous.zoom, target.zoom, 0.0)
+        assertEquals(point, target.coordinate)
+    }
+
+    @Test fun missingOrInvalidSpeedHoldsFilteredBiasAndZoomAndStaleInputCannotAlterThem() {
+        val policy = DriveCameraPolicy()
+        policy.update(input(speed = 30.0), viewport)
+        val held = policy.update(input(1000, 90.0), viewport)!!
+        assertNull(policy.update(input(2000, 0.0).copy(fresh = false), viewport))
+        for ((index, speed) in listOf(null, Double.NaN, Double.POSITIVE_INFINITY, -1.0).withIndex()) {
+            val target = policy.update(input(2000L + index * 1000L, speed)
+                .copy(coordinate = WeatherCoordinate(41.001 + index * .001, 29.0)), viewport)!!
+            assertEquals(anchorFraction(held), anchorFraction(target), 1e-9)
+            assertEquals(held.zoom, target.zoom, 0.0)
+        }
+        assertEquals(.65, anchorFraction(DriveCameraPolicy().update(input(speed = null), viewport)!!), 1e-9)
+    }
+
+    @Test fun approachingTurnOverridesMissingSpeedAndSmoothsBothTargetsBack() {
+        val policy = DriveCameraPolicy()
+        policy.update(input(speed = 100.0), viewport)
+        val turn = policy.update(input(1000, speed = null).copy(maneuverMeters = 100.0), viewport)!!
+        val alpha = 1.0 - exp(-.5)
+        assertEquals(.70 + (.65 - .70) * alpha, anchorFraction(turn), 1e-9)
+        assertEquals(15.5 + (17.5 - 15.5) * alpha, turn.zoom, 1e-9)
     }
 
     @Test fun unknownOrTinyViewportFallsBackFlatWithoutUnsafeInsets() {
@@ -80,6 +145,18 @@ class DriveCameraPolicyTest {
         assertNull(policy.update(input(1100).copy(coordinate = WeatherCoordinate(41.1, 29.1)), viewport))
     }
 
+    @Test fun interruptedNativeTargetRefreshesOnceWithoutBypassingCadenceOrFreshness() {
+        val policy = DriveCameraPolicy()
+        val target = policy.update(input(), viewport)!!
+        policy.requestRefresh()
+        assertNull("Interrupted animation still respects cadence", policy.update(input(999), viewport))
+        assertNull(policy.update(input(1000).copy(fresh = false), viewport))
+        assertNull(policy.update(input(1000).copy(coordinate = null), viewport))
+        assertNull(policy.update(input(1000), viewport.copy(topPx = 800)))
+        assertEquals("Fresh follow must recover the uncompleted endpoint", target, policy.update(input(1000), viewport))
+        assertNull("Refresh is consumed once", policy.update(input(2000), viewport))
+    }
+
     @Test fun zoomAndBearingUseTwoSecondSmoothingAndShortestAngle() {
         val policy = DriveCameraPolicy()
         policy.update(input(speed = 30.0, bearing = 350.0), viewport)
@@ -110,7 +187,9 @@ class DriveCameraPolicyTest {
     @Test fun nearTurnDistanceOrTimeTakesZoomPriorityButInvalidValuesDoNot() {
         for (turn in listOf(input(speed = 100.0).copy(maneuverMeters = 100.0),
             input(speed = 100.0).copy(maneuverSeconds = 8.0))) {
-            assertEquals(17.5, DriveCameraPolicy().update(turn, viewport)!!.zoom, 0.0)
+            val target = DriveCameraPolicy().update(turn, viewport)!!
+            assertEquals(17.5, target.zoom, 0.0)
+            assertEquals(.65, anchorFraction(target), 1e-9)
         }
         for (turn in listOf(input(speed = 100.0).copy(maneuverMeters = 100.1, maneuverSeconds = 8.1),
             input(speed = 100.0).copy(maneuverMeters = -1.0, maneuverSeconds = Double.NaN))) {
@@ -130,6 +209,8 @@ class DriveCameraPolicyTest {
         policy.update(input(5000, 100.0, 90.0), viewport)
         assertNull(policy.update(input(4000), viewport))
         policy.reset()
-        assertEquals(17.5, policy.update(input(0, 0.0), viewport)!!.zoom, 0.0)
+        val reset = policy.update(input(0, 0.0), viewport)!!
+        assertEquals(17.5, reset.zoom, 0.0)
+        assertEquals(.65, anchorFraction(reset), 1e-9)
     }
 }

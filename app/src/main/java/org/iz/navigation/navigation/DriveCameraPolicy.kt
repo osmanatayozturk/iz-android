@@ -13,6 +13,9 @@ internal fun DriveCameraViewport.hasSafeAdaptiveArea(): Boolean = known &&
 class DriveCameraPolicy {
     private var emittedAt: Long? = null
     private var previous: DriveCameraTarget? = null
+    // Keep normalized state: the viewport may resize between otherwise identical fixes.
+    private var previousAnchorFraction: Double? = null
+    private var refreshPending = false
 
     fun update(input: DriveCameraInput, viewport: DriveCameraViewport, force: Boolean = false): DriveCameraTarget? {
         val coordinate = input.coordinate ?: return null
@@ -32,7 +35,6 @@ class DriveCameraPolicy {
         val safeHeight = viewport.heightPx - base[1] - base[3]
         // At less than 160px usable extent, a forward anchor leaves too little map to read safely.
         val adaptive = input.mode == DriveCameraMode.ADAPTIVE && viewport.hasSafeAdaptiveArea()
-        val padding = if (adaptive) listOf(base[0], base[1] + .3 * safeHeight, base[2], base[3]) else base
         val speed = input.speedKmh?.takeIf { it.isFinite() && it >= 0.0 }
         val prior = previous
         val closeTurn = input.maneuverMeters?.let { it.isFinite() && it in 0.0..100.0 } == true ||
@@ -41,6 +43,14 @@ class DriveCameraPolicy {
         val alpha = if (prior == null || lastAt == null) 1.0 else
             1.0 - exp(-(input.nowMillis - lastAt).toDouble() / 2000.0)
         val zoom = prior?.let { it.zoom + (desiredZoom - it.zoom) * alpha } ?: desiredZoom
+        val desiredAnchor = when {
+            closeTurn -> .65
+            speed != null -> speedAnchor(speed)
+            else -> previousAnchorFraction ?: .65
+        }
+        val anchor = previousAnchorFraction?.let { it + (desiredAnchor - it) * alpha } ?: desiredAnchor
+        val padding = if (adaptive) listOf(base[0], base[1] + (2.0 * anchor - 1.0) * safeHeight,
+            base[2], base[3]) else base
         // A GNSS course at standstill is not a heading reference; retain the previous course instead.
         val movingBearing = input.bearingDegrees?.takeIf { adaptive && speed != null && speed >= 3.0 && it.isFinite() }
         val desiredBearing = movingBearing?.let(::normalize) ?: prior?.bearing ?: 0.0
@@ -50,15 +60,26 @@ class DriveCameraPolicy {
             else -> normalize(prior.bearing + shortestAngle(prior.bearing, desiredBearing) * alpha)
         }
         val target = DriveCameraTarget(coordinate, zoom, bearing, if (adaptive) 45.0 else 0.0, padding)
-        if (!force && prior != null && target.coordinate == prior.coordinate && target.padding == prior.padding &&
+        if (!force && !refreshPending && prior != null && target.coordinate == prior.coordinate && target.padding == prior.padding &&
             abs(target.zoom - prior.zoom) < 1e-6 && abs(shortestAngle(target.bearing, prior.bearing)) < 1e-6 &&
             target.pitch == prior.pitch) return null
         previous = target
+        refreshPending = false
+        if (adaptive) previousAnchorFraction = anchor
         emittedAt = input.nowMillis
         return target
     }
 
-    fun reset() { emittedAt = null; previous = null }
+    /** An interrupted native transition may not have reached the last emitted target. */
+    fun requestRefresh() { refreshPending = true }
+
+    fun reset() { emittedAt = null; previous = null; previousAnchorFraction = null; refreshPending = false }
+
+    private fun speedAnchor(speed: Double): Double {
+        val progress = ((speed - 30.0) / 60.0).coerceIn(0.0, 1.0)
+        val smoothstep = progress * progress * (3.0 - 2.0 * progress)
+        return .65 + .05 * smoothstep
+    }
 
     private fun speedZoom(speed: Double): Double = when {
         speed <= 30.0 -> 17.5 - .5 * speed / 30.0

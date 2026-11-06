@@ -7,6 +7,8 @@ import android.graphics.Color
 import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.view.Gravity
 import android.view.Surface
@@ -39,6 +41,7 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
     private var presentation: Presentation? = null
     private var view: MapView? = null
     private var map: MapLibreMap? = null
+    private var cameraAnimator: DriveCameraAnimator? = null
     private var surface: Surface? = null
     private var attribution: TextView? = null
     private var speedPanel: LinearLayout? = null
@@ -67,6 +70,9 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
     private var legacyFix: NavigationFix? = null
     private var active = false
     private var resumed = false
+    private var displayPaused = false
+    private var closed = false
+    private val displayAvailable get() = !displayPaused && surface?.isValid == true
     private val memoryCallbacks = object : ComponentCallbacks2 {
         override fun onConfigurationChanged(newConfig: Configuration) = Unit
         override fun onLowMemory() { lowMemory() }
@@ -75,6 +81,7 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
     init { context.registerComponentCallbacks(memoryCallbacks) }
 
     override fun onSurfaceAvailable(container: SurfaceContainer) {
+        if (closed) return
         release()
         val hostSurface = container.surface ?: return
         if (!hostSurface.isValid || container.width <= 0 || container.height <= 0 || container.dpi <= 0) return
@@ -86,7 +93,22 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
         try {
             OsmMapRuntime.initialize(context)
             display = context.getSystemService(DisplayManager::class.java).createVirtualDisplay(
-                "İz Android Auto map", width, height, container.dpi, hostSurface, 0)
+                "İz Android Auto map", width, height, container.dpi, hostSurface, 0,
+                object : VirtualDisplay.Callback() {
+                    override fun onPaused() {
+                        if (token != generation) return
+                        displayPaused = true
+                        displayOutput { syncVisibility() }
+                    }
+                    override fun onResumed() {
+                        if (token != generation) return
+                        displayPaused = false
+                        displayOutput { syncVisibility() }
+                    }
+                    override fun onStopped() {
+                        if (token == generation) release()
+                    }
+                }, Handler(Looper.getMainLooper()))
             val p = Presentation(context, checkNotNull(display).display)
             presentation = p
             val mapView = MapView(p.context, MapLibreMapOptions.createFromAttributes(p.context)
@@ -104,7 +126,9 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
                 setTextColor(Color.BLACK)
                 setBackgroundColor(0xeefafafa.toInt())
                 addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
-                    if (bottom - top != oldBottom - oldTop) displayOutput { applyPadding() }
+                    if (token == generation && bottom - top != oldBottom - oldTop) {
+                        displayOutput { applyPadding(); render(forceCamera = true) }
+                    }
                 }
             }.also { frame.addView(it, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.RIGHT)) }
             speedPanel = LinearLayout(p.context).apply {
@@ -120,7 +144,8 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
                 speedLimitLabel = valueLabel().also { addView(it, LinearLayout.LayoutParams(-2, -2).apply { marginStart = 8 }) }
             }.also { frame.addView(it, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.LEFT)) }
             speedPanel?.addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
-                if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) {
+                if (token == generation &&
+                    (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop)) {
                     displayOutput { render() }
                 }
             }
@@ -136,9 +161,10 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
             mapView.onStart()
             if (active) { mapView.onResume(); resumed = true }
             mapView.getMapAsync { ready ->
-                if (token != generation) return@getMapAsync
+                if (token != generation || surface?.isValid != true) return@getMapAsync
                 displayOutput {
                     map = ready
+                    cameraAnimator = DriveCameraAnimator(ready)
                     ready.setMaxZoomPreference(19.0)
                     ready.setPrefetchZoomDelta(0)
                     applyStyle()
@@ -165,25 +191,48 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
     }
     override fun onScroll(distanceX: Float, distanceY: Float) {
         interaction.manual()
-        displayOutput { if (active && resumed) map?.scrollBy(-distanceX, -distanceY, 0) }
+        displayOutput {
+            cancelOwnedCamera()
+            if (active && resumed && displayAvailable) map?.scrollBy(-distanceX, -distanceY, 0)
+        }
     }
     override fun onScale(focusX: Float, focusY: Float, scaleFactor: Float) {
         if (scaleFactor.isFinite() && scaleFactor > 0) {
             interaction.manual()
-            displayOutput { if (active && resumed) map?.moveCamera(CameraUpdateFactory.zoomBy(ln(scaleFactor.toDouble()) / ln(2.0))) }
+            displayOutput {
+                cancelOwnedCamera()
+                if (active && resumed && displayAvailable) {
+                    map?.moveCamera(CameraUpdateFactory.zoomBy(ln(scaleFactor.toDouble()) / ln(2.0)))
+                }
+            }
         }
     }
-    fun recenter() { interaction.recenter(); displayOutput { render(forceCamera = true) } }
-    fun panMode(enabled: Boolean) { if (enabled) interaction.manual() }
+    fun recenter() {
+        interaction.recenter()
+        displayOutput {
+            cancelOwnedCamera()
+            render(forceCamera = true)
+        }
+    }
+    fun panMode(enabled: Boolean) {
+        if (enabled) {
+            interaction.manual()
+            displayOutput { cancelOwnedCamera() }
+        }
+    }
     fun zoom(amount: Double) {
         interaction.manual()
-        displayOutput { if (active && resumed) map?.moveCamera(CameraUpdateFactory.zoomBy(amount)) }
+        displayOutput {
+            cancelOwnedCamera()
+            if (active && resumed && displayAvailable) map?.moveCamera(CameraUpdateFactory.zoomBy(amount))
+        }
     }
     val cameraMode get() = interaction.mode
     fun cameraMode(value: DriveCameraMode) {
         interaction.setMode(value)
         displayOutput {
-            if (!interaction.following) flatCamera()
+            cancelOwnedCamera()
+            if (!interaction.following || value == DriveCameraMode.SIMPLE_2D) flatCamera()
             render(forceCamera = true)
         }
     }
@@ -196,7 +245,8 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
         syncVisibility()
     }
     private fun syncVisibility() {
-        val shown = active && !safeArea().isEmpty
+        val shown = active && displayAvailable && !safeArea().isEmpty
+        if (!shown) cancelOwnedCamera()
         view?.let {
             if (shown && !resumed) { it.onResume(); resumed = true }
             if (!shown && resumed) { it.onPause(); resumed = false }
@@ -212,15 +262,21 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
     fun preview(route: PlannedRoute?) {
         preview = route
         interaction.preview(route != null)
-        displayOutput { if (route != null) flatCamera(); render(forceCamera = true); if (route != null) framePreview() }
+        displayOutput {
+            cancelOwnedCamera()
+            if (route != null) flatCamera()
+            render(forceCamera = true)
+            if (route != null) framePreview()
+        }
     }
 
     private fun framePreview(hold: Boolean = false) {
-        if (!active || !resumed) return
+        if (!active || !resumed || !displayAvailable) return
         val route = preview ?: state.route ?: return
         val current = map ?: return
         val vertices = route.vertices.map { LatLng(it.coordinate.latitude, it.coordinate.longitude) }.distinct()
         if (vertices.size < 2) return
+        cancelOwnedCamera()
         // Recheck the live route before changing follow state: the menu may already be stale.
         if (hold) { interaction.manual(); flatCamera() }
         current.moveCamera(CameraUpdateFactory.newLatLngBounds(LatLngBounds.Builder().includes(vertices).build(), 48))
@@ -228,6 +284,7 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
 
     private fun applyStyle() {
         val current = map ?: return
+        cancelOwnedCamera()
         val token = generation
         val dark = context.isDarkMode
         val json = JSONObject(mapStyle(OsmServiceSettings(context).read().tileUrl,
@@ -243,8 +300,9 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
             it.setTextColor(if (dark) Color.WHITE else Color.BLACK)
             it.setBackgroundColor(if (dark) 0xee20252c.toInt() else 0xeefafafa.toInt())
         }
-        current.setStyle(Style.Builder().fromJson(json.toString())) {
-            if (token == generation) displayOutput {
+        current.setStyle(Style.Builder().fromJson(json.toString())) { loaded ->
+            if (token == generation && map === current) displayOutput {
+                if (current.style !== loaded) return@displayOutput
                 paintedRouteJson = null; paintedFixJson = null; legacyFix = null
                 applyPadding(); render(forceCamera = true)
                 if (preview != null) framePreview()
@@ -255,7 +313,10 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
     private fun applyPadding() {
         val safe = safeArea()
         if (safe.isEmpty) return
-        map?.setPadding(safe.left, safe.top, width - safe.right, height - safe.bottom)
+        if (displayAvailable) {
+            cancelOwnedCamera()
+            map?.setPadding(safe.left, safe.top, width - safe.right, height - safe.bottom)
+        }
         attribution?.let { label ->
             label.maxWidth = (safe.width() - 16).coerceAtLeast(1)
             label.layoutParams = (label.layoutParams as FrameLayout.LayoutParams).apply {
@@ -310,7 +371,7 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
 
     private fun flatCamera() {
         val current = map ?: return
-        if (!active || !resumed) return
+        if (!active || !resumed || !displayAvailable) return
         val safe = safeArea()
         if (safe.isEmpty) return
         val viewport = cameraViewport()
@@ -320,13 +381,19 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
             else doubleArrayOf(safe.left.toDouble(), safe.top.toDouble(), (width - safe.right).toDouble(), (height - safe.bottom).toDouble())
         val position = current.cameraPosition
         if (position.tilt == 0.0 && position.bearing == 0.0 && position.padding?.contentEquals(insets) == true) return
+        cancelOwnedCamera()
         current.moveCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder(position)
             .tilt(0.0).bearing(0.0).padding(insets).build()))
     }
 
     private fun render(forceCamera: Boolean = false) {
-        if (!active || !resumed || safeArea().isEmpty) return
+        if (!active || !resumed || !displayAvailable || safeArea().isEmpty) {
+            cancelOwnedCamera()
+            return
+        }
         val current = map ?: return
+        val fix = state.fix
+        if (fix == null || state.gpsStale) cancelOwnedCamera()
         val route = preview ?: state.route
         if (!hasPreparedRoute || preparedRoute !== route) {
             preparedRoute = route
@@ -344,7 +411,6 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
         ownSpeedLabel?.text = "Hızım\n${speed.ownText} km/sa"
         speedLimitLabel?.text = "Hız sınırı\n${speed.limitText} km/sa\n${speed.sourceText}"
         trailLegend?.visibility = View.GONE
-        val fix = state.fix
         val fixJson = featureCollection(if (fix != null) listOf(
             pointFeature(fix.coordinate.latitude, fix.coordinate.longitude)) else emptyList())
         if (paintedFixJson != fixJson) {
@@ -352,7 +418,11 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
             paintedFixJson = fixJson
         }
         val eligible = preview == null && carDriveCameraEnabled(state)
-        if (drivingCamera && !eligible) { cameraPolicy.reset(); flatCamera() }
+        if (drivingCamera && !eligible) {
+            cancelOwnedCamera()
+            cameraPolicy.reset()
+            flatCamera()
+        }
         drivingCamera = eligible
         val viewport = cameraViewport()
         val safeForAdaptive = viewport.hasSafeAdaptiveArea()
@@ -361,6 +431,7 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
         if (!safeForAdaptive) {
             // Safety transitions cannot depend on a fresh fix or on follow/manual state.
             // Preserve the actual native target/zoom, never recenter onto a stale fix.
+            if (lostAdaptiveArea) cancelOwnedCamera()
             flatCamera()
             if (lostAdaptiveArea) return
         }
@@ -373,9 +444,16 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
                 maneuverSeconds = state.route?.maneuvers?.getOrNull(progress?.maneuverIndex ?: -1)?.let { step ->
                     progress?.let { (step.beginElapsedSeconds - it.elapsedSeconds).coerceAtLeast(0.0) }
                 }, mode = interaction.mode), viewport, forceCamera)
-            if (target != null) current.moveCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder(current.cameraPosition)
-                .target(LatLng(target.coordinate.latitude, target.coordinate.longitude)).zoom(target.zoom)
-                .bearing(target.bearing).tilt(target.pitch).padding(target.padding.toDoubleArray()).build()))
+            if (target != null) {
+                if (safeForAdaptive && interaction.mode == DriveCameraMode.ADAPTIVE) {
+                    cameraAnimator?.ease(target)
+                } else {
+                    cancelOwnedCamera()
+                    current.moveCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder(current.cameraPosition)
+                        .target(LatLng(target.coordinate.latitude, target.coordinate.longitude)).zoom(target.zoom)
+                        .bearing(target.bearing).tilt(target.pitch).padding(target.padding.toDoubleArray()).build()))
+                }
+            }
         } else if (!eligible && preview == null && interaction.following && fix != null && !state.gpsStale &&
             (forceCamera || fix != legacyFix && (legacyCameraAt == Long.MIN_VALUE || now - legacyCameraAt >= 1000))) {
             current.moveCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder(current.cameraPosition)
@@ -386,7 +464,14 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
     }
 
     private inline fun displayOutput(block: () -> Unit) {
-        if (!safelyUpdateCarDisplay(block)) recordDisplayFailure()
+        if (!safelyUpdateCarDisplay(block)) {
+            safelyUpdateCarDisplay { cancelOwnedCamera() }
+            recordDisplayFailure()
+        }
+    }
+
+    private fun cancelOwnedCamera() {
+        if (cameraAnimator?.cancel() == true) cameraPolicy.requestRefresh()
     }
 
     private fun recordDisplayFailure() {
@@ -396,6 +481,10 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
 
     fun release() {
         generation++
+        val animator = cameraAnimator
+        cameraAnimator = null
+        // This map is being discarded and its follow policy is reset below.
+        displayOutput { animator?.cancel() }
         map = null
         view?.let { runCatching { if (resumed) it.onPause(); it.onStop(); it.onDestroy() } }
         resumed = false
@@ -405,11 +494,17 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
         runCatching { display?.release() }
         display = null
         surface = null
+        displayPaused = false
         attribution = null
         speedPanel = null; ownSpeedLabel = null; speedLimitLabel = null; trailLegend = null
         paintedRouteJson = null; paintedFixJson = null
         cameraPolicy.reset(); drivingCamera = false; adaptiveAreaSafe = false; legacyFix = null; legacyCameraAt = Long.MIN_VALUE
     }
 
-    fun close() { release(); context.unregisterComponentCallbacks(memoryCallbacks) }
+    fun close() {
+        if (closed) return
+        closed = true
+        release()
+        context.unregisterComponentCallbacks(memoryCallbacks)
+    }
 }

@@ -350,6 +350,15 @@ class Moto0110PhoneDrivingScene {
             sameMap(activity, view, map)
 
             val beforePan = snapshot(map, "before-single-native-pan")
+            if (adaptiveExpected) {
+                val interruptedFix = WeatherCoordinate(coveredFix.latitude + .0001, coveredFix.longitude + .0001)
+                lastFixAt = SystemClock.elapsedRealtime()
+                publishFix(interruptedFix)
+                await("adaptive ease is in flight before the native gesture", 500) {
+                    val current = onMain { pose(map) }
+                    !sameTarget(current, beforePan) && !atCoordinate(current, interruptedFix)
+                }
+            }
             swipeNative(view, exposedGeometry())
             await("native gesture moves the camera", 4_000) { !sameTarget(onMain { pose(map) }, beforePan) }
             settleCamera(map)
@@ -389,6 +398,7 @@ class Moto0110PhoneDrivingScene {
             snapshot(map, "actual-Konumum-follows-B")
             compose.runOnIdle { nav.value = nav.value.copy(fix = fix(b).copy(speedMps = 0f)) }
             assertGuidanceLayout(map, "stationary-header-still-hidden", checkNativePadding = false)
+            verifySpeedProfile(activity, view, map)
             sameMap(activity, view, map)
             assertEquals(1, mounts.get())
             assertFalse(disposed.get())
@@ -478,15 +488,55 @@ class Moto0110PhoneDrivingScene {
         }
     }
 
-    private fun fix(coordinate: WeatherCoordinate) = NavigationFix(coordinate, System.currentTimeMillis(), 5f, 8.3333f, 90f)
-    private fun publishFix(coordinate: WeatherCoordinate): Long {
+    private fun fix(coordinate: WeatherCoordinate, speedKmh: Int = 30) =
+        NavigationFix(coordinate, System.currentTimeMillis(), 5f, (speedKmh / 3.6).toFloat(), 90f)
+
+    private fun publishFix(coordinate: WeatherCoordinate, speedKmh: Int? = null): Long {
         val remaining = lastFixAt + 1_100 - SystemClock.elapsedRealtime()
         if (remaining > 0) SystemClock.sleep(remaining)
         val elapsed = SystemClock.elapsedRealtime() - lastFixAt
-        compose.runOnIdle { nav.value = nav.value.copy(fix = fix(coordinate), gpsStale = false) }
+        compose.runOnIdle {
+            val speed = if (speedKmh == null) nav.value.roadSpeed else nav.value.roadSpeed.copy(ownKmh = speedKmh.toDouble())
+            nav.value = nav.value.copy(fix = fix(coordinate, speedKmh ?: 30), gpsStale = false, roadSpeed = speed)
+        }
         lastFixAt = SystemClock.elapsedRealtime()
         compose.waitForIdle()
         return elapsed
+    }
+
+    private fun verifySpeedProfile(activity: Activity, view: MapView, map: MapLibreMap) {
+        val anchors = mutableListOf<Double>()
+        val zooms = mutableListOf<Double>()
+        lastFixAt = SystemClock.elapsedRealtime()
+        listOf(0, 30, 60, 90, 110, 60, 0).forEachIndexed { index, speed ->
+            val offset = (index + 1) * .00001
+            val coordinate = WeatherCoordinate(b.latitude + offset, b.longitude + offset)
+            assertTrue(publishFix(coordinate, speed) >= 1_100)
+            await("speed profile target settles at $speed km/sa", 4_000) {
+                SystemClock.elapsedRealtime() - lastFixAt >= 500 && atCoordinate(onMain { pose(map) }, coordinate)
+            }
+            val exposed = exposedGeometry()
+            val target = snapshot(map, "speed-profile-$index-$speed")
+            sameMap(activity, view, map)
+            val padding = target.padding
+            assertEquals(4, padding.size)
+            val anchor = .5 + (padding[1] - exposed.top) / (2 * exposed.height)
+            anchors += anchor
+            zooms += target.zoom
+            assertTrue("Speed zoom stays within the filtered bounds", target.zoom in 15.49..17.51)
+            if (adaptiveExpected) {
+                assertTrue("Adaptive anchor stays between 65 and 70 percent", anchor in 0.64..0.71)
+                assertEquals(45.0, target.pitch, 1.0)
+            } else {
+                assertEquals(.5, anchor, .015)
+                assertTrue("Undersized viewport stays flat", flat(target))
+            }
+        }
+        if (adaptiveExpected) {
+            assertTrue("Higher speed pushes the anchor down", anchors[4] > anchors[2] + .003)
+            assertTrue("Slowing down returns the anchor upward", anchors[6] < anchors[4] - .003)
+        }
+        assertTrue("The retained zoom curve eases out and back in", zooms[4] < zooms[2] && zooms[6] > zooms[4])
     }
     private fun bounds(tag: String) = compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
     private fun Rect.json() = JSONArray(listOf(left, top, right, bottom))
@@ -557,8 +607,9 @@ class Moto0110PhoneDrivingScene {
         return value
     }
     private fun sameTarget(value: Pose, expected: Pose) = abs(value.lat - expected.lat) <= .000001 && abs(value.lon - expected.lon) <= .000001
-    private fun adaptive(value: Pose, coordinate: WeatherCoordinate) = abs(value.lat - coordinate.latitude) <= .000001 &&
-        abs(value.lon - coordinate.longitude) <= .000001 && abs(value.zoom - 17.0) <= .1 &&
+    private fun atCoordinate(value: Pose, coordinate: WeatherCoordinate) =
+        abs(value.lat - coordinate.latitude) <= .000001 && abs(value.lon - coordinate.longitude) <= .000001
+    private fun adaptive(value: Pose, coordinate: WeatherCoordinate) = atCoordinate(value, coordinate) && abs(value.zoom - 17.0) <= .1 &&
         abs(value.pitch - (if (adaptiveExpected) 45.0 else 0.0)) <= 1 &&
         value.bearing.isFinite() && (if (adaptiveExpected) value.bearing in 0.0..360.0 else abs(value.bearing) <= .01)
     private fun assertAdaptive(value: Pose, coordinate: WeatherCoordinate) {
