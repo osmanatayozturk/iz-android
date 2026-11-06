@@ -44,13 +44,28 @@ object WeatherEngine {
         forecasts: List<LocationForecast>,
         thresholds: WeatherThresholds,
         elapsedSeconds: Double = 0.0,
+    ): WeatherAssessment = assess(route, RouteScheduleContext(departureAt), forecasts, thresholds, elapsedSeconds)
+
+    fun assess(
+        route: PlannedRoute,
+        context: RouteScheduleContext,
+        forecasts: List<LocationForecast>,
+        thresholds: WeatherThresholds,
+    ): WeatherAssessment = assess(route, context, forecasts, thresholds, context.drivingElapsedSeconds)
+
+    private fun assess(
+        route: PlannedRoute,
+        schedule: RouteScheduleContext,
+        forecasts: List<LocationForecast>,
+        thresholds: WeatherThresholds,
+        elapsedSeconds: Double,
     ): WeatherAssessment {
         require(elapsedSeconds.isFinite() && elapsedSeconds >= 0.0) { "İlerleme süresi geçersiz." }
         val usedForecasts = mutableListOf<LocationForecast>()
         val samples = sampleVertices(route).asSequence()
             .filter { it.elapsedSeconds + 1e-9 >= elapsedSeconds }
             .map { vertex ->
-                val arrivalAt = departureAt + (vertex.elapsedSeconds * 1_000.0).toLong()
+                val arrivalAt = RouteSchedule.arrivalAt(route, schedule, vertex.elapsedSeconds)
                 val forecast = forecasts.asSequence()
                     .map { it to distanceMeters(vertex.coordinate, it.coordinate) }
                     .filter { it.second <= FORECAST_MATCH_METERS }
@@ -74,7 +89,7 @@ object WeatherEngine {
         }
         val readings = samples.map { it.reading }
         return WeatherAssessment(
-            departureAt = departureAt,
+            departureAt = schedule.referenceAt,
             samples = samples,
             exceededSeconds = exceeded,
             complete = samples.isNotEmpty() && samples.all { it.complete },

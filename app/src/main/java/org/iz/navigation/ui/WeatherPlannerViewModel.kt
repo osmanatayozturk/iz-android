@@ -26,6 +26,8 @@ import org.iz.navigation.weather.ConfiguredStopOrderPlanner
 import org.iz.navigation.weather.WeatherAssessment
 import org.iz.navigation.weather.WeatherCoordinate
 import org.iz.navigation.weather.WeatherEngine
+import org.iz.navigation.weather.RouteSchedule
+import org.iz.navigation.weather.RouteTravelTime
 import org.iz.navigation.weather.WeatherPlanStore
 import org.iz.navigation.weather.WeatherProvider
 import org.iz.navigation.weather.WeatherSettingsStore
@@ -184,9 +186,14 @@ internal class WeatherPlannerCoordinator(
     fun setStops(stops: List<RouteStop>) {
         if (mutableState.value.starting) return
         require(stops.size <= 5) { "En fazla üç ara durak ekleyebilirsin." }
+        val normalizedStops = stops.mapIndexed { index, stop ->
+            if ((index == 0 || index == stops.lastIndex) && stop.plannedBreakSeconds != 0) {
+                stop.copy(plannedBreakSeconds = 0)
+            } else stop
+        }
         generation++
         mutableState.value = mutableState.value.copy(
-            stops = stops,
+            stops = normalizedStops,
             route = null,
             forecasts = emptyList(),
             comparisons = emptyList(),
@@ -196,7 +203,7 @@ internal class WeatherPlannerCoordinator(
             error = null,
             activeJourneyId = null,
             originUsesCurrentLocation = mutableState.value.originUsesCurrentLocation &&
-                stops.firstOrNull() == mutableState.value.stops.firstOrNull(),
+                normalizedStops.firstOrNull() == mutableState.value.stops.firstOrNull(),
         )
         invalidateCandidates()
     }
@@ -212,6 +219,18 @@ internal class WeatherPlannerCoordinator(
         require(index in 0..stops.size)
         if (index == stops.size) stops += stop else stops[index] = stop
         setStops(stops)
+    }
+
+    fun setPlannedBreakMinutes(index: Int, minutes: Int) {
+        val current = mutableState.value
+        if (current.starting) return
+        require(index in 1 until current.stops.lastIndex)
+        require(minutes in 0..240)
+        val seconds = minutes * 60
+        if (current.stops[index].plannedBreakSeconds == seconds) return
+        setStops(current.stops.mapIndexed { position, stop ->
+            if (position == index) stop.copy(plannedBreakSeconds = seconds) else stop
+        })
     }
 
     fun addVia(stop: RouteStop) {
@@ -349,8 +368,9 @@ internal class WeatherPlannerCoordinator(
                 check(route.transport == snapshot.transport && route.preferences == snapshot.settings.preferences && (trafficFree || !motorized || route.provider == RouteProvider.TOMTOM))
                 val departure = route.effectiveDepartureAt ?: value
                 val coordinates = WeatherEngine.sampleVertices(route).map { it.coordinate }
+                val until = RouteTravelTime.plannedArrival(RouteSchedule.planned(route, departure).arrivalAt, 3_600.0)
                 val forecasts = services.weatherProvider(snapshot.settings).hourly(coordinates,
-                    (departure - 3_600_000L).coerceAtLeast(0L), departure + (route.durationSeconds * 1000).toLong() + 3_600_000L)
+                    (departure - 3_600_000L).coerceAtLeast(0L), until)
                 val assessment = WeatherEngine.assess(route, departure, forecasts, snapshot.settings.thresholds)
                 if (token != generation) return@launch
                 if (revision != services.credentialRevision()) { refreshCredentials(); return@launch }
@@ -422,6 +442,7 @@ internal class WeatherPlannerCoordinator(
                 val routes = result.routes.onEach { route ->
                     check(route.transport == snapshot.transport && route.preferences == snapshot.settings.preferences)
                     route.requireUsablePreferences()
+                    RouteSchedule.planned(route, route.effectiveDepartureAt ?: at)
                 }.distinctBy { it.geometryKey() }.take(3)
                 if (token != generation) return@launch
                 if (revision != services.credentialRevision()) { refreshCredentials(); return@launch }
@@ -447,8 +468,9 @@ internal class WeatherPlannerCoordinator(
         return scope.launch {
             try {
                 val calculatedAt = services.clock()
+                val until = RouteTravelTime.plannedArrival(RouteSchedule.planned(route, at).arrivalAt, 14_400.0)
                 val forecasts = services.weatherProvider(snapshot.settings).hourly(WeatherEngine.sampleVertices(route).map { it.coordinate },
-                    (at - 3_600_000L).coerceAtLeast(0L), at + (route.durationSeconds * 1000).toLong() + 14_400_000L)
+                    (at - 3_600_000L).coerceAtLeast(0L), until)
                 val comparisons = services.compare(route, at, forecasts, snapshot.settings.thresholds)
                 check(comparisons.size == 7)
                 if (token != generation) return@launch
@@ -552,6 +574,7 @@ internal class WeatherPlannerCoordinator(
                     "Rota seçili yolculuk türüyle eşleşmedi."
                 }
                 if (token != generation) return@launch
+                RouteSchedule.planned(route, route.effectiveDepartureAt ?: now)
                 // A draft write must not fail after the recorder has already started.
                 services.savePlan(SavedWeatherPlan(userStops, now, snapshot.transport, snapshot.settings.preferences, snapshot.originUsesCurrentLocation, snapshot.settings.travelSpeedKmh))
                 // Recording/ETA start immediately; the weather manager retrieves forecasts independently.
@@ -601,10 +624,10 @@ internal class WeatherPlannerCoordinator(
         val route = services.routePlanner(settings).plan(stops, departureAt, transport, settings.travelSpeedKmh, settings.preferences).requireUsablePreferences()
         val calculatedAt = services.clock()
         check(route.transport == transport && route.preferences == settings.preferences) { "Rota seçili yolculuk türüyle eşleşmedi." }
+        val effectiveDeparture = route.effectiveDepartureAt ?: departureAt
+        val until = RouteTravelTime.plannedArrival(RouteSchedule.planned(route, effectiveDeparture).arrivalAt, 14_400.0)
         onRoute(route)
         val coordinates = WeatherEngine.sampleVertices(route).map { it.coordinate }
-        val effectiveDeparture = route.effectiveDepartureAt ?: departureAt
-        val until = effectiveDeparture + (route.durationSeconds * 1_000.0).toLong() + 4L * 60L * 60L * 1_000L
         val forecasts = services.weatherProvider(settings).hourly(
             coordinates,
             (effectiveDeparture - 60L * 60L * 1_000L).coerceAtLeast(0L),
@@ -678,6 +701,7 @@ internal class WeatherPlannerViewModel(application: Application) : AndroidViewMo
     fun setTransport(value: Transport) = coordinator.setTransport(value)
     fun setStops(stops: List<RouteStop>) = coordinator.setStops(stops)
     fun setStop(index: Int, stop: RouteStop) = coordinator.setStop(index, stop)
+    fun setPlannedBreakMinutes(index: Int, minutes: Int) = coordinator.setPlannedBreakMinutes(index, minutes)
     fun setCurrentOrigin(value: WeatherCoordinate) = coordinator.setCurrentOrigin(value)
     fun addVia(stop: RouteStop) = coordinator.addVia(stop)
     fun removeStop(index: Int) = coordinator.removeStop(index)
