@@ -22,6 +22,8 @@ import org.iz.navigation.integration.WeatherRouteMap
 import org.iz.navigation.navigation.NavigationState
 import org.iz.navigation.weather.PlannedRoute
 import org.iz.navigation.weather.RouteProvider
+import org.iz.navigation.weather.RouteSchedule
+import org.iz.navigation.weather.RouteTravelTime
 import org.iz.navigation.weather.RouteStop
 import org.iz.navigation.weather.RoutePreferences
 import org.iz.navigation.weather.geometryKey
@@ -69,6 +71,9 @@ internal fun PhoneDirectionsContent(
     onMap: () -> Unit = onClose,
     commandErrorVersion: Long = 0,
     voiceControls: (@Composable () -> Unit)? = null,
+    onPlannedBreakMinutesChanged: (Int, Int) -> Unit = { _, _ -> },
+    onResumePlannedBreak: () -> Unit = {},
+    plannedBreakResumeEnabled: Boolean = false,
 ) {
     val listState = rememberLazyListState()
     val shownRoute = ui.preview ?: nav.route
@@ -110,7 +115,12 @@ internal fun PhoneDirectionsContent(
                 if (nav.recording) OutlinedButton(stopRecording, enabled = !locked,
                     modifier = Modifier.fillMaxWidth().testTag("stop-navigation-recording")) { Text(PhoneSessionEnd.RECORDING.label) }
             }
-            Text(navigationInstruction(nav), style = MaterialTheme.typography.titleMedium)
+            val activeBreak = nav.plannedBreak
+            if (activeBreak != null) {
+                PlannedBreakCard(activeBreak, enabled = !locked && plannedBreakResumeEnabled, onResume = onResumePlannedBreak, timing = nav.tripTiming)
+            } else {
+                Text(navigationInstruction(nav), style = MaterialTheme.typography.titleMedium)
+            }
             if (ui.preview != null) TextButton(showLive) { Text("Canlı rotaya dön") }
             if (nav.guidance) OutlinedButton(mute) { Text(if (nav.muted) "Sesi aç" else "Sesi kapat") }
         }
@@ -179,6 +189,9 @@ internal fun PhoneDirectionsContent(
                     Text("${index + 1}. ${stop.label}", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                     TextButton({ removeVia(index) }, enabled = !locked) { Text("Kaldır") }
                 }
+                PlannedBreakEditor(stop, enabled = !locked) { minutes ->
+                    onPlannedBreakMinutesChanged(index, minutes)
+                }
             }
             TextButton(addVia, enabled = !locked && ui.via.size < 3, modifier = Modifier.testTag("directions-add-via")) { Text("Ara durak ekle") }
             if (!ui.originCurrent) Text("Başlatınca önce A noktasına, ardından planlanan duraklara gidilir.", style = MaterialTheme.typography.bodySmall)
@@ -207,7 +220,10 @@ internal fun PhoneDirectionsContent(
             ui.alternativeMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             ui.alternatives.forEachIndexed { index, route ->
                 FilterChip(ui.preview.geometryKey() == route.geometryKey(), { selectAlternative(route.id) }, enabled = !ui.busy && !locked,
-                    label = { Text("Rota ${index + 1} · ${formatDistance(route.distanceMeters)} · ${formatDuration(route.durationSeconds)}") },
+                    label = {
+                        val timing = RouteSchedule.planned(route, (route.effectiveDepartureAt ?: route.createdAt).coerceAtLeast(0))
+                        Text("Rota ${index + 1} · ${formatDistance(route.distanceMeters)} · ${formatDuration(timing.totalSeconds)}")
+                    },
                     modifier = Modifier.testTag("directions-route-choice-$index"))
             }
             ui.preview.providerWarnings.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
@@ -248,7 +264,7 @@ internal fun PhoneDirectionsContent(
         shownRoute?.let { route -> item {
             Card(Modifier.fillMaxWidth().testTag("directions-route-summary")) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    RouteTimingText(route, nav.takeIf { live }, preview = !live)
+                    RouteTimingText(route, nav.takeIf { live }, preview = !live, showBreakdown = true)
                     RouteTrafficText(route)
                     TextButton(onClick = { turnsRoute = route }, enabled = route.maneuvers.isNotEmpty()) { Text("Dönüşler") }
                     if (ui.preview != null && onPrepareGroup != null) OutlinedButton(onPrepareGroup, modifier = Modifier.testTag("directions-create-group")) { Text("Bu rotayla grup oluştur") }
@@ -332,25 +348,37 @@ private fun DirectionEndpoint(letter: String, title: String, stop: RouteStop?, s
 
 internal fun navigationInstruction(nav: NavigationState): String = when {
     nav.arrived -> if (nav.recording) "Varış noktasına ulaştın. Kayıt devam ediyor." else "Varış noktasına ulaştın."
+    nav.plannedBreak != null -> "Planlı mola"
+    nav.paused -> "Yönlendirme duraklatıldı"
     nav.guidance -> nav.route?.maneuvers?.getOrNull(nav.progress?.maneuverIndex ?: 0)?.instruction
         ?.takeIf { it.isNotBlank() } ?: "Yönlendirme açık"
     else -> "Serbest sürüş"
 }
 
 @Composable
-internal fun RouteTimingText(route: PlannedRoute, nav: NavigationState?, preview: Boolean) {
-    val now by produceState(System.currentTimeMillis(), route.id) {
-        while (true) { value = System.currentTimeMillis(); delay(30_000) }
-    }
-    val seconds = nav?.progress?.remainingSeconds ?: route.durationSeconds
+internal fun RouteTimingText(route: PlannedRoute, nav: NavigationState?, preview: Boolean, showBreakdown: Boolean = false) {
+    val departure = (route.effectiveDepartureAt ?: route.createdAt).coerceAtLeast(0)
+    val timing = if (preview) RouteSchedule.planned(route, departure) else nav?.tripTiming
+    val seconds = timing?.totalSeconds ?: nav?.progress?.remainingSeconds ?: route.durationSeconds
     val meters = nav?.progress?.remainingMeters ?: route.distanceMeters
-    val departure = if (preview) route.effectiveDepartureAt ?: route.createdAt else now
-    val arrival = if (nav?.gpsStale == true) "—" else SimpleDateFormat("HH:mm", Locale.forLanguageTag("tr-TR"))
-        .format(Date(departure + (seconds * 1000).toLong()))
+    val hasCurrentTiming = nav?.let { !it.gpsStale || it.plannedBreak != null } ?: true
+    val legacyArrival = if (timing == null && nav?.paused != true && hasCurrentTiming &&
+        route.stops.none { it.plannedBreakSeconds > 0 }) {
+        val now by produceState(System.currentTimeMillis(), route.id) {
+            while (true) { value = System.currentTimeMillis(); delay(30_000) }
+        }
+        RouteTravelTime.plannedArrival(now, seconds)
+    } else null
+    val arrival = (timing?.arrivalAt ?: legacyArrival)?.takeIf { hasCurrentTiming }
+    val arrivalLabel = arrival?.let {
+        SimpleDateFormat("HH:mm", Locale.forLanguageTag("tr-TR")).format(Date(it))
+    } ?: "—"
     val minutes = ceil(seconds / 60).toInt().coerceAtLeast(0)
     Text("${if (preview) "Önizleme" else "Kalan"} · ${String.format(Locale.forLanguageTag("tr-TR"), "%.1f", meters / 1000)} km · $minutes dk",
         style = MaterialTheme.typography.titleSmall)
-    Text("Tahmini varış $arrival", style = MaterialTheme.typography.bodySmall)
+    if (showBreakdown && timing != null) RouteTimingBreakdown(timing)
+    Text("Tahmini varış $arrivalLabel", style = MaterialTheme.typography.bodySmall)
+    if (showBreakdown && preview) PlannedViaSchedule(route, departure)
 }
 
 @Composable

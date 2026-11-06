@@ -67,6 +67,8 @@ internal fun NavigationHomeContent(
     onDashboard: (() -> Unit)? = null,
     dashboard: (@Composable () -> Unit)? = null,
     editPreview: org.iz.navigation.navigation.RouteEditPreview? = null,
+    onResumePlannedBreak: () -> Unit = {},
+    plannedBreakResumeEnabled: Boolean = false,
     planner: @Composable () -> Unit,
 ) {
     val presentation = navigationMapPresentation(ui, nav, points, showPlanner, editPreview)
@@ -170,12 +172,20 @@ internal fun NavigationHomeContent(
             val hasWarning = ui.message != null || live && (nav.guidance && voiceFault != null || nav.gpsStale ||
                 !nav.locationActive && !nav.simulation || visibleSessionMessage(nav) != null)
             CompactGuidanceHeader(headerBudget, shortLandscape, nav.roadSpeed, controls, hasWarning, primary = { textPane ->
-                if (live) HomeSessionCard(nav, onMute, onManageSession, body = {
+                if (live) HomeSessionCard(nav, onMute, onManageSession,
+                    plannedBreakResumeEnabled = plannedBreakResumeEnabled, onResumePlannedBreak = onResumePlannedBreak, body = {
                     Box(Modifier.weight(1f, fill = false)) { textPane() }
                 }) else textPane()
             }, text = {
                 entryPanels()
-                if (live) HomeSessionText(nav)
+                if (live) {
+                    val activeBreak = nav.plannedBreak
+                    if (activeBreak != null) {
+                        PlannedBreakDetails(activeBreak, nav.tripTiming)
+                    } else {
+                        HomeSessionText(nav)
+                    }
+                }
                 preparedNotice()
                 if (live) HomeSessionWarnings(nav, voiceFault)
                 statusMessage()
@@ -208,7 +218,8 @@ internal fun NavigationHomeContent(
             .onSizeChanged { panelsMeasurement = panelsKey to with(density) { it.height.toDp() } }, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             entryPanels()
             if (!showPlanner && !dashboardVisible && live) {
-                HomeSessionCard(nav, onMute, onManageSession, Modifier.padding(end = 60.dp)) {
+                HomeSessionCard(nav, onMute, onManageSession, Modifier.padding(end = 60.dp),
+                    plannedBreakResumeEnabled = plannedBreakResumeEnabled, onResumePlannedBreak = onResumePlannedBreak) {
                     HomeSessionWarnings(nav, voiceFault)
                 }
             }
@@ -296,20 +307,26 @@ private fun HomeDashboardButton(onClick: () -> Unit, modifier: Modifier = Modifi
 
 @Composable
 private fun HomeSessionCard(nav: NavigationState, onMute: () -> Unit, onManageSession: () -> Unit,
-    modifier: Modifier = Modifier, body: (@Composable ColumnScope.() -> Unit)? = null, details: @Composable () -> Unit = {}) {
+    modifier: Modifier = Modifier, body: (@Composable ColumnScope.() -> Unit)? = null,
+    plannedBreakResumeEnabled: Boolean = false, onResumePlannedBreak: () -> Unit = {}, details: @Composable () -> Unit = {}) {
     Surface(onClick = onManageSession, shape = RoundedCornerShape(20.dp), shadowElevation = 2.dp,
         color = MaterialTheme.colorScheme.surface.copy(alpha = .98f),
         modifier = modifier.fillMaxWidth().testTag("live-guidance-card")
             .semantics { onClick(label = "Yolculuk işlemlerini aç", action = null) }) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            if (body == null) HomeSessionText(nav) else body()
+            if (body == null) {
+                nav.plannedBreak?.let { PlannedBreakDetails(it, nav.tripTiming) } ?: HomeSessionText(nav)
+            } else body()
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f)) {
-                    if (nav.guidance) nav.progress?.nextManeuverDistanceMeters?.let { meters ->
+                    val activeBreak = nav.plannedBreak
+                    if (activeBreak != null) PlannedBreakElapsed(activeBreak, compact = true)
+                    else if (nav.guidance && !nav.paused) nav.progress?.nextManeuverDistanceMeters?.let { meters ->
                         Text(if (meters >= 1000) "%.1f km sonra".format(meters / 1000) else "${meters.roundToInt().coerceAtLeast(0)} m sonra",
                             fontSize = 16.sp, lineHeight = 23.sp, color = Forest)
                     }
                 }
+                if (nav.plannedBreak != null) PlannedBreakResumeButton(plannedBreakResumeEnabled, onResumePlannedBreak)
                 if (nav.guidance) IconButton(onMute,
                     Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).testTag("compact-card-mute")) {
                     Icon(if (nav.muted) Icons.Outlined.VolumeOff else Icons.Outlined.VolumeUp,

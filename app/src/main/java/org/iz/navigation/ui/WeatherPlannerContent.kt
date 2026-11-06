@@ -50,6 +50,7 @@ import org.iz.navigation.weather.RideWeatherLiveState
 import org.iz.navigation.weather.RideWeatherStatus
 import org.iz.navigation.weather.RouteStop
 import org.iz.navigation.weather.RoutePreferences
+import org.iz.navigation.weather.RouteSchedule
 import org.iz.navigation.weather.matrixUnavailableReason
 import org.iz.navigation.weather.geometryKey
 import org.iz.navigation.weather.WeatherAssessment
@@ -86,6 +87,7 @@ internal data class WeatherPlannerActions(
     val requestAlternatives: () -> Unit = {},
     val selectAlternative: (String) -> Unit = {},
     val saveRoute: () -> Unit = {},
+    val setPlannedBreakMinutes: (Int, Int) -> Unit = { _, _ -> },
 )
 
 @Composable
@@ -199,6 +201,9 @@ internal fun WeatherPlannerContent(
                     onChoose = { actions.chooseStop(viaIndex + 1) },
                     onRemove = { actions.removeStop(viaIndex + 1) },
                 )
+                PlannedBreakEditor(stop, enabled = !interactionLocked) { minutes ->
+                    actions.setPlannedBreakMinutes(viaIndex + 1, minutes)
+                }
             }
         }
         item {
@@ -282,7 +287,11 @@ internal fun WeatherPlannerContent(
                 state.alternatives.forEachIndexed { index, route ->
                     FilterChip(selected = displayRoute.geometryKey() == route.geometryKey(),
                         onClick = { actions.selectAlternative(route.id) }, enabled = !state.loadingAlternatives && !interactionLocked,
-                        label = { Text("Rota ${index + 1} · ${formatDistance(route.distanceMeters)} · ${formatDuration(route.durationSeconds)}") },
+                        label = {
+                             val departure = route.effectiveDepartureAt ?: state.effectiveDepartureAt ?: state.departureAt
+                             val timing = RouteSchedule.planned(route, departure.coerceAtLeast(0))
+                             Text("Rota ${index + 1} · ${formatDistance(route.distanceMeters)} · ${formatDuration(timing.totalSeconds)}")
+                         },
                         modifier = Modifier.testTag("weather_route_choice_$index"))
                 }
                 displayRoute.providerWarnings.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
@@ -543,7 +552,13 @@ internal fun WeatherSampleDialog(
                 Text("Yağış: %${sample.reading.precipitationProbabilityPercent?.roundToInt() ?: "-"} · ${sample.reading.precipitationMm?.let { String.format(Locale.forLanguageTag("tr-TR"), "%.1f", it) } ?: "-"} mm")
                 Text("Rüzgâr: ${sample.reading.windKmh?.roundToInt() ?: "-"} · hamle ${sample.reading.gustKmh?.roundToInt() ?: "-"} km/sa")
                 Text("Yön: ${sample.reading.windDirectionDegrees?.roundToInt()?.let { "$it°" } ?: "-"}")
-                if (!sample.complete) Text("Bu noktada bazı tahmin değerleri eksik.", color = MaterialTheme.colorScheme.error)
+                val reading = sample.reading
+                if (!sample.complete) {
+                    val missing = listOf(reading.temperatureC, reading.precipitationProbabilityPercent, reading.precipitationMm,
+                        reading.windKmh, reading.gustKmh, reading.windDirectionDegrees).all { it == null }
+                    Text(if (missing) "Hava tahmini yok" else "Bu noktada bazı tahmin değerleri eksik.",
+                        color = MaterialTheme.colorScheme.error)
+                }
                 if (sample.hazards.isNotEmpty()) Text(sample.hazards.joinToString { hazardLabel(it) }, color = Clay)
             }
         },

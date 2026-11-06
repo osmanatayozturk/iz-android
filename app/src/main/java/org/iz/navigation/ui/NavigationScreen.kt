@@ -330,7 +330,7 @@ internal class PhoneNavigationViewModel(application: Application) : AndroidViewM
             if (currentUiEntry != entryId || !stillCurrent()) return false
             val current = navigation.state.value
             val active = current.plannedBreak ?: return false
-            return NavigationStopSnapshot.from(current) == expected &&
+            return !current.loading && !ui.value.starting && NavigationStopSnapshot.from(current) == expected &&
                 active.stopIndex == expectedBreak.stopIndex && active.startedAt == expectedBreak.startedAt
         }
         if (commandBusy.value || ui.value.starting || !ownsRequest()) return
@@ -401,6 +401,8 @@ internal fun NavigationScreen(
     val dashboardEntry = org.iz.navigation.ui.history.LocalUiEntryKey.current
     val activeBreak = nav.plannedBreak
     val breakOwner = NavigationStopSnapshot.from(nav)
+    val plannedBreakResumeEnabled = !commandBusy && !ui.starting && !nav.loading && activeBreak != null &&
+        breakOwner != null && (uiHistory?.current?.key ?: "standalone") == dashboardEntry
     val resumePlannedBreak: () -> Unit = {
         if (activeBreak != null && breakOwner != null) {
             vm.resumePlannedBreak(entryId, breakOwner, activeBreak) {
@@ -684,7 +686,7 @@ internal fun NavigationScreen(
         onGroup = onGroup, onMenu = onMenu, onWeather = onWeather,
         onMute = { vm.navigation.setMuted(!nav.muted) }, onManageSession = { showPlanning = true; onPlannerOpened() },
         onLocate = { requestAction(DirectionsAction.CURRENT_ORIGIN) }, onPin = onPin,
-        onResumePlannedBreak = resumePlannedBreak,
+        onResumePlannedBreak = resumePlannedBreak, plannedBreakResumeEnabled = plannedBreakResumeEnabled,
     ) {
     PhoneDirectionsContent(
         ui = ui, nav = nav, points = points, commandBusy = commandBusy, commandErrorVersion = commandErrorVersion, voiceControls = {
@@ -709,7 +711,7 @@ internal fun NavigationScreen(
         showMap = false, recordJourney = vm.directions::setRecordJourney, stopRecording = { requestEnd(PhoneSessionEnd.RECORDING) },
         addVia = { addingVia = true; pickerOrigin = false; showSource = true }, removeVia = vm.directions::removeVia,
         onPlannedBreakMinutesChanged = vm.directions::setPlannedBreakMinutes,
-        onResumePlannedBreak = resumePlannedBreak,
+        onResumePlannedBreak = resumePlannedBreak, plannedBreakResumeEnabled = plannedBreakResumeEnabled,
         suggestStopOrder = { vm.directions.suggestStopOrder() }, acceptStopOrder = vm.directions::acceptStopOrder,
         dismissStopOrder = vm.directions::dismissStopOrder,
         setPreferences = vm.directions::setPreferences,
