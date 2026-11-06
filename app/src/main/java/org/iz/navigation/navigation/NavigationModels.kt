@@ -48,6 +48,9 @@ data class NavigationState(
     val preparedRouteFingerprint: String? = null,
     /** Actual progress/rebase event, never a transport publication timestamp. */
     val progressUpdatedAt: Long? = null,
+    val plannedBreak: PlannedBreakState? = null,
+    val tripTiming: org.iz.navigation.weather.RouteTripTiming? = null,
+    val scheduleContext: org.iz.navigation.weather.RouteScheduleContext? = null,
 )
 /** Ephemeral confirmation identity; changing fixes, progress and messages do not invalidate it. */
 data class NavigationStopSnapshot(

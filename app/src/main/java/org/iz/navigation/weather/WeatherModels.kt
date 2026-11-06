@@ -9,8 +9,11 @@ data class WeatherCoordinate(val latitude: Double, val longitude: Double) {
     }
 }
 
-data class RouteStop(val label: String, val coordinate: WeatherCoordinate) {
-    init { require(label.isNotBlank() && label.length <= 300) { "Durak adı geçersiz." } }
+data class RouteStop(val label: String, val coordinate: WeatherCoordinate, val plannedBreakSeconds: Int = 0) {
+    init {
+        require(label.isNotBlank() && label.length <= 300) { "Durak adı geçersiz." }
+        require(plannedBreakSeconds in 0..14_400) { "Mola süresi 0–240 dakika olmalı." }
+    }
 }
 
 data class RouteVertex(val coordinate: WeatherCoordinate, val elapsedSeconds: Double) {
