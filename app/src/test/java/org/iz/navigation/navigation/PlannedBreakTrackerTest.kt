@@ -23,8 +23,21 @@ class PlannedBreakTrackerTest {
             assertEquals(45.0,t.snapshot(now)!!.elapsedSeconds,0.0)
             val speed=when(mode){Transport.CAR,Transport.MOTORCYCLE,Transport.PASSENGER->2f;Transport.BICYCLE->1.2f;else->.7f}
             assertEquals(PlannedBreakTracker.Change.NONE,t.update(fix(now+1000,.0104,speed),now+1000,{0.0}))
-            assertEquals(PlannedBreakTracker.Change.RESUMED,t.update(fix(now+6000,.0105,speed),now+6000,{0.0}))
+            assertEquals(mode.name,PlannedBreakTracker.Change.RESUMED,t.update(fix(now+6000,.0105,speed),now+6000,{0.0}))
             assertNull(t.snapshot(now+6000)); assertEquals(setOf(2),t.remaining(now+6000).keys)
+        }
+    }
+    @Test fun exactStopSpeedLimitsAreInclusiveButTheNextFloatIsNotStationary() {
+        for(mode in Transport.entries.filter { it!=Transport.UNKNOWN }) {
+            val limit=when(mode){Transport.CAR,Transport.MOTORCYCLE,Transport.PASSENGER->.8f;Transport.BICYCLE->.6f;else->.4f}
+            val atLimit=PlannedBreakTracker(route(mode))
+            val aboveLimit=PlannedBreakTracker(route(mode))
+            for(at in listOf(1_000L,21_000L,46_000L)) {
+                atLimit.update(fix(at,speed=limit),at,{0.0})
+                aboveLimit.update(fix(at,speed=Math.nextUp(limit)),at,{0.0})
+            }
+            assertNotNull(mode.name,atLimit.snapshot(46_000))
+            assertNull(mode.name,aboveLimit.snapshot(46_000))
         }
     }
     @Test fun missingSpeedNeedsMotionBeyondUncertaintyAndDistance() {

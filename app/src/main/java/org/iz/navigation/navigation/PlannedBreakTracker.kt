@@ -61,13 +61,14 @@ internal class PlannedBreakTracker(private val route: PlannedRoute) {
             return Change.NONE
         }
         lastFixAt = fix.recordedAt
-        val speed = fix.speedMps?.takeIf { it.isFinite() && it in 0f..100f }?.toDouble()
+        // Android reports Float speeds; compare inclusive GPS thresholds at that precision.
+        val speed = fix.speedMps?.takeIf { it.isFinite() && it in 0f..100f }
         val current = active
         if (current != null) {
             val displacement = WeatherEngine.distanceMeters(current.first.coordinate, fix.coordinate)
             val uncertainty = current.first.accuracyMeters.toDouble() + fix.accuracyMeters.toDouble()
             val moved = displacement >= profile.third &&
-                if (speed == null) displacement > uncertainty else speed >= profile.second
+                if (speed == null) displacement > uncertainty else speed >= profile.second.toFloat()
             if (!moved) { movement = null; return Change.NONE }
             val previous = movement
             if (previous == null || fix.recordedAt - previous.last.recordedAt > 10_000)
@@ -103,7 +104,7 @@ internal class PlannedBreakTracker(private val route: PlannedRoute) {
         } ?: return Change.NONE
         val along = distanceToStop(index)
         val distance = WeatherEngine.distanceMeters(route.stops[index].coordinate, fix.coordinate)
-        if (along == null || abs(along) > 40.0 || distance > 40.0 || speed != null && speed > profile.first) {
+        if (along == null || abs(along) > 40.0 || distance > 40.0 || speed != null && speed > profile.first.toFloat()) {
             cancelCandidate(); return Change.NONE
         }
         val previous = candidate
