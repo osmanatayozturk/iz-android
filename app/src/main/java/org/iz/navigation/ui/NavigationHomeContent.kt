@@ -30,7 +30,6 @@ import org.iz.navigation.data.TrackPoint
 import org.iz.navigation.integration.RouteMapMember
 import org.iz.navigation.integration.WeatherRouteMap
 import org.iz.navigation.navigation.NavigationState
-import org.iz.navigation.speed.roadSpeedPresentation
 import kotlin.math.roundToInt
 
 /** Keep original positional callers and trailing planner lambdas source-compatible. */
@@ -78,8 +77,9 @@ internal fun NavigationHomeContent(
     val textMeasurer = rememberTextMeasurer()
     val dashboardVisible = showDashboard && dashboard != null
     val baseShowBrand = !live && !showPlanner && !dashboardVisible
-    val showShortcuts = !showPlanner && !dashboardVisible && shortcuts.isNotEmpty()
+    val showShortcuts = !nav.guidance && !showPlanner && !dashboardVisible && shortcuts.isNotEmpty()
     val showDestinationHeader = !nav.guidance && !dashboardVisible
+    val externalHeader = !showPlanner && !dashboardVisible && (nav.guidance || nav.roadSpeed.visible)
     var shortcutMeasurement by remember { mutableStateOf<Pair<List<Any?>, androidx.compose.ui.unit.Dp>?>(null) }
     var headerMeasurement by remember { mutableStateOf<Pair<List<Any?>, androidx.compose.ui.unit.Dp>?>(null) }
     var panelsMeasurement by remember { mutableStateOf<Pair<List<Any?>, androidx.compose.ui.unit.Dp>?>(null) }
@@ -95,17 +95,18 @@ internal fun NavigationHomeContent(
         val dashboardSideWidth = if (dashboardAtSide) measuredDashboard?.let { with(density) { it.width.toDp() } } ?: desiredSideWidth else 0.dp
         val dashboardBottomHeight = if (dashboardVisible && !dashboardAtSide) measuredDashboard?.let { with(density) { it.height.toDp() } } ?: desiredBottomHeight else 0.dp
         val dashboardButtonVisible = onDashboard != null && !dashboardVisible
+        val dashboardButtonInMap = dashboardButtonVisible && !externalHeader
         val dashboardButtonKey = listOf(maxWidth, maxHeight, density.density, density.fontScale, dashboardEpoch)
-        val dashboardButtonHeight = if (dashboardButtonVisible) dashboardButtonMeasurement?.takeIf { it.first == dashboardButtonKey }?.second ?: 48.dp else 0.dp
+        val dashboardButtonHeight = if (dashboardButtonInMap) dashboardButtonMeasurement?.takeIf { it.first == dashboardButtonKey }?.second ?: 48.dp else 0.dp
+        val shortLandscape = maxWidth > maxHeight && maxHeight < 480.dp
+        // At 320dp, leave 192dp for the native map. Its existing local top/bottom margins then leave 56dp.
+        val headerBudget = if (shortLandscape) minOf(maxHeight * .60f, (maxHeight - 192.dp).coerceAtLeast(maxHeight * .40f))
+            else maxHeight * .60f
         // Bounds from an earlier header/panel/viewport must never drive this frame's camera.
         // GPS coordinates alone do not invalidate geometry or remount the native map.
-        val speedText = roadSpeedPresentation(nav.roadSpeed)
         val layoutKey = listOf(maxWidth, maxHeight, density.density, density.fontScale, showPlanner, dashboardVisible, dashboardAtSide, dashboardSideWidth, dashboardBottomHeight, dashboardButtonHeight,
             showDestinationHeader, live, nav.guidance, nav.recording, nav.simulation, nav.gpsStale,
             nav.locationActive, nav.sessionTransport, nav.message, ui.message, weatherLabel, current == null, ui.locating, voiceFault, presentation.editPreviewLabel,
-            if (nav.guidance) navigationInstruction(nav) else null,
-            if (nav.guidance) nav.progress?.nextManeuverDistanceMeters else null,
-            nav.roadSpeed.visible, speedText.ownText, speedText.limitText, speedText.sourceText,
             if (showShortcuts) shortcuts.map { it.kind to it.place.name } else emptyList())
         // A shortcut row does not depend on maneuver, speed or warning text in the other panels.
         val showBrand = baseShowBrand && !(showShortcuts && maxHeight < 400.dp)
@@ -128,29 +129,14 @@ internal fun NavigationHomeContent(
             (!showShortcuts || shortcutMeasurement?.first == shortcutKey) &&
             (presentation.editPreviewLabel == null || panelsMeasurement?.first == panelsKey)
         val dashboardReady = !dashboardVisible || measuredDashboard != null
-        val dashboardButtonReady = !dashboardButtonVisible || dashboardButtonMeasurement?.first == dashboardButtonKey
-        val viewportReady = panelsMeasurement?.first == panelsKey && controlsReady && dashboardReady && dashboardButtonReady
+        val dashboardButtonReady = !dashboardButtonInMap || dashboardButtonMeasurement?.first == dashboardButtonKey
+        val viewportReady = (externalHeader || panelsMeasurement?.first == panelsKey && controlsReady) &&
+            dashboardReady && dashboardButtonReady
         val attributionWidth = with(density) {
             textMeasurer.measure("© OpenStreetMap contributors", style = MaterialTheme.typography.labelSmall).size.width.toDp()
         } + 20.dp
         val compactWeatherWidth = (maxWidth - 24.dp - attributionWidth - 8.dp).coerceAtLeast(48.dp)
-        WeatherRouteMap(route = route, assessment = null, modifier = Modifier.fillMaxSize().padding(end = dashboardSideWidth).testTag("navigation-home-map"),
-            expandable = false, stops = presentation.stops, liveCoordinate = current,
-            recordedPoints = presentation.trail, gpsStale = live && nav.gpsStale,
-            cameraIdentity = presentation.cameraIdentity,
-            preparedRoutes = if (preparedNavigationMapApplies(presentation, nav))
-                (androidx.compose.ui.platform.LocalContext.current.applicationContext as? org.iz.navigation.IzApplication)?.preparedRoutes else null,
-            drivingCamera = phoneDriveCameraInput(nav, showPlanner, android.os.SystemClock.elapsedRealtime()),
-            cameraViewportReady = viewportReady, navigationControlsReady = controlsReady,
-            navigationLayout = true, members = members, onLocate = onLocate, onMapLongClick = onPin,
-            navigationControlsTopInset = if (presentation.editPreviewLabel != null)
-                panelsHeight + 24.dp else headerHeight + shortcutOffset + 24.dp,
-            navigationControlsHorizontal = horizontalMapControls,
-            attributionBottomInset = if (dashboardBottomHeight > 0.dp) dashboardBottomHeight + 92.dp else if (showPlanner && !dashboardVisible) maxHeight * .64f + 4.dp else 92.dp,
-            cameraViewportInsets = PaddingValues(start = 28.dp, top = panelsHeight + 24.dp, end = 84.dp,
-                bottom = if (dashboardBottomHeight > 0.dp) dashboardBottomHeight + 112.dp else if (showPlanner && !dashboardVisible) maxHeight * .64f + 24.dp else 112.dp + dashboardButtonHeight))
-        Column(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(end = dashboardSideWidth).padding(12.dp)
-            .onSizeChanged { panelsMeasurement = panelsKey to with(density) { it.height.toDp() } }, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        val entryPanels: @Composable () -> Unit = {
             presentation.editPreviewLabel?.let { label ->
                 Surface(Modifier.fillMaxWidth().testTag("navigation-edit-preview-label"), shape = MaterialTheme.shapes.medium) {
                     Text(label, Modifier.padding(12.dp), style = MaterialTheme.typography.labelLarge)
@@ -169,56 +155,61 @@ internal fun NavigationHomeContent(
                         Icon(Icons.Outlined.Search, null, tint = Forest)
                         Column(Modifier.weight(1f)) {
                             Text("Nereye?", style = MaterialTheme.typography.titleLarge)
-                            if (nav.guidance) Text(nav.route?.stops?.lastOrNull()?.label.orEmpty(),
-                                maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
                         }
                         Icon(Icons.Outlined.Route, "Yol tarifi", tint = Forest)
                     }
                 }
             }
-            if (!showPlanner && !dashboardVisible && live) Surface(onClick = onManageSession, shape = RoundedCornerShape(20.dp), shadowElevation = 2.dp,
-                color = MaterialTheme.colorScheme.surface.copy(alpha = .98f), modifier = Modifier.fillMaxWidth().padding(end = 60.dp).testTag("live-guidance-card")
-                    .semantics { onClick(label = "Yolculuk işlemlerini aç", action = null) }) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        if (nav.guidance) nav.progress?.nextManeuverDistanceMeters?.let { meters ->
-                            Text(if (meters >= 1000) "%.1f km sonra".format(meters / 1000) else "${meters.roundToInt().coerceAtLeast(0)} m sonra",
-                                modifier = Modifier.align(Alignment.CenterVertically),
-                                style = MaterialTheme.typography.titleLarge, color = Forest)
-                        }
-                        if (nav.guidance) IconButton(onMute,
-                            Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
-                                .align(Alignment.CenterVertically).testTag("compact-card-mute")) {
-                            Icon(if (nav.muted) Icons.Outlined.VolumeOff else Icons.Outlined.VolumeUp,
-                                if (nav.muted) "Sesi aç" else "Sesi kapat")
-                        }
-                        TextButton(onManageSession,
-                            modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
-                                .align(Alignment.CenterVertically).testTag("home-finish-session")
-                                .semantics { contentDescription = "Yolculuk işlemlerini aç" },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("İşlemler") }
-                    }
-                    if (nav.simulation) Text("Simülasyon", color = Forest, style = MaterialTheme.typography.labelSmall)
-                    if (nav.guidance) {
-                        Text(navigationInstruction(nav), fontSize = 24.sp, lineHeight = 29.sp,
-                            maxLines = 3, overflow = TextOverflow.Ellipsis)
-                    } else Text("${nav.sessionTransport?.label().orEmpty()} · Serbest yolculuk", style = MaterialTheme.typography.titleLarge)
-                    if (nav.guidance) voiceFault?.let { Text(it, modifier = Modifier.testTag("navigation-voice-fault"),
-                        color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-                    if (nav.gpsStale) Text("GPS konumu bekleniyor", color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall)
-                    if (!nav.locationActive && !nav.simulation) Text("Konum bağlantısı kuruluyor", style = MaterialTheme.typography.bodySmall)
-                    // The simulation identity stays here; the full explanation remains in the directions panel.
-                    // Unknown messages and every operational warning keep their original visibility.
-                    nav.message?.takeUnless { nav.simulation && it == "Deneme sürüşü · günlüğe kaydedilmez" }
-                        ?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        }
+        val statusMessage: @Composable () -> Unit = {
+            ui.message?.let { Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surface) {
+                Text(it, Modifier.padding(10.dp), style = MaterialTheme.typography.bodySmall)
+            } }
+        }
+        val navigationHeader: @Composable (@Composable () -> Unit, @Composable () -> Unit) -> Unit = { controls, preparedNotice ->
+            val hasWarning = ui.message != null || live && (nav.guidance && voiceFault != null || nav.gpsStale ||
+                !nav.locationActive && !nav.simulation || visibleSessionMessage(nav) != null)
+            CompactGuidanceHeader(headerBudget, shortLandscape, nav.roadSpeed, controls, hasWarning, primary = { textPane ->
+                if (live) HomeSessionCard(nav, onMute, onManageSession, body = {
+                    Box(Modifier.weight(1f, fill = false)) { textPane() }
+                }) else textPane()
+            }, text = {
+                entryPanels()
+                if (live) HomeSessionText(nav)
+                preparedNotice()
+                if (live) HomeSessionWarnings(nav, voiceFault)
+                statusMessage()
+            }, accessories = {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HomeWeatherChip(weatherLabel, onWeather, Modifier.weight(1f, fill = false))
+                    if (dashboardButtonVisible && onDashboard != null) HomeDashboardButton(onDashboard)
                 }
-            }
-            if (!showPlanner && !dashboardVisible && nav.roadSpeed.visible) {
-                val speed = roadSpeedPresentation(nav.roadSpeed)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.testTag("road-speed-panel")) {
-                    SpeedReadout("Hızım", speed.ownText, "GPS", Modifier.width(100.dp))
-                    SpeedReadout("Hız sınırı", speed.limitText, speed.sourceText, Modifier.widthIn(min = 128.dp, max = 200.dp))
+            })
+        }
+        WeatherRouteMap(route = route, assessment = null, modifier = Modifier.fillMaxSize().padding(end = dashboardSideWidth),
+            expandable = false, stops = presentation.stops, liveCoordinate = current,
+            recordedPoints = presentation.trail, gpsStale = live && nav.gpsStale,
+            cameraIdentity = presentation.cameraIdentity,
+            preparedRoutes = if (preparedNavigationMapApplies(presentation, nav))
+                (androidx.compose.ui.platform.LocalContext.current.applicationContext as? org.iz.navigation.IzApplication)?.preparedRoutes else null,
+            drivingCamera = phoneDriveCameraInput(nav, showPlanner, android.os.SystemClock.elapsedRealtime()),
+            cameraViewportReady = viewportReady, navigationControlsReady = controlsReady,
+            navigationLayout = true, members = members, onLocate = onLocate, onMapLongClick = onPin,
+            navigationControlsTopInset = if (presentation.editPreviewLabel != null)
+                panelsHeight + 24.dp else headerHeight + shortcutOffset + 24.dp,
+            navigationControlsHorizontal = horizontalMapControls,
+            attributionBottomInset = if (dashboardBottomHeight > 0.dp) dashboardBottomHeight + 92.dp else if (showPlanner && !dashboardVisible) maxHeight * .64f + 4.dp else 92.dp,
+            cameraViewportInsets = PaddingValues(start = 28.dp, top = if (externalHeader) 24.dp else panelsHeight + 24.dp,
+                end = if (externalHeader) 28.dp else 84.dp,
+                bottom = if (dashboardBottomHeight > 0.dp) dashboardBottomHeight + 112.dp else if (showPlanner && !dashboardVisible) maxHeight * .64f + 24.dp else 112.dp + dashboardButtonHeight),
+            navigationHeader = if (externalHeader) navigationHeader else null)
+        if (!externalHeader) Column(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(end = dashboardSideWidth).padding(12.dp)
+            .onSizeChanged { panelsMeasurement = panelsKey to with(density) { it.height.toDp() } }, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            entryPanels()
+            if (!showPlanner && !dashboardVisible && live) {
+                HomeSessionCard(nav, onMute, onManageSession, Modifier.padding(end = 60.dp)) {
+                    HomeSessionWarnings(nav, voiceFault)
                 }
             }
             if (shortIdle) Row(Modifier.fillMaxWidth().padding(end = if (horizontalMapControls) 116.dp else 60.dp),
@@ -226,9 +217,7 @@ internal fun NavigationHomeContent(
                 if (current == null) HomeLocateChip(ui.locating, onLocate, Modifier.weight(1f, fill = false))
                 HomeWeatherChip(weatherLabel, onWeather, Modifier.weight(1f, fill = false))
             } else if (!showPlanner && !dashboardVisible && !live && current == null) HomeLocateChip(ui.locating, onLocate)
-            if (!showPlanner && !dashboardVisible && ui.message != null) Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surface) {
-                Text(ui.message, Modifier.padding(10.dp), style = MaterialTheme.typography.bodySmall)
-            }
+            if (!showPlanner && !dashboardVisible) statusMessage()
             if (!showPlanner && !dashboardVisible && !shortIdle) HomeWeatherChip(weatherLabel, onWeather,
                 if (compact && live) Modifier.align(Alignment.End).widthIn(max = compactWeatherWidth) else Modifier)
         }
@@ -241,14 +230,10 @@ internal fun NavigationHomeContent(
             else Modifier.align(Alignment.BottomCenter).padding(bottom = 88.dp).fillMaxWidth().height(desiredBottomHeight)
             Box(panelModifier.onSizeChanged { dashboardMeasurement = dashboardKey to it }) { dashboard?.invoke() }
         }
-        if (dashboardButtonVisible) Box(Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 92.dp)) {
-            OutlinedButton(onClick = { onDashboard?.invoke() },
-                modifier = Modifier.sizeIn(minHeight = 48.dp).onSizeChanged {
-                    dashboardButtonMeasurement = dashboardButtonKey to with(density) { it.height.toDp() }
-                }.testTag("open-navigation-dashboard"),
-                colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                Icon(Icons.Outlined.Dashboard, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Gösterge")
-            }
+        if (dashboardButtonInMap && onDashboard != null) Box(Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 92.dp)) {
+            HomeDashboardButton(onDashboard, Modifier.onSizeChanged {
+                dashboardButtonMeasurement = dashboardButtonKey to with(density) { it.height.toDp() }
+            })
         }
         Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(end = dashboardSideWidth).padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
             shape = RoundedCornerShape(24.dp), shadowElevation = 6.dp, color = MaterialTheme.colorScheme.surface) {
@@ -301,15 +286,61 @@ private fun HomeBrand() {
 }
 
 @Composable
-private fun SpeedReadout(label: String, value: String, source: String, modifier: Modifier) {
-    Surface(modifier, shape = RoundedCornerShape(16.dp), shadowElevation = 2.dp, color = MaterialTheme.colorScheme.surface) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-            Text(label, style = MaterialTheme.typography.labelMedium)
-            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(value, style = MaterialTheme.typography.headlineSmall)
-                Text("km/sa", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(bottom = 4.dp))
+private fun HomeDashboardButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    OutlinedButton(onClick = onClick,
+        modifier = modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).testTag("open-navigation-dashboard"),
+        colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Icon(Icons.Outlined.Dashboard, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Gösterge")
+    }
+}
+
+@Composable
+private fun HomeSessionCard(nav: NavigationState, onMute: () -> Unit, onManageSession: () -> Unit,
+    modifier: Modifier = Modifier, body: (@Composable ColumnScope.() -> Unit)? = null, details: @Composable () -> Unit = {}) {
+    Surface(onClick = onManageSession, shape = RoundedCornerShape(20.dp), shadowElevation = 2.dp,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = .98f),
+        modifier = modifier.fillMaxWidth().testTag("live-guidance-card")
+            .semantics { onClick(label = "Yolculuk işlemlerini aç", action = null) }) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (body == null) HomeSessionText(nav) else body()
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) {
+                    if (nav.guidance) nav.progress?.nextManeuverDistanceMeters?.let { meters ->
+                        Text(if (meters >= 1000) "%.1f km sonra".format(meters / 1000) else "${meters.roundToInt().coerceAtLeast(0)} m sonra",
+                            fontSize = 16.sp, lineHeight = 23.sp, color = Forest)
+                    }
+                }
+                if (nav.guidance) IconButton(onMute,
+                    Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).testTag("compact-card-mute")) {
+                    Icon(if (nav.muted) Icons.Outlined.VolumeOff else Icons.Outlined.VolumeUp,
+                        if (nav.muted) "Sesi aç" else "Sesi kapat")
+                }
+                TextButton(onManageSession,
+                    modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).testTag("home-finish-session")
+                        .semantics { contentDescription = "Yolculuk işlemlerini aç" },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("İşlemler") }
             }
-            Text(source, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            details()
         }
     }
+}
+
+@Composable
+private fun HomeSessionText(nav: NavigationState) {
+    if (nav.simulation) Text("Simülasyon", color = Forest, style = MaterialTheme.typography.labelSmall)
+    if (nav.guidance) Text(navigationInstruction(nav), fontSize = 18.sp, lineHeight = 24.sp)
+    else Text("${nav.sessionTransport?.label().orEmpty()} · Serbest yolculuk", style = MaterialTheme.typography.titleLarge)
+}
+
+private fun visibleSessionMessage(nav: NavigationState): String? =
+    nav.message?.takeUnless { nav.simulation && it == "Deneme sürüşü · günlüğe kaydedilmez" }
+
+@Composable
+private fun HomeSessionWarnings(nav: NavigationState, voiceFault: String?) {
+    if (nav.guidance) voiceFault?.let { Text(it, modifier = Modifier.testTag("navigation-voice-fault"),
+        color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+    if (nav.gpsStale) Text("GPS konumu bekleniyor", color = MaterialTheme.colorScheme.error,
+        style = MaterialTheme.typography.bodySmall)
+    if (!nav.locationActive && !nav.simulation) Text("Konum bağlantısı kuruluyor", style = MaterialTheme.typography.bodySmall)
+    visibleSessionMessage(nav)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
 }

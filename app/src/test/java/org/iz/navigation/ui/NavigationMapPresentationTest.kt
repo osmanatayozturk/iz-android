@@ -6,6 +6,9 @@ import org.iz.navigation.navigation.NavigationFix
 import org.iz.navigation.navigation.NavigationProgress
 import org.iz.navigation.navigation.RouteEditOwner
 import org.iz.navigation.navigation.RouteEditPreview
+import org.iz.navigation.speed.RoadSpeedLimit
+import org.iz.navigation.speed.RoadSpeedSource
+import org.iz.navigation.speed.RoadSpeedState
 import org.iz.navigation.weather.*
 import org.junit.Assert.*
 import org.junit.Test
@@ -14,6 +17,35 @@ class NavigationMapPresentationTest {
     private val a = RouteStop("A", WeatherCoordinate(41.0, 29.0))
     private val b = RouteStop("B", WeatherCoordinate(41.1, 29.1))
     private val route = PlannedRoute("old", listOf(a, b), listOf(RouteVertex(a.coordinate, 0.0), RouteVertex(b.coordinate, 60.0)), 1000.0, 60.0, 1L)
+
+    @Test fun liveNumericTicksKeepTheCameraIdentityAndRouteGeometry() {
+        val live = NavigationState(sessionId = "live", guidance = true, route = route)
+        val first = navigationMapPresentation(PhoneDirectionsState(), live, emptyList(), false)
+        val updated = live.copy(roadSpeed = RoadSpeedState(ownKmh = 101.0, visible = true),
+            progress = NavigationProgress(10.0, 50.0, 800.0, 0.0, 0, 90.0))
+        val next = navigationMapPresentation(PhoneDirectionsState(), updated, emptyList(), false)
+        assertEquals(first.cameraIdentity, next.cameraIdentity)
+        assertSame(first.route, next.route)
+        assertEquals(first.stops, next.stops)
+    }
+
+    @Test fun compactSpeedPreservesKnownUnknownUnlimitedAndGenericProvenance() {
+        val known = RoadSpeedLimit(110.0, RoadSpeedSource.TOMTOM_POSTED, true, 1L, a.coordinate,
+            Transport.MOTORCYCLE, "synthetic-road")
+        val readout = compactRoadSpeedReadout(RoadSpeedState(100.0, known, true))
+        assertEquals("100/110 km/sa", readout.value)
+        assertEquals("Genel yol sınırı · TomTom", readout.source)
+        assertTrue(readout.description.contains("Hızım 100 kilometre/saat"))
+        assertTrue(readout.description.contains("Hız sınırı 110 kilometre/saat"))
+        val unknown = compactRoadSpeedReadout(RoadSpeedState(visible = true))
+        assertEquals("—/— km/sa", unknown.value)
+        assertTrue(unknown.description.contains("Hız sınırı bilinmiyor"))
+        val unlimited = compactRoadSpeedReadout(RoadSpeedState(0.0,
+            known.copy(valueKmh = null, source = RoadSpeedSource.OSM, genericPosted = false), true))
+        assertEquals("0/∞ km/sa", unlimited.value)
+        assertEquals("OSM", unlimited.source)
+        assertTrue(unlimited.description.contains("Hız sınırı sınırsız"))
+    }
 
     @Test fun pendingGpsSessionStillShowsLiveControls() {
         val result = navigationMapPresentation(PhoneDirectionsState(), NavigationState(sessionId = "pending"), emptyList(), false)

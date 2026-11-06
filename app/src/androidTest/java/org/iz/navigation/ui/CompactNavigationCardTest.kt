@@ -45,7 +45,7 @@ class CompactNavigationCardTest {
     @Test fun shortManeuverFitsCompactCardAt360Dp() {
         render(360.dp)
         assertHomeWidth(360)
-        assertCompactHeight()
+        assertCompactTypography()
         val distance = textBounds("200 m sonra")
         val mute = bounds("compact-card-mute")
         val operations = bounds("home-finish-session")
@@ -55,25 +55,25 @@ class CompactNavigationCardTest {
         capture("short-360")
     }
 
-    @Test fun shortManeuverControlsWrapWithoutOverlapAt320Dp() {
+    @Test fun shortManeuverControlsStaySeparateAt320Dp() {
         render(320.dp)
         assertHomeWidth(320)
         assertControlsAndMapStaySeparate()
         val distance = textBounds("200 m sonra")
         val operations = bounds("home-finish-session")
-        assertTrue("Operations must flow below the distance when the row cannot fit", operations.top >= distance.bottom)
+        assertFalse("Operations must not cover the distance", operations.overlaps(distance))
         capture("short-320")
     }
 
     @Test fun shortManeuverFitsAllocatedNormalWidth() {
         render()
         assertTrue("The allocated normal-width device must be at least 360dp", bounds("navigation-home").width / density >= 359f)
-        assertCompactHeight()
+        assertCompactTypography()
         assertControlsAndMapStaySeparate()
         capture("short-allocated-width")
     }
 
-    @Test fun longManeuverKeepsThreeLinesAndPanelHasFullInstruction() {
+    @Test fun longManeuverWrapsAndPanelHasFullInstruction() {
         val instruction = "Sentetik kavşaktan sağa dön ve uzun sahil caddesini izleyerek ikinci yol ayrımından şehir merkezi yönünde devam et"
         state.value = guided(instruction)
         render(320.dp)
@@ -81,9 +81,9 @@ class CompactNavigationCardTest {
         val layouts = mutableListOf<TextLayoutResult>()
         node.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
         val layout = layouts.single()
-        assertEquals("The existing three-line instruction must not be shortened", 3, layout.lineCount)
-        assertEquals(24f, layout.layoutInput.style.fontSize.value, .01f)
-        assertTrue("Card must grow for a long instruction", bounds("live-guidance-card").height / density > 136f)
+        assertTrue("Long instructions wrap at system text scale", layout.lineCount > 1)
+        assertFalse("The instruction text is not truncated", layout.hasVisualOverflow)
+        assertEquals(18f, layout.layoutInput.style.fontSize.value, .01f)
         assertControlsAndMapStaySeparate()
         capture("long-320")
         compose.onNodeWithTag("home-finish-session").performClick()
@@ -208,13 +208,19 @@ class CompactNavigationCardTest {
         assertEquals("The host must actually provide the requested width", expected.toFloat(), bounds("navigation-home").width / density, 1f)
     }
 
-    private fun assertCompactHeight() {
-        val height = bounds("live-guidance-card").height / density
-        assertTrue("Short normal-font card height should be 104–136dp; was $height", height in 104f..136f)
+    private fun assertCompactTypography() {
         compose.onAllNodes(hasText("Kalan ·", substring = true), useUnmergedTree = true).assertCountEquals(0)
         compose.onAllNodes(hasText("Tahmini varış", substring = true), useUnmergedTree = true).assertCountEquals(0)
         compose.onNodeWithText("200 m sonra", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithText("Sağa dön", useUnmergedTree = true).assertIsDisplayed()
+        fun assertSize(text: String, expected: Float) {
+            val layouts = mutableListOf<TextLayoutResult>()
+            compose.onNodeWithText(text, useUnmergedTree = true)
+                .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            assertEquals(expected, layouts.single().layoutInput.style.fontSize.value, .01f)
+        }
+        assertSize("Sağa dön", 18f)
+        assertSize("200 m sonra", 16f)
     }
 
     private fun assertControlsAndMapStaySeparate() {
@@ -227,9 +233,15 @@ class CompactNavigationCardTest {
             }
         }
         assertFalse("Independent tap targets must not overlap", actions[0].overlaps(actions[1]))
+        val map = bounds("navigation-home-map")
+        assertTrue("Real map starts below the guidance header", map.top >= bounds("compact-guidance-header").bottom - 1f)
+        assertTrue("The card must end before the actual map", card.bottom <= map.top)
         listOf("directions-recenter", "map-layers").forEach { tag ->
-            compose.onNodeWithTag(tag).assertIsDisplayed()
-            assertFalse("Card covers map control $tag", card.overlaps(bounds(tag)))
+            compose.onAllNodesWithTag(tag).assertCountEquals(1)
+            compose.onNodeWithTag(tag).assertIsDisplayed().assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
+            val control = bounds(tag)
+            assertFalse("Card covers map control $tag", card.overlaps(control))
+            assertTrue("$tag must be above the real map", control.bottom <= map.top)
         }
     }
 
@@ -273,7 +285,7 @@ class CompactNavigationCardTest {
         File(directory, "geometry.json").writeText(JSONObject().put("density", density).put("fontScale", fontScale)
             .put("homeWidthDp", bounds("navigation-home").width / density).put("cardWidthDp", card.width / density)
             .put("cardHeightDp", card.height / density).put("cardBoundsPx", card.toString())
-            .put("mapBoundsPx", map.toString()).put("cardRectangleMapAreaFraction", card.width * card.height / (map.width * map.height))
+            .put("mapBoundsPx", map.toString()).put("cardOverlapsRealMap", card.overlaps(map))
             .put("sourceCommitArgument", InstrumentationRegistry.getArguments().getString("izCandidateCommit")).toString(2))
     }
 

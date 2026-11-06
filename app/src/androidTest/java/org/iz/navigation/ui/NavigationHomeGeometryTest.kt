@@ -8,6 +8,7 @@ import java.io.File
 import androidx.compose.ui.test.*
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.material3.Text
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
@@ -183,8 +184,10 @@ class NavigationHomeGeometryTest {
         val card = compose.onNodeWithTag("live-guidance-card").fetchSemanticsNode().boundsInRoot
         val weather = compose.onNodeWithTag("home-weather").fetchSemanticsNode().boundsInRoot
         val speed = compose.onNodeWithTag("road-speed-panel").fetchSemanticsNode().boundsInRoot
-        compose.onNodeWithText("0").assertIsDisplayed()
-        compose.onNodeWithText("Genel yol sınırı · TomTom").assertIsDisplayed()
+        compose.onNodeWithTag("road-speed-panel").assertContentDescriptionEquals(
+            "Hızım 0 kilometre/saat, GPS. Hız sınırı 50 kilometre/saat, Genel yol sınırı · TomTom.")
+        assertOutsideMap()
+        assertTrue("Portrait controls belong below the instruction", bounds("navigation-map-controls-row").top >= card.bottom)
         listOf("directions-recenter", "map-layers").forEach { tag ->
             compose.onNodeWithTag(tag).assertIsDisplayed()
             val control = compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
@@ -204,21 +207,26 @@ class NavigationHomeGeometryTest {
         }
     }
 
-    private var uxDensity = 0f
     private fun uxGuided(recording: Boolean = false) = NavigationState(sessionId = "ux-header-session",
         sessionTransport = Transport.MOTORCYCLE, guidance = true, recording = recording,
         journey = if (recording) org.iz.navigation.data.Journey(id = "ux-header-journey", transport = Transport.MOTORCYCLE) else null)
 
     private fun renderUxHeader(nav: androidx.compose.runtime.MutableState<NavigationState>,
         planner: androidx.compose.runtime.MutableState<Boolean>,
-        shortcuts: androidx.compose.runtime.MutableState<List<org.iz.navigation.data.DestinationShortcut>> = mutableStateOf(emptyList())) {
+        shortcuts: androidx.compose.runtime.MutableState<List<org.iz.navigation.data.DestinationShortcut>> = mutableStateOf(emptyList()),
+        width: Dp = 360.dp, height: Dp = 560.dp,
+        dashboard: androidx.compose.runtime.MutableState<Boolean>? = null) {
         var fontScale = 0f
         uxHost.setContent {
             val observed = LocalDensity.current
-            androidx.compose.runtime.SideEffect { uxDensity = observed.density; fontScale = observed.fontScale }
-            IzTheme { Box(Modifier.requiredSize(360.dp, 560.dp)) {
+            androidx.compose.runtime.SideEffect { fontScale = observed.fontScale }
+            val openDashboard: () -> Unit = { dashboard?.value = true }
+            val dashboardContent: @androidx.compose.runtime.Composable () -> Unit = { Text("Sentetik gösterge") }
+            IzTheme { Box(Modifier.requiredSize(width, height)) {
                 NavigationHomeContent(PhoneDirectionsState(), nav.value, emptyList(), emptyList(), planner.value,
                     "QA", { planner.value = true }, {}, {}, {}, {}, {}, { planner.value = true }, {}, {},
+                    showDashboard = dashboard?.value == true, onDashboard = openDashboard.takeIf { dashboard != null },
+                    dashboard = dashboardContent.takeIf { dashboard != null },
                     shortcuts = shortcuts.value, onShortcut = {}, planner = {})
             } }
         }
@@ -246,31 +254,46 @@ class NavigationHomeGeometryTest {
         compose.onNodeWithTag("compact-card-mute").assertIsDisplayed()
     }
 
-    @Test fun uxGuidanceControlsUseZeroHeaderHeightAndPreserveOnlyShortcutOffset() {
-        val nav = mutableStateOf(uxGuided(true))
+    @Test fun shortLandscapeKeepsPrimaryActionsAndRealMapWithLongGuidanceAndDashboard() {
+        val a = RouteStop("Başlangıç", WeatherCoordinate(41.0, 29.0))
+        val b = RouteStop("Varış", WeatherCoordinate(41.01, 29.01))
+        val instruction = "Uzun sahil caddesini izleyerek ikinci yol ayrımından şehir merkezi yönünde devam et. ".repeat(10).trim()
+        val warning = "Sentetik işletim uyarısı. ".repeat(30).trim()
+        val route = PlannedRoute("short-landscape", listOf(a, b),
+            listOf(RouteVertex(a.coordinate, 0.0), RouteVertex(b.coordinate, 90.0)), 1000.0, 90.0, 1L,
+            transport = Transport.WALK,
+            maneuvers = listOf(RouteManeuver(1, instruction, instruction, emptyList(), 0, 1, 0.0, 90.0)))
+        val nav = mutableStateOf(uxGuided().copy(sessionTransport = Transport.WALK, gpsStale = false,
+            locationActive = true, route = route, message = warning,
+            progress = NavigationProgress(0.0, 90.0, 1000.0, 0.0, 0, 80.0)))
         val planner = mutableStateOf(false)
-        val shortcuts = mutableStateOf(emptyList<org.iz.navigation.data.DestinationShortcut>())
-        renderUxHeader(nav, planner, shortcuts)
-        fun assertControlTop(extra: Float = 0f) {
-            val map = compose.onNodeWithTag("navigation-home-map").fetchSemanticsNode().boundsInRoot
-            val control = compose.onNodeWithTag("directions-recenter").fetchSemanticsNode().boundsInRoot
-            assertEquals("Removed header must reserve zero height", (24f * uxDensity + extra).toDouble(),
-                (control.top - map.top).toDouble(), 2.0)
+        val dashboard = mutableStateOf(false)
+        renderUxHeader(nav, planner, width = 640.dp, height = 320.dp, dashboard = dashboard)
+        assertOutsideMap()
+        val card = bounds("live-guidance-card")
+        val row = bounds("navigation-map-controls-row")
+        assertTrue("Landscape controls sit alongside the instruction", card.right <= row.left && row.top < card.bottom)
+        val map = bounds("navigation-home-map")
+        compose.onNodeWithTag("navigation-home-map").assertHeightIsAtLeast(191.dp)
+        val primaryActions = listOf("compact-card-mute", "home-finish-session", "open-navigation-dashboard")
+        for (tag in primaryActions) {
+            compose.onAllNodesWithTag(tag).assertCountEquals(1)
+            compose.onNodeWithTag(tag).assertIsDisplayed().assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
+            assertTrue("$tag must end above the real map", bounds(tag).bottom <= map.top + 1f)
         }
-        assertControlTop()
-        compose.runOnIdle { shortcuts.value = listOf(org.iz.navigation.data.DestinationShortcut(
-            org.iz.navigation.data.DestinationShortcutKind.HOME,
-            org.iz.navigation.data.Place(id = "ux-home", name = "QA target", latitude = 41.0, longitude = 29.0))) }
-        val shortcut = compose.onNodeWithTag("destination-shortcut-HOME").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-        assertControlTop(shortcut.height + 8f * uxDensity)
-        compose.runOnIdle { planner.value = true }
-        compose.onNodeWithTag("destination-shortcut-HOME").assertDoesNotExist()
-        assertControlTop()
-        compose.runOnIdle { planner.value = false; shortcuts.value = emptyList() }
-        assertControlTop()
+        assertTrue("Dashboard stays below the speed and map-controls row", bounds("open-navigation-dashboard").top >= row.bottom)
+        compose.onNodeWithTag("road-speed-panel").assertDoesNotExist()
+        compose.onNodeWithText("© OpenStreetMap contributors").assertIsDisplayed()
+        compose.onNodeWithTag("compact-guidance-overflow", useUnmergedTree = true).assertIsDisplayed()
+            .assertTextContains("Uyarı var", substring = true)
+        compose.onNodeWithText(warning, useUnmergedTree = true).performScrollTo().assertIsDisplayed()
+        primaryActions.forEach { compose.onNodeWithTag(it).assertIsDisplayed() }
+        assertOutsideMap()
+        compose.onNodeWithTag("open-navigation-dashboard").performClick()
+        compose.onNodeWithText("Sentetik gösterge").assertIsDisplayed()
     }
 
-    @Test fun uxShortcutControlsStayFixedOnFirstFrameOfNavigationTextUpdates() {
+    @Test fun numericTicksKeepRealViewportAndControlsFixedOnTheFirstFrame() {
         val nav = mutableStateOf(uxGuided(true).copy(
             progress = NavigationProgress(0.0, 30.0, 200.0, 150.0, -1, 0.0),
             roadSpeed = RoadSpeedState(ownKmh = 5.0, visible = true)))
@@ -279,24 +302,22 @@ class NavigationHomeGeometryTest {
             org.iz.navigation.data.DestinationShortcutKind.HOME,
             org.iz.navigation.data.Place(id = "ux-steady-home", name = "QA target", latitude = 41.0, longitude = 29.0))))
         renderUxHeader(nav, planner, shortcuts)
-        val mapTop = compose.onNodeWithTag("navigation-home-map").fetchSemanticsNode().boundsInRoot.top
-        val row = compose.onNodeWithTag("destination-shortcut-HOME").fetchSemanticsNode().boundsInRoot
-        val expectedTop = mapTop + 24f * uxDensity + row.height + 8f * uxDensity
+        val map = bounds("navigation-home-map")
+        val row = bounds("navigation-map-controls-row")
         fun assertSteadyControls() {
             compose.onNodeWithTag("open-navigation").assertDoesNotExist()
-            val control = compose.onNodeWithTag("directions-recenter").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-            assertEquals("Unchanged shortcut bounds must survive the FIRST navigation-update frame",
-                expectedTop.toDouble(), control.top.toDouble(), 2.0)
-            assertTrue("Controls must not overlap the shortcut", control.top >= row.bottom)
+            compose.onNodeWithTag("destination-shortcut-HOME").assertDoesNotExist()
+            assertOutsideMap()
+            assertEquals(map, bounds("navigation-home-map"))
+            assertEquals(row, bounds("navigation-map-controls-row"))
         }
         assertSteadyControls()
         compose.mainClock.autoAdvance = false
         try {
             val initial = nav.value
             for (next in listOf(
-                initial.copy(progress = initial.progress?.copy(nextManeuverDistanceMeters = 140.0)),
-                initial.copy(roadSpeed = RoadSpeedState(ownKmh = 25.0, visible = true)),
-                initial.copy(message = "QA operational warning"))) {
+                initial.copy(progress = initial.progress?.copy(nextManeuverDistanceMeters = 1_100.0)),
+                initial.copy(roadSpeed = RoadSpeedState(ownKmh = 105.0, visible = true)))) {
                 compose.runOnUiThread { nav.value = next }
                 // One frame commits exactly one recomposition/layout. Do not settle away a bad first frame.
                 compose.mainClock.advanceTimeByFrame()
@@ -307,17 +328,40 @@ class NavigationHomeGeometryTest {
             compose.mainClock.autoAdvance = true
             compose.waitForIdle()
         }
+        compose.runOnIdle { nav.value = nav.value.copy(message = "QA operational warning") }
+        compose.onNodeWithText("QA operational warning").assertIsDisplayed()
+        assertOutsideMap()
     }
 
     @Test fun uxEndingGuidanceRestoresHeaderWhileRecordingAndSessionContinue() {
         val nav = mutableStateOf(uxGuided(true))
         val planner = mutableStateOf(false)
-        renderUxHeader(nav, planner)
+        val shortcuts = mutableStateOf(listOf(org.iz.navigation.data.DestinationShortcut(
+            org.iz.navigation.data.DestinationShortcutKind.HOME,
+            org.iz.navigation.data.Place(id = "ux-home", name = "QA target", latitude = 41.0, longitude = 29.0))))
+        renderUxHeader(nav, planner, shortcuts)
         compose.onNodeWithTag("open-navigation").assertDoesNotExist()
-        compose.runOnIdle { nav.value = nav.value.copy(guidance = false) }
+        compose.onNodeWithTag("destination-shortcut-HOME").assertDoesNotExist()
+        compose.runOnIdle { nav.value = nav.value.copy(guidance = false, roadSpeed = RoadSpeedState(visible = true)) }
         compose.onNodeWithTag("open-navigation").assertIsDisplayed()
+        compose.onNodeWithTag("destination-shortcut-HOME").assertIsDisplayed()
+        compose.onNodeWithTag("road-speed-panel").assertIsDisplayed()
+        assertOutsideMap()
         compose.onNodeWithTag("home-record").assertTextContains("Kayıt açık")
         compose.runOnIdle { assertTrue(nav.value.recording); assertEquals("ux-header-session", nav.value.sessionId) }
+    }
+
+    private fun bounds(tag: String) = compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+
+    private fun assertOutsideMap() {
+        val map = bounds("navigation-home-map")
+        assertTrue("The actual map must remain visible", map.height > 0)
+        assertTrue("The header must not cover the real map", bounds("compact-guidance-header").bottom <= map.top + 1f)
+        for (tag in listOf("directions-recenter", "map-layers")) {
+            compose.onAllNodesWithTag(tag).assertCountEquals(1)
+            compose.onNodeWithTag(tag).assertIsDisplayed().assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
+            assertTrue("$tag must end before the map", bounds(tag).bottom <= map.top + 1f)
+        }
     }
 
     @Test fun uxIdlePreviewAndRecordingOnlyKeepDestinationHeader() {

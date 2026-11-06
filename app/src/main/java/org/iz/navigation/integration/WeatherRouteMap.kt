@@ -87,22 +87,27 @@ fun WeatherRouteMap(
     cameraViewportReady: Boolean = true,
     navigationControlsReady: Boolean = true,
     preparedRoutes: org.iz.navigation.navigation.PreparedRouteManager? = null,
+    navigationHeader: (@Composable (@Composable () -> Unit, @Composable () -> Unit) -> Unit)? = null,
     overlay: @Composable BoxScope.() -> Unit = {},
 ) {
     ExpandableMap(modifier = modifier, title = title, expandable = expandable) { mapModifier ->
         Box(mapModifier) {
-            WeatherRouteMapContent(route, assessment, Modifier.fillMaxSize(), onSampleClick,
-                onMapLongClick, stops, liveCoordinate, recordedPoints, gpsStale, singleStopLabel, cameraIdentity, navigationLayout, members, onLocate, attributionBottomInset, cameraViewportInsets, navigationControlsTopInset, navigationControlsHorizontal, drivingCamera, cameraViewportReady, navigationControlsReady, preparedRoutes)
+            Column(Modifier.fillMaxSize()) {
+                WeatherRouteMapContent(route, assessment, onSampleClick, onMapLongClick, stops,
+                    liveCoordinate, recordedPoints, gpsStale, singleStopLabel, cameraIdentity, navigationLayout,
+                    members, onLocate, attributionBottomInset, cameraViewportInsets, navigationControlsTopInset,
+                    navigationControlsHorizontal, drivingCamera, cameraViewportReady, navigationControlsReady,
+                    preparedRoutes, navigationHeader)
+            }
             overlay()
         }
     }
 }
 
 @Composable
-private fun WeatherRouteMapContent(
+private fun ColumnScope.WeatherRouteMapContent(
     route: PlannedRoute?,
     assessment: WeatherAssessment?,
-    modifier: Modifier,
     onSampleClick: (RouteWeatherSample) -> Unit,
     onMapLongClick: (GeoCoordinate) -> Unit,
     stops: List<RouteStop>,
@@ -122,6 +127,7 @@ private fun WeatherRouteMapContent(
     cameraViewportReady: Boolean,
     navigationControlsReady: Boolean,
     preparedRoutes: org.iz.navigation.navigation.PreparedRouteManager?,
+    navigationHeader: (@Composable (@Composable () -> Unit, @Composable () -> Unit) -> Unit)?,
 ) {
     val context = LocalContext.current
     val tileUrl = remember(context) { OsmServiceSettings(context).read().tileUrl }
@@ -239,8 +245,48 @@ private fun WeatherRouteMapContent(
             Offset(point.x, point.y)
         }
     }
-    Box(modifier.clipToBounds().onSizeChanged { mapSize = it }) {
-        OsmMapView(styleJson = displayStyle, modifier = Modifier.fillMaxSize(),
+    val navigationControls: @Composable () -> Unit = {
+        Surface(shape = CircleShape, shadowElevation = 3.dp) {
+            IconButton(onClick = {
+                pendingFitDataset = null; driveFollow.recenter(); cameraPolicy.followCurrent(); following = true
+                if (fix == null) onLocate()
+                else if (driveEnabled) driveRecenter++
+                else if (cameraViewportReady) map?.let { focusRouteCoordinate(it, fix, 16.0, cameraPadding) }
+            }, modifier = Modifier.size(48.dp).testTag("directions-recenter")) { Icon(Icons.Outlined.GpsFixed, "Konumum") }
+        }
+        Surface(shape = CircleShape, shadowElevation = 3.dp) {
+            IconButton(onClick = { layersOpen = true }, modifier = Modifier.size(48.dp).testTag("map-layers")) {
+                Icon(Icons.Outlined.Layers, "Katmanlar")
+            }
+            DropdownMenu(expanded = layersOpen, onDismissRequest = { layersOpen = false }) {
+                if (route != null) DropdownMenuItem(text = { Text("Rotayı sığdır") }, onClick = {
+                    layersOpen = false; pendingFitDataset = null; cameraPolicy.userGesture(); driveFollow.userGesture(); following = false
+                    if (cameraViewportReady) map?.let { resetDrivingCamera(it); frameRoute(it) }
+                    else pendingFitDataset = dataset
+                }, modifier = Modifier.testTag("directions-fit-route"))
+                if (driveEnabled) DropdownMenuItem(text = { Text(if (driveMode == DriveCameraMode.SIMPLE_2D) "Sürüş görünümü" else "Basit 2D") }, onClick = {
+                    driveMode = if (driveMode == DriveCameraMode.ADAPTIVE) DriveCameraMode.SIMPLE_2D else DriveCameraMode.ADAPTIVE
+                    layersOpen = false; driveRecenter++
+                    if (!following && cameraViewportReady) map?.let(::resetDrivingCamera)
+                })
+                DropdownMenuItem(text = { Text(if (showRoute) "✓ Planlanan rota" else "Planlanan rota") }, onClick = { showRoute = !showRoute })
+                DropdownMenuItem(text = { Text(if (showMembers) "✓ Grup üyeleri" else "Grup üyeleri") }, onClick = { showMembers = !showMembers })
+            }
+        }
+    }
+    val preparedNotice: @Composable () -> Unit = {
+        if (preparedDisplay) Surface(color = MaterialTheme.colorScheme.surface) {
+            Text(when {
+                preparedStyle == null -> "Hazır rota · Harita paketi kullanılamıyor; rota çizgisi gösteriliyor."
+                preparedCenterCovered -> "Hazır harita · Merkez seçili alanda; ekranın tamamı için kapsam garantisi yok."
+                else -> "Hazır rota · Harita merkezi kayıtlı alanın dışında."
+            }, Modifier.padding(8.dp), style = MaterialTheme.typography.labelSmall)
+        }
+    }
+    navigationHeader?.invoke(navigationControls, preparedNotice)
+    Box(Modifier.fillMaxWidth().weight(1f).clipToBounds().onSizeChanged { mapSize = it }) {
+        val viewport = Modifier.fillMaxSize().then(if (navigationLayout) Modifier.testTag("navigation-home-map") else Modifier)
+        OsmMapView(styleJson = displayStyle, modifier = viewport,
             onReady = { ready ->
                 map = ready
                 if (preparedStyle != null) preparedState?.pack?.request?.let { request ->
@@ -262,14 +308,9 @@ private fun WeatherRouteMapContent(
             mapAttribution = if (preparedStyle != null) org.iz.navigation.offline.OfflineCorridorSession.MAP_ATTRIBUTION else "© OpenStreetMap contributors",
             onAttributionClick = if (preparedDisplay) ({ showOfflineNotices = true }) else null,
         )
-        if (preparedDisplay) Surface(Modifier.align(Alignment.BottomCenter).padding(bottom = attributionBottomInset + 28.dp, start = 12.dp, end = 12.dp),
-            color = MaterialTheme.colorScheme.surface) {
-            Text(when {
-                preparedStyle == null -> "Hazır rota · Harita paketi kullanılamıyor; rota çizgisi gösteriliyor."
-                preparedCenterCovered -> "Hazır harita · Merkez seçili alanda; ekranın tamamı için kapsam garantisi yok."
-                else -> "Hazır rota · Harita merkezi kayıtlı alanın dışında."
-            }, Modifier.padding(8.dp), style = MaterialTheme.typography.labelSmall)
-        }
+        if (preparedDisplay && navigationHeader == null) Box(
+            Modifier.align(Alignment.BottomCenter).padding(bottom = attributionBottomInset + 28.dp, start = 12.dp, end = 12.dp)
+        ) { preparedNotice() }
         // Sprite images can be registered/queryable yet absent from the native GPU atlas.
         // Geographic Compose badges keep endpoint labels visible and accessible above the live fix.
         stops.forEachIndexed { index, stop ->
@@ -294,39 +335,10 @@ private fun WeatherRouteMapContent(
             }
         }
         if (navigationLayout) {
-            val controls: @Composable () -> Unit = {
-            Surface(shape = CircleShape, shadowElevation = 3.dp) {
-                IconButton(onClick = {
-                    pendingFitDataset = null; driveFollow.recenter(); cameraPolicy.followCurrent(); following = true
-                    if (fix == null) onLocate()
-                    else if (driveEnabled) driveRecenter++
-                    else if (cameraViewportReady) map?.let { focusRouteCoordinate(it, fix, 16.0, cameraPadding) }
-                }, modifier = Modifier.size(48.dp).testTag("directions-recenter")) { Icon(Icons.Outlined.GpsFixed, "Konumum") }
-            }
-            Surface(shape = CircleShape, shadowElevation = 3.dp) {
-                IconButton(onClick = { layersOpen = true }, modifier = Modifier.size(48.dp).testTag("map-layers")) {
-                    Icon(Icons.Outlined.Layers, "Katmanlar")
-                }
-                DropdownMenu(expanded = layersOpen, onDismissRequest = { layersOpen = false }) {
-                    if (route != null) DropdownMenuItem(text = { Text("Rotayı sığdır") }, onClick = {
-                        layersOpen = false; pendingFitDataset = null; cameraPolicy.userGesture(); driveFollow.userGesture(); following = false
-                        if (cameraViewportReady) map?.let { resetDrivingCamera(it); frameRoute(it) }
-                        else pendingFitDataset = dataset
-                    }, modifier = Modifier.testTag("directions-fit-route"))
-                    if (driveEnabled) DropdownMenuItem(text = { Text(if (driveMode == DriveCameraMode.SIMPLE_2D) "Sürüş görünümü" else "Basit 2D") }, onClick = {
-                        driveMode = if (driveMode == DriveCameraMode.ADAPTIVE) DriveCameraMode.SIMPLE_2D else DriveCameraMode.ADAPTIVE
-                        layersOpen = false; driveRecenter++
-                        if (!following && cameraViewportReady) map?.let(::resetDrivingCamera)
-                    })
-                    DropdownMenuItem(text = { Text(if (showRoute) "✓ Planlanan rota" else "Planlanan rota") }, onClick = { showRoute = !showRoute })
-                    DropdownMenuItem(text = { Text(if (showMembers) "✓ Grup üyeleri" else "Grup üyeleri") }, onClick = { showMembers = !showMembers })
-                }
-            }
-            }
-            if (navigationControlsReady) {
+            if (navigationHeader == null && navigationControlsReady) {
                 val controlsModifier = Modifier.align(Alignment.TopEnd).padding(top = navigationControlsTopInset, end = 12.dp)
-                if (navigationControlsHorizontal) Row(controlsModifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) { controls() }
-                else Column(controlsModifier, verticalArrangement = Arrangement.spacedBy(8.dp)) { controls() }
+                if (navigationControlsHorizontal) Row(controlsModifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) { navigationControls() }
+                else Column(controlsModifier, verticalArrangement = Arrangement.spacedBy(8.dp)) { navigationControls() }
             }
         } else Column(Modifier.align(Alignment.BottomStart).padding(start = 8.dp, bottom = 30.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)) {
