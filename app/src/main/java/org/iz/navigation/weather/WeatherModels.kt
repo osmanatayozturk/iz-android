@@ -63,6 +63,7 @@ data class PlannedRoute(
         require(id.isNotBlank()) { "Rota kimliği boş olamaz." }
         require(avoidAreas.size <= 3) { "En fazla üç bölüm hariç tutulabilir." }
         require(stops.size in 2..6) { "Rota 2 ile 6 durak içermelidir." }
+        require(stops.first().plannedBreakSeconds == 0 && stops.last().plannedBreakSeconds == 0) { "Mola yalnız ara durağa eklenebilir." }
         require(vertices.isNotEmpty()) { "Rota geometrisi boş olamaz." }
         require(distanceMeters.isFinite() && distanceMeters >= 0.0) { "Rota mesafesi geçersiz." }
         require(durationSeconds.isFinite() && durationSeconds >= 0.0) { "Rota süresi geçersiz." }
@@ -71,6 +72,10 @@ data class PlannedRoute(
         require(stopElapsedSeconds.isEmpty() || stopElapsedSeconds.size == stops.size) { "Durak zaman çizelgesi eksik." }
         require(stopElapsedSeconds.all { it.isFinite() && it in 0.0..durationSeconds }) { "Durak zamanı geçersiz." }
         require(stopElapsedSeconds.zipWithNext().all { (a, b) -> a <= b }) { "Durak zamanları sıralı olmalıdır." }
+        if (stops.any { it.plannedBreakSeconds > 0 }) {
+            require(stopElapsedSeconds.size == stops.size && stopElapsedSeconds.first() == 0.0 &&
+                kotlin.math.abs(stopElapsedSeconds.last() - durationSeconds) <= .001) { "Mola için durak zamanları doğrulanamadı." }
+        }
     }
 }
 

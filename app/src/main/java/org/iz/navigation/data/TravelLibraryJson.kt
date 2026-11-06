@@ -4,6 +4,8 @@ import org.iz.navigation.gpx.ImportedTrack
 import org.iz.navigation.gpx.TrackSegment
 import org.iz.navigation.weather.RoutePreferences
 import org.iz.navigation.weather.RouteStop
+import org.iz.navigation.weather.plannedBreakSeconds
+import org.iz.navigation.weather.withPlannedBreak
 import org.iz.navigation.weather.WeatherCoordinate
 import org.json.JSONArray
 import org.json.JSONObject
@@ -13,10 +15,10 @@ internal object TravelLibraryJson {
     private fun obj(vararg pairs: Pair<String, Any?>) = JSONObject().apply { pairs.forEach { put(it.first, it.second ?: JSONObject.NULL) } }
     fun <T> array(values: List<T>, encode: (T) -> JSONObject) = JSONArray().apply { values.forEach { put(encode(it)) } }
 
-    fun stops(values: List<RouteStop>) = array(values) { obj("label" to it.label, "latitude" to it.coordinate.latitude, "longitude" to it.coordinate.longitude) }
+    fun stops(values: List<RouteStop>) = array(values) { obj("label" to it.label, "latitude" to it.coordinate.latitude, "longitude" to it.coordinate.longitude).withPlannedBreak(it) }
     fun readStops(array: JSONArray): List<RouteStop> {
         require(array.length() in 2..5) { "Kaydedilen rota 2–5 durak içermeli." }
-        return List(array.length()) { array.getJSONObject(it).let { value -> RouteStop(value.text("label"), coordinate(value)) } }
+        return List(array.length()) { array.getJSONObject(it).let { value -> RouteStop(value.text("label"), coordinate(value), value.plannedBreakSeconds()) } }
     }
 
     fun plan(value: SavedRoutePlan): JSONObject = TravelLibraryRules.normalizePlan(value).let {

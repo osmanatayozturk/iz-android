@@ -47,6 +47,9 @@ class NavigationEngine(private val route: PlannedRoute) {
 
     fun remainingStops(): List<RouteStop> = remainingStopIndices().map { route.stops[it] }
 
+    /** Signed along-route distance preserves occurrence order at crossings. */
+    internal fun distanceToStopMeters(index: Int): Double? = stopDistances.getOrNull(index)?.minus(travelled)
+
     fun update(fix: NavigationFix, now: Long): NavigationProgress? {
         if (fix.recordedAt > now || now - fix.recordedAt > 10_000 ||
             !fix.accuracyMeters.isFinite() || fix.accuracyMeters !in 0f..50f ||

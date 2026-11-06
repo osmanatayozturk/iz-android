@@ -27,6 +27,7 @@ object TravelLibraryRules {
         require(plan.createdAt >= 0 && plan.updatedAt >= plan.createdAt) { "Rota kayıt tarihleri geçersiz." }
         require(plan.stops.size in 2..5) { "Kaydedilen rota 2–5 durak içermeli." }
         plan.stops.forEach { validName(it.label) }
+        require(plan.stops.first().plannedBreakSeconds == 0 && plan.stops.last().plannedBreakSeconds == 0) { "Mola yalnız ara durağa eklenebilir." }
         return plan.copy(stops = plan.stops.toList(), travelSpeedKmh = routeTravelSpeedKmh(plan.transport, plan.travelSpeedKmh))
     }
 

@@ -28,13 +28,14 @@ internal object WeatherPlanCodec {
         routeTravelSpeedKmh(value.transport, value.travelSpeedKmh)
         require(value.transport != Transport.UNKNOWN) { "Yolculuk tarzını seç." }
         require(value.stops.size in 2..5 && value.departureAt >= 0) { "Başlangıç ve hedef seç." }
+        require(value.stops.first().plannedBreakSeconds == 0 && value.stops.last().plannedBreakSeconds == 0) { "Mola yalnız ara durağa eklenebilir." }
         val stops = JSONArray()
         value.stops.forEach { stop ->
             val point = stop.coordinate
             require(point.latitude.isFinite() && point.longitude.isFinite() &&
                 point.latitude in -90.0..90.0 && point.longitude in -180.0..180.0 &&
                 stop.label.length <= 200) { "Rota noktası geçerli değil." }
-            stops.put(JSONObject().put("name", stop.label).put("lat", point.latitude).put("lon", point.longitude))
+            stops.put(JSONObject().put("name", stop.label).put("lat", point.latitude).put("lon", point.longitude).withPlannedBreak(stop))
         }
         return JSONObject().put("version", 3).put("transport", value.transport.name)
             .put("preferences", value.preferences.json()).put("originUsesCurrentLocation", value.originUsesCurrentLocation)
@@ -52,7 +53,7 @@ internal object WeatherPlanCodec {
         require(list.length() in 2..5)
         SavedWeatherPlan((0 until list.length()).map {
             val point = list.getJSONObject(it)
-            RouteStop(point.getString("name"), WeatherCoordinate(point.getDouble("lat"), point.getDouble("lon")))
+            RouteStop(point.getString("name"), WeatherCoordinate(point.getDouble("lat"), point.getDouble("lon")), point.plannedBreakSeconds())
         }, json.getLong("departureAt"), transport,
             routePreferences(json.optJSONObject("preferences"), RoutePreferences.defaults(transport)),
             if (version < 3) list.getJSONObject(0).getString("name") in setOf("Mevcut konum", "Konumum")

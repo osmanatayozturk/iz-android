@@ -32,7 +32,7 @@ class NavigationRouteCache(private val directory: File) {
             val version = json.getInt("version"); require(version in 1..4)
             val transport = Transport.valueOf(json.optString("transport", Transport.MOTORCYCLE.name))
             val stops = json.getJSONArray("stops").bounded(6).map { item ->
-                RouteStop(item.getString("label"), item.coordinate())
+                RouteStop(item.getString("label"), item.coordinate(), item.plannedBreakSeconds())
             }
             val vertices = json.getJSONArray("vertices").bounded(100_000).map { item ->
                 RouteVertex(item.coordinate(), item.getDouble("elapsed"))
@@ -78,7 +78,7 @@ class NavigationRouteCache(private val directory: File) {
             .put("selectionLocked", route.selectionLocked).put("providerWarnings", JSONArray(route.providerWarnings))
             .put("duration", route.durationSeconds).put("createdAt", route.createdAt).put("transport", route.transport.name)
             .put("speed", route.travelSpeedKmh ?: JSONObject.NULL)
-            .put("stops", JSONArray().apply { route.stops.forEach { put(it.coordinate.json().put("label", it.label)) } })
+            .put("stops", JSONArray().apply { route.stops.forEach { put(it.coordinate.json().put("label", it.label).withPlannedBreak(it)) } })
             .put("vertices", JSONArray().apply { route.vertices.forEach { put(it.coordinate.json().put("elapsed", it.elapsedSeconds)) } })
             .put("stopTimes", JSONArray(route.stopElapsedSeconds))
             .put("avoidAreas", JSONArray().apply { route.avoidAreas.forEach { area ->
@@ -106,6 +106,7 @@ class NavigationRouteCache(private val directory: File) {
     }
 
     private fun validate(route: PlannedRoute) {
+        RouteSchedule.planned(route, 0L)
         require(route.avoidAreas.size <= 3)
         require(route.id.length <= 300 && route.vertices.size <= 100_000 && route.maneuvers.size <= 10_000)
         require(route.providerWarnings.size <= 100 && route.providerWarnings.all { it.length <= 2000 })
