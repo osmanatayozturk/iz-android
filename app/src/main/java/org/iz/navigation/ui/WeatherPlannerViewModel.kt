@@ -363,6 +363,7 @@ internal class WeatherPlannerCoordinator(
                 val route = if (snapshot.route?.selectionLocked == true) planner.revalidateSelection(snapshot.route, snapshot.stops, value,
                     snapshot.transport, snapshot.settings.travelSpeedKmh, snapshot.settings.preferences)
                 else planner.plan(snapshot.stops, value, snapshot.transport, snapshot.settings.travelSpeedKmh, snapshot.settings.preferences)
+                route.requireRequestedBreakStops(snapshot.stops)
                 route.requireUsablePreferences()
                 val calculatedAt = services.clock()
                 check(route.transport == snapshot.transport && route.preferences == snapshot.settings.preferences && (trafficFree || !motorized || route.provider == RouteProvider.TOMTOM))
@@ -440,6 +441,7 @@ internal class WeatherPlannerCoordinator(
                 val result = services.routePlanner(snapshot.settings).alternatives(snapshot.stops, at, snapshot.transport,
                     snapshot.settings.travelSpeedKmh, snapshot.settings.preferences)
                 val routes = result.routes.onEach { route ->
+                    route.requireRequestedBreakStops(snapshot.stops)
                     check(route.transport == snapshot.transport && route.preferences == snapshot.settings.preferences)
                     route.requireUsablePreferences()
                     RouteSchedule.planned(route, route.effectiveDepartureAt ?: at)
@@ -569,6 +571,7 @@ internal class WeatherPlannerCoordinator(
                 val route = if (snapshot.route?.selectionLocked == true) planner.revalidateSelection(snapshot.route, freshStops, now,
                     snapshot.transport, snapshot.settings.travelSpeedKmh, snapshot.settings.preferences)
                 else planner.plan(freshStops, now, snapshot.transport, snapshot.settings.travelSpeedKmh, snapshot.settings.preferences)
+                route.requireRequestedBreakStops(freshStops)
                 route.requireUsablePreferences()
                 check(route.preferences == snapshot.settings.preferences && route.transport == snapshot.transport && route.vertices.size >= 2 && route.durationSeconds > 0) {
                     "Rota seçili yolculuk türüyle eşleşmedi."
@@ -622,6 +625,7 @@ internal class WeatherPlannerCoordinator(
         onRoute: (PlannedRoute) -> Unit = {},
     ): LoadedWeatherPlan {
         val route = services.routePlanner(settings).plan(stops, departureAt, transport, settings.travelSpeedKmh, settings.preferences).requireUsablePreferences()
+        route.requireRequestedBreakStops(stops)
         val calculatedAt = services.clock()
         check(route.transport == transport && route.preferences == settings.preferences) { "Rota seçili yolculuk türüyle eşleşmedi." }
         val effectiveDeparture = route.effectiveDepartureAt ?: departureAt
@@ -644,6 +648,12 @@ internal class WeatherPlannerCoordinator(
         val comparisons: List<WeatherAssessment>,
         val calculatedAt: Long,
     )
+}
+
+private fun PlannedRoute.requireRequestedBreakStops(requestedStops: List<RouteStop>) {
+    if (requestedStops.any { it.plannedBreakSeconds > 0 }) {
+        require(stops == requestedStops) { "Rota servisi planlanan molaları koruyamadı. Rotayı yeniden hesapla." }
+    }
 }
 
 internal fun planIssue(stops: List<RouteStop>, departureAt: Long, now: Long): String? = when {

@@ -76,4 +76,58 @@ class WeatherPlannedBreakTest {
         coordinator.setPlannedBreakMinutes(2, 0)
         assertEquals(stops, coordinator.state.value.stops)
     }
+
+    @Test fun droppedBreakStopsRejectPreviewAndActivation() = runBlocking {
+        val start = 3_600_000L
+        val stops = listOf(
+            RouteStop("Start", WeatherCoordinate(41.0, 29.0)),
+            RouteStop("Via", WeatherCoordinate(41.01, 29.0), plannedBreakSeconds = 600),
+            RouteStop("End", WeatherCoordinate(41.02, 29.0)),
+        )
+        var dropBreak = true
+        var forecastCalls = 0
+        var saves = 0
+        var activations = 0
+        val planner = object : RoutePlanner {
+            override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport,
+                travelSpeedKmh: Double?, preferences: RoutePreferences): PlannedRoute {
+                val returned = if (dropBreak) stops.map { it.copy(plannedBreakSeconds = 0) } else stops
+                val times = returned.indices.map { it * 900.0 }
+                return PlannedRoute("route", returned, returned.zip(times) { stop, time -> RouteVertex(stop.coordinate, time) },
+                    2_000.0, times.last(), departureAt, times, transport, preferences = preferences, hasHighway = false)
+            }
+        }
+        val provider = object : WeatherProvider {
+            override suspend fun hourly(coordinates: List<WeatherCoordinate>, from: Long, until: Long): List<LocationForecast> {
+                forecastCalls++
+                return emptyList()
+            }
+        }
+        val coordinator = WeatherPlannerCoordinator(this, WeatherPlannerServices(
+            routePlanner = { planner }, weatherProvider = { provider }, readSettings = ::defaultWeatherSettings,
+            saveSettings = { _, _ -> }, savePlan = { saves++ },
+            activate = { _, _ -> activations++; "journey" }, clock = { start },
+        ), SavedWeatherPlan(stops, start))
+
+        requireNotNull(coordinator.calculate()).join()
+        assertNull(coordinator.state.value.route)
+        assertFalse(coordinator.state.value.canStart)
+        assertEquals(stops, coordinator.state.value.stops)
+        assertEquals(0, forecastCalls)
+        assertEquals(0, saves)
+
+        dropBreak = false
+        requireNotNull(coordinator.calculate()).join()
+        assertTrue(coordinator.state.value.canStart)
+        val preview = coordinator.state.value.route
+        val savesBeforeStart = saves
+
+        dropBreak = true
+        requireNotNull(coordinator.startFromCurrentLocation(stops.first().coordinate)).join()
+        assertEquals(preview, coordinator.state.value.route)
+        assertEquals(savesBeforeStart, saves)
+        assertEquals(0, activations)
+        assertNull(coordinator.state.value.activeJourneyId)
+    }
+
 }

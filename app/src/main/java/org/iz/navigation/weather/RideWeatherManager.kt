@@ -106,9 +106,9 @@ class RideWeatherManager(
                     expectedTrackFollowKey = expectedTrackFollowKey)
         }
     },
+    private val readSettings: (Transport) -> RideWeatherSettings = WeatherSettingsStore(context)::read,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val settings = WeatherSettingsStore(context)
     private val mutableState = MutableStateFlow(RideWeatherLiveState())
     val state: StateFlow<RideWeatherLiveState> = mutableState.asStateFlow()
     private val activationMutex = Mutex()
@@ -179,9 +179,18 @@ class RideWeatherManager(
             return
         }
         val existing = session
-        val replace = existing == null || existing.journeyId != ownerId ||
-            existing.routeRevision != value.routeRevision || existing.freeDrive != (value.route == null) ||
-            existing.transport != transport
+        val sameOwner = existing != null && existing.journeyId == ownerId &&
+            existing.freeDrive == (value.route == null) && existing.transport == transport
+        val previousBreaks = previous?.scheduleContext?.breakSecondsByStop
+        val remainingBreaks = value.scheduleContext?.breakSecondsByStop
+        val revisionChanged = existing?.routeRevision != value.routeRevision
+        val retainForTimingRevision = existing != null && sameOwner && revisionChanged &&
+            value.route != null && existing.route == route &&
+            previous?.guidance == value.guidance && previous?.arrived == value.arrived &&
+            previous?.recording == value.recording &&
+            (existing.paused != value.paused || previous?.plannedBreak != value.plannedBreak ||
+                previousBreaks != remainingBreaks)
+        val replace = !sameOwner || (revisionChanged && !retainForTimingRevision)
         val current = if (replace) {
             reset()
             Session(ownerId, route, emptyList(), clock()).also { next ->
@@ -201,6 +210,12 @@ class RideWeatherManager(
                 }
             }
         } else requireNotNull(existing)
+        if (retainForTimingRevision) {
+            // Transfer the weather session to the new timing revision and fence older responses.
+            current.routeRevision = value.routeRevision
+            networkJob?.cancel()
+            networkJob = null
+        }
         current.paused = value.paused
         value.fix?.let { current.lastFix = Fix(ownerId, it.coordinate, it.recordedAt, it.accuracyMeters) }
         value.progress?.let {
@@ -210,10 +225,12 @@ class RideWeatherManager(
         if (current.freeDrive) current.route = route
         val moved = freeDriveNeedsRefresh(current)
         // Assessment rejects forecasts outside 100 m; retaining them also covers a return during cooldown.
+        val activeStop = value.plannedBreak?.stopIndex
+        // The active countdown and overtime change the ETA, while upcoming allocations can change the forecast.
+        val allocationChanged = if (activeStop == null) previousBreaks != remainingBreaks
+            else previousBreaks?.minus(activeStop) != remainingBreaks?.minus(activeStop)
         val breakTimingChanged = previous?.paused != value.paused ||
-            previous?.plannedBreak?.stopIndex != value.plannedBreak?.stopIndex ||
-            if (value.plannedBreak != null) previous?.tripTiming?.arrivalAt != value.tripTiming?.arrivalAt
-            else previous?.scheduleContext?.breakSecondsByStop != value.scheduleContext?.breakSecondsByStop
+            previous?.plannedBreak?.stopIndex != activeStop || allocationChanged
         evaluate(current, force = replace || moved || breakTimingChanged)
         requestNetwork(current, false, moved || current.freeDrive && current.forecasts.isEmpty())
     }
@@ -376,7 +393,7 @@ class RideWeatherManager(
                 message = "Yönlendirme duraklatıldı; varış zamanı ve ilerideki yolun hava tahmini bekletiliyor.") }
             return
         }
-        val preferences = settings.read(current.transport)
+        val preferences = readSettings(current.transport)
         if (!preferences.alertsEnabled && current.lastSettings?.alertsEnabled != false) runCatching { output.clear() }
         if (!preferences.voiceEnabled || !RideWeatherTiming.forecastFresh(mutableState.value.assessment?.fetchedAt,now)) runCatching { output.suspendVoice() }
         val shouldEvaluate = force || current.lastEvaluatedAt == Long.MIN_VALUE ||
@@ -450,7 +467,7 @@ class RideWeatherManager(
             remainingSeconds = timing.remainingSeconds, arrivalAt = timing.arrivalAt,
             timingUpdatedAt = timing.updatedAt, gpsStale = timing.gpsStale, paused = current.paused,
             tripTiming = scheduledTiming?.takeIf { !timing.gpsStale || plannedBreak != null },
-            plannedBreak = plannedBreak) }
+            plannedBreak = plannedBreak, routeRevision = current.routeRevision) }
         return timing
     }
 
@@ -471,7 +488,7 @@ class RideWeatherManager(
         val oldRoute = current.route
         val revision = current.routeRevision
         val remainingStops = if (navigationSource == null) current.tracker.remainingStops(current.progress.elapsedSeconds) else emptyList()
-        val preferences = settings.read(current.transport)
+        val preferences = readSettings(current.transport)
         current.lastFetchAttemptAt = now
         if (reroute) { current.lastRouteAttemptAt = now; current.pendingReroute = false }
         networkJob = scope.launch {
@@ -524,13 +541,13 @@ class RideWeatherManager(
                 evaluate(current, force = true)
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) {
-                if (isCurrent(current, token)) {
+                if (isCurrent(current, token) && current.routeRevision == revision) {
                     current.problem = (if (reroute) "Rota yenilenemedi. " else "Hava tahmini yenilenemedi. ") +
                         (error.message ?: "Bağlantıyı kontrol et.").take(180)
                     evaluate(current, force = true)
                 }
             } finally {
-                if (isCurrent(current, token)) {
+                if (isCurrent(current, token) && current.routeRevision == revision) {
                     networkJob = null
                     if (current.pendingReroute) requestNetwork(current, reroute = true, force = true)
                     else if (freeDriveNeedsRefresh(current)) requestNetwork(current, reroute = false, force = true)
