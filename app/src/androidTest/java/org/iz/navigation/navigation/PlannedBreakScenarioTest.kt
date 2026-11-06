@@ -1,28 +1,55 @@
 package org.iz.navigation.navigation
 
+import android.app.Instrumentation
 import android.content.ComponentName
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.os.Build
+import android.os.Looper
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertWidthIsAtLeast
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.getBoundsInRoot
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onRoot
-import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.unit.DpRect
+import androidx.compose.ui.unit.dp
 import androidx.room.Room
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.FutureTask
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,7 +69,8 @@ import org.iz.navigation.data.Transport
 import org.iz.navigation.health.HealthPrivacyActivity
 import org.iz.navigation.tracking.TrackingService
 import org.iz.navigation.ui.IzTheme
-import org.iz.navigation.ui.PlannedBreakCard
+import org.iz.navigation.ui.NavigationHomeContent
+import org.iz.navigation.ui.PhoneDirectionsState
 import org.iz.navigation.weather.LocationForecast
 import org.iz.navigation.weather.PlannedRoute
 import org.iz.navigation.weather.RouteManeuver
@@ -64,6 +92,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.maplibre.android.MapLibre
+import org.maplibre.android.ModuleProvider
+import org.maplibre.android.http.HttpRequest
+import org.maplibre.android.http.HttpResponder
 
 /** Production coordinator with synthetic GPS/speech and an isolated in-memory Room recorder. */
 @OptIn(ExperimentalTestApi::class)
@@ -112,21 +144,57 @@ class PlannedBreakScenarioTest {
             evidence.put("planned", timing(planned.arrivalAt, planned.breakSeconds))
 
             val intent = Intent().setComponent(ComponentName(app.packageName, HealthPrivacyActivity::class.java.name))
-            ActivityScenario.launch<HealthPrivacyActivity>(intent).use { host ->
+            phase = "home viewport"
+            withOfflineHost(instrumentation, intent) { host ->
+                var availableWidth = 0.dp
+                var availableHeight = 0.dp
+                var fontScale = 0f
                 host.onActivity { activity ->
                     check(activity.javaClass == HealthPrivacyActivity::class.java)
+                    check(activity.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+                        "The allocated host must already be landscape"
+                    }
                     activity.setContent {
                         val state by coordinator.state.collectAsState()
                         IzTheme {
-                            state.plannedBreak?.let { active ->
-                                PlannedBreakCard(active, enabled = true, onResume = {
-                                    val owner = checkNotNull(NavigationStopSnapshot.from(state))
-                                    scope.launch { explicitResume.complete(coordinator.resumePlannedBreak(owner)) }
-                                })
+                            BoxWithConstraints {
+                                val width = maxWidth
+                                val height = maxHeight
+                                val scale = LocalDensity.current.fontScale
+                                SideEffect {
+                                    availableWidth = width
+                                    availableHeight = height
+                                    fontScale = scale
+                                }
+                                Box(Modifier.size(640.dp, 320.dp).testTag("planned-break-home-host")) {
+                                    NavigationHomeContent(
+                                        ui = PhoneDirectionsState(), nav = state, points = emptyList(),
+                                        members = emptyList(), showPlanner = false, weatherLabel = "Sentetik",
+                                        onSearch = {}, onRecord = {}, onGroup = {}, onMenu = {}, onWeather = {},
+                                        onMute = {}, onManageSession = {}, onLocate = {}, onPin = {},
+                                        shortcuts = emptyList(), onShortcut = {}, plannedBreakResumeEnabled = true,
+                                        onResumePlannedBreak = {
+                                            val owner = checkNotNull(NavigationStopSnapshot.from(state))
+                                            scope.launch { explicitResume.complete(coordinator.resumePlannedBreak(owner)) }
+                                        },
+                                        planner = {},
+                                    )
+                                }
                             }
                         }
                     }
                 }
+                compose.runOnIdle {
+                    evidence.put("availableWidthDp", availableWidth.value).put("availableHeightDp", availableHeight.value)
+                        .put("fontScale", fontScale)
+                    assertTrue("Landscape host must fit 640×320 dp without clipping",
+                        availableWidth >= 640.dp && availableHeight >= 320.dp)
+                    assertEquals("Use the allocated normal font", 1f, fontScale, .01f)
+                }
+                val homeHost = fullyVisibleBounds("planned-break-home-host")
+                assertEquals(640f, (homeHost.right - homeHost.left).value, .5f)
+                assertEquals(320f, (homeHost.bottom - homeHost.top).value, .5f)
+                evidence.put("homeHostBoundsDp", homeHost.json())
                 phase = "recorder readiness"
                 val session = withContext(Dispatchers.Main.immediate) { coordinator.startGuidance(route, recordJourney = true) }
                 withTimeout(5_000) {
@@ -173,8 +241,8 @@ class PlannedBreakScenarioTest {
                 val firstAtResume = send(960, 900, 0f)
                 assertBreak(firstAtResume, 1, at(900), 60.0)
                 assertEquals(initialCueCount, runtime.cues.size)
-                capture(root, "first-break.png")
-                resumeNode().performClick()
+                capture(root, evidence, "first-break")
+                resumeNode().performTouchInput { click() }
                 assertTrue(withTimeout(5_000) { explicitResume.await() })
                 val early = coordinator.state.value
                 assertResumed(early, session)
@@ -198,7 +266,7 @@ class PlannedBreakScenarioTest {
                 assertLive(route, overtime, at(2_945), 0.0)
                 assertEquals(beforeSecond, runtime.cues.size)
                 evidence.put("overtime", timing(checkNotNull(overtime.tripTiming).arrivalAt, 0.0))
-                capture(root, "second-break-overtime.png")
+                capture(root, evidence, "second-break-overtime")
 
                 phase = "motion resumes guidance"
                 assertTrue(send(2_046, 1_910, 3f).paused)
@@ -229,6 +297,7 @@ class PlannedBreakScenarioTest {
                     .put("cueTimes", JSONArray(runtime.cues.map { it.at }))
                 withContext(Dispatchers.Main.immediate) { coordinator.finishSession(session) }
             }
+            evidence.put("mapHttp", "BOUNDED_FAILURE_ONLY").put("mapProviderRestored", true)
             evidence.put("status", "ASSERTIONS_PASS")
         } catch (failure: Throwable) {
             evidence.put("status", "FIRST_NONPASS").put("phase", phase)
@@ -243,14 +312,49 @@ class PlannedBreakScenarioTest {
         }
     }
 
-    private fun resumeNode() = compose.onNodeWithTag("planned-break-resume")
+    private fun node(tag: String) = compose.onNodeWithTag(tag, useUnmergedTree = true)
 
-    private fun capture(root: File, name: String) {
-        resumeNode().assertIsDisplayed()
-        compose.onNodeWithTag("planned-break-elapsed").assertIsDisplayed()
-        val image = compose.onRoot().captureToImage().asAndroidBitmap()
-        File(root, name).outputStream().use { check(image.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+    private fun resumeNode() = node("planned-break-resume")
+
+    private fun fullyVisibleBounds(tag: String): DpRect {
+        val target = node(tag).assertIsDisplayed()
+        val visible = target.getBoundsInRoot()
+        val full = target.getUnclippedBoundsInRoot()
+        assertEquals("$tag left must be visible", full.left.value, visible.left.value, .5f)
+        assertEquals("$tag top must be visible", full.top.value, visible.top.value, .5f)
+        assertEquals("$tag right must be visible", full.right.value, visible.right.value, .5f)
+        assertEquals("$tag bottom must be visible", full.bottom.value, visible.bottom.value, .5f)
+        return visible
     }
+
+    private fun capture(root: File, evidence: JSONObject, name: String) {
+        compose.onAllNodesWithTag("planned-break-resume", useUnmergedTree = true).assertCountEquals(1)
+        resumeNode().assertIsEnabled().assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
+        val resume = fullyVisibleBounds("planned-break-resume")
+        val elapsed = fullyVisibleBounds("planned-break-elapsed")
+        val operations = fullyVisibleBounds("home-finish-session")
+        val card = fullyVisibleBounds("live-guidance-card")
+        val header = fullyVisibleBounds("compact-guidance-header")
+        val map = node("navigation-home-map").assertIsDisplayed().getBoundsInRoot()
+        for (action in listOf(resume, elapsed, operations)) {
+            assertTrue("Fixed actions must stay inside the card and header",
+                card.contains(action) && header.contains(action))
+            assertTrue("Fixed actions must stay outside the map", action.bottom <= map.top + .5.dp)
+        }
+        assertTrue("Elapsed, resume and operations must stay in the same fixed row",
+            maxOf(resume.top, elapsed.top, operations.top) < minOf(resume.bottom, elapsed.bottom, operations.bottom))
+        assertTrue("Fixed actions must not overlap", elapsed.right <= resume.left + .5.dp && resume.right <= operations.left + .5.dp)
+        evidence.put(name, JSONObject().put("resume", resume.json()).put("elapsed", elapsed.json())
+            .put("operations", operations.json()).put("card", card.json()).put("header", header.json()).put("map", map.json()))
+        val image = node("planned-break-home-host").captureToImage().asAndroidBitmap()
+        File(root, "$name.png").outputStream().use { check(image.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+    }
+
+    private fun DpRect.contains(other: DpRect): Boolean =
+        other.left >= left - .5.dp && other.top >= top - .5.dp &&
+            other.right <= right + .5.dp && other.bottom <= bottom + .5.dp
+
+    private fun DpRect.json() = JSONArray(listOf(left.value, top.value, right.value, bottom.value))
 
     private fun assertBreak(state: NavigationState, stop: Int, startedAt: Long, elapsed: Double) {
         assertTrue(state.guidance && state.paused)
@@ -303,6 +407,81 @@ class PlannedBreakScenarioTest {
     }
 
     private fun timing(arrival: Long, breaks: Double) = JSONObject().put("arrivalAt", arrival).put("breakSeconds", breaks)
+
+    private suspend fun withOfflineHost(
+        instrumentation: Instrumentation,
+        intent: Intent,
+        block: suspend (ActivityScenario<HealthPrivacyActivity>) -> Unit,
+    ) {
+        lateinit var previous: ModuleProvider
+        lateinit var offline: NoNetworkMaps
+        instrumentation.runOnMainSync {
+            previous = MapLibre.getModuleProvider()
+            offline = NoNetworkMaps(previous)
+            MapLibre.setModuleProvider(offline)
+            check(MapLibre.getModuleProvider() === offline)
+        }
+        val cleanup = AutoCloseable {
+            try {
+                offline.drain()
+                offline.assertHealthy()
+            } finally {
+                instrumentation.runOnMainSync {
+                    MapLibre.setModuleProvider(previous)
+                    check(MapLibre.getModuleProvider() === previous)
+                }
+            }
+        }
+        cleanup.use {
+            ActivityScenario.launch<HealthPrivacyActivity>(intent).use { host -> block(host) }
+        }
+    }
+
+    // Same bounded failure-only MapLibre request pattern used by Ux0111ComposeHost.
+    private class NoNetworkMaps(private val previous: ModuleProvider) : ModuleProvider {
+        private val closing = AtomicBoolean(false)
+        private val gate = Any()
+        private val callbacks = AtomicInteger()
+        private val fatal = AtomicReference<Throwable?>()
+        private val pending = ConcurrentHashMap.newKeySet<FutureTask<Unit>>()
+        private val worker = ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, ArrayBlockingQueue<Runnable>(64),
+            { runnable -> Thread(runnable, "iz-planned-break-test-map").apply { isDaemon = true } }, ThreadPoolExecutor.AbortPolicy())
+        override fun createLibraryLoaderProvider() = previous.createLibraryLoaderProvider()
+        override fun createHttpRequest(): HttpRequest = object : HttpRequest {
+            private val cancelled = AtomicBoolean(false)
+            private val future = AtomicReference<FutureTask<Unit>?>()
+            override fun executeRequest(responder: HttpResponder, ignored: Long, url: String, range: String?, etag: String?, modified: String?, offline: Boolean) {
+                val task = object : FutureTask<Unit>({
+                    if (!cancelled.get() && !closing.get()) {
+                        callbacks.incrementAndGet()
+                        try { if (!cancelled.get() && !closing.get()) responder.handleFailure(HttpRequest.PERMANENT_ERROR, "QA map network disabled") }
+                        catch (failure: Throwable) { fatal.compareAndSet(null, failure) }
+                        finally { callbacks.decrementAndGet() }
+                    }
+                    Unit
+                }) { override fun done() { pending.remove(this) } }
+                check(future.compareAndSet(null, task)) { "Map request must execute once" }
+                synchronized(gate) {
+                    if (cancelled.get() || closing.get()) { task.cancel(false); return }
+                    pending += task
+                    try { worker.execute(task) } catch (failure: java.util.concurrent.RejectedExecutionException) {
+                        task.cancel(false); fatal.compareAndSet(null, failure)
+                    }
+                }
+            }
+            override fun cancelRequest() { synchronized(gate) { cancelled.set(true); future.get()?.cancel(false) } }
+        }
+        fun assertHealthy() { fatal.get()?.let { throw AssertionError("QA map transport failed", it) } }
+        fun drain() {
+            check(Looper.myLooper() != Looper.getMainLooper())
+            synchronized(gate) {
+                closing.set(true)
+                pending.toList().forEach { it.cancel(false) }
+                worker.shutdown()
+            }
+            check(worker.awaitTermination(5, TimeUnit.SECONDS) && callbacks.get() == 0 && pending.isEmpty()) { "Map transport must drain before provider restoration" }
+        }
+    }
 
     private class SyntheticRuntime(private val db: DiaryDatabase, private val clock: () -> Long) : NavigationRuntime {
         private val dao = db.diaryDao()
