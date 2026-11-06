@@ -127,7 +127,11 @@ class PlannedBreakScenarioTest {
                         }
                     }
                 }
+                phase = "recorder readiness"
                 val session = withContext(Dispatchers.Main.immediate) { coordinator.startGuidance(route, recordJourney = true) }
+                withTimeout(5_000) {
+                    coordinator.state.first { it.sessionId == session && it.recording && it.locationActive }
+                }
                 val submitted = mutableListOf<Long>()
 
                 suspend fun send(wallSeconds: Int, drivingSeconds: Int, speed: Float): NavigationState {
