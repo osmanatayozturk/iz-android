@@ -28,6 +28,8 @@ import org.iz.navigation.integration.WeatherRouteMap
 import org.iz.navigation.weather.*
 import org.iz.navigation.navigation.TrackReplacementConsent
 import org.iz.navigation.navigation.NavigationState
+import org.iz.navigation.navigation.NavigationStopSnapshot
+import org.iz.navigation.navigation.PlannedBreakState
 import org.iz.navigation.navigation.trackReplacementKey
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -220,7 +222,7 @@ internal class PhoneNavigationViewModel(application: Application) : AndroidViewM
                     }
                 }
                 RouteOperationUiAction.PAUSE, RouteOperationUiAction.RESUME -> {
-                    val snapshot = org.iz.navigation.navigation.NavigationStopSnapshot.from(navigation.state.value) ?: return
+                    val snapshot = NavigationStopSnapshot.from(navigation.state.value) ?: return
                     check(navigation.setPaused(snapshot, action == RouteOperationUiAction.PAUSE)) {
                         "Duraklama durumu değişti. Güncel durumu kontrol et."
                     }
@@ -321,6 +323,21 @@ internal class PhoneNavigationViewModel(application: Application) : AndroidViewM
             if (accepted && request.action == PhoneSessionEnd.ALL) directions.showLiveRoute()
         }
     }
+
+    fun resumePlannedBreak(entryId: Long, expected: NavigationStopSnapshot, expectedBreak: PlannedBreakState,
+        stillCurrent: () -> Boolean) {
+        fun ownsRequest(): Boolean {
+            if (currentUiEntry != entryId || !stillCurrent()) return false
+            val current = navigation.state.value
+            val active = current.plannedBreak ?: return false
+            return NavigationStopSnapshot.from(current) == expected &&
+                active.stopIndex == expectedBreak.stopIndex && active.startedAt == expectedBreak.startedAt
+        }
+        if (commandBusy.value || ui.value.starting || !ownsRequest()) return
+        work.mutate {
+            if (ownsRequest()) navigation.resumePlannedBreak(expected)
+        }
+    }
 }
 
 @Composable
@@ -382,6 +399,15 @@ internal fun NavigationScreen(
     val weather by app.weatherManager.state.collectAsStateWithLifecycle()
     var showPlanning by androidx.compose.runtime.saveable.rememberSaveable(entryId) { mutableStateOf(initiallyPlanning) }
     val dashboardEntry = org.iz.navigation.ui.history.LocalUiEntryKey.current
+    val activeBreak = nav.plannedBreak
+    val breakOwner = NavigationStopSnapshot.from(nav)
+    val resumePlannedBreak: () -> Unit = {
+        if (activeBreak != null && breakOwner != null) {
+            vm.resumePlannedBreak(entryId, breakOwner, activeBreak) {
+                (uiHistory?.current?.key ?: "standalone") == dashboardEntry
+            }
+        }
+    }
     var showDashboard by remember(dashboardEntry, nav.sessionId) { mutableStateOf(false) }
     val dashboardOwner = DashboardOwner(dashboardEntry, nav.sessionId)
     val dashboardRouteRevision = nav.routeRevision
@@ -658,6 +684,7 @@ internal fun NavigationScreen(
         onGroup = onGroup, onMenu = onMenu, onWeather = onWeather,
         onMute = { vm.navigation.setMuted(!nav.muted) }, onManageSession = { showPlanning = true; onPlannerOpened() },
         onLocate = { requestAction(DirectionsAction.CURRENT_ORIGIN) }, onPin = onPin,
+        onResumePlannedBreak = resumePlannedBreak,
     ) {
     PhoneDirectionsContent(
         ui = ui, nav = nav, points = points, commandBusy = commandBusy, commandErrorVersion = commandErrorVersion, voiceControls = {
@@ -681,6 +708,8 @@ internal fun NavigationScreen(
         permissions = { requestPermissions(permissionNames(), forAction = false) },
         showMap = false, recordJourney = vm.directions::setRecordJourney, stopRecording = { requestEnd(PhoneSessionEnd.RECORDING) },
         addVia = { addingVia = true; pickerOrigin = false; showSource = true }, removeVia = vm.directions::removeVia,
+        onPlannedBreakMinutesChanged = vm.directions::setPlannedBreakMinutes,
+        onResumePlannedBreak = resumePlannedBreak,
         suggestStopOrder = { vm.directions.suggestStopOrder() }, acceptStopOrder = vm.directions::acceptStopOrder,
         dismissStopOrder = vm.directions::dismissStopOrder,
         setPreferences = vm.directions::setPreferences,

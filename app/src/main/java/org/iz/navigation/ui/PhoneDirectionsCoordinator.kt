@@ -83,6 +83,7 @@ internal class PhoneDirectionsCoordinator(
         val route = planWithPreferences?.invoke(stops, snapshot.transport, snapshot.travelSpeedKmh, snapshot.preferences)
             ?: plan(stops, snapshot.transport)
         require(route.transport == snapshot.transport && route.preferences == snapshot.preferences) { "Rota seçilen yolculuk türü veya tercihlerle eşleşmiyor." }
+        route.requireMatchingPlannedBreaks(stops)
         return route.requireUsablePreferences()
     }
 
@@ -162,6 +163,7 @@ internal class PhoneDirectionsCoordinator(
                     ?: RouteAlternatives(listOf(before.preview), "Bu servis alternatif rota sunmuyor.")
                 val routes = result.routes.onEach { route ->
                     require(route.transport == before.transport && route.preferences == before.preferences)
+                    route.requireMatchingPlannedBreaks(before.stops)
                     route.requireUsablePreferences()
                 }.distinctBy { it.geometryKey() }.take(3)
                 if (token != revision) return@launch
@@ -326,6 +328,17 @@ internal class PhoneDirectionsCoordinator(
         invalidatePreview()
         mutableState.update { it.copy(via = it.via.filterIndexed { i, _ -> i != index }, message = null) }
     }
+
+    fun setPlannedBreakMinutes(viaIndex: Int, minutes: Int) {
+        if (starting || minutes !in 0..240) return
+        val via = state.value.via
+        val stop = via.getOrNull(viaIndex) ?: return
+        val seconds = minutes * 60
+        if (stop.plannedBreakSeconds == seconds) return
+        val updated = via.toMutableList().apply { this[viaIndex] = stop.copy(plannedBreakSeconds = seconds) }
+        invalidatePreview()
+        mutableState.update { it.copy(via = updated, message = null) }
+    }
     fun showLiveRoute() { invalidatePreview() }
     fun sessionStarted() { invalidatePreview(); mutableState.update { it.copy(startedCount = it.startedCount + 1) } }
     fun reportMessage(message: String?) { mutableState.update { it.copy(message = message) } }
@@ -339,6 +352,12 @@ internal class PhoneDirectionsCoordinator(
     }
     private fun reportError(error: Exception) = reportMessage(error.message ?: "İşlem tamamlanamadı.")
     private fun currentStop(coordinate: WeatherCoordinate) = RouteStop("Mevcut konum", coordinate)
+
+    private fun PlannedRoute.requireMatchingPlannedBreaks(requested: List<RouteStop>) {
+        if (requested.any { it.plannedBreakSeconds > 0 }) {
+            require(stops == requested) { "Mola durakları doğrulanamadı. Rotayı yeniden hesapla." }
+        }
+    }
 }
 
 internal fun finishNavigationWork(directions: PhoneDirectionsCoordinator, work: PhoneNavigationWork,

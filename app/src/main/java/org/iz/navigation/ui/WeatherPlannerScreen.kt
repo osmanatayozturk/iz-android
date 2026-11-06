@@ -337,6 +337,7 @@ private fun WeatherPlannerScreenContent(
             },
             useCurrentOrigin = { requestLocation(WeatherLocationAction.ORIGIN) },
             removeStop = vm::removeStop,
+            setPlannedBreakMinutes = vm::setPlannedBreakMinutes,
             addVia = {
                 if (state.stops.size in 2..4) {
                     pickerTarget = WEATHER_TARGET_NEW_VIA
