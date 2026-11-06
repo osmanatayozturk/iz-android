@@ -18,9 +18,17 @@ internal object WearNavigationFactory {
             progress.remainingMeters, progress.nextManeuverDistanceMeters).all { it.isFinite() && it >= 0.0 }
         val usable = state.guidance && !state.paused && !state.loading && !stale && !offRoute && !arrived && validProgress
         val maneuver = if (usable) state.route?.maneuvers?.getOrNull(progress!!.maneuverIndex) else null
-        val arrival = if (usable) {
-            val millis = progress!!.remainingSeconds * 1_000
-            if (millis < Long.MAX_VALUE.toDouble()) runCatching { Math.addExact(state.progressUpdatedAt?.takeIf { it in fixAt!!..now } ?: fixAt!!, millis.toLong()) }.getOrNull() else null
+        val arrival = if (usable && progress != null && fixAt != null) {
+            val timing = state.tripTiming
+            if (timing != null) {
+                timing.arrivalAt.takeIf { it >= fixAt }
+            } else {
+                val millis = progress.remainingSeconds * 1_000
+                val anchor = state.progressUpdatedAt?.takeIf { it in fixAt..now } ?: fixAt
+                if (millis < Long.MAX_VALUE.toDouble()) {
+                    runCatching { Math.addExact(anchor, millis.toLong()) }.getOrNull()
+                } else null
+            }
         } else null
         return WearNavigationSummary(
             sessionId = session, guidance = state.guidance, fixAt = fixAt, gpsStale = stale,
