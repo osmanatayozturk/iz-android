@@ -193,7 +193,7 @@ internal class CarHomeScreen(context: CarContext, private val surface: CarMapSur
                 builder.setNavigationInfo(RoutingInfo.Builder().setCurrentStep(carStep(checkNotNull(step), state.simulation,
                     carVoiceWarning(state, speechStatus)),
                     carDistance(currentProgress.nextManeuverDistanceMeters)).build())
-                builder.setDestinationTravelEstimate(carEstimate(currentProgress.remainingMeters, currentProgress.remainingSeconds))
+                builder.setDestinationTravelEstimate(carDestinationEstimate(state))
             }
             return builder.build()
         }

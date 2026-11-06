@@ -2,10 +2,13 @@ package org.iz.navigation.car
 
 import androidx.car.app.model.Distance
 import androidx.car.app.model.CarText
+import androidx.car.app.model.DateTimeWithZone
 import androidx.car.app.navigation.model.*
 import org.iz.navigation.navigation.NavigationState
 import org.iz.navigation.weather.RouteManeuver
 import java.time.ZonedDateTime
+import java.util.TimeZone
+import kotlin.math.ceil
 
 internal fun carManeuverType(type: Int): Int = when (type) {
     1, 2, 3 -> Maneuver.TYPE_DEPART
@@ -50,6 +53,15 @@ internal fun carEstimate(meters: Double, seconds: Double): TravelEstimate = Trav
     carDistance(meters), ZonedDateTime.now().plusSeconds(seconds.toLong().coerceAtLeast(0)))
     .setRemainingTimeSeconds(seconds.toLong().coerceAtLeast(0)).build()
 
+internal fun carDestinationEstimate(state: NavigationState): TravelEstimate {
+    val progress = checkNotNull(state.progress)
+    val timing = state.tripTiming ?: return carEstimate(progress.remainingMeters, progress.remainingSeconds)
+    val arrival = DateTimeWithZone.create(timing.arrivalAt, TimeZone.getDefault())
+    return TravelEstimate.Builder(carDistance(progress.remainingMeters), arrival)
+        .setRemainingTimeSeconds(ceil(timing.totalSeconds).toLong())
+        .build()
+}
+
 internal fun carTrip(state: NavigationState): Trip {
     if (!carCanPresentProgress(state)) {
         return Trip.Builder().setLoading(true).build()
@@ -57,7 +69,7 @@ internal fun carTrip(state: NavigationState): Trip {
     val route = checkNotNull(state.route)
     val progress = checkNotNull(state.progress)
     val builder = Trip.Builder().addDestination(Destination.Builder().setName(route.stops.last().label).build(),
-        carEstimate(progress.remainingMeters, progress.remainingSeconds))
+        carDestinationEstimate(state))
     route.maneuvers.getOrNull(progress.maneuverIndex)?.let { maneuver ->
         builder.addStep(carStep(maneuver, state.simulation), carEstimate(progress.nextManeuverDistanceMeters,
             (maneuver.beginElapsedSeconds - progress.elapsedSeconds).coerceAtLeast(0.0)))
