@@ -347,6 +347,8 @@ class JourneyNavigationCoordinator(
         publish(mutableState.value.copy(loading = true, message = null))
         return try {
             val route = runtime.plan(stops, transport).requireUsablePreferences()
+            require(stops.none { it.plannedBreakSeconds > 0 } || route.stops == stops) { "Planlanan molalar önizleme rotasında korunamadı." }
+            RouteSchedule.planned(route, clock())
             check(route.transport == transport) { "Rota seçili yolculuk türüyle eşleşmedi." }
             check(token == epoch) { "Yolculuk durumu değişti; rotayı yeniden seç." }
             route
