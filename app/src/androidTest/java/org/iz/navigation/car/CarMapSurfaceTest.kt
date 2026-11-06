@@ -158,7 +158,9 @@ class CarMapSurfaceTest {
             val route = PlannedRoute("isolated-car-render-route",
                 listOf(RouteStop("Konum", current), RouteStop("Örnek hedef", destination)),
                 listOf(RouteVertex(current, 0.0), RouteVertex(ahead, 20.0), RouteVertex(turn, 40.0),
-                    RouteVertex(destination, 60.0)), 370.0, 60.0, now, transport = Transport.CAR)
+                    RouteVertex(destination, 60.0)), 370.0, 60.0, now, transport = Transport.CAR,
+                maneuvers = listOf(org.iz.navigation.weather.RouteManeuver(
+                    10, "Sağa dön", "Sağa dön", emptyList(), 1, 2, 20.0, 40.0)))
             val recording = NavigationState(journey = journey, recording = true, route = route,
                 gpsStale = false, fix = NavigationFix(current, now, 5f),
                 roadSpeed = RoadSpeedState(57.6, RoadSpeedLimit(90.0, RoadSpeedSource.TOMTOM_POSTED,

@@ -26,7 +26,7 @@ class MotorcyclePhonePolicyTest {
                 org.iz.navigation.weather.RouteVertex(org.iz.navigation.weather.WeatherCoordinate(41.0005, 29.0005), 20.0),
                 org.iz.navigation.weather.RouteVertex(b, 30.0)),
             200.0, 30.0, 1L, maneuvers = listOf(org.iz.navigation.weather.RouteManeuver(
-                1, "Turn", "Turn", emptyList(), 1, 2, 20.0, 30.0)))
+                10, "Turn", "Turn", emptyList(), 1, 2, 20.0, 30.0)))
         return NavigationState(guidance = true, sessionTransport = Transport.MOTORCYCLE, route = route,
             progress = org.iz.navigation.navigation.NavigationProgress(12.0, 18.0, 150.0, 0.0, 0, 150.0),
             fix = org.iz.navigation.navigation.NavigationFix(a, 1L, 3f, 1f, 0f), gpsStale = false)
@@ -50,6 +50,17 @@ class MotorcyclePhonePolicyTest {
             assertNull(input.maneuverMeters)
             assertNull(input.maneuverSeconds)
         }
+    }
+    @Test fun nearStraightInstructionDoesNotSupplyTurnProximityToPhoneCamera() {
+        val turn = guidanceState()
+        val route = checkNotNull(turn.route)
+        val straight = turn.copy(route = route.copy(maneuvers = listOf(route.maneuvers.single().copy(type = 8))),
+            progress = turn.progress!!.copy(nextManeuverDistanceMeters = 10.0))
+        val input = phoneDriveCameraInput(straight, false, 1000L)
+        assertNull(input.maneuverMeters)
+        assertNull(input.maneuverSeconds)
+        assertTrue(input.enabled)
+        assertTrue(input.fresh)
     }
     @Test fun cameraManeuverTimeUsesRouteTimelineRatherThanDistanceOverSpeed() {
         val input = phoneDriveCameraInput(guidanceState(), false, 1000L)

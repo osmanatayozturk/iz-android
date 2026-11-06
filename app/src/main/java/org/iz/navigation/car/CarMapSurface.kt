@@ -437,13 +437,11 @@ internal class CarMapSurface(private val context: CarContext) : SurfaceCallback 
         }
         val now = SystemClock.elapsedRealtime()
         if (eligible && interaction.following) {
-            val progress = state.progress?.takeIf { state.guidance && !state.arrived && !it.offRoute && it.maneuverIndex >= 0 }
+            val turn = state.driveCameraTurn()
             val target = cameraPolicy.update(DriveCameraInput(now, fix?.coordinate, fix?.speedMps?.toDouble()?.times(3.6),
                 fix?.bearingDegrees?.toDouble(), fresh = !state.gpsStale && fix != null, enabled = true,
-                maneuverMeters = progress?.nextManeuverDistanceMeters,
-                maneuverSeconds = state.route?.maneuvers?.getOrNull(progress?.maneuverIndex ?: -1)?.let { step ->
-                    progress?.let { (step.beginElapsedSeconds - it.elapsedSeconds).coerceAtLeast(0.0) }
-                }, mode = interaction.mode), viewport, forceCamera)
+                maneuverMeters = turn?.meters, maneuverSeconds = turn?.seconds,
+                mode = interaction.mode), viewport, forceCamera)
             if (target != null) {
                 if (safeForAdaptive && interaction.mode == DriveCameraMode.ADAPTIVE) {
                     cameraAnimator?.ease(target)
