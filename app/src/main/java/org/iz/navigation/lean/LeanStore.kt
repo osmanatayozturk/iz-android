@@ -10,6 +10,7 @@ import java.nio.file.Files
 import kotlin.coroutines.AbstractCoroutineContextElement
 import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -234,10 +235,19 @@ class LeanStore internal constructor(
         LeanBackupSession(source, row.state, parts.map { it.manifest() }, result?.let { LeanCodec.estimate(it.payload) })
     }
 
+    /** Export supplies bounded metadata from the same Room transaction. No raw BLOB list. */
+    internal suspend fun backupSession(row: LeanSessionEntity, parts: List<LeanChunkInfo>): LeanBackupSession {
+        require(parts.size <= MAX_CHUNKS)
+        val result = dao.result(row.id)
+        val source = input(row, parts).let { if (result == null) it else it.copy(inputHash = result.inputHash) }
+        return LeanBackupSession(source, row.state, parts.map { it.manifest() }, result?.let { LeanCodec.estimate(it.payload) })
+    }
+
     /** Caller holds the snapshot lease; no cache or external filename is trusted as input. */
     internal suspend fun writeRaw(session: LeanBackupSession, output: OutputStream) {
         val stream = DataOutputStream(output)
         for (part in session.chunks.sortedBy { it.partIndex }) {
+            currentCoroutineContext().ensureActive()
             val stored = requireNotNull(dao.chunk(session.input.token.id, part.partIndex)) { "Yedek ham verisi eksik." }
             LeanArchive.validateChunk(session, part, stored.payload)
             stream.writeInt(stored.payload.size)

@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -41,6 +42,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -50,7 +52,9 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.withResumed
 import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
@@ -62,6 +66,10 @@ import org.iz.navigation.weather.RoutePreferences
 import org.iz.navigation.weather.RouteStop
 import org.iz.navigation.weather.SavedWeatherPlan
 import org.iz.navigation.integration.*
+import org.iz.navigation.ui.backup.BackupExportPhase
+import org.iz.navigation.ui.backup.BackupExportProgress
+import org.iz.navigation.ui.backup.DiaryBackupExportOperations
+import org.iz.navigation.ui.backup.message
 import org.iz.navigation.tracking.TrackerSettings
 import org.iz.navigation.tracking.TrackingPolicy
 import com.google.android.gms.location.LocationServices
@@ -192,7 +200,12 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     var showDetection by detectionState
     var refresh by remember { mutableIntStateOf(0) }
     var restoreUri by rememberUiEntryState<Uri?>(history) { null }
-    var backupBusy by resultOwner.backupBusy
+    var backupImportBusy by resultOwner.backupBusy
+    val backupExport = resultOwner.backupExport
+    val backup = remember(context.applicationContext, vm.repository) {
+        DiaryBackupExportOperations(context.applicationContext, DiaryBackup(context.applicationContext, vm.repository))
+    }
+    val backupBusy = backupImportBusy || backupExport.busy
     var showBackupOptions by rememberUiEntryState<Boolean>(history) { false }
     var includeHealthBackup by remember { mutableStateOf(false) }
     val healthManager = remember { (context.applicationContext as org.iz.navigation.IzApplication).healthManager }
@@ -316,12 +329,20 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     }
     val exportBackup = rememberUiResultLauncher(ActivityResultContracts.CreateDocument("application/zip"), resultOwner.requests,
         "backup-export", launcherCapture) { owner, uri ->
-        val payload = resultOwner.takePayload("backup-export", owner) as? UiResultPayload.Backup
-        if (uri != null && payload != null && accepts(owner)) vm.execute("Yedek dosyası kaydedildi.") {
-            backupBusy = true
-            try { DiaryBackup(context, vm.repository).exportTo(uri, includeHealth = payload.includeHealth) } finally { backupBusy = false }
+        backupExport.onPickerResult(owner, uri, accepts(owner))
+    }
+    val backupLifecycle = LocalLifecycleOwner.current.lifecycle
+    val currentExportLauncher by rememberUpdatedState(exportBackup)
+    LaunchedEffect(backupExport, backup) { backupExport.initialize(backup) }
+    LaunchedEffect(backupExport, uiEntry.key) { backupExport.cancelIfOwnerLeft(uiEntry.key) }
+    LaunchedEffect(backupExport, backupExport.phase, backupLifecycle) {
+        if (backupExport.phase == BackupExportPhase.READY) {
+            backupLifecycle.withResumed {
+                backupExport.openPicker { owner, title -> currentExportLauncher.launchWithOwner(owner, title) }
+            }
         }
     }
+    LaunchedEffect(backupExport, vm) { backupExport.notices.collect { vm.message(it.message()) } }
     fun cleanupTrackExport(owner: UiAsyncOwner) {
         val payload = resultOwner.takePayload("gpx-export", owner) as? UiResultPayload.TrackExport ?: return
         vm.execute { withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) { gpxStore.remove(payload.id) } }
@@ -469,7 +490,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     LaunchedEffect(groupState.screenRequested) { if (groupState.screenRequested) groupPage = true }
 
     CompositionLocalProvider(LocalUiOwnerRegistrations provides resultOwner.registrations, LocalUiExitGuard provides exitGuard, LocalUiEntryKey provides uiEntry.key, LocalUiHistory provides history, LocalUiVoiceSettingsAction provides openVoiceSettings, LocalUiDirectionsPermissions provides openDirectionsPermissions,
-        LocalUiOperationBusy provides { resultOwner.backupBusy.value || resultOwner.libraryBusy.value || resultOwner.gpxStarting.value || resultOwner.preparingGpx.value || resultOwner.formBusy.value || resultOwner.contributionBusy.value }) {
+        LocalUiOperationBusy provides { resultOwner.backupBusy.value || backupExport.busy || resultOwner.libraryBusy.value || resultOwner.gpxStarting.value || resultOwner.preparingGpx.value || resultOwner.formBusy.value || resultOwner.contributionBusy.value }) {
     UiEditOwner(UiEditState(uiEntry.key + "/ui", null, 0, 0, false, false))
     if (!libraryOpen && !collectionsOpen && !mapEditsPage && !osmActions) Scaffold(containerColor = Paper, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
@@ -615,8 +636,17 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     onRepairDetection = { vm.tracker.enableDetection { error -> refresh++; error?.let(vm::message) } },
                     onStopMinutes = { settings.stopMinutes = it; refresh++ },
                     onPermissions = { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) },
-                    onExport = { includeHealthBackup = false; showBackupOptions = true },
-                    onImport = { importBackup.launch(arrayOf("application/zip", "application/octet-stream")) },
+                    onExport = {
+                        if (!backupImportBusy && !backupExport.busy) {
+                            includeHealthBackup = false
+                            showBackupOptions = true
+                        }
+                    },
+                    onImport = {
+                        if (!backupImportBusy && !backupExport.busy) {
+                            importBackup.launch(arrayOf("application/zip", "application/octet-stream"))
+                        }
+                    },
                     onContributions = { osmActions = true }, onMessage = vm::message,
                     onCommunity = { communityMessageId = null; communityAccountId = null; navigator.open(UiPage.COMMUNITY) },
                 )
@@ -840,17 +870,19 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
         }
     }, confirmButton = { TextButton(onClick = { vm.tracker.enableDetection { error -> refresh++; if (error == null) { showDetection = false; vm.message("Hareket algılama açıldı.") } else vm.message(error) } }) { Text("Algılamayı aç") } }, dismissButton = { TextButton(onClick = { showDetection = false }) { Text("Şimdi değil") } })
     restoreUri?.let { uri -> AlertDialog(onDismissRequest = { restoreUri = null }, title = { Text("Yedeği geri yükle") }, text = { Text("Dosya doğrulanıp günlük başarıyla değiştirildiğinde aktif yolculuk kaydı duracak. Mevcut kayıtların için önce yedek alabilirsin.") }, confirmButton = { TextButton(enabled = !backupBusy, onClick = {
-        restoreUri = null
-        vm.execute("Yedek geri yüklendi.") {
-            backupBusy = true
-            val wasEnabled = settings.enabled
-            // Keep the existing subscription, but ignore new detection events during replacement.
-            settings.enabled = false
-            try {
-                healthManager.withDiaryReplacement { DiaryBackup(context, vm.repository).importFrom(uri) { vm.tracker.stopAfterRestore() } }
-                selectedJourney = null; selectedPlace = null
+        if (!backupImportBusy && !backupExport.busy) {
+            restoreUri = null
+            backupImportBusy = true
+            vm.execute("Yedek geri yüklendi.") {
+                val wasEnabled = settings.enabled
+                // Keep the existing subscription, but ignore new detection events during replacement.
+                settings.enabled = false
+                try {
+                    healthManager.withDiaryReplacement { DiaryBackup(context, vm.repository).importFrom(uri) { vm.tracker.stopAfterRestore() } }
+                    selectedJourney = null; selectedPlace = null
+                }
+                finally { settings.enabled = wasEnabled; backupImportBusy = false; refresh++ }
             }
-            finally { settings.enabled = wasEnabled; backupBusy = false; refresh++ }
         }
     }) { Text("Geri yükle") } }, dismissButton = { TextButton(onClick = { restoreUri = null }) { Text("Vazgeç") } }) }
     if (showBackupOptions) AlertDialog(onDismissRequest = { showBackupOptions = false },
@@ -858,18 +890,33 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Yolculuklar, konum kayıtları, yerler, özel notlar ve fotoğraflar yedeklenir.")
             Text("Varsa deneysel yatış verileri, ham sensör kayıtları ve bunlara bağlı konum, zaman, hız ve kalibrasyon bilgileri de yedeklenir.")
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(includeHealthBackup, { includeHealthBackup = it })
+            Row(
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(
+                    value = includeHealthBackup,
+                    role = Role.Checkbox,
+                    onValueChange = { includeHealthBackup = it },
+                ),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Checkbox(checked = includeHealthBackup, onCheckedChange = null)
                 Text("Sağlık ölçümlerini de ekle")
             }
             Text("Sağlık ölçümleri varsayılan olarak eklenmez. Bu seçim yatış ve sensör kayıtlarını etkilemez.")
+            Text("Yedek hazır olduğunda kaydedileceği konumu seçeceksin. Dosya adını değiştirmeden yeni bir dosyaya kaydet.")
         } },
         confirmButton = { TextButton(onClick = {
-            showBackupOptions = false
-            exportBackup.launch("iz-yedek-" + SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).format(Date()) + ".zip") { owner -> resultOwner.putPayload("backup-export", owner, UiResultPayload.Backup(includeHealthBackup)); includeHealthBackup = false }
-        }) { Text("Dosyaya kaydet") } },
+            if (!backupImportBusy && !backupExport.busy) {
+                val owner = captureResultOwner()
+                if (owner != null && backupExport.start(backup, owner, includeHealthBackup)) {
+                    showBackupOptions = false
+                    includeHealthBackup = false
+                }
+            }
+        }) { Text("Yedeği hazırla") } },
         dismissButton = { TextButton(onClick = { showBackupOptions = false }) { Text("Vazgeç") } })
-    if (backupBusy) AlertDialog(onDismissRequest = {}, title = { Text("Arşivin hazırlanıyor") }, text = { Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) { CircularProgressIndicator(Modifier.size(28.dp)); Text("İşlem tamamlanana kadar lütfen bekle.") } }, confirmButton = {})
+    if (backupImportBusy) AlertDialog(onDismissRequest = {}, title = { Text("Arşivin hazırlanıyor") }, text = { Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) { CircularProgressIndicator(Modifier.size(28.dp)); Text("İşlem tamamlanana kadar lütfen bekle.") } }, confirmButton = {})
+    BackupExportProgress(backupExport.phase, backupExport::cancel)
     UiExitConfirmation(exitGuard)
     }
 }

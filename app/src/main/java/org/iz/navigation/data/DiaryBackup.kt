@@ -4,11 +4,8 @@ import android.content.Context
 import android.net.Uri
 import java.io.File
 import java.io.InputStream
-import java.io.OutputStream
 import java.util.UUID
-import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
-import java.util.zip.ZipOutputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
@@ -22,60 +19,23 @@ import org.json.JSONObject
 class DiaryBackup(context: Context, private val repository: DiaryRepository) {
     private val context = context.applicationContext
 
-    suspend fun exportTo(uri: Uri, includeHealth: Boolean = false) = withContext(Dispatchers.IO) {
-        LeanStore.withSnapshotLease {
-            val snapshot = exportable(repository.snapshot(), includeHealth)
-            DiaryRules.validate(snapshot)
-            validateMapSnapshot(snapshot)
-            LeanBackupCodec.validateSnapshot(snapshot)
-            val paths = snapshot.photos.map { it.relativePath }.distinct()
-            val rawSessions = snapshot.leanSessions.filter { it.chunks.isNotEmpty() }
-            require(paths.size + rawSessions.size + 1 <= MAX_FILES) { "Yedekte çok fazla dosya var." }
-            val photoBytes = paths.sumOf { path ->
-                val file = repository.photoFile(path)
-                require(file.isFile && file.length() <= MAX_PHOTO_BYTES) { "Fotoğraf eksik veya 50 MB sınırından büyük." }
-                file.length()
-            }
-            val manifest = BackupJson.encode(snapshot, includeHealth).toString().toByteArray(Charsets.UTF_8)
-            require(manifest.size <= MAX_MANIFEST_BYTES) { "Günlük verisi 32 MB sınırını aşıyor." }
-            require(photoBytes + manifest.size + LeanArchive.framedBytes(rawSessions) <= MAX_TOTAL_BYTES) {
-                "Yedek 512 MB sınırını aşıyor."
-            }
-            val output = context.contentResolver.openOutputStream(uri, "wt") ?: error("Yedek dosyası açılamadı.")
-            val store = repository.leanStore
-            ZipOutputStream(output.buffered()).use { zip ->
-                zip.putNextEntry(ZipEntry(MANIFEST))
-                zip.write(manifest)
-                zip.closeEntry()
-                var written = manifest.size.toLong()
-                paths.forEach { path ->
-                    zip.putNextEntry(ZipEntry(path))
-                    written += repository.photoFile(path).inputStream().use {
-                        copyLimited(it, zip, MAX_PHOTO_BYTES, MAX_TOTAL_BYTES - written)
-                    }
-                    zip.closeEntry()
-                }
-                for (session in rawSessions) {
-                    zip.putNextEntry(ZipEntry(LeanArchive.rawName(session.input.token.id)))
-                    val remaining = MAX_TOTAL_BYTES - written
-                    var entryBytes = 0L
-                    val bounded = object : OutputStream() {
-                        override fun write(value: Int) {
-                            require(entryBytes < remaining) { "Yedek 512 MB sınırını aşıyor." }
-                            zip.write(value); entryBytes++
-                        }
-                        override fun write(bytes: ByteArray, offset: Int, length: Int) {
-                            require(length.toLong() <= remaining - entryBytes) { "Yedek 512 MB sınırını aşıyor." }
-                            zip.write(bytes, offset, length); entryBytes += length
-                        }
-                    }
-                    store.writeRaw(session, bounded)
-                    require(entryBytes == LeanArchive.framedBytes(listOf(session))) { "Sensör yedeği boyutu eşleşmedi." }
-                    written += entryBytes
-                    zip.closeEntry()
-                }
-            }
-        }
+    private val stages = DiaryBackupStages(this.context, repository)
+
+    suspend fun prepareExport(includeHealth: Boolean = false): PreparedDiaryBackup =
+        stages.prepare(includeHealth, BackupExportOptions())
+
+    internal suspend fun prepareExport(includeHealth: Boolean, options: BackupExportOptions): PreparedDiaryBackup =
+        stages.prepare(includeHealth, options)
+
+    suspend fun savePrepared(prepared: PreparedDiaryBackup, uri: Uri) = stages.save(prepared, uri)
+    suspend fun discardPrepared(prepared: PreparedDiaryBackup): Boolean = stages.discard(prepared)
+    suspend fun cleanupAbandonedExports(): Boolean = stages.cleanupAbandoned()
+
+    /** Compatibility entry point; interactive UI prepares before opening CreateDocument. */
+    suspend fun exportTo(uri: Uri, includeHealth: Boolean = false) {
+        val prepared = prepareExport(includeHealth)
+        try { savePrepared(prepared, uri) }
+        finally { withContext(NonCancellable) { discardPrepared(prepared) } }
     }
 
     suspend fun importFrom(uri: Uri, afterReplace: suspend () -> Unit = {}) = withContext(Dispatchers.IO) {
@@ -178,40 +138,6 @@ class DiaryBackup(context: Context, private val repository: DiaryRepository) {
         }
     }
 
-    private fun exportable(snapshot: DiarySnapshot, includeHealth: Boolean): DiarySnapshot {
-        val journeys = snapshot.journeys.filter { it.status == JourneyStatus.CONFIRMED }
-        val ids = journeys.map { it.id }.toSet()
-        val photos = snapshot.photos.filter { it.visitId != null || it.journeyId in ids }.map {
-            if (it.journeyId != null && it.journeyId !in ids) it.copy(journeyId = null) else it
-        }
-        val photoIds = photos.map { it.id }.toSet()
-        return snapshot.copy(
-            journeys = journeys,
-            points = snapshot.points.filter { it.journeyId in ids },
-            visits = snapshot.visits.map { if (it.journeyId != null && it.journeyId !in ids) it.copy(journeyId = null) else it },
-            photos = photos,
-            drafts = snapshot.drafts.map { it.copy(photoIds = it.photoIds.filter { id -> id in photoIds }) },
-            healthSamples = if (includeHealth) snapshot.healthSamples.filter { it.journeyId in ids } else emptyList(),
-            watchHealthSessions = if (includeHealth) snapshot.watchHealthSessions.filter { it.journeyId in ids } else emptyList(),
-            watchHealthSamples = if (includeHealth) snapshot.watchHealthSamples.filter { it.journeyId in ids } else emptyList(),
-            memberships = snapshot.memberships.filter { it.journeyId in ids },
-            leanSessions = snapshot.leanSessions.filter { it.input.token.journeyId in ids },
-        )
-    }
-
-    private fun copyLimited(input: InputStream, output: OutputStream, limit: Long, remaining: Long): Long {
-        val buffer = ByteArray(8192)
-        var total = 0L
-        while (true) {
-            val count = input.read(buffer)
-            if (count < 0) break
-            total += count
-            require(total <= limit && total <= remaining) { "Yedek açıldığında izin verilen boyutu aşıyor." }
-            output.write(buffer, 0, count)
-        }
-        return total
-    }
-
     companion object {
         private const val MANIFEST = "manifest.json"
         private const val MAX_FILES = 10_000
@@ -230,50 +156,70 @@ internal object BackupJson {
     }
     private fun <T> array(values: List<T>, encode: (T) -> JSONObject): JSONArray = JSONArray().apply { values.forEach { put(encode(it)) } }
 
+    internal fun header(exportedAt: Long): JSONObject = json("format" to FORMAT, "version" to VERSION, "exportedAt" to exportedAt)
+
+    internal fun recordJourneys(value: Journey): JSONObject = json("id" to value.id, "title" to value.title, "transport" to value.transport.name, "status" to value.status.name,
+            "startedAt" to value.startedAt, "endedAt" to value.endedAt, "expiresAt" to value.expiresAt, "note" to value.note,
+            "interrupted" to value.interrupted, "stepCount" to value.stepCount)
+
+    internal fun recordPoints(value: TrackPoint): JSONObject = json("id" to value.id, "journeyId" to value.journeyId, "latitude" to value.latitude, "longitude" to value.longitude,
+            "recordedAt" to value.recordedAt, "accuracy" to value.accuracy, "speed" to value.speed, "altitude" to value.altitude, "breakBefore" to value.breakBefore)
+
+    internal fun recordPlaces(value: Place): JSONObject = json("id" to value.id, "name" to value.name, "latitude" to value.latitude, "longitude" to value.longitude,
+            "googlePlaceId" to value.googlePlaceId, "osmType" to value.osmType?.name, "osmId" to value.osmId, "source" to value.source.name, "sortOrder" to value.sortOrder)
+
+    internal fun recordVisits(value: Visit): JSONObject = json("id" to value.id, "placeId" to value.placeId, "journeyId" to value.journeyId, "visitedAt" to value.visitedAt, "note" to value.note, "rating" to value.rating)
+
+    internal fun recordPhotos(value: Photo): JSONObject = json("id" to value.id, "relativePath" to value.relativePath, "journeyId" to value.journeyId, "visitId" to value.visitId,
+            "takenAt" to value.takenAt, "latitude" to value.latitude, "longitude" to value.longitude, "caption" to value.caption)
+
+    internal fun recordDrafts(value: ShareDraft): JSONObject = json("id" to value.id, "visitId" to value.visitId, "text" to value.text, "rating" to value.rating,
+            "photoIds" to JSONArray(value.photoIds), "markedSharedAt" to value.markedSharedAt)
+
+    internal fun recordContributions(value: ContributionDraft): JSONObject = json("id" to value.id, "placeId" to value.placeId, "latitude" to value.latitude, "longitude" to value.longitude,
+            "observedAt" to value.observedAt, "kind" to value.kind.name, "text" to value.text, "status" to value.status.name, "osmType" to value.osmType?.name,
+            "osmId" to value.osmId, "remoteNoteId" to value.remoteNoteId, "remoteStatus" to value.remoteStatus,
+            "submittedAt" to value.submittedAt, "submittedBy" to value.submittedBy, "error" to value.error)
+
+    internal fun recordHealthSamples(value: JourneyHealthSample): JSONObject = json("journeyId" to value.journeyId, "sourceId" to value.sourceId, "originPackage" to value.originPackage,
+                "deviceType" to value.deviceType, "deviceManufacturer" to value.deviceManufacturer, "deviceModel" to value.deviceModel,
+                "metric" to value.metric.name, "startAt" to value.startAt, "endAt" to value.endAt, "value" to value.value)
+
+    internal fun recordMapEdits(value: MapEditDraft): JSONObject = json("id" to value.id, "placeId" to value.placeId,
+            "latitude" to value.latitude, "longitude" to value.longitude, "preset" to value.preset.name,
+            "name" to value.name, "street" to value.street, "houseNumber" to value.houseNumber,
+            "observedAt" to value.observedAt, "surveyConfirmed" to value.surveyConfirmed,
+            "status" to value.status.name, "stage" to value.stage.name, "submittedAt" to value.submittedAt,
+            "submittedBy" to value.submittedBy, "changesetId" to value.changesetId,
+            "remoteNodeId" to value.remoteNodeId, "remoteNodeVersion" to value.remoteNodeVersion,
+            "changesetClosed" to value.changesetClosed, "error" to value.error)
+
+    internal fun recordWatchHealthSessions(value: WatchHealthSession): JSONObject = json("id" to value.id, "journeyId" to value.journeyId, "watchId" to value.watchId,
+                "deviceName" to value.deviceName, "createdAt" to value.createdAt)
+
+    internal fun recordWatchHealthSamples(value: WatchHealthSample): JSONObject = json("sessionId" to value.sessionId, "sequence" to value.sequence, "journeyId" to value.journeyId,
+                "metric" to value.metric.name, "startAt" to value.startAt, "endAt" to value.endAt, "value" to value.value)
+
+    internal fun recordDestinationShortcuts(value: DestinationShortcutRef): JSONObject = json("kind" to value.kind.name, "placeId" to value.placeId)
+
     fun encode(value: DiarySnapshot, includeHealth: Boolean = false): JSONObject = json(
         "format" to FORMAT, "version" to VERSION, "exportedAt" to System.currentTimeMillis(),
-        "journeys" to array(value.journeys) { json("id" to it.id, "title" to it.title, "transport" to it.transport.name, "status" to it.status.name,
-            "startedAt" to it.startedAt, "endedAt" to it.endedAt, "expiresAt" to it.expiresAt, "note" to it.note,
-            "interrupted" to it.interrupted, "stepCount" to it.stepCount) },
-        "points" to array(value.points) { json("id" to it.id, "journeyId" to it.journeyId, "latitude" to it.latitude, "longitude" to it.longitude,
-            "recordedAt" to it.recordedAt, "accuracy" to it.accuracy, "speed" to it.speed, "altitude" to it.altitude, "breakBefore" to it.breakBefore) },
-        "places" to array(value.places) { json("id" to it.id, "name" to it.name, "latitude" to it.latitude, "longitude" to it.longitude,
-            "googlePlaceId" to it.googlePlaceId, "osmType" to it.osmType?.name, "osmId" to it.osmId, "source" to it.source.name, "sortOrder" to it.sortOrder) },
-        "visits" to array(value.visits) { json("id" to it.id, "placeId" to it.placeId, "journeyId" to it.journeyId, "visitedAt" to it.visitedAt, "note" to it.note, "rating" to it.rating) },
-        "photos" to array(value.photos) { json("id" to it.id, "relativePath" to it.relativePath, "journeyId" to it.journeyId, "visitId" to it.visitId,
-            "takenAt" to it.takenAt, "latitude" to it.latitude, "longitude" to it.longitude, "caption" to it.caption) },
-        "drafts" to array(value.drafts) { json("id" to it.id, "visitId" to it.visitId, "text" to it.text, "rating" to it.rating,
-            "photoIds" to JSONArray(it.photoIds), "markedSharedAt" to it.markedSharedAt) },
-        "contributions" to array(value.contributions) { json("id" to it.id, "placeId" to it.placeId, "latitude" to it.latitude, "longitude" to it.longitude,
-            "observedAt" to it.observedAt, "kind" to it.kind.name, "text" to it.text, "status" to it.status.name, "osmType" to it.osmType?.name,
-            "osmId" to it.osmId, "remoteNoteId" to it.remoteNoteId, "remoteStatus" to it.remoteStatus,
-            "submittedAt" to it.submittedAt, "submittedBy" to it.submittedBy, "error" to it.error) },
-        "healthSamples" to array(if (includeHealth) value.healthSamples else emptyList()) {
-            json("journeyId" to it.journeyId, "sourceId" to it.sourceId, "originPackage" to it.originPackage,
-                "deviceType" to it.deviceType, "deviceManufacturer" to it.deviceManufacturer, "deviceModel" to it.deviceModel,
-                "metric" to it.metric.name, "startAt" to it.startAt, "endAt" to it.endAt, "value" to it.value)
-        },
-        "mapEdits" to array(value.mapEdits) { json("id" to it.id, "placeId" to it.placeId,
-            "latitude" to it.latitude, "longitude" to it.longitude, "preset" to it.preset.name,
-            "name" to it.name, "street" to it.street, "houseNumber" to it.houseNumber,
-            "observedAt" to it.observedAt, "surveyConfirmed" to it.surveyConfirmed,
-            "status" to it.status.name, "stage" to it.stage.name, "submittedAt" to it.submittedAt,
-            "submittedBy" to it.submittedBy, "changesetId" to it.changesetId,
-            "remoteNodeId" to it.remoteNodeId, "remoteNodeVersion" to it.remoteNodeVersion,
-            "changesetClosed" to it.changesetClosed, "error" to it.error) },
-        "watchHealthSessions" to array(if (includeHealth) value.watchHealthSessions else emptyList()) {
-            json("id" to it.id, "journeyId" to it.journeyId, "watchId" to it.watchId,
-                "deviceName" to it.deviceName, "createdAt" to it.createdAt)
-        },
-        "watchHealthSamples" to array(if (includeHealth) value.watchHealthSamples else emptyList()) {
-            json("sessionId" to it.sessionId, "sequence" to it.sequence, "journeyId" to it.journeyId,
-                "metric" to it.metric.name, "startAt" to it.startAt, "endAt" to it.endAt, "value" to it.value)
-        },
+        "journeys" to array(value.journeys, ::recordJourneys),
+        "points" to array(value.points, ::recordPoints),
+        "places" to array(value.places, ::recordPlaces),
+        "visits" to array(value.visits, ::recordVisits),
+        "photos" to array(value.photos, ::recordPhotos),
+        "drafts" to array(value.drafts, ::recordDrafts),
+        "contributions" to array(value.contributions, ::recordContributions),
+        "healthSamples" to array(if (includeHealth) value.healthSamples else emptyList(), ::recordHealthSamples),
+        "mapEdits" to array(value.mapEdits, ::recordMapEdits),
+        "watchHealthSessions" to array(if (includeHealth) value.watchHealthSessions else emptyList(), ::recordWatchHealthSessions),
+        "watchHealthSamples" to array(if (includeHealth) value.watchHealthSamples else emptyList(), ::recordWatchHealthSamples),
         "savedPlans" to array(value.savedPlans, TravelLibraryJson::plan),
         "importedTracks" to array(value.importedTracks, TravelLibraryJson::track),
         "collections" to array(value.collections, TravelLibraryJson::collection),
         "memberships" to array(value.memberships, TravelLibraryJson::membership),
-        "destinationShortcuts" to array(value.destinationShortcuts) { json("kind" to it.kind.name, "placeId" to it.placeId) },
+        "destinationShortcuts" to array(value.destinationShortcuts, ::recordDestinationShortcuts),
         "leanSessions" to LeanBackupCodec.encode(value.leanSessions),
     ).also {
         LeanBackupCodec.validateSnapshot(value)

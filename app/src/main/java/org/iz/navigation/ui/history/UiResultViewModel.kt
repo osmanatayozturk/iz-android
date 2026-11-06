@@ -1,25 +1,29 @@
 package org.iz.navigation.ui.history
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.viewModelScope
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.mutableStateOf
 import org.iz.navigation.ui.PhoneVoiceSettingsOwner
+import org.iz.navigation.ui.backup.BackupExportFlow
 
 internal sealed interface UiResultPayload {
     data class Photos(val journeyId: String?, val visitId: String?, val modalRevision: Long) : UiResultPayload
     data class Camera(val uri: String, val journeyId: String?, val visitId: String?) : UiResultPayload
-    data class Backup(val includeHealth: Boolean) : UiResultPayload
     data class TrackExport(val id: String) : UiResultPayload
     data class Voice(val owner: PhoneVoiceSettingsOwner) : UiResultPayload
     data class Permissions(val result: UiPermissionReturn) : UiResultPayload
 }
 
-/** Activity UI lifetime only. Neither request fences nor payloads use SavedState/History/database. */
-internal class UiResultViewModel : ViewModel() {
+/** Request fences and payloads remain transient. Backup saves only its outcome marker. */
+internal class UiResultViewModel(savedState: SavedStateHandle) : ViewModel() {
     val requests = UiResultRequests()
     val registrations = UiOwnerRegistrations()
     val deliveredCommunityTargets = mutableSetOf<String>()
     val backupBusy = mutableStateOf(false)
+    val backupExport = BackupExportFlow<Uri>(viewModelScope, savedState)
     val libraryBusy = mutableStateOf(false)
     val gpxStarting = mutableStateOf(false)
     val preparingGpx = mutableStateOf(false)

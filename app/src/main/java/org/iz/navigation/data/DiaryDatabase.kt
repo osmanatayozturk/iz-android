@@ -104,6 +104,7 @@ internal interface DiaryDao {
 @TypeConverters(DiaryConverters::class)
 internal abstract class DiaryDatabase : RoomDatabase() {
     abstract fun diaryDao(): DiaryDao
+    abstract fun backupExportDao(): BackupExportDao
     abstract fun mapEditDao(): MapEditDao
     abstract fun watchHealthDao(): WatchHealthDao
     abstract fun travelLibraryDao(): TravelLibraryDao

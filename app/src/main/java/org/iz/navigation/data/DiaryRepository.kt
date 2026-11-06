@@ -434,6 +434,12 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
         dao.allDrafts().filter { id in it.photoIds }.forEach { dao.save(it.copy(photoIds = it.photoIds - id)) }
     }
 
+    /** Local-only consistent export. No document-provider I/O is permitted in this block.
+     * https://developer.android.com/reference/kotlin/androidx/room/package-summary#withTransaction(androidx.room.RoomDatabase,kotlin.coroutines.SuspendFunction0)
+     */
+    internal suspend fun <T> withBackupRead(action: suspend (BackupExportDao) -> T): T =
+        db.withTransaction { action(db.backupExportDao()) }
+
     suspend fun snapshot(): DiarySnapshot = db.withTransaction {
         DiarySnapshot(dao.allJourneys(), dao.allPoints(), dao.allPlaces(), dao.allVisits(), dao.allPhotos(), dao.allDrafts(), dao.allContributions(), dao.allHealthSamples(),
             mapEdits = mapDao.all(), watchHealthSessions = watchDao.allSessions(), watchHealthSamples = watchDao.allSamples(),
