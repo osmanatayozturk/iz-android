@@ -544,6 +544,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     onOpenRoute = { stops, transport -> groups.dismissScreenRequest(); openDirections(stops, transport) })
                 communityPage -> OsmCommunityScreen(vm = featureOwners.getSavedState("community", uiEntry.key, OsmCommunityViewModel::class.java, context.applicationContext as android.app.Application, savedStateHost), onClose = { communityPage = false; communityMessageId = null; communityAccountId = null },
                     initialMessageId = remember(uiEntry.key) { uiEntry.entityId?.toLongOrNull()?.takeIf { !history.isRestoredEntry(uiEntry.key) && resultOwner.deliveredCommunityTargets.add(uiEntry.key) } }, initialAccountId = uiEntry.accountKey?.toLongOrNull(),
+                    initialGpsJourneyId = osmGpsJourneyFromEntry(uiEntry, entries.getOrNull(entries.lastIndex - 1)), gpsJourneys = state.journeys,
                     onOpenSettings = { tab = 4 })
                 weatherPage -> WeatherPlannerScreen(onClose = { weatherPage = false },
                     vm = featureOwners.get("weather", uiEntry.key, WeatherPlannerViewModel::class.java, featureFactory), initialTransport = active?.transport,
@@ -577,6 +578,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     onDeletePhoto = { photo -> deletion = Deletion("Fotoğraf uygulamadaki günlükten silinecek.") { vm.repository.deletePhoto(photo.id) } },
                     onEditPhoto = { editPhoto = it },
                     onExportGpx = { gpxJourney = journey },
+                    onOpenGpsTraces = { navigator.open(UiPage.COMMUNITY, OSM_GPS_JOURNEY_ENTRY) },
                     onSharePhotos = { photosToShare = state.photos.filter { it.journeyId == journey.id } },
                 )
                 place != null -> PlaceDetail(place, state,
@@ -616,7 +618,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     onExport = { includeHealthBackup = false; showBackupOptions = true },
                     onImport = { importBackup.launch(arrayOf("application/zip", "application/octet-stream")) },
                     onContributions = { osmActions = true }, onMessage = vm::message,
-                    onCommunity = { communityMessageId = null; communityAccountId = null; navigator.open(UiPage.COMMUNITY, accountKey = osmAuth.state.value.user?.id?.toString()) },
+                    onCommunity = { communityMessageId = null; communityAccountId = null; navigator.open(UiPage.COMMUNITY) },
                 )
             }
         }
@@ -633,7 +635,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
             TextButton({ open { tab = 2 } }, Modifier.fillMaxWidth().testTag("menu-places")) { Text("Yerler") }
             TextButton({ open { tab = 3 } }, Modifier.fillMaxWidth().testTag("menu-heatmap")) { Text("Yoğunluk haritası") }
             TextButton({ open { openAddPlace() } }, Modifier.fillMaxWidth().testTag("menu-add-place")) { Text("Bir yer kaydet") }
-            TextButton({ open { navigator.open(UiPage.COMMUNITY, accountKey = osmAuth.state.value.user?.id?.toString()) } }, Modifier.fillMaxWidth().testTag("menu-community")) { Text("OSM Topluluğu") }
+            TextButton({ open { navigator.open(UiPage.COMMUNITY) } }, Modifier.fillMaxWidth().testTag("menu-community")) { Text("OSM Topluluğu") }
             TextButton({ open { osmActions = true } }, Modifier.fillMaxWidth().testTag("menu-osm")) { Text("OSM'ye katkı") }
             TextButton({ open { weatherPage = true } }, Modifier.fillMaxWidth().testTag("menu-weather")) { Text("Hava durumu") }
             TextButton({ open { tab = 4 } }, Modifier.fillMaxWidth().testTag("menu-settings")) { Text("Ayarlar") }
@@ -980,7 +982,7 @@ private fun JourneysScreen(state: DiaryState, now: Long, onJourney: (Journey) ->
 }
 
 @Composable
-private fun JourneyDetail(journey: Journey, state: DiaryState, now: Long, onEdit: () -> Unit, onConfirm: () -> Unit, onFinish: () -> Unit, onSwitch: () -> Unit, onAddPlace: () -> Unit, onPhoto: () -> Unit, onVisit: (Visit) -> Unit, onDelete: () -> Unit, onDeletePhoto: (Photo) -> Unit, onEditPhoto: (Photo) -> Unit, onExportGpx: () -> Unit, onSharePhotos: () -> Unit, listState: LazyListState = rememberLazyListState()) {
+private fun JourneyDetail(journey: Journey, state: DiaryState, now: Long, onEdit: () -> Unit, onConfirm: () -> Unit, onFinish: () -> Unit, onSwitch: () -> Unit, onAddPlace: () -> Unit, onPhoto: () -> Unit, onVisit: (Visit) -> Unit, onDelete: () -> Unit, onDeletePhoto: (Photo) -> Unit, onEditPhoto: (Photo) -> Unit, onExportGpx: () -> Unit, onOpenGpsTraces: () -> Unit, onSharePhotos: () -> Unit, listState: LazyListState = rememberLazyListState()) {
     val prepared = state.prepared(journey)
     val visits = state.visits.filter { it.journeyId == journey.id }.sortedBy { it.visitedAt }
     LazyColumn(state = listState, contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -998,6 +1000,12 @@ private fun JourneyDetail(journey: Journey, state: DiaryState, now: Long, onEdit
         item { RecordedCurvePanel(journey, state) }
         item { LeanJourneyReportPanel(journey) }
         if (journey.endedAt != null && journey.status == JourneyStatus.CONFIRMED) item { OutlinedButton(onClick = onExportGpx, modifier = Modifier.fillMaxWidth()) { Text("GPX rotasını dışa aktar") } }
+        if (osmGpsEligibleJourney(journey)) item {
+            OutlinedButton(onClick = onOpenGpsTraces, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                .testTag("journey-osm-gps-traces")) {
+                Text("OSM'ye GPS izi gönder")
+            }
+        }
         if (journey.note.isNotBlank()) item { Text(journey.note) }
         item { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton(onClick = onAddPlace, Modifier.weight(1f)) { Icon(Icons.Outlined.AddLocationAlt, null); Text("Yer ekle") }; OutlinedButton(onClick = onPhoto, Modifier.weight(1f)) { Icon(Icons.Outlined.AddAPhoto, null); Text("Fotoğraf") } } }
         item { Text("Yol üzerindeki anlar", style = MaterialTheme.typography.titleLarge) }

@@ -27,6 +27,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -35,6 +36,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import org.iz.navigation.integration.osm.OsmAuthManager
+import org.iz.navigation.data.Journey
 import org.iz.navigation.osmcommunity.*
 import org.iz.navigation.ui.history.LocalUiEntryKey
 import org.iz.navigation.ui.history.LocalUiHistory
@@ -47,6 +49,8 @@ import org.iz.navigation.ui.history.UiAsyncOwner
 internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = null,
     initialAccountId: Long? = null, onOpenSettings: () -> Unit = onClose,
     vm: OsmCommunityViewModel = viewModel(),
+    initialGpsJourneyId: String? = null,
+    gpsJourneys: List<Journey> = emptyList(),
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val auth = remember { OsmAuthManager.get(context) }
@@ -57,6 +61,7 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
     val editorState by vm.editorState.collectAsStateWithLifecycle()
     val exitGuard = LocalUiExitGuard.current
     val entryKey = LocalUiEntryKey.current
+    var gpsOpen by rememberSaveable(entryKey, initialGpsJourneyId) { mutableStateOf(initialGpsJourneyId != null) }
     val history = LocalUiHistory.current
     val disconnect = remember(entryKey) { OsmDestructiveConfirmation<Long> { it > 0 } }
     val pendingDisconnect by disconnect.pending.collectAsStateWithLifecycle()
@@ -117,7 +122,7 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
         }
     }
     fun close() { vm.closeEditor(); onClose() }
-    fun back() { exit { if (!vm.back()) close() } }
+    fun back() { exit { if (gpsOpen || !vm.back()) close() } }
     if (ui.editor == null) UiEditOwner(
         UiEditState(entryKey + "/community", accountKey(), 0, 0, false, ui.busy || authState.busy || editorState.saving),
         currentState = { UiEditState(entryKey + "/community", accountKey(), 0, 0, false,
@@ -139,7 +144,8 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
         vm.repository.refreshNotificationSchedule()
     }
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { vm.persistEditor() }
-    LaunchedEffect(community.accountId, community.canConsume, community.cacheIdentity) {
+    LaunchedEffect(community.accountId, community.canConsume, community.cacheIdentity, gpsOpen) {
+        if (gpsOpen) return@LaunchedEffect
         if (community.accountId != null && community.ready && initialMessageId == null) vm.refresh()
         if (community.accountId != null && community.canConsume && community.notificationsEnabled &&
             Build.VERSION.SDK_INT >= 33 && !systemAllowed &&
@@ -165,26 +171,36 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
             IconButton(onClick = ::back) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "OSM topluluğundan geri dön") }
             Column(Modifier.weight(1f)) {
                 Text("OSM Topluluğu", style = MaterialTheme.typography.titleLarge)
-                Text(authState.user?.displayName ?: "OpenStreetMap insanlarıyla bağlantı kur", style = MaterialTheme.typography.bodySmall, color = Muted)
+                if (!gpsOpen) Text(authState.user?.displayName ?: "OpenStreetMap insanlarıyla bağlantı kur",
+                    style = MaterialTheme.typography.bodySmall, color = Muted)
             }
-            IconButton(onClick = vm::refresh, enabled = community.accountId != null && !ui.busy) { Icon(Icons.Outlined.Refresh, "Topluluğu yenile") }
+            if (!gpsOpen) IconButton(onClick = vm::refresh, enabled = community.accountId != null && !ui.busy) {
+                Icon(Icons.Outlined.Refresh, "Topluluğu yenile")
+            }
         }
-        TabRow(selectedTabIndex = ui.section.ordinal) {
+        TabRow(selectedTabIndex = if (gpsOpen) CommunitySection.entries.size else ui.section.ordinal) {
             listOf("Mesajlar", "Kişiler", "Hesabım").forEachIndexed { index, label ->
-                Tab(ui.section.ordinal == index, onClick = { exit { vm.section(CommunitySection.entries[index]) } }, text = { Text(label) })
+                Tab(!gpsOpen && ui.section.ordinal == index, onClick = {
+                    exit { gpsOpen = false; vm.section(CommunitySection.entries[index]) }
+                }, text = { Text(label) })
             }
+            Tab(gpsOpen, onClick = { exit { vm.closeEditor(); gpsOpen = true } },
+                modifier = Modifier.testTag("osm-community-gps-tab"), text = { Text("GPS izleri") })
         }
-        if (ui.busy || authState.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-        val error = ui.error ?: authState.error
+        if (!gpsOpen && (ui.busy || authState.busy)) LinearProgressIndicator(Modifier.fillMaxWidth())
+        val error = if (gpsOpen) null else ui.error ?: authState.error
         if (error != null) Surface(color = MaterialTheme.colorScheme.errorContainer) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(error, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
                 IconButton(onClick = { vm.clearError(); auth.clearError() }) { Icon(Icons.Outlined.Close, "Hata bilgisini kapat") }
             }
         }
-        ui.notice?.let { Text(it, Modifier.padding(16.dp), color = Forest) }
+        if (!gpsOpen) ui.notice?.let { Text(it, Modifier.padding(16.dp), color = Forest) }
         when {
-            community.accountId != null && !community.ready -> Text("Kayıtlı topluluk bilgileri yükleniyor…", Modifier.padding(20.dp), color = Muted)
+            gpsOpen -> OsmGpsScreen(gpsJourneys, initialGpsJourneyId, vm.gpsSelection, vm.gpsUpload,
+                onLogin = { auth.startLogin(it) }, onSettings = onOpenSettings)
+            community.accountId != liveSession?.userId || community.accountId != null && !community.ready ->
+                Text("Kayıtlı topluluk bilgileri yükleniyor…", Modifier.padding(20.dp), color = Muted)
             ui.editor != null && community.accountId != null -> CommunityComposer(ui.editor, community.canSend, ui.busy,
                 vm::changeDraft, { vm.back() }, vm::send, vm::deleteDraft,
                 { exit { vm.folder(CommunityFolder.OUTBOX); vm.refresh() } }, vm::copyUncertainDraft,

@@ -56,6 +56,8 @@ internal class OsmCommunityViewModel(application: Application, private val saved
 ) : AndroidViewModel(application) {
     constructor(application: Application, savedState: SavedStateHandle) : this(application, savedState, (application as IzApplication).community)
     val community = repository.state
+    val gpsSelection = OsmGpsSelection()
+    val gpsUpload = OsmGpsUpload(viewModelScope)
     private val mutableUi = MutableStateFlow(CommunityUiState(accountId = community.value.accountId, cacheIdentity = community.value.cacheIdentity))
     val ui = mutableUi.asStateFlow()
     private var operation: Job? = null
