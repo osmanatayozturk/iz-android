@@ -40,7 +40,8 @@ class OsmGpxPrivacyTest {
         // Fixed cumulative oracle: 0, 100, 600, 1000, 2000, 3000 meters.
         val source = points(0.0, 100.0, 600.0, 1000.0, 2000.0, 3000.0)
         assertEquals(1000.0, DiaryRules.distanceMeters(source.take(4)), 0.0)
-        assertEquals(1000.0, DiaryRules.distanceMeters(source.takeLast(2)), 0.0)
+        assertEquals(2000.0, DiaryRules.distanceMeters(source.take(5)), 0.0)
+        assertEquals(3000.0, DiaryRules.distanceMeters(source), 0.0)
         val trace = ready(source)
         assertEquals(source.subList(3, 5).map { it.recordedAt }, trace.segments.single().map { it.recordedAt })
         assertEquals(1000.0, trace.removedStartMeters, 0.0)
