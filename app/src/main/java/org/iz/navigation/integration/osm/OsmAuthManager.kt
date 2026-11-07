@@ -28,11 +28,18 @@ import net.openid.appauth.ResponseTypeValues
 import net.openid.appauth.TokenRequest
 import net.openid.appauth.TokenResponse
 import org.json.JSONObject
+import org.iz.navigation.osmcommunity.CommunitySession
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
+internal const val OSM_GPX_WRITE_SCOPE = "write_gpx"
+
+internal fun osmGpxUpgradeScopes(existing: Set<String>): Set<String> =
+    OsmOAuthScopes.requested(existing) + OSM_GPX_WRITE_SCOPE
+
 data class OsmAuthUiState(val user: OsmUser? = null, val busy: Boolean = false,
-    val error: String? = null, val clientIdConfigured: Boolean = false, val canWriteMap: Boolean = false)
+    val error: String? = null, val clientIdConfigured: Boolean = false, val canWriteMap: Boolean = false,
+    val canWriteGpx: Boolean = false)
 
 class OsmAuthManager private constructor(context: Context) {
     private val app = context.applicationContext
@@ -43,6 +50,7 @@ class OsmAuthManager private constructor(context: Context) {
     private var clientId = BuildConfig.OSM_CLIENT_ID.trim()
     private var pendingRequest: String? = null
     private var pendingStartedAt = 0L
+    private var pendingGpxAccountId: Long? = null
     private var generation = 0L
     @Volatile private var credentials: OsmCredentials? = null
     private val mutableState = MutableStateFlow(OsmAuthUiState())
@@ -67,6 +75,7 @@ class OsmAuthManager private constructor(context: Context) {
                 clientId = saved.optString("clientId", clientId)
                 pendingRequest = saved.optString("pendingRequest").takeIf { it.isNotBlank() }
                 pendingStartedAt = saved.optLong("pendingStartedAt")
+                pendingGpxAccountId = saved.optLong("pendingGpxAccountId").takeIf { it > 0 }
                 saved.optJSONObject("session")?.let { session ->
                     val user = OsmUser(session.getLong("userId"), session.getString("displayName"))
                     val token = session.getString("accessToken")
@@ -83,7 +92,7 @@ class OsmAuthManager private constructor(context: Context) {
             publish()
         } catch (_: Exception) {
             credentials = null
-            pendingRequest = null
+            clearPendingAuthorization()
             storage.clear()
             publish(error = "OSM oturumu açılamadı. Hesabınızı yeniden bağlayın.")
         }
@@ -100,7 +109,7 @@ class OsmAuthManager private constructor(context: Context) {
         }
         generation++
         credentials = null
-        pendingRequest = null
+        clearPendingAuthorization()
         clientId = clean
         saveOrDisconnect()
     }
@@ -108,7 +117,7 @@ class OsmAuthManager private constructor(context: Context) {
     fun disconnect() {
         generation++
         credentials = null
-        pendingRequest = null
+        clearPendingAuthorization()
         saveOrDisconnect()
     }
 
@@ -125,13 +134,26 @@ class OsmAuthManager private constructor(context: Context) {
         }
     }
 
+    internal fun currentGpxSession(): CommunitySession? {
+        val current = currentCredentials() ?: return null
+        return communitySource.sessions.value?.takeIf {
+            it.userId == current.user.id && it.token == current.token && it.scopes == current.scopes
+        }
+    }
+
+    fun requestGpxPermission(activity: Activity) {
+        val current = currentCredentials() ?: return
+        if (OSM_GPX_WRITE_SCOPE !in current.scopes) beginLogin(activity, gpxAccountId = current.user.id)
+    }
+
     fun startMapEditLogin(activity: Activity) = startLogin(activity, allowMapEdits = true)
     fun startCommunityLogin(activity: Activity) = beginLogin(activity, community = true)
 
     fun startLogin(activity: Activity, allowMapEdits: Boolean = false) =
         beginLogin(activity, mapEdits = allowMapEdits)
 
-    private fun beginLogin(activity: Activity, mapEdits: Boolean = false, community: Boolean = false) {
+    private fun beginLogin(activity: Activity, mapEdits: Boolean = false, community: Boolean = false,
+        gpxAccountId: Long? = null) {
         if (state.value.busy) return
         if (activity.isFinishing || activity.isDestroyed) return
         if (clientId.isBlank()) {
@@ -140,13 +162,17 @@ class OsmAuthManager private constructor(context: Context) {
         }
         try {
             generation++
+            val existing = credentials?.scopes.orEmpty()
+            val scopes = if (gpxAccountId == null) OsmOAuthScopes.requested(existing, mapEdits, community)
+                else osmGpxUpgradeScopes(existing)
             val request = AuthorizationRequest.Builder(configuration(), clientId, ResponseTypeValues.CODE, Uri.parse(OsmSafetyRules.REDIRECT_URI))
-                .setScopes(OsmOAuthScopes.requested(credentials?.scopes.orEmpty(), mapEdits, community))
+                .setScopes(scopes)
                 .setState(Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32).also { SecureRandom().nextBytes(it) }))
                 .setCodeVerifier(CodeVerifierUtil.generateRandomCodeVerifier())
                 .build()
             pendingStartedAt = System.currentTimeMillis()
             pendingRequest = request.jsonSerializeString()
+            pendingGpxAccountId = gpxAccountId
             persist()
             publish(busy = true)
             val flags = PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_MUTABLE
@@ -159,7 +185,7 @@ class OsmAuthManager private constructor(context: Context) {
                 resultIntent(ACTION_CANCEL), flags)
             service.performAuthorizationRequest(request, complete, cancel)
         } catch (_: Exception) {
-            pendingRequest = null
+            clearPendingAuthorization()
             runCatching { persist() }
             publish(error = "OSM giriş sayfası açılamadı. Bir tarayıcı kurulu olduğundan emin olun.")
         }
@@ -171,7 +197,8 @@ class OsmAuthManager private constructor(context: Context) {
         if (intent.action !in setOf(ACTION_COMPLETE, ACTION_CANCEL) ||
             intent.getStringExtra(EXTRA_TRANSACTION_STATE) != request.state) return
         val started = pendingStartedAt
-        pendingRequest = null
+        val expectedGpxAccountId = pendingGpxAccountId
+        clearPendingAuthorization()
         val attemptGeneration = generation
         // Consume the transaction durably before exchanging its single-use code.
         if (runCatching { persist() }.isFailure) {
@@ -200,6 +227,7 @@ class OsmAuthManager private constructor(context: Context) {
                     request.configuration.tokenEndpoint == configuration().tokenEndpoint &&
                     response.request.configuration.authorizationEndpoint == configuration().authorizationEndpoint &&
                     response.request.configuration.tokenEndpoint == configuration().tokenEndpoint)
+                require(expectedGpxAccountId == null || previousCredentials?.user?.id == expectedGpxAccountId)
                 val tokenRequest = TokenRequest.Builder(configuration(), clientId)
                     .setGrantType(GrantTypeValues.AUTHORIZATION_CODE).setAuthorizationCode(response.authorizationCode)
                     .setRedirectUri(Uri.parse(OsmSafetyRules.REDIRECT_URI)).setCodeVerifier(request.codeVerifier).build()
@@ -209,6 +237,7 @@ class OsmAuthManager private constructor(context: Context) {
                 require(granted.containsAll(request.scope.orEmpty().split(" ").filter(String::isNotBlank)))
                 val user = api.currentUser(token)
                 if (attemptGeneration != generation) return@launch
+                require(expectedGpxAccountId == null || user.id == expectedGpxAccountId)
                 credentials = OsmCredentials(token, user, tokenResponse.accessTokenExpirationTime, granted)
                 persist()
                 publish()
@@ -237,9 +266,16 @@ class OsmAuthManager private constructor(context: Context) {
         catch (_: Exception) { credentials = null; storage.clear(); publish(error = "OSM oturumu güvenli olarak saklanamadı.") }
     }
 
+    private fun clearPendingAuthorization() {
+        pendingRequest = null
+        pendingStartedAt = 0L
+        pendingGpxAccountId = null
+    }
+
     private fun persist() {
         val value = JSONObject().put("clientId", clientId).put("pendingStartedAt", pendingStartedAt)
         pendingRequest?.let { value.put("pendingRequest", it) }
+        pendingGpxAccountId?.let { value.put("pendingGpxAccountId", it) }
         credentials?.let {
             value.put("session", JSONObject().put("accessToken", it.token).put("userId", it.user.id)
                 .put("displayName", it.user.displayName).put("expiresAt", it.expiresAt)
@@ -251,7 +287,8 @@ class OsmAuthManager private constructor(context: Context) {
     private fun publish(busy: Boolean = false, error: String? = null) {
         communitySource.update(credentials, generation)
         mutableState.value = OsmAuthUiState(credentials?.user, busy, error, clientId.isNotBlank(),
-            credentials?.scopes?.contains("write_api") == true)
+            credentials?.scopes?.contains("write_api") == true,
+            credentials?.scopes?.contains(OSM_GPX_WRITE_SCOPE) == true)
     }
 
     companion object {
