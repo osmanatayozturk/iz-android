@@ -1,6 +1,6 @@
 # İz 0.8.1 — OSM Topluluğu
 
-**Menü → OSM Topluluğu** veya Ayarlar'daki aynı adlı kısayol bölümü açar. Topluluk bölümünün içinde **Mesajlar**, **Kişiler** ve **Hesabım** bulunur.
+**Menü → OSM Topluluğu** veya Ayarlar'daki aynı adlı kısayol bölümü açar. Topluluk bölümünde **Mesajlar**, **Kişiler**, **Hesabım** ve dağıtımda ayrıca etkinleştirilmesi gereken **GPS izleri** bulunur.
 
 ## Kullanım
 
@@ -17,11 +17,13 @@ Mesajlar düz metin gösterilir. İçerikteki HTML veya JavaScript çalıştır�
 
 Bu akış, tamamlanmış kaydedilmiş yolculukları OSM hesabınıza GPS izi olarak göndermek içindir. OSM Topluluğu'nda birden çok yolculuk seçilebilir. Yolculuk ayrıntısındaki kısayol aynı paylaşım ekranını o yolculuk seçili olarak açar. Her yolculuk ayrı bir GPX izi olarak hazırlanır. Önizleme ve gönderim aynı kırpılmış GPS verisini kullanır. Onaydan önce gönderilecek izi, kalan mesafeyi veya engellenme nedenini inceleyin. Onay ekranı OSM kullanıcı adınızı ve gönderilebilir iz sayısını gösterir. Özgün yolculuk kaydı değişmez. Seçilen izler yalnız açık gönderim onayından sonra aktarılır.
 
-İz başlangıcından ve bitişinden en az 1 km çıkarılır. Ölçüm yalnız günlükte birbirine bağlı geçerli GPS noktaları üzerinden yapılır. GPS boşlukları birleştirilmez ve eksik noktalar uydurulmaz. Geçerli yolculuk uzunluğu 2 km veya daha azsa ya da kırpma sonrasında çizilebilir bölüm kalmazsa iz gönderilemez. Ayrıntı ekranından Android dosya seçicisiyle yapılan yerel GPX dışa aktarımı bu kurallardan ve OSM paylaşımından bağımsızdır.
+İz başlangıcından ve bitişinden en az 1 km çıkarılır. Ölçüm yalnız günlükte birbirine bağlı geçerli GPS noktaları üzerinden yapılır. Günlüğün hareketsiz GPS salınımı için mevcut mesafe eşiği korunur: iki nokta arasındaki hareket 3 m veya uç noktaların düşük doğruluk değerinin %40'ı eşiklerinden büyük olanını karşılamıyorsa mesafeye eklenmez. Böylece bu küçük oynamalar kırpma mesafesini uzatmaz. GPS boşlukları birleştirilmez ve eksik noktalar uydurulmaz. Geçerli yolculuk uzunluğu 2 km veya daha azsa ya da kırpma sonrasında çizilebilir bölüm kalmazsa iz gönderilemez. Ayrıntı ekranından Android dosya seçicisiyle yapılan yerel GPX dışa aktarımı bu kurallardan ve OSM paylaşımından bağımsızdır.
 
 İzler OSM'ye sabit olarak `identifiable` görünürlüğüyle yüklenir. Bu iz herkese açık iz listesinde görünür ve hesabınıza bağlanır. Gerçek koordinatlar ile zaman damgaları OSM'de görüntülenebilir ve API üzerinden erişilebilir; GPX dosyası indirilebilir. Başlangıç ve bitişi kırpmak konum gizliliği risklerini ortadan kaldırmaz. Paylaşım izni, mevcut not ve mesaj izinlerinden ayrıdır.
 
 Bu akış yalnız uygulamanın canlı OSM OAuth kaydı ve dağıtımı `write_gpx` iznini ayrıca etkinleştirdiğinde kullanılabilir. İzin metnini veya uygulama kodunu eklemek, canlı OSM kaydını kendiliğinden değiştirmez. Etkinleştirme tamamlanana kadar yerel GPX dışa aktarımı kullanılabilir; otomatik OSM yüklemesi yapılmaz.
+
+OSM yanıtının iz kimliği döndürmesi gönderimin alındığını gösterir. Sunucu GPX içeriğini arka planda işlemeyi sürdürebilir; kimlik işlemenin tamamlandığını veya iz noktalarının başarıyla işlendiğini tek başına kanıtlamaz. Çoklu gönderimde kısmi başarı halinde alınmış iz kimlikleri ve gönderilmemiş kalan izler korunur. Belirsiz sonuç `UNKNOWN` durumunda korunur. OSM iz listesini kontrol edin ve yalnız yeni, açık onayla tekrar deneyin. OAuth akışından dönüş, uygulamanın arka plana geçmesi veya hesap değişikliği bekleyen gönderimleri durdurur. Sonraki açılış veya OAuth dönüşü otomatik devam ettirmez.
 
 ## OSM uygulamasını hazırlama
 
