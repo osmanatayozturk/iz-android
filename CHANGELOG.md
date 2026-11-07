@@ -4,9 +4,9 @@
 
 Büyük yedekler sayfalı hazırlanır. ZIP kaydedildiğinde geri okunup doğrulanır. Geri yüklemede arşiv ve ilişkiler denetlenir. Kamera kadrajı iyileştirmeleri, Molalı rota ve isteğe bağlı OSM GPS izi paylaşımı da sürüm kapsamındadır. Wear OS 0.7.0 / code 12 ve iletişim protokolü değişmiyor. [Telefon 0.13.0 sürüm sayfası](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.13.0).
 
-## Telefon 0.12.0 öncesi tarihsel aday kayıtları
+## Telefon 0.12.0 numarasıyla tutulan tarihsel aday kayıtları
 
-Aşağıdaki notlar 0.12.0 yayımlanmadan önceki aday kayıtlarıdır. Sonraki yayımlanmış sürüm olan 0.12.0’ın tam release notları için [GitHub sürüm kaydı](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.12.0) esas alınır. Bu eski aday sonuçları 0.13.0’a taşınmaz.
+Bu bölüm, 0.12.0 yayımlanmadan önceki aday doğrulama anlık görüntüsünü ve yayımlanmış 0.12.0’dan sonra 6–7 Kasım’da aynı 0.12.0 numarasıyla yapılan kamera, Molalı rota ve OSM GPS izi paylaşımı kaynak güncellemelerini birlikte kaydeder. Sonraki kaynak güncellemeleri yayımlanmış 0.12.0 sürümünün içeriği değildir. Bu tarihsel doğrulama ve kaynak kayıtları 0.13.0 için kabul veya doğrulama oluşturmaz. Yayımlanmış 0.12.0’ın release notları için [GitHub sürüm kaydı](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.12.0) esas alınır.
 
 ### 0.12.0 öncesi aday doğrulama anlık görüntüsü
 
