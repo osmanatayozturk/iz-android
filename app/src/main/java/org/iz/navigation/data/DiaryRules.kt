@@ -35,14 +35,17 @@ object DiaryRules {
             metersBetween(a, b) / (elapsed / 1000.0) <= 100.0
     }
 
+    /** Connected distance excluding the same small stationary fluctuations used by diary summaries. */
+    fun distanceContributionMeters(a: TrackPoint, b: TrackPoint): Double {
+        if (!connects(a, b)) return 0.0
+        val distance = metersBetween(a, b)
+        return if (distance >= max(3.0, min(a.accuracy, b.accuracy) * 0.4)) distance else 0.0
+    }
+
     fun distanceMeters(points: List<TrackPoint>): Double =
         points.groupBy { it.journeyId }.values.sumOf { route ->
             route.sortedBy { it.recordedAt }.zipWithNext().sumOf { (a, b) ->
-                if (connects(a, b)) {
-                    val distance = metersBetween(a, b)
-                    // Avoid counting small GPS fluctuations while the user is stationary.
-                    if (distance >= max(3.0, min(a.accuracy, b.accuracy) * 0.4)) distance else 0.0
-                } else 0.0
+                distanceContributionMeters(a, b)
             }
         }
 

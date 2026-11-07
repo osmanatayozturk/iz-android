@@ -1,6 +1,5 @@
 package org.iz.navigation.integration
 
-import org.iz.navigation.data.DiaryRules
 import org.iz.navigation.data.Journey
 import org.iz.navigation.data.JourneyStatus
 import org.iz.navigation.data.TrackPoint
@@ -10,17 +9,7 @@ import java.time.Instant
 fun gpxSegments(journey: Journey, points: List<TrackPoint>, startTrim: Int = 0, endTrim: Int = 0): List<List<TrackPoint>> {
     require(journey.status == JourneyStatus.CONFIRMED && journey.endedAt != null && journey.endedAt >= journey.startedAt) { "Yalnızca tamamlanmış ve onaylanmış yolculuklar dışa aktarılabilir." }
     require(startTrim >= 0 && endTrim >= 0) { "Kırpma değeri negatif olamaz." }
-    val segments = mutableListOf<MutableList<TrackPoint>>()
-    var previous: TrackPoint? = null
-    points.filter { it.journeyId == journey.id }.sortedBy { it.recordedAt }.forEach { point ->
-        if (!DiaryRules.isUsablePoint(point) || point.recordedAt !in journey.startedAt..journey.endedAt) {
-            previous = null
-        } else {
-            if (previous == null || !DiaryRules.connects(previous!!, point)) segments.add(mutableListOf())
-            segments.last().add(point)
-            previous = point
-        }
-    }
+    val segments = measuredJourneySegments(journey, points)
     val count = segments.sumOf { it.size }
     require(count.toLong() - startTrim - endTrim >= 2) { "Dışa aktarmak için kırpma sonrasında en az iki geçerli rota noktası gerekli." }
     var index = 0
