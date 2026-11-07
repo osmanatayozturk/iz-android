@@ -197,6 +197,8 @@ Yürüyüş adımları telefonun donanım sayacından (yoksa adım algılama sen
 
 Tamamlanmış kalıcı yolculukların ayrıntısından **GPX rotasını dışa aktar** seçilir. Önizlemede başlangıç/bitiş kısaltılır ve Android dosya seçicisiyle GPX 1.1 kaydedilir. GPS boşlukları ayrı rota bölümleridir; özel başlık/not/fotoğraflar eklenmez ve dosya otomatik OSM’ye yüklenmez.
 
+**OSM’ye GPS izi paylaşımı** ayrı ve isteğe bağlı bir akıştır; yalnız `write_gpx` izni ve canlı OSM uygulama kaydı etkinleştirilmiş dağıtımda kullanılabilir. OSM Topluluğu’nda tamamlanmış yolculuklar çoklu seçilir; yolculuk ayrıntısındaki kısayol da aynı ekrana o yolculuk seçili olarak açılır. Her iz için gönderilecek kırpılmış GPX önizlemesi veya engellenme nedeni gösterilir. Başlangıçtan ve bitişten en az 1 km, yalnız gerçek ve geçerli GPS ölçümleri boyunca çıkarılır. Kullanılabilir kayıt 2 km veya daha kısaysa ya da kalan bölüm çizilemezse gönderim engellenir. Bu paylaşım yerel GPX dışa aktarımından ayrıdır. `identifiable` görünürlüğüyle yüklenen iz OSM hesabınızla ilişkilendirilir; koordinatlar ve zaman damgaları herkese açık olur ve GPX indirilebilir. Ayrıntılar [OSM Topluluğu rehberindedir](docs/OSM_TOPLULUGU.md).
+
 Menü → Isı haritasında Tümü ve ulaşım türleri ayrı seçilir. Yalnızca kalıcı kayıtlardaki ölçülmüş konumlar kullanılır. Her yolculuk yaklaşık 30 metrelik bölgede bir kez sayılır; aynı yerde beklerken sık gelen GPS ölçümleri yoğunluğu yapay olarak artırmaz.
 
 ## Galaxy Watch8 Classic
