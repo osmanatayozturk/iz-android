@@ -26,14 +26,25 @@ class OsmGpxPrivacyTest {
     }
 
     @Test fun strictTwoKilometerBoundaryAndIncompleteJourneysAreBlocked() {
-        val exact = points(0.0, 500.0, 1000.0, 1500.0, 2000.0)
-        assertEquals(2000.0, DiaryRules.distanceMeters(exact), 1e-8)
+        val exact = points(0.0, 100.0, 200.0, 700.0, 2000.0)
+        assertEquals(2000.0, DiaryRules.distanceMeters(exact), 0.0)
         assertBlocked(OsmGpxBlockedReason.TOO_SHORT, exact)
         assertBlocked(OsmGpxBlockedReason.TOO_SHORT, points(0.0, 500.0, 1000.0, 1999.0))
         assertBlocked(OsmGpxBlockedReason.NOT_CONFIRMED_COMPLETED, exact, journey.copy(endedAt = null))
         assertBlocked(OsmGpxBlockedReason.NOT_CONFIRMED_COMPLETED, exact, journey.copy(status = JourneyStatus.TEMPORARY))
         assertBlocked(OsmGpxBlockedReason.NOT_CONFIRMED_COMPLETED, exact, journey.copy(endedAt = start - 1))
         assertBlocked(OsmGpxBlockedReason.TOO_SHORT, emptyList())
+    }
+
+    @Test fun keepsActualFixesAtBothInclusiveOneKilometerBoundaries() {
+        // Fixed cumulative oracle: 0, 100, 600, 1000, 2000, 3000 meters.
+        val source = points(0.0, 100.0, 600.0, 1000.0, 2000.0, 3000.0)
+        assertEquals(1000.0, DiaryRules.distanceMeters(source.take(4)), 0.0)
+        assertEquals(1000.0, DiaryRules.distanceMeters(source.takeLast(2)), 0.0)
+        val trace = ready(source)
+        assertEquals(source.subList(3, 5).map { it.recordedAt }, trace.segments.single().map { it.recordedAt })
+        assertEquals(1000.0, trace.removedStartMeters, 0.0)
+        assertEquals(1000.0, trace.removedEndMeters, 0.0)
     }
 
     @Test fun clipsToActualFixesWithoutInterpolationAndLeavesSourceUntouched() {
@@ -107,7 +118,18 @@ class OsmGpxPrivacyTest {
             setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
         }
         val doc = factory.newDocumentBuilder().parse(trace.gpxXml.byteInputStream())
-        val nodes = doc.getElementsByTagNameNS("http://www.topografix.com/GPX/1/1", "trkpt")
+        val namespace = "http://www.topografix.com/GPX/1/1"
+        val parentNames = mapOf("gpx" to null, "trk" to "gpx", "trkseg" to "trk", "trkpt" to "trkseg", "time" to "trkpt")
+        val allElements = doc.getElementsByTagName("*")
+        assertEquals(11, allElements.length)
+        for (i in 0 until allElements.length) {
+            val element = allElements.item(i) as org.w3c.dom.Element
+            assertEquals(namespace, element.namespaceURI)
+            assertTrue("Unexpected GPX element: "+element.localName, element.localName in parentNames)
+            assertEquals(parentNames[element.localName], (element.parentNode as? org.w3c.dom.Element)?.localName)
+            if (element.localName in setOf("trk", "trkseg", "time")) assertEquals(0, element.attributes.length)
+        }
+        val nodes = doc.getElementsByTagNameNS(namespace, "trkpt")
         assertEquals(4, nodes.length)
         for (i in 0 until nodes.length) {
             val element = nodes.item(i) as org.w3c.dom.Element
@@ -117,6 +139,8 @@ class OsmGpxPrivacyTest {
             assertEquals(expected.longitude, element.getAttribute("lon").toDouble(), 0.0)
             assertEquals(Instant.ofEpochMilli(expected.recordedAt).toString(), element.textContent)
             assertEquals(1, element.childNodes.length)
+            assertEquals(namespace, element.firstChild.namespaceURI)
+            assertEquals("time", element.firstChild.localName)
         }
         listOf("PRIVATE", "private-journey", "private-point", "<ele", "<name", "<desc", "<wpt", "42.12345").forEach {
             assertFalse(trace.gpxXml.contains(it))
