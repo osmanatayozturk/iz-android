@@ -32,7 +32,7 @@ class PreparedOsmGpxTrace private constructor(
     val sha256: String,
 ) {
     val pointCount: Int = segments.sumOf { it.size }
-    val fileName: String = "iz-gps-${sha256.take(24)}.gpx"
+    val fileName: String = "iz_gps_${sha256.take(24)}.gpx"
 
     companion object {
         internal fun create(
