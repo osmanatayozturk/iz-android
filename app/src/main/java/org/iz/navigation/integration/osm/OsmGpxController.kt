@@ -74,6 +74,8 @@ class OsmGpxController internal constructor(
     private val gateway: OsmGpxGateway,
     private val store: OsmGpxReceiptStore,
     val authState: StateFlow<OsmAuthUiState>,
+    /** Session identity for UI invalidation. Upload eligibility also checks the current usable session. */
+    internal val sessions: StateFlow<CommunitySession?>,
     private val permissionRequest: (Activity) -> Unit,
     private val rejectSession: (CommunitySession) -> Unit = {},
 ) {
@@ -212,7 +214,8 @@ class OsmGpxController internal constructor(
             testing ?: instance ?: run {
                 val auth = OsmAuthManager.get(context)
                 OsmGpxController(auth::currentGpxSession, OsmGpxClient(),
-                    OsmGpxFileReceipts(context.noBackupFilesDir), auth.state, auth::requestGpxPermission,
+                    OsmGpxFileReceipts(context.noBackupFilesDir), auth.state,
+                    auth.communitySessionSource.sessions, auth::requestGpxPermission,
                     auth.communitySessionSource::rejectSession).also { instance = it }
             }
         }
@@ -221,14 +224,16 @@ class OsmGpxController internal constructor(
         internal fun installForTesting(
             context: Context,
             authState: StateFlow<OsmAuthUiState>,
-            currentSession: () -> CommunitySession?,
+            sessions: StateFlow<CommunitySession?>,
             gateway: OsmGpxGateway,
             requestPermission: (Activity) -> Unit,
         ): AutoCloseable = synchronized(this) {
             check(BuildConfig.DEBUG && context.applicationContext.packageName == "org.iz.navigation.osmgpxqa")
             check(testing == null)
-            val override = OsmGpxController(currentSession, gateway, OsmGpxFileReceipts(context.noBackupFilesDir),
-                authState, requestPermission)
+            val override = OsmGpxController(
+                { sessions.value.takeUnless { authState.value.busy } }, gateway,
+                OsmGpxFileReceipts(context.noBackupFilesDir), authState, sessions, requestPermission,
+            )
             testing = override
             AutoCloseable { synchronized(this) { if (testing === override) testing = null } }
         }

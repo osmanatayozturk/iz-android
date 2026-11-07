@@ -20,7 +20,7 @@ import org.junit.rules.TemporaryFolder
 class OsmGpxControllerTest {
     @get:Rule val noBackup = TemporaryFolder()
 
-    private var session = session(42)
+    private val sessions = MutableStateFlow<CommunitySession?>(session(42))
     private val first = osmGpxTestTrace("journey-first")
     private val second = osmGpxTestTrace("journey-second")
     private val third = osmGpxTestTrace("journey-third")
@@ -58,7 +58,7 @@ class OsmGpxControllerTest {
         val receipt = checkNotNull(reopened.receipts(listOf(first))[OsmGpxReceiptKey.of(first)])
         assertEquals(19L, receipt.traceId)
         assertEquals("https://www.openstreetmap.org/user/A%20B/traces/19", receipt.traceUrl(OsmUser(42, "A B")))
-        session = session(43)
+        sessions.value = session(43)
         assertTrue(reopened.receipts(listOf(first)).isEmpty())
         assertNull(receipt.traceUrl(OsmUser(43, "A B")))
         assertEquals(1, reopened.prepareConfirmation(listOf(first))?.traceCount)
@@ -100,14 +100,14 @@ class OsmGpxControllerTest {
 
     @Test fun accountChangeStopsRemainingQueueAndKeepsReceiptWithSendingAccount() = runBlocking {
         val controller = controller {
-            session = session(43)
+            sessions.value = session(43)
             OsmGpxUploadResult.Received(12)
         }
         val result = controller.upload(checkNotNull(controller.prepareConfirmation(listOf(first, second))), { true })
         assertEquals(OsmGpxStop.ACCOUNT_CHANGED, result.stop)
         assertEquals(1, result.unattemptedCount)
         assertTrue(controller.receipts(listOf(first, second)).isEmpty())
-        session = session(42)
+        sessions.value = session(42)
         assertEquals(setOf(OsmGpxReceiptKey.of(first)), controller.receipts(listOf(first, second)).keys)
     }
 
@@ -142,26 +142,30 @@ class OsmGpxControllerTest {
     }
 
     @Test fun consentRequiresGpxScopeAndFreshSessionAfterPermissionFlow() = runBlocking {
-        session = CommunitySession("fixture", 42, "Fixture user", setOf("read_prefs"), 1)
+        sessions.value = CommunitySession("fixture", 42, "Fixture user", setOf("read_prefs"), 1)
         val controller = controller { error("An outdated consent cannot dispatch") }
         assertNull(controller.prepareConfirmation(listOf(first)))
-        session = session(42)
+        sessions.value = session(42)
         val firstConsent = checkNotNull(controller.prepareConfirmation(listOf(first)))
-        session = session(42)
+        assertSame(sessions.value, controller.sessions.value)
+        sessions.value = session(42, generation = 3)
+        assertEquals(3L, controller.sessions.value?.generation)
         assertEquals(OsmGpxStop.ACCOUNT_CHANGED, controller.upload(firstConsent, { true }).stop)
         assertFalse(controller.receipts(listOf(first)).containsKey(OsmGpxReceiptKey.of(first)))
     }
 
     private fun controller(upload: suspend (PreparedOsmGpxTrace) -> OsmGpxUploadResult) = OsmGpxController(
-        currentSession = { session },
+        currentSession = { sessions.value },
         gateway = OsmGpxGateway { _, trace, canDispatch ->
             check(canDispatch())
             upload(trace)
         },
         store = OsmGpxFileReceipts(noBackup.root),
         authState = MutableStateFlow(OsmAuthUiState()),
+        sessions = sessions,
         permissionRequest = {},
     )
 
-    private fun session(id: Long) = CommunitySession("fixture", id, "Fixture user", setOf(OSM_GPX_WRITE_SCOPE), 2)
+    private fun session(id: Long, generation: Long = 2) =
+        CommunitySession("fixture", id, "Fixture user", setOf(OSM_GPX_WRITE_SCOPE), generation)
 }
