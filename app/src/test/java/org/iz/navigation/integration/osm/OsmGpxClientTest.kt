@@ -89,9 +89,12 @@ class OsmGpxClientTest {
     private fun client(server: MockWebServer) = OsmGpxClient(server.url("/api/0.6").toString())
 }
 
-internal fun osmGpxTestTrace(journeyId: String = "fixture-journey"): PreparedOsmGpxTrace {
+internal fun osmGpxTestTrace(
+    journeyId: String = "fixture-journey",
+    startedAt: Long = 1_000_000,
+): PreparedOsmGpxTrace {
     val journey = Journey(id = journeyId, title = "Private fixture title", note = "Private fixture note",
-        startedAt = 1_000_000, endedAt = 1_300_000)
+        startedAt = startedAt, endedAt = startedAt + 300_000)
     val points = (0..10).map { index ->
         TrackPoint(journeyId = journeyId, latitude = 41.0, longitude = 29.0 + index * 0.005,
             recordedAt = journey.startedAt + index * 30_000L, accuracy = 5f)

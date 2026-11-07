@@ -1,11 +1,22 @@
 package org.iz.navigation.integration.osm
 
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import okhttp3.mockwebserver.Dispatcher
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
 import org.iz.navigation.integration.PreparedOsmGpxTrace
 import org.iz.navigation.osmcommunity.CommunitySession
 import org.junit.Assert.assertEquals
@@ -49,6 +60,65 @@ class OsmGpxControllerTest {
         assertEquals(listOf(second), retry.traces)
         assertEquals(OsmGpxStop.COMPLETE, controller.upload(retry, { true }).stop)
         assertNull(controller.prepareConfirmation(listOf(first, second), setOf(unknown)))
+    }
+
+    @Test fun wireQueueRejectsConcurrentSubmitAndStopsAfterRateLimit() = runBlocking {
+        MockWebServer().use { server ->
+            val firstPost = AtomicBoolean(true)
+            val releaseFirst = CountDownLatch(1)
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    if (firstPost.getAndSet(false)) {
+                        return if (releaseFirst.await(10, TimeUnit.SECONDS)) MockResponse().setBody("123")
+                        else MockResponse().setResponseCode(500)
+                    }
+                    return MockResponse().setResponseCode(429).addHeader("Retry-After", "2")
+                }
+            }
+            val client = OsmGpxClient(server.url("/api/0.6").toString())
+            val controller = controllerWithGateway(client)
+            val rateLimited = osmGpxTestTrace("wire-second", startedAt = 1_400_000)
+            val unsent = osmGpxTestTrace("wire-third", startedAt = 1_800_000)
+            val traces = listOf(first, rateLimited, unsent)
+
+            withTimeout(15_000) {
+                val confirmation = checkNotNull(controller.prepareConfirmation(traces))
+                val upload = async { controller.upload(confirmation, { true }) }
+                val result = try {
+                    val received = withContext(Dispatchers.IO) {
+                        checkNotNull(server.takeRequest(5, TimeUnit.SECONDS))
+                    }
+                    assertTracePost(received, first)
+                    assertEquals(OsmGpxStop.BUSY, controller.upload(confirmation, { true }).stop)
+                    assertEquals(1, server.requestCount)
+                    releaseFirst.countDown()
+                    upload.await()
+                } finally {
+                    releaseFirst.countDown()
+                }
+                assertEquals(OsmGpxStop.RATE_LIMITED, result.stop)
+                assertEquals(429, result.httpStatus)
+                assertEquals(2_000L, result.retryAfterMillis)
+                assertEquals(1, result.unattemptedCount)
+                assertTracePost(checkNotNull(server.takeRequest(1, TimeUnit.SECONDS)), rateLimited)
+                assertEquals(2, server.requestCount)
+
+                val receipt = result.receipts.single()
+                assertEquals(OsmGpxReceiptStatus.RECEIVED, receipt.status)
+                assertEquals(123L, receipt.traceId)
+                val reopened = controllerWithGateway(client)
+                assertEquals(mapOf(OsmGpxReceiptKey.of(first) to receipt), reopened.receipts(traces))
+                assertNull(reopened.prepareConfirmation(listOf(first)))
+                assertEquals(listOf(rateLimited, unsent), checkNotNull(reopened.prepareConfirmation(traces)).traces)
+                assertEquals(2, server.requestCount)
+            }
+        }
+    }
+
+    private fun assertTracePost(request: RecordedRequest, trace: PreparedOsmGpxTrace) {
+        assertEquals("POST", request.method)
+        assertEquals("/api/0.6/gpx", request.path)
+        assertTrue(request.body.readUtf8().contains("filename=\"" + trace.fileName + "\""))
     }
 
     @Test fun receiptReadbackIsAccountScopedAcrossControllerInstances() = runBlocking {
@@ -154,12 +224,15 @@ class OsmGpxControllerTest {
         assertFalse(controller.receipts(listOf(first)).containsKey(OsmGpxReceiptKey.of(first)))
     }
 
-    private fun controller(upload: suspend (PreparedOsmGpxTrace) -> OsmGpxUploadResult) = OsmGpxController(
-        currentSession = { sessions.value },
-        gateway = OsmGpxGateway { _, trace, canDispatch ->
+    private fun controller(upload: suspend (PreparedOsmGpxTrace) -> OsmGpxUploadResult) =
+        controllerWithGateway(OsmGpxGateway { _, trace, canDispatch ->
             check(canDispatch())
             upload(trace)
-        },
+        })
+
+    private fun controllerWithGateway(gateway: OsmGpxGateway) = OsmGpxController(
+        currentSession = { sessions.value },
+        gateway = gateway,
         store = OsmGpxFileReceipts(noBackup.root),
         authState = MutableStateFlow(OsmAuthUiState()),
         sessions = sessions,
