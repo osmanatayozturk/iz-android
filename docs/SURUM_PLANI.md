@@ -10,6 +10,11 @@ Büyük yedekler sayfalı hazırlanır. ZIP kaydedildiğinde geri okunup doğrul
 | Kamera kadrajı | Yönlendirme bilgisini harita alanından ayrı tut ve takip hareketini yumuşat. |
 | Molalı rota | Planlı molaları rota zamanlaması ve yolculuk kartıyla eşleştir. |
 | OSM GPS izi paylaşımı | Tamamlanmış yolculuk izlerini açık kullanıcı onayıyla isteğe bağlı paylaş. |
+| Nereye? (telefon kaynak adayı) | Ana ekrandan kayıtlı bir yer veya OpenStreetMap arama sonucu seç. Ulaşım türünü belirleyip mevcut konumdan rota başlat. |
+
+**Nereye? doğrulaması.** Kaynak adayı `ad84d727` üzerinde 193 test grubunda 1.410 birim testi geçti. Başarısızlık, hata ve atlama sayıları sıfırdı. Debug lint 97 uyarı ve 3 ipucu verdi, hata vermedi. Debug uygulama ve AndroidTest APK’ları bilgisayarda derlendi.
+
+Fiziksel Samsung telefonda ağsız QA paketiyle yapılan ilk koşuda üç sentetik hızlı hedef senaryosu geçti. MainActivity’de Nereye? giriş ve geri dönüş kontrolü, MapLibre’ın ağ isteği izin hatası verince tamamlanamadı. Aynı ürün APK’sıyla yapılan ayrı koşuda, yalnız test paketine eklenen çevrimdışı MapLibre kuralıyla giriş ve geri dönüş kontrolü geçti.
 
 Yayımlanmış önceki sürüm Telefon 0.12.0 / code 28’dir. Bu bölüm, 0.12.0 yayımlanmadan önceki aday doğrulama anlık görüntüsünü ve yayımlanmış 0.12.0’dan sonra 6–7 Kasım’da aynı 0.12.0 numarasıyla yapılan kamera, Molalı rota ve OSM GPS izi paylaşımı kaynak güncellemelerini birlikte kaydeder. Sonraki kaynak güncellemeleri yayımlanmış 0.12.0 sürümünün içeriği değildir. Bu tarihsel doğrulama ve kaynak kayıtları 0.13.0 için kabul veya doğrulama oluşturmaz. Yayımlanmış 0.12.0’ın release notları için [GitHub sürüm kaydı](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.12.0) esas alınır.
 

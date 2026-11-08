@@ -4,6 +4,12 @@
 
 Büyük yedekler sayfalı hazırlanır. ZIP kaydedildiğinde geri okunup doğrulanır. Geri yüklemede arşiv ve ilişkiler denetlenir. Kamera kadrajı iyileştirmeleri, Molalı rota ve isteğe bağlı OSM GPS izi paylaşımı da sürüm kapsamındadır. Wear OS 0.7.0 / code 12 ve iletişim protokolü değişmiyor. [Telefon 0.13.0 sürüm sayfası](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.13.0).
 
+### Nereye? — telefon kaynak adayı
+
+Telefonun ana ekranındaki **Nereye?** ile kayıtlı bir yeri veya OpenStreetMap arama sonucunu hedef olarak seçebilirsiniz. Ulaşım türünü seçtiğinizde uygulama mevcut konumunuzdan rota hesaplar. Rota hazırlanırken geri dönmek isteği iptal eder.
+
+Bilgisayarda 1.410 birim testi geçti, Debug lint hata vermedi ve Debug uygulama ile AndroidTest APK’ları derlendi. Fiziksel Samsung telefonda ağsız QA paketiyle üç sentetik hızlı hedef senaryosu geçti. Ana ekrandaki Nereye? giriş ve geri dönüş kontrolü, aynı ürün APK’sıyla ve testte çevrimdışı harita kuralıyla yapılan ayrı koşuda geçti.
+
 ## Telefon 0.12.0 numarasıyla tutulan tarihsel aday kayıtları
 
 Bu bölüm, 0.12.0 yayımlanmadan önceki aday doğrulama anlık görüntüsünü ve yayımlanmış 0.12.0’dan sonra 6–7 Kasım’da aynı 0.12.0 numarasıyla yapılan kamera, Molalı rota ve OSM GPS izi paylaşımı kaynak güncellemelerini birlikte kaydeder. Sonraki kaynak güncellemeleri yayımlanmış 0.12.0 sürümünün içeriği değildir. Bu tarihsel doğrulama ve kaynak kayıtları 0.13.0 için kabul veya doğrulama oluşturmaz. Yayımlanmış 0.12.0’ın release notları için [GitHub sürüm kaydı](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.12.0) esas alınır.
