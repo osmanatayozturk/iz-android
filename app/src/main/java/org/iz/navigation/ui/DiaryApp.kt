@@ -658,6 +658,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             fun open(action: () -> Unit) { menuOpen = false; action() }
             TextButton({ open { tab = 1 } }, Modifier.fillMaxWidth().testTag("menu-journeys")) { Text("Yolculuklar") }
+            TextButton({ open { openDirections() } }, Modifier.fillMaxWidth().testTag("menu-route-plan")) { Text("Rota planla") }
             TextButton({ open { libraryOpen = true } }, Modifier.fillMaxWidth().testTag("menu-route-library")) { Text("Rotalarım") }
             TextButton({ open { collectionsOpen = true } }, Modifier.fillMaxWidth().testTag("menu-collections")) { Text("Geziler") }
             TextButton({ open { openGpx() } }, Modifier.fillMaxWidth().testTag("menu-gpx-follow")) { Text("GPX izi takip et") }

@@ -43,7 +43,6 @@ class NavigationSessionEntryTest {
         compose.onNodeWithTag("home-finish-session").assertTextEquals("İşlemler")
             .assertContentDescriptionEquals("Yolculuk işlemlerini aç").assertHasClickAction().performClick()
         compose.runOnIdle { assertEquals(2, opens); assertEquals(0, resets); panel.value = false }
-        compose.onNodeWithTag("open-navigation").performClick()
-        compose.runOnIdle { assertEquals(3, opens); assertEquals(0, resets) }
+        compose.onNodeWithTag("open-navigation").assertDoesNotExist()
     }
 }

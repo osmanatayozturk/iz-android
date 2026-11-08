@@ -65,6 +65,21 @@ interface NavigationRuntime : NavigationCueRuntime {
     suspend fun plan(stops: List<RouteStop>, transport: Transport, preferences: RoutePreferences,
         travelSpeedKmh: Double?): PlannedRoute = plan(stops, transport)
     suspend fun locate(): NavigationFix
+    fun hasPreciseLocation(): Boolean = false
+    fun canLocateQuickly(): Boolean = hasPreciseLocation()
+    suspend fun cachedQuickLocation(precise: Boolean): NavigationFix? = null
+    suspend fun locateApproximate(): NavigationFix? = null
+    /** The Android runtime commits while holding the recorder's mutex. */
+    suspend fun prepareQuickSession(transport: Transport, stillCurrent: () -> Boolean,
+        commit: (Journey?) -> Unit) {
+        val existing = activeJourney()
+        check(stillCurrent()) { "Başlatma isteği artık güncel değil." }
+        require(existing == null || existing.status == JourneyStatus.CONFIRMED &&
+            existing.transport == transport && recordingId() == existing.id) {
+            "Mevcut kaydı korumak için aynı yolculuk türünü seç veya kaydı önce bitir."
+        }
+        commit(existing)
+    }
     fun trafficRefreshEnabled(route: PlannedRoute): Boolean = route.provider == RouteProvider.TOMTOM
     val roadSpeedMonitoring: Boolean get() = false
     fun roadSpeedState(state: NavigationState, now: Long): RoadSpeedState = RoadSpeedState(
@@ -131,6 +146,7 @@ class JourneyNavigationCoordinator(
     private var lastSpeedRefresh = Long.MIN_VALUE
     private var simulationEnabled = false
     private var freeDrive = false
+    private var quickSessionId: String? = null
     private var stoppingRecordingId: String? = null
     private val retiredJourneys = linkedSetOf<String>()
 
@@ -204,6 +220,7 @@ class JourneyNavigationCoordinator(
                 if (trackStartPending || finishingSession) continue
                 val before = mutableState.value
                 val fresh = before.fix?.let { fresh(it, clock()) } == true &&
+                    (quickSessionId == null || runtime.hasPreciseLocation()) &&
                     (before.trackFollow == null || runtime.locationActive())
                 if (!fresh) breaks?.gpsUnavailable()
                 if (!fresh && !before.gpsStale) runtime.cancelSpeech()
@@ -212,7 +229,11 @@ class JourneyNavigationCoordinator(
                     if (before.trackFollow != null) endLocalSession() else clearRoute()
                     publish(mutableState.value.copy(sharingLocation = false))
                 }
-                publish(mutableState.value.copy(recording = alive, gpsStale = !fresh,
+                val current = mutableState.value
+                val clearQuickProgress = quickSessionId != null && !fresh
+                publish(current.copy(recording = alive, gpsStale = !fresh,
+                    progress = current.progress.takeUnless { clearQuickProgress },
+                    progressUpdatedAt = current.progressUpdatedAt.takeUnless { clearQuickProgress },
                     sessionId = mutableState.value.sessionId ?: before.journey?.id?.takeIf { alive },
                     sessionTransport = before.journey?.transport ?: mutableState.value.sessionTransport,
                     locationActive = !before.simulation && runtime.locationActive(),
@@ -362,6 +383,64 @@ class JourneyNavigationCoordinator(
         activate(route, true, recordJourney, replaceTrackFollow, expectedTrackFollowKey)
     suspend fun activateRoute(route: PlannedRoute, replaceTrackFollow: Boolean = false): String = activate(route, false, true, replaceTrackFollow)
 
+    internal suspend fun quickOrigin(): QuickNavigationOrigin {
+        val owner = state.value
+        check(owner.route == null && owner.trackFollow == null && !owner.simulation && !simulationEnabled) {
+            "Önce açık yol tarifini, GPX takibini veya deneme sürüşünü bitir."
+        }
+        check(runtime.canLocateQuickly()) { "Konum iznini kontrol et ve yeniden dene." }
+        val visible = owner.fix.takeIf { runtime.hasPreciseLocation() }
+        fun result(fix: NavigationFix, precise: Boolean, requiresFine: Boolean): QuickNavigationOrigin {
+            return QuickNavigationOrigin(fix, precise, owner.routeRevision, owner.sessionId, requiresFine)
+                .also(::validateQuickOrigin)
+        }
+        if (visible != null && fresh(visible, clock())) return result(visible, true, requiresFine = true)
+
+        return withTimeoutOrNull(5_000) {
+            val cacheRequiresFine = runtime.hasPreciseLocation()
+            val candidate = try { withTimeoutOrNull(250) { runtime.cachedQuickLocation(cacheRequiresFine) } }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { null }
+            val fine = runtime.hasPreciseLocation()
+            val cached = candidate.takeUnless { cacheRequiresFine && !fine }
+            if (cached != null && cacheRequiresFine && fresh(cached, clock())) {
+                return@withTimeoutOrNull result(cached, true, requiresFine = true)
+            }
+            val previous = visible?.takeIf { fine && usableQuickLocation(it, clock()) }
+            val usableCache = cached?.takeIf { usableQuickLocation(it, clock()) }
+            if (previous != null && (usableCache == null || previous.recordedAt >= usableCache.recordedAt)) {
+                return@withTimeoutOrNull result(previous, false, requiresFine = true)
+            }
+            if (usableCache != null) return@withTimeoutOrNull result(usableCache, false, requiresFine = cacheRequiresFine)
+            runtime.locateApproximate()?.takeIf { usableQuickLocation(it, clock()) }
+                ?.let { result(it, false, requiresFine = false) }
+        } ?: error("Konum alınamadı. Yeniden dene veya konum ayarlarını aç.")
+    }
+
+    internal fun validateQuickOrigin(origin: QuickNavigationOrigin) {
+        check(quickLocationAllowed(origin)) { "Konum izni değişti. Konumu yeniden al." }
+        check(usableQuickLocation(origin.fix, clock())) { "Başlangıç konumu eskidi. Yeniden dene." }
+        check(state.value.routeRevision == origin.routeRevision && state.value.sessionId == origin.sessionId) {
+            "Yolculuk değişti. Konumu yeniden al."
+        }
+    }
+
+    private fun quickLocationAllowed(origin: QuickNavigationOrigin) =
+        runtime.canLocateQuickly() && (!origin.requiresFinePermission || runtime.hasPreciseLocation())
+
+    internal suspend fun startQuickGuidance(route: PlannedRoute, origin: QuickNavigationOrigin,
+        recordJourney: Boolean): String {
+        validateQuickOrigin(origin)
+        val caller = currentCoroutineContext()
+        return activate(route, true, recordJourney, false, quickOrigin = origin, startStillCurrent = {
+            caller.isActive && quickLocationAllowed(origin) &&
+                state.value.routeRevision == origin.routeRevision && state.value.sessionId == origin.sessionId
+        })
+    }
+
+    private fun usableQuickLocation(fix: NavigationFix, now: Long) =
+        now - fix.recordedAt in 0..60_000 && fix.accuracyMeters.isFinite() && fix.accuracyMeters >= 0
+
     /** Exact prepared geometry: never asks a planner for a connector or replacement. */
     suspend fun startPreparedGuidance(route: PlannedRoute, fingerprint: String, recordJourney: Boolean = true,
         stillPrepared: () -> Boolean = { true }, stillCurrent: () -> Boolean = { true }): String {
@@ -381,6 +460,7 @@ class JourneyNavigationCoordinator(
     private suspend fun activate(route: PlannedRoute, guidance: Boolean, recordJourney: Boolean, replaceTrackFollow: Boolean,
         expectedTrackFollowKey: String? = null, preparedFingerprint: String? = null,
         preparedFix: NavigationFix? = null, stillPrepared: () -> Boolean = { true },
+        quickOrigin: QuickNavigationOrigin? = null,
         startStillCurrent: () -> Boolean = { true }): String = commands.withLock {
         route.requireUsablePreferences()
         check(expectedTrackFollowKey == null || mutableState.value.trackReplacementKey() == expectedTrackFollowKey) {
@@ -394,6 +474,10 @@ class JourneyNavigationCoordinator(
         check(!mutableState.value.simulation || simulated) { "Önce deneme sürüşünü bitir." }
         check(!simulationEnabled || guidance) { "Deneme modunda gerçek kayıt başlatılamaz." }
         check(startStillCurrent() && stillPrepared()) { "Başlatma isteği artık güncel değil." }
+        if (quickOrigin != null) {
+            check(!simulated && mutableState.value.route == null) { "Önce açık yol tarifini veya deneme sürüşünü bitir." }
+            return@withLock activateQuickLocked(route, quickOrigin, recordJourney, startStillCurrent)
+        }
         val activationEpoch = epoch
         check(!simulated || runtime.activeJourney() == null) { "Deneme sürüşü için önce gerçek yolculuğu bitir." }
         check(activationEpoch == epoch) { "Başlatma işlemi iptal edildi." }
@@ -408,21 +492,14 @@ class JourneyNavigationCoordinator(
         } else null
         clearRoute()
         freeDrive = false
-        engine = NavigationEngine(route)
-        breaks = PlannedBreakTracker(route)
-        lastTrafficCheckAt = clock()
-        cues.reset()
+        configureRoute(route)
         publish(mutableState.value.copy(journey = journey, recording = journey != null, route = route,
             sessionId = sessionId, sessionTransport = route.transport,
             guidance = guidance, arrived = false, progress = null, progressUpdatedAt = null, routeRevision = epoch,
             loading = false, message = if (simulated) "Deneme sürüşü · günlüğe kaydedilmez" else null,
             simulation = simulated, paused = false, preparedRouteFingerprint = preparedFingerprint))
         // Voice availability cannot undo the already committed visual guidance/session.
-        if (guidance) runCatching {
-            val voice = runtime as? NavigationVoiceRuntime
-            if (voice != null) voice.prepareSpeech(if (preparedFingerprint != null) GuidanceVoiceMode.PREPARED_LOCAL else GuidanceVoiceMode.DEFAULT)
-            else runtime.prepareSpeech()
-        }
+        if (guidance) prepareGuidanceSpeech(preparedFingerprint != null)
         if (!simulated) saveRoute(route)
         if (simulated) startSimulation(route, requireNotNull(journey))
         else (initialFix ?: mutableState.value.fix)?.takeIf { fresh(it, clock()) }?.let { fix ->
@@ -432,10 +509,55 @@ class JourneyNavigationCoordinator(
         sessionId
     }
 
-    private suspend fun ensureRecording(transport: Transport): Journey {
+    private suspend fun activateQuickLocked(route: PlannedRoute, origin: QuickNavigationOrigin,
+        recordJourney: Boolean, stillCurrent: () -> Boolean): String {
+        val previous = mutableState.value
+        require(previous.sessionId == null || previous.sessionTransport == route.transport) {
+            "Açık yolculuğun türü farklı. Önce mevcut yolculuğu bitir."
+        }
+        lateinit var session: String
+        var initialFix: NavigationFix? = null
+        runtime.prepareQuickSession(route.transport, stillCurrent) { existing ->
+            require(usableQuickLocation(origin.fix, clock())) { "Başlangıç konumu eskidi. Yeniden dene." }
+            initialFix = previous.fix?.takeIf { runtime.hasPreciseLocation() && fresh(it, clock()) }
+                ?: origin.fix.takeIf { origin.precise && runtime.hasPreciseLocation() && fresh(it, clock()) }
+            session = previous.sessionId ?: existing?.id ?: UUID.randomUUID().toString()
+            clearRoute()
+            freeDrive = false
+            configureRoute(route)
+            quickSessionId = session
+            publish(mutableState.value.copy(journey = existing, recording = existing != null, route = route,
+                sessionId = session, sessionTransport = route.transport, guidance = true,
+                fix = null, gpsStale = true, recordingPending = recordJourney && existing == null,
+                approximateOrigin = origin.fix.coordinate.takeIf { initialFix == null }))
+        }
+        prepareGuidanceSpeech(prepared = false)
+        saveRoute(route)
+        initialFix?.let { onAcceptedLocation(session, it) }
+        return session
+    }
+
+    private fun configureRoute(route: PlannedRoute) {
+        engine = NavigationEngine(route)
+        breaks = PlannedBreakTracker(route)
+        lastTrafficCheckAt = clock()
+        cues.reset()
+    }
+
+    private fun prepareGuidanceSpeech(prepared: Boolean) {
+        runCatching {
+            val voice = runtime as? NavigationVoiceRuntime
+            if (voice != null) voice.prepareSpeech(if (prepared) GuidanceVoiceMode.PREPARED_LOCAL else GuidanceVoiceMode.DEFAULT)
+            else runtime.prepareSpeech()
+        }
+    }
+
+    private suspend fun ensureRecording(transport: Transport, quickStillCurrent: (() -> Boolean)? = null): Journey {
         val token = epoch
+        val stillCurrent = { token == epoch && quickStillCurrent?.invoke() != false }
         var before = runtime.activeJourney()
-        check(token == epoch) { "Başlatma işlemi iptal edildi." }
+        check(stillCurrent()) { "Başlatma işlemi iptal edildi." }
+        check(quickStillCurrent == null || before == null) { "Başka bir kayıt başladı." }
         if (before != null && runtime.recordingId() != before.id && !runtime.startPending(before.id)) {
             val orphanId = before.id
             retireJourney(orphanId)
@@ -453,27 +575,36 @@ class JourneyNavigationCoordinator(
             require(!before.interrupted) { "Kesilen yolculuğu telefondan kontrol et." }
             if (before.status == JourneyStatus.TEMPORARY) runtime.confirm(before.id, transport)
         }
-        check(token == epoch) { "Başlatma işlemi iptal edildi." }
-        val id = before?.id ?: runtime.start(transport) { token == epoch }
+        check(stillCurrent()) { "Başlatma işlemi iptal edildi." }
+        val id = before?.id ?: runtime.start(transport, stillCurrent)
         try {
             withTimeout(8000) {
                 while (runtime.recordingId() != id) {
-                    check(token == epoch) { "Başlatma işlemi iptal edildi." }
+                    check(stillCurrent()) { "Başlatma işlemi iptal edildi." }
                     check(runtime.activeJourney()?.id == id) { "Yolculuk başlatılamadı." }
                     delay(100)
                 }
             }
+            check(stillCurrent()) { "Yolculuk durumu değişti." }
+            val actual = runtime.activeJourney()
+            check(stillCurrent()) { "Yolculuk durumu değişti." }
+            check(actual?.id == id && actual.status == JourneyStatus.CONFIRMED) { "Yolculuk artık açık değil." }
+            publish(mutableState.value.copy(journey = actual, recording = true,
+                fix = mutableState.value.fix.takeIf { mutableState.value.journey?.id == id }, message = null))
+            return actual
         } catch (error: TimeoutCancellationException) {
-            if (before == null) runtime.interrupt(id)
+            if (before == null && quickStillCurrent == null) runtime.interrupt(id)
+            if (quickStillCurrent != null) releaseFailedQuickRecording(id)
             throw IllegalStateException("Konum servisi başlamadı. Telefonun konum izinlerini kontrol et.", error)
+        } catch (error: Exception) {
+            if (quickStillCurrent != null) releaseFailedQuickRecording(id)
+            throw error
         }
-        check(token == epoch) { "Yolculuk durumu değişti." }
-        val actual = runtime.activeJourney()
-        check(token == epoch) { "Yolculuk durumu değişti." }
-        check(actual?.id == id && actual.status == JourneyStatus.CONFIRMED) { "Yolculuk artık açık değil." }
-        publish(mutableState.value.copy(journey = actual, recording = true,
-            fix = mutableState.value.fix.takeIf { mutableState.value.journey?.id == id }, message = null))
-        return actual
+    }
+
+    private suspend fun releaseFailedQuickRecording(id: String) = withContext(NonCancellable) {
+        retireJourney(id)
+        runtime.stopRecording(id)
     }
 
     fun stopGuidance() { scope.launch {
@@ -650,6 +781,7 @@ class JourneyNavigationCoordinator(
             before = mutableState.value
         }
         if (before.sessionId != id && before.journey?.id != id || !fresh(fix, now)) return
+        if (quickSessionId != null && !runtime.hasPreciseLocation()) return
         if (before.fix?.let { fix.recordedAt <= it.recordedAt } == true) return
         var resumedPlannedBreak = false
         if (before.paused) {
@@ -675,10 +807,12 @@ class JourneyNavigationCoordinator(
         }
         val progress = if (currentEngine != null) withContext(Dispatchers.Default) { currentEngine.update(fix, now) } else null
         if (token != epoch || mutableState.value.sessionId != before.sessionId) return
+        if (quickSessionId != null && !runtime.hasPreciseLocation()) return
         val arrived = progress?.arrived == true
         // A resumed break must not expose the pre-break projection as usable guidance.
         val missingResumeProgress = resumedPlannedBreak && progress == null
         val next = mutableState.value.copy(fix = fix, gpsStale = missingResumeProgress,
+            approximateOrigin = null, recordingPending = !arrived && before.recordingPending,
             progress = if (missingResumeProgress) null else progress ?: before.progress,
             paused = before.paused, plannedBreak = before.plannedBreak, routeRevision = epoch,
             scheduleContext = if (missingResumeProgress) null else before.scheduleContext,
@@ -710,13 +844,43 @@ class JourneyNavigationCoordinator(
                     val currentFix = current.fix
                     token == epoch && current.sessionId == before.sessionId && current.route?.id == route.id &&
                         current.routeRevision == before.routeRevision && current.guidance && !current.paused &&
-                        !current.muted && !current.gpsStale && !current.arrived && preparedVoiceReady(current) &&
+                         !current.muted && !current.gpsStale && !current.arrived && preparedVoiceReady(current) &&
+                         (quickSessionId == null || runtime.hasPreciseLocation()) &&
                         currentProgress != null && !currentProgress.offRoute && !currentProgress.arrived &&
                         currentFix != null && fresh(currentFix, clock()) && cues.isEligible(request, route, currentProgress, currentFix)
                 }?.let(runtime::speakCue)
             }
         } else if (progress?.offRoute == true) runtime.cancelSpeech()
+        if (next.recordingPending) attachQuickRecording(next.sessionId, fix)
         if (progress?.offRoute == true && !arrived) requestReroute()
+    }
+
+    private suspend fun attachQuickRecording(session: String?, fix: NavigationFix) = commands.withLock {
+        val before = mutableState.value
+        val mode = before.sessionTransport
+        if (session == null || session != quickSessionId || session != before.sessionId || mode == null ||
+            !before.guidance || !before.recordingPending || before.recording ||
+            !runtime.hasPreciseLocation() || !fresh(fix, clock())) return@withLock
+        try {
+            // An external active journey is handled by the existing session observer.
+            if (runtime.activeJourney() != null) return@withLock
+            if (!runtime.hasPreciseLocation() || !fresh(fix, clock())) return@withLock
+            ensureRecording(mode) {
+                val current = mutableState.value
+                current.sessionId == session && quickSessionId == session && current.guidance &&
+                    runtime.hasPreciseLocation() && fresh(fix, clock())
+            }
+            val current = mutableState.value
+            if (current.sessionId == session && quickSessionId == session) {
+                publish(current.copy(fix = fix, recordingPending = false, gpsStale = !fresh(fix, clock())))
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: Exception) {
+            val current = mutableState.value
+            if (current.sessionId == session && quickSessionId == session) {
+                publish(current.copy(recordingPending = false, message = error.message ?: "Yolculuk kaydı başlatılamadı."))
+            }
+        }
     }
 
     private fun remainingRouteStopIndices(): List<Int> = engine?.remainingStopIndices().orEmpty().let {
@@ -931,6 +1095,7 @@ class JourneyNavigationCoordinator(
 
     private fun clearRoute() {
         epoch++
+        quickSessionId = null
         rerouteJob?.cancel(); rerouteJob = null
         simulationJob?.cancel(); simulationJob = null
         invalidateEdits()
@@ -940,7 +1105,8 @@ class JourneyNavigationCoordinator(
         markerProblem = null
         runtime.endGuidanceSpeech()
         publish(mutableState.value.copy(route = null, guidance = false, arrived = false, progress = null,
-            loading = false, routeRevision = epoch, message = null, trackFollow = null, paused = false, preparedRouteFingerprint = null, progressUpdatedAt = null))
+            loading = false, routeRevision = epoch, message = null, trackFollow = null, paused = false, preparedRouteFingerprint = null,
+            progressUpdatedAt = null, approximateOrigin = null, recordingPending = false))
     }
 
     private fun publish(value: NavigationState, refreshSpeed: Boolean = true) {
@@ -953,9 +1119,12 @@ class JourneyNavigationCoordinator(
         val context = if (canTime) RouteScheduleContext(
             if (activeBreak != null) now else value.progressUpdatedAt ?: value.fix?.recordedAt ?: now,
             requireNotNull(value.progress).elapsedSeconds, breaks?.remaining(now))
-            else if (route != null && !manualPause && !value.arrived && mutableState.value.route?.id == route.id) value.scheduleContext else null
+            else if (route != null && !manualPause && !value.arrived &&
+                (quickSessionId == null || !value.gpsStale) &&
+                mutableState.value.route?.id == route.id) value.scheduleContext else null
         val timing = if (context != null && route != null) RouteSchedule.remaining(route, context) else null
         val rendered = value.copy(plannedBreak = activeBreak, scheduleContext = context, tripTiming = timing,
+            recordingPending = value.recordingPending && !value.recording,
             roadSpeed = runtime.roadSpeedState(value, now))
         mutableState.value = rendered
         val highFrequency = value.guidance || value.trackFollow != null

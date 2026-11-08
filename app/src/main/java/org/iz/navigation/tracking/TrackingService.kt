@@ -592,12 +592,13 @@ class TrackingService : Service() {
             if (old == next && (isRunning || next == null ||
                 lastSessionStartAttempt != Long.MIN_VALUE && elapsed - lastSessionStartAttempt in 0 until 15_000)) return
             sessionDemand = next
+            // A coarse-only quick route can retain demand without starting the fine GPS service.
+            if (!isRunning && next != null && !TrackingController.hasFineLocation(context)) return
             val intent = Intent(context, TrackingService::class.java).setAction(ACTION_SESSION)
             try {
                 if (isRunning) context.startService(intent)
                 else if (next != null) {
                     lastSessionStartAttempt = elapsed
-                    check(TrackingController.hasFineLocation(context))
                     ContextCompat.startForegroundService(context, intent)
                 }
             } catch (_: RuntimeException) {

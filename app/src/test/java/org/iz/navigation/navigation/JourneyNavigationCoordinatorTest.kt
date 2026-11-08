@@ -33,6 +33,16 @@ class JourneyNavigationCoordinatorTest {
         var onStopRecording: (suspend () -> Unit)? = null
         var planCalls = 0
         var onPlan: (suspend (List<RouteStop>, Transport) -> PlannedRoute)? = null
+        var preciseLocation = true
+        var cachedLocation: NavigationFix? = null
+        var onCachedLocation: (suspend (Boolean) -> NavigationFix?)? = null
+        var approximateLookup: suspend () -> NavigationFix? = { null }
+        var quickLocationAllowed = true
+        override fun hasPreciseLocation() = preciseLocation
+        override fun canLocateQuickly() = quickLocationAllowed
+        override suspend fun cachedQuickLocation(precise: Boolean) =
+            onCachedLocation?.invoke(precise) ?: cachedLocation
+        override suspend fun locateApproximate() = approximateLookup()
         override suspend fun activeJourney(): Journey? {
             activeCalls++; onActive?.invoke(activeCalls)
             return authoritativeJourney ?: journeys.value.firstOrNull { it.endedAt == null }
@@ -148,6 +158,86 @@ class JourneyNavigationCoordinatorTest {
         controller.finishSession(id)
         assertNull(controller.state.value.sessionId)
         assertEquals(1, runtime.finished)
+    }
+
+    @Test fun quickGuidanceWaitsForFineFixAndAttachesRecordingOnlyOnce() = runTest {
+        val runtime = Runtime()
+        var now = 1_000L
+        runtime.preciseLocation = false
+        runtime.cachedLocation = NavigationFix(WeatherCoordinate(40.0, 29.0), now, 300f)
+        val controller = JourneyNavigationCoordinator(runtime, null, { now }, backgroundScope)
+        val origin = controller.quickOrigin()
+        val session = controller.startQuickGuidance(route(), origin, recordJourney = true)
+
+        assertTrue(controller.state.value.guidance)
+        assertTrue(controller.state.value.recordingPending)
+        assertTrue(controller.state.value.gpsStale)
+        assertNull(controller.state.value.progress)
+        assertEquals(0, runtime.started)
+
+        now += 1_000
+        controller.onAcceptedLocation(session, NavigationFix(origin.fix.coordinate, now, 5f))
+        runCurrent()
+        assertEquals(0, runtime.started)
+
+        runtime.preciseLocation = true
+        now += 1_000
+        controller.onAcceptedLocation(session, NavigationFix(origin.fix.coordinate, now, 5f))
+        withContext(Dispatchers.Default) {
+            withTimeout(5_000) { controller.state.first { it.recording && !it.recordingPending } }
+        }
+        assertEquals(session, controller.state.value.sessionId)
+        assertEquals(1, runtime.started)
+        assertTrue(runCatching { controller.startQuickGuidance(route(), origin, true) }.isFailure)
+        controller.finishSession(session)
+        controller.onAcceptedLocation(session, NavigationFix(origin.fix.coordinate, now + 1, 5f))
+        runCurrent()
+        assertNull(controller.state.value.sessionId)
+        assertEquals(1, runtime.started)
+    }
+
+    @Test fun quickOriginUsesFreshCacheThenBoundsUnavailableApproximateFix() = runTest {
+        val now = 100_000L
+        val coordinate = WeatherCoordinate(40.0, 29.0)
+        val runtime = Runtime()
+        val controller = JourneyNavigationCoordinator(runtime, null, { now }, backgroundScope)
+        runtime.approximateLookup = { error("Cache should satisfy the request") }
+
+        runtime.cachedLocation = NavigationFix(coordinate, now - 10_000, 50f)
+        assertTrue(controller.quickOrigin().precise)
+        runtime.cachedLocation = NavigationFix(coordinate, now - 60_000, 50f)
+        assertFalse(controller.quickOrigin().precise)
+
+        runtime.cachedLocation = NavigationFix(coordinate, now - 60_001, 50f)
+        runtime.approximateLookup = { delay(6_000); NavigationFix(coordinate, now, 100f) }
+        val startedAt = testScheduler.currentTime
+        assertTrue(runCatching { controller.quickOrigin() }.isFailure)
+        assertEquals(5_000L, testScheduler.currentTime - startedAt)
+    }
+
+    @Test fun quickOriginDoesNotReuseFineFixAfterDowngradeOrCommitAfterRevocation() = runTest {
+        val runtime = Runtime()
+        var now = 1_000L
+        val controller = JourneyNavigationCoordinator(runtime, null, { now }, backgroundScope)
+        val prior = controller.currentLocation()
+        val fine = controller.quickOrigin()
+        now += 11_000
+        runtime.onCachedLocation = { precise ->
+            assertTrue(precise)
+            delay(100)
+            runtime.preciseLocation = false
+            prior.copy(recordedAt = now)
+        }
+        val approximate = NavigationFix(WeatherCoordinate(40.005, 29.0), now, 300f)
+        runtime.approximateLookup = { approximate }
+        val origin = controller.quickOrigin()
+        assertEquals(approximate, origin.fix)
+        assertNotEquals(prior.coordinate, origin.fix.coordinate)
+        assertTrue(runCatching { controller.validateQuickOrigin(fine) }.isFailure)
+        runtime.onActive = { runtime.quickLocationAllowed = false }
+        assertTrue(runCatching { controller.startQuickGuidance(route(), origin, true) }.isFailure)
+        assertNull(controller.state.value.route)
+        assertEquals(0, runtime.started)
     }
 
     @Test fun guidanceWithoutRecordingNeverCreatesDiaryAndAcceptsSessionFixes() = runTest {

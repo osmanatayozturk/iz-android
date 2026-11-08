@@ -98,6 +98,7 @@ internal fun PhoneDirectionsContent(
                     Text(when {
                         nav.simulation -> "Simülasyon · Günlüğe kaydedilmez"
                         nav.guidance && nav.recording -> "Yol tarifi açık · Kayıt açık"
+                        nav.guidance && nav.recordingPending -> "Yol tarifi açık · Kayıt konum bekliyor"
                         nav.guidance -> "Yol tarifi açık · Kayıt kapalı"
                         nav.recording -> nav.journey?.transport?.takeUnless { it == Transport.UNKNOWN }?.label()
                             ?.let { "$it · Kayıt açık" } ?: "Kayıt açık"
@@ -110,6 +111,8 @@ internal fun PhoneDirectionsContent(
         }
         if (sessionActive) item {
             Column(Modifier.fillMaxWidth().testTag("active-session-actions"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (nav.approximateOrigin != null) Text("Yaklaşık konum", style = MaterialTheme.typography.bodyMedium)
+                if (nav.recordingPending) RecordingPendingWarning()
                 if (nav.guidance) OutlinedButton(stopGuidance, enabled = !locked,
                     modifier = Modifier.fillMaxWidth().testTag("stop-navigation-guidance")) { Text(PhoneSessionEnd.GUIDANCE.label) }
                 if (nav.recording) OutlinedButton(stopRecording, enabled = !locked,
@@ -130,7 +133,7 @@ internal fun PhoneDirectionsContent(
                 route = shownRoute, assessment = null,
                 modifier = Modifier.fillMaxWidth().height(290.dp).testTag("directions-route-map"),
                 stops = shownRoute?.stops ?: if (live) emptyList() else ui.stops,
-                liveCoordinate = nav.fix?.coordinate ?: ui.origin?.takeIf { ui.originCurrent }?.coordinate,
+                liveCoordinate = nav.fix?.coordinate ?: ui.origin?.takeIf { ui.originCurrent && nav.approximateOrigin == null }?.coordinate,
                 recordedPoints = points, gpsStale = nav.gpsStale,
                 singleStopLabel = if (ui.origin == null && ui.destination != null) "B" else "A",
                 title = if (live) "Canlı yol tarifi" else "Rota önizleme",
@@ -350,6 +353,7 @@ internal fun navigationInstruction(nav: NavigationState): String = when {
     nav.arrived -> if (nav.recording) "Varış noktasına ulaştın. Kayıt devam ediyor." else "Varış noktasına ulaştın."
     nav.plannedBreak != null -> "Planlı mola"
     nav.paused -> "Yönlendirme duraklatıldı"
+    nav.guidance && nav.gpsStale && !nav.simulation -> "Güvenilir GPS konumu bekleniyor"
     nav.guidance -> nav.route?.maneuvers?.getOrNull(nav.progress?.maneuverIndex ?: 0)?.instruction
         ?.takeIf { it.isNotBlank() } ?: "Yönlendirme açık"
     else -> "Serbest sürüş"
@@ -357,6 +361,10 @@ internal fun navigationInstruction(nav: NavigationState): String = when {
 
 @Composable
 internal fun RouteTimingText(route: PlannedRoute, nav: NavigationState?, preview: Boolean, showBreakdown: Boolean = false) {
+    if (!preview && nav != null && nav.gpsStale && !nav.simulation && nav.plannedBreak == null) {
+        Text("Güncel kalan yol ve süre bilgisi yok.", style = MaterialTheme.typography.bodySmall)
+        return
+    }
     val departure = (route.effectiveDepartureAt ?: route.createdAt).coerceAtLeast(0)
     val timing = if (preview) RouteSchedule.planned(route, departure) else nav?.tripTiming
     val seconds = timing?.totalSeconds ?: nav?.progress?.remainingSeconds ?: route.durationSeconds

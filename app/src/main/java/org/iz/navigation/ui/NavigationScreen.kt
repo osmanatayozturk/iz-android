@@ -398,6 +398,7 @@ internal fun NavigationScreen(
     val groupState by app.groups.state.collectAsStateWithLifecycle()
     val weather by app.weatherManager.state.collectAsStateWithLifecycle()
     var showPlanning by androidx.compose.runtime.saveable.rememberSaveable(entryId) { mutableStateOf(initiallyPlanning) }
+    var showQuickDirections by remember(entryId) { mutableStateOf(false) }
     val dashboardEntry = org.iz.navigation.ui.history.LocalUiEntryKey.current
     val activeBreak = nav.plannedBreak
     val breakOwner = NavigationStopSnapshot.from(nav)
@@ -585,7 +586,6 @@ internal fun NavigationScreen(
         nav.route?.id == weather.route?.id
     val dashboardProgress = dashboardRemaining(nav.guidance, nav.route != null, nav.gpsStale,
         nav.progress?.remainingMeters, nav.progress?.remainingSeconds)
-    // Only this new presenter withholds unverified progress; legacy instruction callers stay unchanged.
     val dashboardManeuver = nav.route?.let { route ->
         nav.progress?.takeIf {
             dashboardProgress != null && !nav.arrived && !it.arrived && !it.offRoute &&
@@ -596,6 +596,7 @@ internal fun NavigationScreen(
     }
     val dashboardWarnings = buildList {
         if (ui.busy || ui.locating || nav.loading || commandBusy) add("İşlem sürüyor; mevcut durum korunuyor.")
+        if (nav.approximateOrigin != null) add("Yaklaşık konum")
         if (nav.gpsStale) add("GPS konumu bekleniyor; son konum güncel değil.")
         if (!nav.locationActive && !nav.simulation && (nav.sessionId != null || nav.guidance || nav.recording)) add("Konum bağlantısı kuruluyor.")
         phoneVoiceFault(speechStatus, nav.guidance, nav.muted)?.let(::add)
@@ -632,6 +633,7 @@ internal fun NavigationScreen(
         } else "") + when {
             nav.simulation -> "Simülasyon · Günlüğe kaydedilmez"
             nav.guidance && nav.recording -> "Yol tarifi açık · Kayıt açık"
+            nav.guidance && nav.recordingPending -> "Yol tarifi açık · Kayıt konum bekliyor"
             nav.guidance -> "Yol tarifi açık · Kayıt kapalı"
             nav.recording -> "Yolculuk kaydı açık · Yönlendirme kapalı"
             else -> "Yolculuk kaydı ve yönlendirme kapalı"
@@ -671,9 +673,7 @@ internal fun NavigationScreen(
         showDashboard = showDashboard, onDashboard = { if (dashboardStillCurrent()) showDashboard = true }, dashboard = dashboardContent,
         weatherLabel = weather.assessment?.samples?.firstOrNull()?.reading?.temperatureC?.let { "${it.toInt()}° · Hava" } ?: "Hava durumu",
         onSearch = {
-            val current = vm.navigation.state.value
-            openPhoneDirectionsPanel(current, showPlanning,
-                { vm.enter(System.nanoTime(), null, current.sessionTransport ?: vm.ui.value.transport) }, { showPlanning = true; onPlannerOpened() })
+            showQuickDirections = true
         },
         onRecord = {
             if (nav.recording) sessionActions = true
@@ -721,6 +721,24 @@ internal fun NavigationScreen(
         onPrepareGroup = { ui.preview?.let { app.groups.prepareRoute(it.stops, it.transport); onGroup() } },
     )
     }
+    if (showQuickDirections) QuickDirectionsDialog(
+        places = places,
+        navigationState = vm.navigation.state,
+        locate = vm.navigation::quickOrigin,
+        validateOrigin = vm.navigation::validateQuickOrigin,
+        plan = vm.directions::planQuick,
+        activate = vm.navigation::startQuickGuidance,
+        commandBusy = commandBusy || ui.starting,
+        stillOnEntry = {
+            (uiHistory == null || uiHistory.current.key == dashboardEntry) && !vm.commandBusy.value && !vm.ui.value.starting
+        },
+        onDismiss = { showQuickDirections = false },
+        onStarted = {
+            showQuickDirections = false
+            showPlanning = false
+            onStarted()
+        },
+    )
     if (recordDialog) TransportDialog(ui.transport, "Yolculuğu kaydet", onDismiss = { recordDialog = false }) { selected ->
         vm.directions.transport(selected)
         vm.directions.setRecordJourney(true)
@@ -729,6 +747,8 @@ internal fun NavigationScreen(
     }
     if (sessionActions) AlertDialog(onDismissRequest = { sessionActions = false }, title = { Text("Yolculuk işlemleri") }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (nav.approximateOrigin != null) Text("Yaklaşık konum", style = MaterialTheme.typography.bodyMedium)
+            if (nav.recordingPending) RecordingPendingWarning()
             voiceControls()
             if (nav.guidance) OutlinedButton({ requestEnd(PhoneSessionEnd.GUIDANCE) }, enabled = !commandBusy && !ui.starting) { Text(PhoneSessionEnd.GUIDANCE.label) }
             if (nav.recording) OutlinedButton({ requestEnd(PhoneSessionEnd.RECORDING) }, enabled = !commandBusy && !ui.starting) { Text(PhoneSessionEnd.RECORDING.label) }

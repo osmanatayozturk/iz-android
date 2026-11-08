@@ -2,6 +2,11 @@
 
 package org.iz.navigation.ui
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.Settings
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -12,6 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.testTag
@@ -24,6 +30,9 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import org.iz.navigation.R
 import org.iz.navigation.data.GeoCoordinate
 import org.iz.navigation.data.TrackPoint
@@ -71,10 +80,15 @@ internal fun NavigationHomeContent(
     plannedBreakResumeEnabled: Boolean = false,
     planner: @Composable () -> Unit,
 ) {
-    val presentation = navigationMapPresentation(ui, nav, points, showPlanner, editPreview)
+    val plannerPresentation = navigationMapPresentation(ui, nav, points, showPlanner, editPreview)
+    val liveRouteBehindPlanner = nav.route?.takeIf { showPlanner && nav.guidance && plannerPresentation.route == null }
+    val presentation = if (liveRouteBehindPlanner != null) plannerPresentation.copy(
+        route = liveRouteBehindPlanner, stops = liveRouteBehindPlanner.stops, cameraIdentity = "session:${nav.sessionId}",
+    ) else plannerPresentation
     val live = presentation.sessionActive
     val route = presentation.route
-    val current = presentation.coordinate
+    val current = presentation.coordinate.takeUnless { nav.approximateOrigin != null && nav.gpsStale }
+    val preciseLocationAllowed = if (nav.recordingPending) rememberPreciseLocationPermission() else false
     val density = LocalDensity.current
     val textMeasurer = rememberTextMeasurer()
     val dashboardVisible = showDashboard && dashboard != null
@@ -107,7 +121,8 @@ internal fun NavigationHomeContent(
         // Bounds from an earlier header/panel/viewport must never drive this frame's camera.
         // GPS coordinates alone do not invalidate geometry or remount the native map.
         val layoutKey = listOf(maxWidth, maxHeight, density.density, density.fontScale, showPlanner, dashboardVisible, dashboardAtSide, dashboardSideWidth, dashboardBottomHeight, dashboardButtonHeight,
-            showDestinationHeader, live, nav.guidance, nav.recording, nav.simulation, nav.gpsStale,
+            showDestinationHeader, live, nav.guidance, nav.recording, nav.recordingPending, nav.simulation, nav.gpsStale,
+            nav.approximateOrigin != null, preciseLocationAllowed,
             nav.locationActive, nav.sessionTransport, nav.message, ui.message, weatherLabel, current == null, ui.locating, voiceFault, presentation.editPreviewLabel,
             if (showShortcuts) shortcuts.map { it.kind to it.place.name } else emptyList())
         // A shortcut row does not depend on maneuver, speed or warning text in the other panels.
@@ -150,7 +165,7 @@ internal fun NavigationHomeContent(
             if (showDestinationHeader) Column(Modifier.fillMaxWidth().onSizeChanged { headerMeasurement = headerKey to with(density) { it.height.toDp() } },
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (showBrand) HomeBrand()
-                Surface(onClick = onSearch, modifier = Modifier.fillMaxWidth().testTag("open-navigation"),
+                Surface(onClick = onSearch, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("open-navigation"),
                     shape = RoundedCornerShape(24.dp), shadowElevation = 4.dp, color = MaterialTheme.colorScheme.surface) {
                     Row(Modifier.padding(horizontal = 18.dp, vertical = 15.dp), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -169,7 +184,7 @@ internal fun NavigationHomeContent(
             } }
         }
         val navigationHeader: @Composable (@Composable () -> Unit, @Composable () -> Unit) -> Unit = { controls, preparedNotice ->
-            val hasWarning = ui.message != null || live && (nav.guidance && voiceFault != null || nav.gpsStale ||
+            val hasWarning = ui.message != null || live && (nav.guidance && voiceFault != null || nav.gpsStale || nav.recordingPending ||
                 !nav.locationActive && !nav.simulation || visibleSessionMessage(nav) != null)
             CompactGuidanceHeader(headerBudget, shortLandscape, nav.roadSpeed, controls, hasWarning, primary = { textPane ->
                 if (live) HomeSessionCard(nav, onMute, onManageSession,
@@ -187,7 +202,7 @@ internal fun NavigationHomeContent(
                     }
                 }
                 preparedNotice()
-                if (live) HomeSessionWarnings(nav, voiceFault)
+                if (live) HomeSessionWarnings(nav, voiceFault, preciseLocationAllowed)
                 statusMessage()
             }, accessories = {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
@@ -220,7 +235,7 @@ internal fun NavigationHomeContent(
             if (!showPlanner && !dashboardVisible && live) {
                 HomeSessionCard(nav, onMute, onManageSession, Modifier.padding(end = 60.dp),
                     plannedBreakResumeEnabled = plannedBreakResumeEnabled, onResumePlannedBreak = onResumePlannedBreak) {
-                    HomeSessionWarnings(nav, voiceFault)
+                    HomeSessionWarnings(nav, voiceFault, preciseLocationAllowed)
                 }
             }
             if (shortIdle) Row(Modifier.fillMaxWidth().padding(end = if (horizontalMapControls) 116.dp else 60.dp),
@@ -249,9 +264,14 @@ internal fun NavigationHomeContent(
         Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(end = dashboardSideWidth).padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
             shape = RoundedCornerShape(24.dp), shadowElevation = 6.dp, color = MaterialTheme.colorScheme.surface) {
             Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalButton(onRecord, Modifier.weight(1f).height(56.dp).testTag("home-record"), contentPadding = PaddingValues(6.dp)) {
+                FilledTonalButton(onRecord, Modifier.weight(1f).height(56.dp).testTag("home-record"),
+                    enabled = !nav.recordingPending, contentPadding = PaddingValues(6.dp)) {
                     Icon(if (nav.recording) Icons.Outlined.StopCircle else Icons.Outlined.FiberManualRecord, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(5.dp)); Text(if (nav.recording) "Kayıt açık" else "Kaydet", maxLines = 1)
+                    Spacer(Modifier.width(5.dp)); Text(when {
+                        nav.recording -> "Kayıt açık"
+                        nav.recordingPending -> "Kayıt bekliyor"
+                        else -> "Kaydet"
+                    }, maxLines = 1)
                 }
                 TextButton(onGroup, Modifier.weight(1f).height(56.dp).testTag("home-group"), contentPadding = PaddingValues(6.dp)) {
                     Icon(Icons.Outlined.Groups, null, Modifier.size(20.dp)); Spacer(Modifier.width(5.dp)); Text("Grup")
@@ -321,7 +341,7 @@ private fun HomeSessionCard(nav: NavigationState, onMute: () -> Unit, onManageSe
                 Box(Modifier.weight(1f)) {
                     val activeBreak = nav.plannedBreak
                     if (activeBreak != null) PlannedBreakElapsed(activeBreak, compact = true)
-                    else if (nav.guidance && !nav.paused) nav.progress?.nextManeuverDistanceMeters?.let { meters ->
+                    else if (nav.guidance && !nav.paused && !nav.gpsStale) nav.progress?.nextManeuverDistanceMeters?.let { meters ->
                         Text(if (meters >= 1000) "%.1f km sonra".format(meters / 1000) else "${meters.roundToInt().coerceAtLeast(0)} m sonra",
                             fontSize = 16.sp, lineHeight = 23.sp, color = Forest)
                     }
@@ -353,11 +373,40 @@ private fun visibleSessionMessage(nav: NavigationState): String? =
     nav.message?.takeUnless { nav.simulation && it == "Deneme sürüşü · günlüğe kaydedilmez" }
 
 @Composable
-private fun HomeSessionWarnings(nav: NavigationState, voiceFault: String?) {
+private fun HomeSessionWarnings(nav: NavigationState, voiceFault: String?, preciseLocationAllowed: Boolean) {
+    if (nav.approximateOrigin != null) Text("Yaklaşık konum", modifier = Modifier.testTag("quick-approximate-location"),
+        style = MaterialTheme.typography.bodyMedium)
     if (nav.guidance) voiceFault?.let { Text(it, modifier = Modifier.testTag("navigation-voice-fault"),
         color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
     if (nav.gpsStale) Text("GPS konumu bekleniyor", color = MaterialTheme.colorScheme.error,
         style = MaterialTheme.typography.bodySmall)
+    if (nav.recordingPending) RecordingPendingWarning(preciseLocationAllowed)
     if (!nav.locationActive && !nav.simulation) Text("Konum bağlantısı kuruluyor", style = MaterialTheme.typography.bodySmall)
     visibleSessionMessage(nav)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+}
+
+@Composable
+private fun rememberPreciseLocationPermission(): Boolean {
+    val context = LocalContext.current
+    fun hasPreciseLocation() = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+        PackageManager.PERMISSION_GRANTED
+    var allowed by remember(context) { mutableStateOf(hasPreciseLocation()) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { allowed = hasPreciseLocation() }
+    return allowed
+}
+
+@Composable
+internal fun RecordingPendingWarning(preciseLocationAllowed: Boolean = rememberPreciseLocationPermission()) {
+    val context = LocalContext.current
+    Column {
+        Text(if (preciseLocationAllowed) "Kayıt için güncel konum bekleniyor." else "Kayıt için hassas konum izni gerekiyor.",
+            style = MaterialTheme.typography.bodySmall)
+        if (!preciseLocationAllowed) {
+            TextButton(onClick = {
+                context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)))
+            }, modifier = Modifier.heightIn(min = 48.dp).testTag("recording-permission-settings")) {
+                Text("İzin ayarları")
+            }
+        }
+    }
 }

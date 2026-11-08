@@ -20,9 +20,9 @@ class NavigationEntryUiTest {
         val owner = (compose.activity.application as IzApplication).navigation
         val before = owner.state.value
         compose.onNodeWithTag("open-navigation").performClick()
-        compose.onNodeWithTag("navigation-screen").assertIsDisplayed()
-        compose.onNodeWithTag("close-directions-planner").performScrollTo().performClick()
-        compose.onNodeWithTag("navigation-screen").assertDoesNotExist()
+        compose.onNodeWithTag("quick-directions").assertIsDisplayed()
+        compose.onNodeWithTag("quick-back").performClick()
+        compose.onNodeWithTag("quick-directions").assertDoesNotExist()
         val after = owner.state.value
         assertEquals(before.journey?.id, after.journey?.id)
         assertEquals(before.route?.id, after.route?.id)

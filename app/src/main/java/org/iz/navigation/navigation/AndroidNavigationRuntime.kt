@@ -1,8 +1,12 @@
 package org.iz.navigation.navigation
 
 import android.annotation.SuppressLint
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.location.Location
+import androidx.core.content.ContextCompat
 import org.iz.navigation.data.*
 import org.iz.navigation.tracking.*
 import org.iz.navigation.weather.*
@@ -72,6 +76,11 @@ internal class AndroidNavigationRuntime(private val context: Context) : Navigati
         }
     }
     override fun setPreparingNoRecord(enabled: Boolean) { TrackingService.preparingNoRecord = enabled }
+    override suspend fun prepareQuickSession(transport: Transport, stillCurrent: () -> Boolean,
+        commit: (Journey?) -> Unit) = TrackingCoordinator.mutex.withLock {
+        check(TrackingCoordinator.pendingManualStartId() == null) { "Mevcut kaydın başlamasını bekle." }
+        super<NavigationRuntime>.prepareQuickSession(transport, stillCurrent, commit)
+    }
     override suspend fun prepareTrackFollowSession(transport: Transport, stillCurrent: () -> Boolean,
         onDiscard: (Journey) -> Unit, commit: (Journey?) -> Unit) = TrackingCoordinator.mutex.withLock {
         check(stillCurrent()) { "Başlatma işlemi iptal edildi." }
@@ -124,6 +133,38 @@ internal class AndroidNavigationRuntime(private val context: Context) : Navigati
         if (route.transport !in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE)) return false
         return TrafficSettingsStore(context).read().let { it.enabled && it.hasKey && it.freePlanAcknowledged }
     }
+
+    override fun hasPreciseLocation() = TrackingController.hasFineLocation(context)
+
+    override fun canLocateQuickly() = ContextCompat.checkSelfPermission(context,
+        Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED || hasPreciseLocation()
+
+    @SuppressLint("MissingPermission")
+    override suspend fun cachedQuickLocation(precise: Boolean): NavigationFix? {
+        if (!canLocateQuickly()) return null
+        val granularity = if (precise) Granularity.GRANULARITY_FINE else Granularity.GRANULARITY_COARSE
+        val request = LastLocationRequest.Builder().setGranularity(granularity).setMaxUpdateAgeMillis(60_000).build()
+        return LocationServices.getFusedLocationProviderClient(context)
+            .getLastLocation(request).await()?.toNavigationFix()
+    }
+
+    @SuppressLint("MissingPermission")
+    override suspend fun locateApproximate(): NavigationFix? {
+        if (!canLocateQuickly()) return null
+        val token = CancellationTokenSource()
+        try {
+            val request = CurrentLocationRequest.Builder().setPriority(Priority.PRIORITY_BALANCED_POWER_ACCURACY)
+                .setGranularity(Granularity.GRANULARITY_COARSE).setMaxUpdateAgeMillis(60_000)
+                .setDurationMillis(5_000).build()
+            return LocationServices.getFusedLocationProviderClient(context)
+                .getCurrentLocation(request, token.token).await()?.toNavigationFix()
+        } finally { token.cancel() }
+    }
+
+    private fun Location.toNavigationFix() = NavigationFix(WeatherCoordinate(latitude, longitude), time,
+        if (hasAccuracy()) accuracy else Float.POSITIVE_INFINITY,
+        if (hasSpeed()) speed else null, if (hasBearing()) bearing else null)
+
     @SuppressLint("MissingPermission")
     override suspend fun locate(): NavigationFix {
         check(TrackingController.hasFineLocation(context)) { "Hassas konum iznini telefondan ver." }
@@ -133,9 +174,7 @@ internal class AndroidNavigationRuntime(private val context: Context) : Navigati
                 .getCurrentLocation(CurrentLocationRequest.Builder().setPriority(Priority.PRIORITY_HIGH_ACCURACY)
                     .setMaxUpdateAgeMillis(5000).setDurationMillis(10_000).build(), token.token).await() }
                 ?: error("Güncel konum alınamadı. Konum hizmetlerini kontrol et.")
-            NavigationFix(WeatherCoordinate(location.latitude, location.longitude), location.time,
-                if (location.hasAccuracy()) location.accuracy else Float.POSITIVE_INFINITY,
-                if (location.hasSpeed()) location.speed else null, if (location.hasBearing()) location.bearing else null)
+            location.toNavigationFix()
         } finally { token.cancel() }
     }
     override fun render(state: NavigationState) {

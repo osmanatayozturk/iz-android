@@ -293,7 +293,8 @@ class ApprovedPhoneUsabilityAcceptanceTest {
     @Test fun defaultSearchReachesRealDirectionsDestinationAndPreservesOtherStops() = evidenceCase("route_receiver") {
         fixture.seedSearch()
         launch()
-        compose.onNodeWithTag("open-navigation").performClick()
+        compose.onNodeWithTag("home-menu").performClick()
+        compose.onNodeWithTag("menu-route-plan").performScrollTo().performClick()
         waitForTag("navigation-screen")
         val vm = navigationViewModel()
         scenario!!.onActivity {
@@ -375,7 +376,8 @@ class ApprovedPhoneUsabilityAcceptanceTest {
             }
         }
         fixture.capture("compact_card_mute_roundtrip", windowFacts())
-        for (entry in listOf("live-guidance-card", "home-finish-session", "open-navigation")) {
+        compose.onNodeWithTag("open-navigation").assertDoesNotExist()
+        for (entry in listOf("live-guidance-card", "home-finish-session")) {
             compose.onNodeWithTag(entry).performClick()
             waitForTag("navigation-screen")
             compose.onNodeWithTag("active-session-actions").assertExists()
@@ -437,7 +439,7 @@ class ApprovedPhoneUsabilityAcceptanceTest {
             assertEquals(session, NavigationStopSnapshot.from(fixture.app.navigation.state.value))
             assertTrue(windowKeepsScreenOn())
 
-            compose.onNodeWithTag("open-navigation").performClick()
+            compose.onNodeWithTag("home-finish-session").performClick()
             waitForTag("active-session-actions")
             assertTrue(fixture.observeScreen("paired_guidance_panel").allInteractive)
             compose.onNodeWithTag("stop-navigation-guidance").performScrollTo().performClick()

@@ -28,15 +28,20 @@ class NavigationHomeShellTest {
     }
 
     @Test fun plannerCanCloseWithoutDismissingOrScrollingMainMap() {
-        compose.onNodeWithTag("open-navigation").performClick()
+        openPlannerFromMenu()
         compose.onNodeWithTag("navigation-screen").performScrollToNode(hasTestTag("record-navigation-choice"))
         compose.onNodeWithTag("record-navigation-choice").assertIsOn().performClick().assertIsOff()
         compose.onNodeWithTag("navigation-screen").performScrollToNode(hasTestTag("close-directions-planner"))
         compose.onNodeWithTag("close-directions-planner").performClick()
         compose.onNodeWithTag("navigation-home-map").assertIsDisplayed()
-        compose.onNodeWithTag("open-navigation").performClick()
+        openPlannerFromMenu()
         compose.onNodeWithTag("navigation-screen").performScrollToNode(hasTestTag("record-navigation-choice"))
         compose.onNodeWithTag("record-navigation-choice").assertIsOn()
+    }
+
+    private fun openPlannerFromMenu() {
+        compose.onNodeWithTag("home-menu").performClick()
+        compose.onNodeWithTag("menu-route-plan").performScrollTo().performClick()
     }
 }
 

@@ -87,6 +87,16 @@ internal class PhoneDirectionsCoordinator(
         return route.requireUsablePreferences()
     }
 
+    suspend fun planQuick(origin: WeatherCoordinate, destination: RouteStop, transport: Transport,
+        choices: Map<QuickRoutePreference, Boolean>): PlannedRoute {
+        val settings = readSettings(transport)
+        val preferences = choices.entries.fold(settings.preferences) { current, (preference, avoid) ->
+            if (preference.supports(transport)) preference.applyTo(current, avoid) else current
+        }
+        return requestPlan(listOf(RouteStop("Mevcut konum", origin), destination),
+            PhoneDirectionsState(transport = transport, preferences = preferences, travelSpeedKmh = settings.travelSpeedKmh))
+    }
+
     fun adoptUiEntry(entryId: Long) { entry = entryId; enteredPlan = null }
     fun workingInput(): PhoneDirectionsInput = state.value.let {
         PhoneDirectionsInput(it.origin, it.originCurrent, it.destination, it.via.toList(), it.transport,

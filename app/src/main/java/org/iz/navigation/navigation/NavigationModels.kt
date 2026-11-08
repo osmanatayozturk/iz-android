@@ -12,6 +12,14 @@ data class NavigationFix(
     val bearingDegrees: Float? = null,
 )
 
+internal data class QuickNavigationOrigin(
+    val fix: NavigationFix,
+    val precise: Boolean,
+    internal val routeRevision: Long,
+    internal val sessionId: String?,
+    internal val requiresFinePermission: Boolean,
+)
+
 data class NavigationProgress(
     val elapsedSeconds: Double,
     val remainingSeconds: Double,
@@ -51,6 +59,8 @@ data class NavigationState(
     val plannedBreak: PlannedBreakState? = null,
     val tripTiming: org.iz.navigation.weather.RouteTripTiming? = null,
     val scheduleContext: org.iz.navigation.weather.RouteScheduleContext? = null,
+    val approximateOrigin: WeatherCoordinate? = null,
+    val recordingPending: Boolean = false,
 )
 /** Ephemeral confirmation identity; changing fixes, progress and messages do not invalidate it. */
 data class NavigationStopSnapshot(
