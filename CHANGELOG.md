@@ -34,7 +34,7 @@ Yerinde doğrulanan nokta ve tek kapalı çizgiyle tanımlanan alanlarda ad, sok
 
 Yedekten geri yüklenen OSM gönderimlerinin durumu İz’de kontrol edilebilir ve OSM bağlantısı açılabilir. İz’den kapatma, bu kurulumun OSM’den aldığı gerçek oluşturma yanıtıyla kaydettiği değişiklik kümelerine açıktır.
 
-`aa13500` adayında 1.467 birim testinin tamamı geçti, Debug lint hata vermedi ve Debug uygulama ile AndroidTest APK’ları derlendi. Bu adayın fiziksel telefon testi henüz çalıştırılmadı.
+`aa13500` adayında 1.467 birim testinin tamamı geçti, Debug lint hata vermedi ve Debug uygulama ile AndroidTest APK’ları derlendi. Aynı adayla fiziksel Samsung telefonda çevrimdışı 12/12 sentetik kontrol geçti. Geri yüklemede gecikmiş oluşturma yanıtına karşı iki ek kontrol de geçti ve iki QA paketi kaldırıldı. Canlı OSM işlemleri test kapsamı dışındaydı.
 
 ## Telefon 0.12.0 numarasıyla tutulan tarihsel aday kayıtları
 
