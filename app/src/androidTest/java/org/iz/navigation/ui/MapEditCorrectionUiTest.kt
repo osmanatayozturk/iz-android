@@ -1,14 +1,26 @@
 package org.iz.navigation.ui
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.iz.navigation.data.MapEditDraft
 import org.iz.navigation.data.OsmRef
@@ -100,7 +112,7 @@ class MapEditCorrectionUiTest {
         compose.onNodeWithTag("osm-map-correction-$key").performScrollTo().performTextReplacement(input)
         val preview = compose.onNodeWithText("OSM bilgilerini kontrol et ve incele")
         preview.performScrollTo().assertIsNotEnabled()
-        compose.onNodeWithTag("osm-map-correction-survey").performScrollTo().performClick()
+        confirmCheckbox("osm-map-correction-survey", "Düzelttiğim bilgileri yerinde doğruladım.")
         preview.performScrollTo().performClick()
         compose.onNodeWithText("OSM hesabı · Test haritacı").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Önce: $before").performScrollTo().assertIsDisplayed()
@@ -108,7 +120,7 @@ class MapEditCorrectionUiTest {
         val publish = compose.onNodeWithTag("osm-map-correction-publish")
         publish.performScrollTo().assertIsNotEnabled()
         compose.runOnIdle { assertTrue(submissions.isEmpty()) }
-        compose.onNodeWithTag("osm-map-correction-reviewed").performScrollTo().performClick()
+        confirmCheckbox("osm-map-correction-reviewed", "Güncellenecek bilgileri ve OSM hesabımı kontrol ettim.")
         publish.performScrollTo().performClick()
         return compose.runOnIdle {
             val review = submissions.single()
@@ -116,5 +128,15 @@ class MapEditCorrectionUiTest {
             assertEquals(41L, review.credentials.user.id)
             review.corrected
         }
+    }
+
+    private fun confirmCheckbox(tag: String, label: String) {
+        val checkbox = hasTestTag(tag) and hasText(label) and hasClickAction() and
+            SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Checkbox)
+        compose.onAllNodes(checkbox).assertCountEquals(1)
+        compose.onAllNodes(hasClickAction() and hasAnyAncestor(hasTestTag(tag)), useUnmergedTree = true)
+            .assertCountEquals(0)
+        compose.onNode(checkbox).performScrollTo().assertHeightIsAtLeast(48.dp)
+            .assertIsOff().performClick().assertIsOn()
     }
 }

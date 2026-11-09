@@ -4,9 +4,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -25,9 +27,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -148,11 +152,13 @@ internal fun MapEditCorrectionEditor(
                         }
                     }
                     Text("Onayladığın bilgiler OSM hesabınla herkese açık haritada güncellenecek.")
-                    Row {
-                        Checkbox(reviewed, { reviewed = it }, enabled = !locked && canWriteMap,
-                            modifier = Modifier.testTag("osm-map-correction-reviewed"))
-                        Text("Güncellenecek bilgileri ve OSM hesabımı kontrol ettim.", Modifier.padding(top = 12.dp))
-                    }
+                    CorrectionConfirmationRow(
+                        label = "Güncellenecek bilgileri ve OSM hesabımı kontrol ettim.",
+                        tag = "osm-map-correction-reviewed",
+                        checked = reviewed,
+                        enabled = !locked && canWriteMap,
+                        onCheckedChange = { reviewed = it },
+                    )
                     Button(onClick = {
                         clearReview()
                         if (isReviewCurrent(activeReview)) onPublish(activeReview)
@@ -167,10 +173,13 @@ internal fun MapEditCorrectionEditor(
                     CorrectionTextField("name", name, current?.tags?.get("name"), !locked) { name = it; survey = false }
                     CorrectionTextField("addr:street", street, current?.tags?.get("addr:street"), !locked) { street = it; survey = false }
                     CorrectionTextField("addr:housenumber", number, current?.tags?.get("addr:housenumber"), !locked) { number = it; survey = false }
-                    Row {
-                        Checkbox(survey, { survey = it }, enabled = !locked, modifier = Modifier.testTag("osm-map-correction-survey"))
-                        Text("Düzelttiğim bilgileri yerinde doğruladım.", Modifier.padding(top = 12.dp))
-                    }
+                    CorrectionConfirmationRow(
+                        label = "Düzelttiğim bilgileri yerinde doğruladım.",
+                        tag = "osm-map-correction-survey",
+                        checked = survey,
+                        enabled = !locked,
+                        onCheckedChange = { survey = it },
+                    )
                     val hasInput = listOf(name, street, number).any { it.isNotBlank() }
                     if (canWriteMap) Button(enabled = valid && survey && hasInput && !locked, modifier = Modifier.fillMaxWidth(), onClick = {
                         querying = true
@@ -209,6 +218,26 @@ internal fun MapEditCorrectionEditor(
                 TextButton(onClick = { exit(onClose) }, enabled = !locked) { Text("Kapat") }
             }
         }
+    }
+}
+
+@Composable
+private fun CorrectionConfirmationRow(
+    label: String,
+    tag: String,
+    checked: Boolean,
+    enabled: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag(tag).toggleable(
+            value = checked, enabled = enabled, role = Role.Checkbox, onValueChange = onCheckedChange,
+        ),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Checkbox(checked = checked, onCheckedChange = null, enabled = enabled)
+        Text(label)
     }
 }
 
