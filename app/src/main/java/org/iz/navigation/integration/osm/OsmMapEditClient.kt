@@ -46,6 +46,7 @@ internal interface OsmMapEditGateway {
         closeChangeset(token, id)
     }
     suspend fun downloadChangeset(id: Long): List<OsmCreatedNode>
+    suspend fun downloadSingleCreatedNode(id: Long): OsmCreatedNode?
     suspend fun readChangeset(id: Long): OsmChangesetInfo
 }
 
@@ -157,6 +158,13 @@ internal class OsmMapEditClient(
         }
     }
 
+    override suspend fun downloadSingleCreatedNode(id: Long): OsmCreatedNode? = withContext(Dispatchers.IO) {
+        val created = singleChangesetElement(id, "create")?.takeIf { it.tagName == "node" }
+            ?.readCorrectionElement() ?: return@withContext null
+        OsmCreatedNode(created.ref.id, created.version, created.changesetId, requireNotNull(created.userId),
+            requireNotNull(created.latitude).toDouble(), requireNotNull(created.longitude).toDouble(), created.tags)
+    }
+
     override suspend fun readElement(ref: OsmRef): OsmCorrectionElement = withContext(Dispatchers.IO) {
         require(ref.id > 0)
         if (ref.type == OsmType.RELATION) throw OsmUnsupportedCorrection()
@@ -182,11 +190,15 @@ internal class OsmMapEditClient(
     }
 
     override suspend fun downloadCorrection(changeset: Long): OsmCorrectionElement? = withContext(Dispatchers.IO) {
+        singleChangesetElement(changeset, "modify")?.readCorrectionElement()
+    }
+
+    private fun singleChangesetElement(changeset: Long, action: String): Element? {
         require(changeset > 0)
         val root = OsmMapEditXml.parse(execute(api("changeset/$changeset/download").header("Cache-Control", "no-cache").get().build()))
         require(root.tagName == "osmChange")
-        OsmMapEditXml.elements(root).singleOrNull()?.takeIf { it.tagName == "modify" }?.let { modify ->
-            OsmMapEditXml.elements(modify).singleOrNull()?.readCorrectionElement()
+        return OsmMapEditXml.elements(root).singleOrNull()?.takeIf { it.tagName == action }?.let { section ->
+            OsmMapEditXml.elements(section).singleOrNull()
         }
     }
 

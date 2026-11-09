@@ -80,24 +80,69 @@ class OsmMapCorrectionTest {
     }
 
     @Test fun provenAlreadyClosedChangesetOnlyUpdatesLocalState() = runBlocking {
+        for (legacy in listOf(false, true)) {
+            val fixture = Fixture()
+            val restored = if (legacy) fixture.restoreLegacySent() else fixture.restoreSent()
+            fixture.remoteOpen = false
+            fixture.download = fixture.exactCloseProof(legacy)
+            assertTrue(fixture.controller().close(restored.id).success)
+            assertEquals(0, fixture.closeRequests.size)
+            assertEquals(restored.copy(changesetClosed = true), fixture.store.value)
+        }
+    }
+
+    @Test fun downgradedZipNeedsExactlyOneMatchingCreatedNodeBeforeClose() = runBlocking {
         val fixture = Fixture()
-        val restored = fixture.restoreSent()
-        fixture.remoteOpen = false
-        fixture.download = "<osmChange><modify>${fixture.element(9, 22, corrected = true)}</modify></osmChange>"
-        assertTrue(fixture.controller().close(restored.id).success)
+        val restored = fixture.restoreLegacySent()
+        val node = fixture.createdNode()
+        val rejected = listOf(
+            "<modify>$node</modify>",
+            "<create>$node</create><modify>${fixture.element(9, 22, corrected = true)}</modify>",
+            "<create>$node$node</create>",
+            "<create>$node<way id=\"17\"/></create>",
+            "<create>${node.replace("id=\"7\"", "id=\"17\"")}</create>",
+            "<create>${node.replace("version=\"1\"", "version=\"2\"")}</create>",
+            "<create>${node.replace("uid=\"41\"", "uid=\"42\"")}</create>",
+            "<create>${node.replace("changeset=\"22\"", "changeset=\"23\"")}</create>",
+            "<create>${node.replace("41.1234567", "41.1234568")}</create>",
+            "<create>${node.replace("-29.2345678", "-29.2345679")}</create>",
+            "<create>${node.replace("cafe", "school")}</create>",
+        )
+        for (content in rejected) {
+            fixture.download = "<osmChange>$content</osmChange>"
+            fixture.controller().close(restored.id)
+            assertEquals(content, 0, fixture.closeRequests.size)
+            assertEquals(restored, fixture.store.value)
+        }
+        fixture.download = "<osmChange><create>$node</create></osmChange>"
+        fixture.remoteChangesetOwner = 42
+        assertFalse(fixture.controller().close(restored.id).success)
+        fixture.remoteChangesetOwner = 41
+        fixture.remoteChangesetId = 23
+        assertFalse(fixture.controller().close(restored.id).success)
         assertEquals(0, fixture.closeRequests.size)
+    }
+
+    @Test fun legacyZipWithExactCreatedNodeCanClose() = runBlocking {
+        val fixture = Fixture()
+        val restored = fixture.restoreLegacySent()
+        fixture.download = "<osmChange><create>${fixture.createdNode()}</create></osmChange>"
+        fixture.requests.clear()
+        assertTrue(fixture.controller().close(restored.id).success)
+        assertEquals(listOf("GET /api/0.6/changeset/22", "GET /api/0.6/changeset/22/download", "PUT /api/0.6/changeset/22/close"),
+            fixture.requests.map { "${it.method} ${it.url.encodedPath}" })
+        assertEquals("Bearer test-token", fixture.closeRequests.single().header("Authorization"))
         assertEquals(restored.copy(changesetClosed = true), fixture.store.value)
     }
 
     @Test fun closeNetworkGuardRejectsReplacedRowOrAccountAfterPreflight() = runBlocking {
-        for (replaceAccount in listOf(false, true)) {
+        for ((legacy, replaceAccount) in listOf(false to false, false to true, true to false, true to true)) {
             val fixture = Fixture()
-            val restored = fixture.restoreSent()
-            val exact = fixture.element(9, 22, corrected = true)
+            val restored = if (legacy) fixture.restoreLegacySent() else fixture.restoreSent()
             MockWebServer().use { server ->
                 server.start()
                 server.enqueue(MockResponse().setBody("""<osm><changeset id="22" uid="41" open="true"/></osm>"""))
-                server.enqueue(MockResponse().setBody("<osmChange><modify>$exact</modify></osmChange>"))
+                server.enqueue(MockResponse().setBody(fixture.exactCloseProof(legacy)))
                 server.enqueue(MockResponse().setBody(""))
                 var queuedClose = false
                 val gateway = OsmMapEditClient(OkHttpClient.Builder().addInterceptor { chain ->
@@ -324,6 +369,10 @@ class OsmMapCorrectionTest {
                 reviewedFingerprint = review.corrected.fingerprint(), appliedVersion = 9L))
             val manifest = BackupJson.encode(DiarySnapshot(mapEdits = listOf(sent)))
             assertEquals(9, manifest.getInt("version"))
+            if (sent.targetType == null) {
+                val row = manifest.getJSONArray("mapEdits").getJSONObject(0)
+                listOf("targetType", "targetId", "reviewedVersion", "reviewedFingerprint", "appliedVersion").forEach { row.remove(it) }
+            }
             val zipped = ByteArrayOutputStream()
             ZipOutputStream(zipped).use { zip ->
                 zip.putNextEntry(ZipEntry("manifest.json"))
@@ -336,6 +385,20 @@ class OsmMapCorrectionTest {
             assertEquals(sent, store.value)
             remoteOpen = true
             return store.value
+        }
+
+        suspend fun restoreLegacySent(): MapEditDraft = restoreSent {
+            it.copy(targetType = null, targetId = null, reviewedVersion = null, reviewedFingerprint = null,
+                appliedVersion = null, remoteNodeId = 7L, remoteNodeVersion = 1L,
+                latitude = 41.12345674, longitude = -29.23456784)
+        }
+
+        fun createdNode() = """<node id="7" version="1" changeset="22" uid="41" lat="41.1234567" lon="-29.2345678"><tag k="name" v="New &amp; Local"/><tag k="amenity" v="cafe"/></node>"""
+
+        fun exactCloseProof(legacy: Boolean): String = if (legacy) {
+            "<osmChange><create>${createdNode()}</create></osmChange>"
+        } else {
+            "<osmChange><modify>${element(9, 22, corrected = true)}</modify></osmChange>"
         }
 
         fun element(version: Long, changeset: Int, corrected: Boolean = false): String {

@@ -5,6 +5,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
+import kotlin.math.roundToLong
 
 internal interface OsmMapEditStore {
     suspend fun get(id: String): MapEditDraft?
@@ -92,9 +93,8 @@ internal class OsmMapEditPublisher(
             val info = api.readChangeset(changeset)
             if (info.userId != draft.submittedBy || info.id != changeset) return failure("OSM gönderimini yapan hesap eşleşmiyor.")
             val nodes = api.downloadChangeset(changeset)
-            val matches = nodes.filter { node -> node.id > 0 && node.version == 1L && node.changesetId == changeset &&
-                node.userId == draft.submittedBy && abs(node.latitude - draft.latitude) <= 0.0000001 &&
-                abs(node.longitude - draft.longitude) <= 0.0000001 && node.tags == draft.publicTags() }
+            val matches = nodes.filter { node -> node.matchesCreatedNode(draft, changeset) &&
+                abs(node.latitude - draft.latitude) <= 0.0000001 && abs(node.longitude - draft.longitude) <= 0.0000001 }
                 .distinctBy { it.id }
             val match = matches.singleOrNull()
             if (match == null) {
@@ -114,16 +114,39 @@ internal class OsmMapEditPublisher(
         catch (_: Exception) { return failure("OSM sonucu şu an kontrol edilemiyor. Yeniden gönderim yapılmadı.") }
     }
 
-    /** Explicit user action for an already published edit. */
+    /** Recheck remote creation proof before acting on a persisted or restored publication. */
     suspend fun close(id: String): OsmContributionResult {
         val value = store.get(id) ?: return failure("Kayıt bulunamadı.")
         if (value.targetType != null) return failure("Düzeltmenin OSM sonucunu doğrula.")
         val session = account()?.takeIf { "write_api" in it.scopes && it.user.id == value.submittedBy }
             ?: return failure("Gönderimi yapan hesabın harita düzenleme izni gerekli.")
-        if (value.status != MapEditStatus.SENT || value.remoteNodeId == null)
+        if (value.status != MapEditStatus.SENT || value.remoteNodeId == null || value.remoteNodeVersion != 1L)
             return failure("Önce yayımlama sonucunu kontrol et.")
-        return if (store.closePublishedMapEdit(value, session, api)) success("OSM gönderimi tamamlandı.")
-        else failure("Mekân yayımlanmış durumda. Gönderimin son adımı şu an tamamlanamadı.")
+        val changeset = value.changesetId ?: return failure(CLOSE_UNVERIFIED)
+        try {
+            val info = api.readChangeset(changeset)
+            if (info.id != changeset || info.userId != session.user.id) return failure(CLOSE_UNVERIFIED)
+            val node = api.downloadSingleCreatedNode(changeset) ?: return failure(CLOSE_UNVERIFIED)
+            if (node.id != value.remoteNodeId || !node.matchesCreatedNode(value, changeset) ||
+                node.latitude != osmStoredCoordinate(value.latitude) || node.longitude != osmStoredCoordinate(value.longitude))
+                return failure(CLOSE_UNVERIFIED)
+            if (store.get(value.id) != value || account() !== session) return failure(CLOSE_CHANGED)
+            if (info.open) {
+                if (value.changesetClosed) return failure(CLOSE_UNVERIFIED)
+                api.closeChangeset(session.token, changeset) {
+                    account() === session && store.isCurrentForDispatch(value) && account() === session
+                }
+            }
+            if (account() !== session || !store.compareAndSet(value, value.copy(changesetClosed = true, error = null)))
+                return failure(CLOSE_CHANGED)
+            return success("OSM gönderimi tamamlandı.")
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: OsmMapEditNotDispatched) {
+            return failure(CLOSE_CHANGED)
+        } catch (_: Exception) {
+            return failure(CLOSE_UNVERIFIED)
+        }
     }
 
     private suspend fun markInterrupted(value: MapEditDraft) {
@@ -131,7 +154,21 @@ internal class OsmMapEditPublisher(
     }
     private fun failure(message: String) = OsmContributionResult(false, message)
     private fun success(message: String) = OsmContributionResult(true, message)
-    companion object { private const val UNKNOWN_MESSAGE = "Gönderimin sonucu belirsiz. Tekrar gönderme; OSM sonucunu kontrol et." }
+    companion object {
+        private const val UNKNOWN_MESSAGE = "Gönderimin sonucu belirsiz. Tekrar gönderme; OSM sonucunu kontrol et."
+        private const val CLOSE_UNVERIFIED = "OSM gönderimi kesin olarak doğrulanamadı. Sonucu daha sonra kontrol et."
+        private const val CLOSE_CHANGED = "OSM oturumu veya gönderim kaydı değişti. Güncel durumu kontrol et."
+    }
+}
+
+private fun OsmCreatedNode.matchesCreatedNode(draft: MapEditDraft, changeset: Long): Boolean =
+    id > 0 && version == 1L && changesetId == changeset && userId == draft.submittedBy && tags == draft.publicTags()
+
+/** OSM stores node coordinates as rounded signed integer units of 10⁻⁷ degrees. */
+private fun osmStoredCoordinate(value: Double): Double {
+    val scaled = value * 10_000_000.0
+    val units = abs(scaled).roundToLong()
+    return (if (scaled < 0) -units else units) / 10_000_000.0
 }
 
 internal suspend fun OsmMapEditStore.closePublishedMapEdit(

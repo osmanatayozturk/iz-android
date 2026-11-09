@@ -69,6 +69,8 @@ class OsmMapEditTest {
         assertFalse(store.value.changesetClosed)
         publisher.send(store.value.id)
         api.closeFailure = null
+        api.open = true
+        api.nodes = listOf(OsmCreatedNode(9, 1, 7, 41, 41.01, 29.02, draft().publicTags()))
         assertTrue(publisher.close(store.value.id).success)
         assertTrue(store.value.changesetClosed)
         assertEquals(1, api.uploads)
@@ -114,6 +116,7 @@ class OsmMapEditTest {
     private class Gateway : OsmMapEditGateway {
         var creates = 0; var uploads = 0
         var uploadFailure: Exception? = null; var closeFailure: Exception? = null
+        var open = false
         var nodes = emptyList<OsmCreatedNode>()
         var duplicates = emptyList<OsmDuplicateCandidate>()
         override suspend fun nearby(draft: MapEditDraft) = duplicates
@@ -123,6 +126,7 @@ class OsmMapEditTest {
         }
         override suspend fun closeChangeset(token: String, id: Long) { closeFailure?.let { throw it } }
         override suspend fun downloadChangeset(id: Long) = nodes
-        override suspend fun readChangeset(id: Long) = OsmChangesetInfo(id, 41, false)
+        override suspend fun downloadSingleCreatedNode(id: Long) = nodes.singleOrNull()
+        override suspend fun readChangeset(id: Long) = OsmChangesetInfo(id, 41, open)
     }
 }
