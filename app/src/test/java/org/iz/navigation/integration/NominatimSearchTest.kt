@@ -346,6 +346,64 @@ class NominatimSearchTest {
             assertEquals(2, f.writtenKeys.size)
         }
     }
+    @Test fun directionsBiasStaysUnboundedOnBothPagesAndCacheKeysUseTheExactUrl() = runTest {
+        fixture().use { f ->
+            val origin = org.iz.navigation.weather.WeatherCoordinate(39.912345, 32.812345)
+            val viewbox = DirectionsViewbox.around(origin)
+            f.enqueue(page(place(15, "Yahya Çavuş", lat = 41.01, lon = 29.01)))
+            f.enqueue(page(place(15, "Yahya Çavuş", lat = 41.01, lon = 29.01),
+                place(363072750, "Yahya Çavuş İlkokulu", lat = 39.94, lon = 32.86)))
+            val first = f.search.searchForDirections("Yahya Çavuş", viewbox)
+            assertEquals(listOf(363072750L, 15L),
+                rankDirectionsPlaces(first, origin).map { it.osmRef!!.id })
+            val urls = List(2) { checkNotNull(f.server.takeRequest(1, java.util.concurrent.TimeUnit.SECONDS)?.requestUrl) }
+            for (url in urls) {
+                assertEquals("32.55,40.10,33.05,39.70", url.queryParameter("viewbox"))
+                assertEquals("0", url.queryParameter("bounded"))
+                assertEquals("Yahya Çavuş", url.queryParameter("q"))
+                assertFalse(url.toString().contains("12345"))
+            }
+            assertEquals("W15", urls.last().queryParameter("exclude_place_ids"))
+            assertEquals(urls.map { "search-v3:accept-language=tr:$it" }, f.writtenKeys)
+            assertEquals(first, f.newSearch().searchForDirections("Yahya Çavuş", viewbox))
+            assertEquals(2, f.server.requestCount)
+            f.enqueue(page())
+            f.search.searchForDirections("Yahya Çavuş", DirectionsViewbox.around(origin.copy(latitude = 40.2)))
+            f.enqueue(page())
+            f.search.searchForDirections("YAHYA ÇAVUŞ", viewbox)
+            assertEquals(4, f.server.requestCount)
+        }
+    }
+
+    @Test fun directionsWithoutUsableBoxRemoveBiasFromBothRequests() = runTest {
+        fixture().use { f ->
+            f.endpoint = f.server.url("/search?viewbox=1,2,3,4&bounded=1").toString()
+            f.enqueue(page(place(1, "Kültür Merkezi")))
+            f.enqueue(page())
+            f.search.searchForDirections("Kültür Merkezi", null)
+            repeat(2) {
+                val url = checkNotNull(f.server.takeRequest(1, java.util.concurrent.TimeUnit.SECONDS)?.requestUrl)
+                assertNull(url.queryParameter("viewbox"))
+                assertNull(url.queryParameter("bounded"))
+            }
+        }
+    }
+
+    @Test fun directionsForwardTheExplicitCityAndKeepTheFartherExactName() = runTest {
+        fixture().use { f ->
+            val origin = org.iz.navigation.weather.WeatherCoordinate(39.93, 32.85)
+            f.enqueue(page(place(15, "Yahya Çavuş", lat = 41.01, lon = 29.01),
+                place(363072750, "Yahya Çavuş İlkokulu", lat = 39.94, lon = 32.86)))
+            f.enqueue(page())
+            val places = f.search.searchForDirections("Yahya Çavuş, İstanbul", DirectionsViewbox.around(origin))
+            assertEquals(listOf(363072750L, 15L), rankDirectionsPlaces(places, origin).map { it.osmRef!!.id })
+            repeat(2) {
+                val url = checkNotNull(f.server.takeRequest(1, java.util.concurrent.TimeUnit.SECONDS)?.requestUrl)
+                assertEquals("Yahya Çavuş, İstanbul", url.queryParameter("q"))
+            }
+        }
+    }
+
     private fun TestScope.fixture() = Fixture(this, temporary.newFolder())
 
     private class Fixture(private val scope: TestScope, private val folder: File) : AutoCloseable {

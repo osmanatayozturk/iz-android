@@ -109,14 +109,20 @@ internal fun QuickDirectionsDialog(
     searchPlaces: (suspend (String) -> List<SelectedOsmPlace>)? = null,
     hasLocationPermission: (() -> Boolean)? = null,
     initialDestination: RouteStop? = null,
+    searchOrigin: suspend () -> WeatherCoordinate? = { null },
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val onRouteStarted by rememberUpdatedState(onStarted)
     val currentlyBusy by rememberUpdatedState(commandBusy)
     val entryCurrent by rememberUpdatedState(stillOnEntry)
+    val currentSearchOrigin by rememberUpdatedState(searchOrigin)
     val search = remember(context, scope, searchPlaces) {
-        OsmSearchController(scope, "", searchPlaces ?: OsmPlaces(context)::search)
+        val service by lazy { OsmPlaces(context) }
+        val submit: suspend (String) -> List<SelectedOsmPlace> = searchPlaces ?: { query ->
+            service.searchForDirections(query, currentSearchOrigin)
+        }
+        OsmSearchController(scope, "", submit)
     }
     val results by search.state.collectAsStateWithLifecycle()
     val nav by navigationState.collectAsStateWithLifecycle()
@@ -299,9 +305,14 @@ private fun QuickDestinationPicker(state: OsmSearchUiState, places: List<Place>,
             OutlinedCard({ choose(quickStop(place.name, place.latitude, place.longitude)) }, Modifier.fillMaxWidth()) {
                 Column(Modifier.heightIn(min = 48.dp).padding(12.dp)) {
                     Text(place.name)
-                    place.displayName?.takeIf { it.isNotBlank() && it.trim() != place.name.trim() }?.let {
-                        Text(it, style = MaterialTheme.typography.bodySmall)
+                    val name = place.name.trim()
+                    val display = place.displayName.orEmpty().trim()
+                    val address = when {
+                        display.equals(name, ignoreCase = true) -> ""
+                        display.startsWith("$name,", ignoreCase = true) -> display.drop(name.length + 1).trim()
+                        else -> display
                     }
+                    Text(address.ifEmpty { "Adres bilgisi yok" }, style = MaterialTheme.typography.bodySmall)
                 }
             }
         }

@@ -25,21 +25,34 @@ internal class NominatimSearch(
     private val now: () -> Long = System::currentTimeMillis,
     private val pause: suspend (Long) -> Unit = { delay(it) },
 ) {
-    suspend fun search(query: String): List<SelectedOsmPlace> {
+    suspend fun search(query: String): List<SelectedOsmPlace> = search(query, directions = false, viewbox = null)
+
+    suspend fun searchForDirections(query: String, viewbox: DirectionsViewbox?): List<SelectedOsmPlace> =
+        search(query, directions = true, viewbox = viewbox)
+
+    private suspend fun search(query: String, directions: Boolean, viewbox: DirectionsViewbox?): List<SelectedOsmPlace> {
         coroutineContext.ensureActive()
-        val normalized = query.trim().replace(Regex("\\s+"), " ")
+        val normalized = normalizeNominatimQuery(query)
         if (normalized.length < 2) return emptyList()
-        require(normalized.length <= 200) { "Arama en fazla 200 karakter olabilir." }
         return mutex.withLock {
             coroutineContext.ensureActive()
-            val service = endpoint().toHttpUrl()
-            val first = page(searchUrl(service, normalized))
+            val endpointUrl = endpoint().toHttpUrl()
+            val service = if (directions) endpointUrl.newBuilder()
+                .removeAllQueryParameters("viewbox")
+                .removeAllQueryParameters("bounded")
+                .apply {
+                    if (viewbox != null) {
+                        setQueryParameter("viewbox", viewbox.value)
+                        setQueryParameter("bounded", "0")
+                    }
+                }.build() else endpointUrl
+            val first = page(searchUrl(service, normalized), directions)
             val exclusions = first.mapNotNull { it.osmRef }
                 .map { it.type.name.first().toString() + it.id }.distinct().sorted().joinToString(",")
             // One bounded continuation of this explicit submission, never an all-results loop.
             val extra = if (first.size in 1..9 && exclusions.isNotEmpty()) {
                 try {
-                    page(searchUrl(service, normalized, exclusions))
+                    page(searchUrl(service, normalized, exclusions), directions)
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (_: Exception) {
@@ -61,13 +74,17 @@ internal class NominatimSearch(
             .apply { if (exclusions.isNotEmpty()) setQueryParameter("exclude_place_ids", exclusions) }
             .build()
 
-    private suspend fun page(url: HttpUrl): List<SelectedOsmPlace> {
+    private suspend fun page(url: HttpUrl, directions: Boolean): List<SelectedOsmPlace> {
         val context = coroutineContext
         context.ensureActive()
         // Version and full request options isolate old one-page data and each exclusion page.
-        val cacheUrl = url.newBuilder()
-            .setQueryParameter("q", url.queryParameter("q")!!.lowercase(Locale.ROOT)).build()
-        val key = "search-v2:accept-language=tr:$cacheUrl"
+        val key = if (directions) {
+            "search-v3:accept-language=tr:$url"
+        } else {
+            val cacheUrl = url.newBuilder()
+                .setQueryParameter("q", url.queryParameter("q")!!.lowercase(Locale.ROOT)).build()
+            "search-v2:accept-language=tr:$cacheUrl"
+        }
         val cached = readCached(key)
         context.ensureActive()
         if (cached != null) return cached.take(10)
@@ -104,4 +121,10 @@ internal class NominatimSearch(
             throw OsmServiceException("Yer arama servisi beklememizi istiyor. Biraz sonra yeniden ara.")
         }
     }
+}
+
+internal fun normalizeNominatimQuery(query: String): String {
+    val normalized = query.trim().replace(Regex("\\s+"), " ")
+    require(normalized.length <= 200) { "Arama en fazla 200 karakter olabilir." }
+    return normalized
 }

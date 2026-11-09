@@ -383,6 +383,15 @@ class JourneyNavigationCoordinator(
         activate(route, true, recordJourney, replaceTrackFollow, expectedTrackFollowKey)
     suspend fun activateRoute(route: PlannedRoute, replaceTrackFollow: Boolean = false): String = activate(route, false, true, replaceTrackFollow)
 
+    internal suspend fun quickSearchCoordinate(): WeatherCoordinate? = findQuickSearchCoordinate(
+        canLocate = runtime::canLocateQuickly,
+        hasFine = runtime::hasPreciseLocation,
+        visible = { state.value.takeUnless { it.simulation || simulationEnabled }?.fix },
+        cached = runtime::cachedQuickLocation,
+        approximate = runtime::locateApproximate,
+        now = clock,
+    )
+
     internal suspend fun quickOrigin(): QuickNavigationOrigin {
         val owner = state.value
         check(owner.route == null && owner.trackFollow == null && !owner.simulation && !simulationEnabled) {
@@ -437,9 +446,6 @@ class JourneyNavigationCoordinator(
                 state.value.routeRevision == origin.routeRevision && state.value.sessionId == origin.sessionId
         })
     }
-
-    private fun usableQuickLocation(fix: NavigationFix, now: Long) =
-        now - fix.recordedAt in 0..60_000 && fix.accuracyMeters.isFinite() && fix.accuracyMeters >= 0
 
     /** Exact prepared geometry: never asks a planner for a connector or replacement. */
     suspend fun startPreparedGuidance(route: PlannedRoute, fingerprint: String, recordJourney: Boolean = true,

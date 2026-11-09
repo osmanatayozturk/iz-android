@@ -9,8 +9,11 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
 import org.iz.navigation.data.Place
+import org.iz.navigation.data.OsmRef
+import org.iz.navigation.data.OsmType
 import org.iz.navigation.data.SelectedOsmPlace
 import org.iz.navigation.data.Transport
+import org.iz.navigation.integration.rankDirectionsPlaces
 import org.iz.navigation.navigation.NavigationFix
 import org.iz.navigation.navigation.NavigationState
 import org.iz.navigation.navigation.QuickNavigationOrigin
@@ -21,6 +24,7 @@ import org.iz.navigation.weather.WeatherCoordinate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -100,7 +104,11 @@ class QuickDirectionsUiTest {
 
     @Test fun osmResultStartsOnceWithTheSelectedCoordinates() {
         val nav = MutableStateFlow(NavigationState())
-        val expected = WeatherCoordinate(41.03, 29.03)
+        val searchOrigin = WeatherCoordinate(39.93, 32.85)
+        val expected = WeatherCoordinate(39.94, 32.86)
+        val nearby = SelectedOsmPlace("Yahya Çavuş İlkokulu", expected.latitude, expected.longitude,
+            OsmRef(OsmType.WAY, 363072750), "Yahya Çavuş İlkokulu, Ankara")
+        val distant = SelectedOsmPlace("Yahya Çavuş", 41.01, 29.01, displayName = "Yahya Çavuş, İstanbul")
         val plannedDestinations = mutableListOf<WeatherCoordinate>()
         val activatedRoutes = mutableListOf<PlannedRoute>()
         var completion = 0
@@ -118,18 +126,26 @@ class QuickDirectionsUiTest {
                         route.id
                     },
                     onDismiss = {}, onStarted = { completion++ }, hasLocationPermission = { true },
-                    searchPlaces = { listOf(SelectedOsmPlace("OSM kıyısı", 41.03, 29.03)) },
+                    searchPlaces = {
+                        rankDirectionsPlaces(listOf(distant, nearby), searchOrigin)
+                    },
                 )
             }
         }
 
         val destinations = compose.onNodeWithTag("quick-destinations")
         destinations.performScrollToNode(hasTestTag("quick-search-query"))
-        compose.onNodeWithTag("quick-search-query").performTextInput("kıyı")
+        compose.onNodeWithTag("quick-search-query").performTextInput("Yahya Çavuş")
         compose.onNodeWithTag("quick-search-submit").performClick()
-        compose.waitUntil(5_000) { compose.onAllNodesWithText("OSM kıyısı").fetchSemanticsNodes().isNotEmpty() }
-        destinations.performScrollToNode(hasText("OSM kıyısı"))
-        compose.onNodeWithText("OSM kıyısı").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithText(nearby.name).fetchSemanticsNodes().isNotEmpty() }
+        // Title, search field and preferences precede the two settled results.
+        destinations.performScrollToIndex(3)
+        val nearRow = compose.onNodeWithText(nearby.name).assertIsDisplayed()
+        val farRow = compose.onNodeWithText(distant.name).assertIsDisplayed()
+        assertTrue(nearRow.fetchSemanticsNode().boundsInRoot.top < farRow.fetchSemanticsNode().boundsInRoot.top)
+        compose.onNodeWithText("İstanbul", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("Ankara", useUnmergedTree = true).assertIsDisplayed()
+        nearRow.performClick()
         compose.onNodeWithTag("quick-route-options").performScrollToNode(hasTestTag("quick-mode-CAR"))
         compose.onNodeWithTag("quick-mode-CAR").performClick()
         compose.runOnIdle {

@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlin.coroutines.coroutineContext
 import org.iz.navigation.weather.PlannedRoute
+import org.iz.navigation.weather.WeatherCoordinate
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -51,6 +52,20 @@ class OsmPlaces(context: Context) {
 
     suspend fun search(query: String): List<SelectedOsmPlace> = withContext(Dispatchers.IO) {
         nominatimSearch.search(query)
+    }
+
+    internal suspend fun searchForDirections(
+        query: String,
+        location: suspend () -> WeatherCoordinate?,
+    ): List<SelectedOsmPlace> {
+        coroutineContext.ensureActive()
+        val normalized = normalizeNominatimQuery(query)
+        if (normalized.length < 2) return emptyList()
+        val origin = location()
+        return withContext(Dispatchers.IO) {
+            val places = nominatimSearch.searchForDirections(normalized, origin?.let(DirectionsViewbox::around))
+            rankDirectionsPlaces(places, origin)
+        }
     }
 
     suspend fun nearby(latitude: Double, longitude: Double): List<SelectedOsmPlace> = withContext(Dispatchers.IO) {

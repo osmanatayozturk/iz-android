@@ -5,13 +5,18 @@
 ## Servisler
 
 - MapLibre, çevrimiçi raster haritayı görünür OpenStreetMap kaynak gösterimiyle çizer. Çevrimdışı bölge indirme veya toplu karo ön yükleme yapılmaz.
-- Nominatim yalnız kullanıcı **Ara** düğmesine bastığında sorgulanır. İlk sayfada 1–9 geçerli sonuç ve en az bir OSM referansı varsa, mevcut referanslar `exclude_place_ids` ile dışlanarak en fazla bir devam isteği yapılır. İlk sayfa boşsa, tam 10 sonuç içeriyorsa veya referans yoksa devam edilmez. Her sayfa en fazla 10, birleşik liste en fazla 20 sonuçla sınırlıdır; bu sınır eksiksiz yer keşfi garantisi değildir.
-- Mevcut yapılandırılabilir sağlayıcı, `format=jsonv2`, `limit=10`, `addressdetails=0` ve Türkçe dil tercihi korunur. Ham yanıtlar endpoint, sorgu, seçenekler, dil ve dışlama listesiyle ayrılan v2 sayfa anahtarlarında önbelleğe alınır. İkinci sayfa başarısız olursa ilk sayfa korunur; mevcut istek hızı, yanıt boyutu, bekleme ve iptal sınırları sürer.
-- Arama sonuçlarında `name` başlık olarak kalır; mevcut yanıttaki `display_name` ayrı bir sunum alanıyla telefon listesine taşınır. Boş veya yalnız başlığı tekrarlayan açıklama için “Adres bilgisi yok” kullanılır. Yapılandırılmış adres alanı istenmez, virgülden mahalle/sokak türü çıkarılmaz ve adres için ek sorgu yapılmaz. Bu sunum alanı günlük, rota veya yedek veri biçimine eklenmez.
-- Overpass küçük, görünür harita alanlarında yakındaki OSM nesnelerini bulur. Yanıt boyutu ve günlük kullanım sınırlandırılır; servis kota yanıtı verdiğinde yeniden deneme geciktirilir.
+- Nominatim yalnız kullanıcı açıkça arama başlattığında sorgulanır. İlk sayfada 1–9 geçerli sonuç ve en az bir OSM referansı varsa, mevcut referanslar `exclude_place_ids` ile dışlanarak en fazla bir devam isteği yapılır. İlk sayfa boşsa, tam 10 sonuç içeriyorsa veya referans yoksa devam edilmez. Her sayfa en fazla 10, birleşik liste en fazla 20 sonuçla sınırlıdır. Bu sınır, tüm eşleşmelerin dönmesini garanti etmez.
+- Yapılandırılabilir sağlayıcı, `format=jsonv2`, `limit=10`, `addressdetails=0` ve Türkçe dil tercihi korunur. **Nereye?** aramasında her ham yanıt Türkçe dil tercihi ve tam istek URL’siyle v3 sayfa önbelleğine yazılır. Diğer aramalar v2 anahtarlarını kullanır. İkinci sayfa başarısız olursa ilk sayfa korunur. Mevcut istek hızı, yanıt boyutu, bekleme ve iptal sınırları sürer.
+- **Nereye?** sonuçlarında `name` başlık olarak kalır. Mevcut yanıttaki `display_name` ayrı bir satıra yazılır ve başta yinelenen yer adı çıkarılır. Adres satırı boş kalırsa “Adres bilgisi yok” gösterilir. Adres için ek sorgu yapılmaz. Bu sunum alanı günlük, rota veya yedek veri biçimine eklenmez.
+- Overpass küçük, görünür harita alanlarında yakındaki OSM nesnelerini bulur. Yanıt boyutu ve günlük kullanım sınırlandırılır. Servis kota yanıtı verdiğinde yeniden deneme geciktirilir.
 - OSM Notes yazma, yalnız kullanıcı metni ve konumu önizleyip açıkça onayladıktan sonra gerçekleşir. Özel günlük notları, fotoğraflar ve sağlık verileri gönderilmez.
 
 Servis adresleri uygulamanın gelişmiş ayarlarından değiştirilebilir. Bir dağıtımı çok sayıda kullanıcıya açmadan önce seçilen karo, Nominatim ve Overpass sunucularının kullanım politikaları ve kapasitesi değerlendirilmelidir.
+
+### Terimler
+
+- **Yakınlık önceliği** — Telefonda **Nereye?** aramasında **Ara** düğmesi veya klavyenin **Ara** eylemiyle başlar. Hazır ve izinli konum en fazla 60 saniye eski olabilir. Hazır konum yoksa ve izin varsa yaklaşık konum için en fazla 5 saniye beklenir. Gelen sonuçlar cihazda en yakından en uzağa sıralanır. Eşit mesafede veya konum alınamadığında servis sırası korunur.
+- **Yaklaşık arama alanı** — Nominatim’e gönderilen, merkezi 0,1 dereceye yuvarlanmış `viewbox`. Alan merkezden enlemde 0,20°, boylamda 0,25° uzanır. `bounded=0` ile alan dışındaki eşleşmeler de dönebilir. [Nominatim arama belgesi](https://nominatim.org/release-docs/latest/api/Search/)
 
 ## Kimlik doğrulama ve veri güvenliği
 

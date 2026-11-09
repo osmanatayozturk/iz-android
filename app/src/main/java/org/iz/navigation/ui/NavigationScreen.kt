@@ -759,6 +759,7 @@ internal fun NavigationScreen(
             places = places,
             navigationState = vm.navigation.state,
             locate = vm.navigation::quickOrigin,
+            searchOrigin = vm.navigation::quickSearchCoordinate,
             validateOrigin = vm.navigation::validateQuickOrigin,
             plan = vm.directions::planQuick,
             activate = vm.navigation::startQuickGuidance,
