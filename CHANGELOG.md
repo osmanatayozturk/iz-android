@@ -18,6 +18,12 @@ Ana harita boşta olduğunda logo ve **İz** başlığının altında **Nereye?*
 
 `a1d1ad5d` adayında bilgisayarda 1.426 birim testi geçti, Debug lint hata vermedi ve Debug uygulama ile AndroidTest APK’ları derlendi. Fiziksel Samsung telefonda ayrı çevrimdışı QA paketiyle Ev/İş kapsamındaki 7 kontrolün tamamı geçti. Canlı rota ve OSM gönderimi kapsam dışıydı.
 
+### Nereye? — aramada yakınlık önceliği
+
+Konum kullanılabiliyorsa **Nereye?** araması OpenStreetMap servisine merkezi yuvarlanmış bir arama alanı gönderir ve sonuçları cihazda yakından uzağa sıralar. Arama için yeni konum izni istenmez. İzin yoksa veya konum alınamazsa sonuçlar servisin sırasıyla gösterilir.
+
+Özellik commit’i `22678f2d` üzerinde 1.438 birim testi geçti, Debug lint hata vermedi, Debug uygulama ve AndroidTest APK’ları derlendi. Son aday `aeb44d5d` ile fiziksel Samsung telefonda iki sentetik arama senaryosu geçti.
+
 ## Telefon 0.12.0 numarasıyla tutulan tarihsel aday kayıtları
 
 Bu bölüm, 0.12.0 yayımlanmadan önceki aday doğrulama anlık görüntüsünü ve yayımlanmış 0.12.0’dan sonra 6–7 Kasım’da aynı 0.12.0 numarasıyla yapılan kamera, Molalı rota ve OSM GPS izi paylaşımı kaynak güncellemelerini birlikte kaydeder. Sonraki kaynak güncellemeleri yayımlanmış 0.12.0 sürümünün içeriği değildir. Bu tarihsel doğrulama ve kaynak kayıtları 0.13.0 için kabul veya doğrulama oluşturmaz. Yayımlanmış 0.12.0’ın release notları için [GitHub sürüm kaydı](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.12.0) esas alınır.

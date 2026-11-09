@@ -11,6 +11,7 @@ Büyük yedekler sayfalı hazırlanır. ZIP kaydedildiğinde geri okunup doğrul
 | Molalı rota | Planlı molaları rota zamanlaması ve yolculuk kartıyla eşleştir. |
 | OSM GPS izi paylaşımı | Tamamlanmış yolculuk izlerini açık kullanıcı onayıyla isteğe bağlı paylaş. |
 | Nereye? (telefon kaynak adayı) | Ana ekrandan kayıtlı bir yer veya OpenStreetMap arama sonucu seç. Ulaşım türünü belirleyip mevcut konumdan rota başlat. |
+| Nereye? yakınlık önceliği (telefon kaynak adayı) | Konum kullanılabiliyorsa yaklaşık arama alanıyla yakındaki eşleşmelere öncelik ver ve sonuçları cihazda mesafeye göre sırala. Konum yoksa servis sırasını kullan. |
 | OSM toplu iz (telefon kaynak adayı) | Tamamlanmış yolculuk izlerini birlikte seç, gönderimi inceleyip onayla ve sonucu bağlı hesabın ayrı **Yüklenenler** sayfasında kontrol et. |
 | Ev/İş (telefon kaynak adayı) | Boştaki ana haritada logo ve İz başlığının altında Nereye?, ardından Ev ve İş yer alır. Yer atadıktan sonra kısayol, hızlı hedef ekranını seçili hedefle açar. |
 
@@ -19,6 +20,8 @@ Büyük yedekler sayfalı hazırlanır. ZIP kaydedildiğinde geri okunup doğrul
 Fiziksel Samsung telefonda ağsız QA paketiyle yapılan ilk koşuda üç sentetik hızlı hedef senaryosu geçti. MainActivity’de Nereye? giriş ve geri dönüş kontrolü, MapLibre’ın ağ isteği izin hatası verince tamamlanamadı. Aynı ürün APK’sıyla yapılan ayrı koşuda, yalnız test paketine eklenen çevrimdışı MapLibre kuralıyla giriş ve geri dönüş kontrolü geçti.
 
 **OSM toplu iz ve Ev/İş doğrulaması.** Kaynak adayı `a1d1ad5d` üzerinde 1.426 birim testi geçti. Başarısızlık, hata ve atlama sayıları sıfırdı. Debug lint 98 uyarı ve 1 ipucu verdi, hata vermedi. Debug uygulama ve AndroidTest APK’ları bilgisayarda derlendi. Fiziksel Samsung telefonda ayrı çevrimdışı QA paketiyle 7/7 kontrol geçti. Kapsam ana ekrandan Ev/İş atama, seçili hedefle ulaşım türü seçme, ana ekran yerleşimi, geri dönüldüğünde geciken rota sonucunun uygulanmaması ve yeni yer kaydıydı. Canlı rota ve OSM gönderimi kapsam dışıydı.
+
+**Nereye? arama doğrulaması.** `22678f2d` üzerinde 1.438 birim testi geçti ve Debug lint 0 hata verdi. Debug uygulama ve AndroidTest APK’ları bilgisayarda derlendi. Son aday `aeb44d5d` üzerinde fiziksel Samsung telefonda ayrı QA paketiyle 2/2 sentetik kontrol geçti. Kapsam seçilen arama sonucunun koordinatlarıyla yönlendirme başlatma, klavyeden arama ve geri dönüşte seçimlerin korunmasıydı.
 
 Yayımlanmış önceki sürüm Telefon 0.12.0 / code 28’dir. Bu bölüm, 0.12.0 yayımlanmadan önceki aday doğrulama anlık görüntüsünü ve yayımlanmış 0.12.0’dan sonra 6–7 Kasım’da aynı 0.12.0 numarasıyla yapılan kamera, Molalı rota ve OSM GPS izi paylaşımı kaynak güncellemelerini birlikte kaydeder. Sonraki kaynak güncellemeleri yayımlanmış 0.12.0 sürümünün içeriği değildir. Bu tarihsel doğrulama ve kaynak kayıtları 0.13.0 için kabul veya doğrulama oluşturmaz. Yayımlanmış 0.12.0’ın release notları için [GitHub sürüm kaydı](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.12.0) esas alınır.
 
