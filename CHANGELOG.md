@@ -10,6 +10,14 @@ Telefonun ana ekranındaki **Nereye?** ile kayıtlı bir yeri veya OpenStreetMap
 
 Bilgisayarda 1.410 birim testi geçti, Debug lint hata vermedi ve Debug uygulama ile AndroidTest APK’ları derlendi. Fiziksel Samsung telefonda ağsız QA paketiyle üç sentetik hızlı hedef senaryosu geçti. Ana ekrandaki Nereye? giriş ve geri dönüş kontrolü, aynı ürün APK’sıyla ve testte çevrimdışı harita kuralıyla yapılan ayrı koşuda geçti.
 
+### OSM toplu iz ve Ev/İş — telefon kaynak adayı
+
+OpenStreetMap’e göndermek istediğiniz tamamlanmış yolculuk izlerini birlikte seçip gönderimden önce inceleyebilirsiniz. Gönderim durumu ve iz geçmişi bağlı OSM hesabına göre gösterilir.
+
+Telefonun ana haritasındaki **Ev** ve **İş** kısayollarına kayıtlı bir yer atayabilir veya yeni bir yer ekleyebilirsiniz. Atanmış kısayol, **Nereye?** ekranını hedef seçili olarak açar.
+
+`a1d1ad5d` adayında bilgisayarda 1.426 birim testi geçti, Debug lint hata vermedi ve Debug uygulama ile AndroidTest APK’ları derlendi. Fiziksel telefon doğrulaması bekliyor.
+
 ## Telefon 0.12.0 numarasıyla tutulan tarihsel aday kayıtları
 
 Bu bölüm, 0.12.0 yayımlanmadan önceki aday doğrulama anlık görüntüsünü ve yayımlanmış 0.12.0’dan sonra 6–7 Kasım’da aynı 0.12.0 numarasıyla yapılan kamera, Molalı rota ve OSM GPS izi paylaşımı kaynak güncellemelerini birlikte kaydeder. Sonraki kaynak güncellemeleri yayımlanmış 0.12.0 sürümünün içeriği değildir. Bu tarihsel doğrulama ve kaynak kayıtları 0.13.0 için kabul veya doğrulama oluşturmaz. Yayımlanmış 0.12.0’ın release notları için [GitHub sürüm kaydı](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.12.0) esas alınır.
