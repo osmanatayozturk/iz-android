@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 internal interface MapEditDao {
     @Query("SELECT * FROM map_edit_drafts WHERE id = :id") suspend fun read(id: String): MapEditDraft?
+    @Query("SELECT * FROM map_edit_drafts WHERE id = :id") fun readForDispatch(id: String): MapEditDraft?
     @Query("SELECT * FROM map_edit_drafts ORDER BY observedAt DESC") fun observeAll(): Flow<List<MapEditDraft>>
     @Query("SELECT * FROM map_edit_drafts") suspend fun all(): List<MapEditDraft>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun save(value: MapEditDraft)

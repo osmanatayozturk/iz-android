@@ -140,7 +140,7 @@ internal class OsmMapEditClient(
         }
     override suspend fun readChangeset(id: Long): OsmChangesetInfo = withContext(Dispatchers.IO) {
         require(id > 0)
-        val root = OsmMapEditXml.parse(execute(api("changeset/$id").get().build()))
+        val root = OsmMapEditXml.parse(execute(api("changeset/$id").header("Cache-Control", "no-cache").get().build()))
         val value = OsmMapEditXml.children(root, "changeset").single()
         OsmChangesetInfo(value.getAttribute("id").toLong(), value.getAttribute("uid").toLong(),
             value.getAttribute("open").let { require(it in setOf("true", "false")); it == "true" }).also { require(it.id == id && it.userId > 0) }

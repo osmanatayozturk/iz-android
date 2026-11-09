@@ -8,6 +8,7 @@ import kotlin.math.abs
 
 internal interface OsmMapEditStore {
     suspend fun get(id: String): MapEditDraft?
+    fun isCurrentForDispatch(expected: MapEditDraft): Boolean
     suspend fun begin(id: String, userId: Long, time: Long): MapEditDraft?
     suspend fun compareAndSet(expected: MapEditDraft, updated: MapEditDraft): Boolean
 }
@@ -116,12 +117,12 @@ internal class OsmMapEditPublisher(
     /** Explicit user action for an already published edit. */
     suspend fun close(id: String): OsmContributionResult {
         val value = store.get(id) ?: return failure("Kayıt bulunamadı.")
+        if (value.targetType != null) return failure("Düzeltmenin OSM sonucunu doğrula.")
         val session = account()?.takeIf { "write_api" in it.scopes && it.user.id == value.submittedBy }
             ?: return failure("Gönderimi yapan hesabın harita düzenleme izni gerekli.")
-        if (value.status != MapEditStatus.SENT || (value.remoteNodeId == null && value.appliedVersion == null))
+        if (value.status != MapEditStatus.SENT || value.remoteNodeId == null)
             return failure("Önce yayımlama sonucunu kontrol et.")
-        val canDispatch = if (value.targetType != null) ({ account() === session }) else null
-        return if (store.closePublishedMapEdit(value, session, api, canDispatch)) success("OSM gönderimi tamamlandı.")
+        return if (store.closePublishedMapEdit(value, session, api)) success("OSM gönderimi tamamlandı.")
         else failure("Mekân yayımlanmış durumda. Gönderimin son adımı şu an tamamlanamadı.")
     }
 
@@ -152,21 +153,35 @@ internal suspend fun OsmMapEditStore.closePublishedMapEdit(
     }
 }
 
-class OsmMapEditController(private val repository: DiaryRepository, auth: OsmAuthManager, overpassEndpoint: () -> String) {
-    private val api = OsmMapEditClient(overpassEndpoint = overpassEndpoint)
-    private val store = object : OsmMapEditStore {
-        override suspend fun get(id: String) = repository.getMapEdit(id)
-        override suspend fun begin(id: String, userId: Long, time: Long) = repository.beginMapEditSend(id, userId, time)
-        override suspend fun compareAndSet(expected: MapEditDraft, updated: MapEditDraft) = repository.compareAndSetMapEdit(expected, updated)
-    }
-    private val publisher = OsmMapEditPublisher(store, auth::currentCredentials, api, onUnauthorized = auth::rejectExpiredSession)
-    private val correction = OsmMapCorrectionPublisher(store, auth::currentCredentials, api, onUnauthorized = auth::rejectExpiredSession)
+class OsmMapEditController internal constructor(
+    private val store: OsmMapEditStore,
+    account: () -> OsmCredentials?,
+    private val api: OsmMapCorrectionGateway,
+    onUnauthorized: (OsmCredentials) -> Unit = {},
+) {
+    constructor(repository: DiaryRepository, auth: OsmAuthManager, overpassEndpoint: () -> String) : this(
+        object : OsmMapEditStore {
+            override suspend fun get(id: String) = repository.getMapEdit(id)
+            override fun isCurrentForDispatch(expected: MapEditDraft) = repository.isMapEditCurrentForDispatch(expected)
+            override suspend fun begin(id: String, userId: Long, time: Long) = repository.beginMapEditSend(id, userId, time)
+            override suspend fun compareAndSet(expected: MapEditDraft, updated: MapEditDraft) = repository.compareAndSetMapEdit(expected, updated)
+        },
+        auth::currentCredentials,
+        OsmMapEditClient(overpassEndpoint = overpassEndpoint),
+        auth::rejectExpiredSession,
+    )
+
+    private val publisher = OsmMapEditPublisher(store, account, api, onUnauthorized = onUnauthorized)
+    private val correction = OsmMapCorrectionPublisher(store, account, api, onUnauthorized = onUnauthorized)
     suspend fun nearby(draft: MapEditDraft): List<OsmDuplicateCandidate> = api.nearby(draft)
     suspend fun send(id: String, reviewedCandidates: Set<OsmRef>) = publisher.send(id, reviewedCandidates)
     internal suspend fun readCorrectionTarget(ref: OsmRef) = correction.readSupported(ref)
     internal suspend fun previewCorrection(draft: MapEditDraft) = correction.preview(draft)
     internal suspend fun sendCorrection(review: OsmCorrectionReview) = correction.send(review)
     suspend fun reconcile(id: String) =
-        if (repository.getMapEdit(id)?.targetType != null) correction.reconcile(id) else publisher.reconcile(id)
-    suspend fun close(id: String) = publisher.close(id)
+        if (store.get(id)?.targetType != null) correction.reconcile(id) else publisher.reconcile(id)
+    suspend fun close(id: String): OsmContributionResult {
+        val draft = store.get(id) ?: return OsmContributionResult(false, "Kayıt bulunamadı.")
+        return if (draft.targetType != null) correction.close(draft) else publisher.close(id)
+    }
 }

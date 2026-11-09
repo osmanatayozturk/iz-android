@@ -1,22 +1,123 @@
 package org.iz.navigation.integration.osm
 
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import okio.Buffer
+import org.iz.navigation.data.BackupJson
+import org.iz.navigation.data.DiarySnapshot
 import org.iz.navigation.data.MapEditDraft
 import org.iz.navigation.data.MapEditStage
 import org.iz.navigation.data.MapEditStatus
 import org.iz.navigation.data.OsmType
+import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 
 class OsmMapCorrectionTest {
+    @Test fun restoredSentNeedsExactRemoteProofBeforeClose() = runBlocking {
+        val fixture = Fixture(OsmType.WAY)
+        val restored = fixture.restoreSent()
+        val exact = fixture.element(9, 22, corrected = true)
+        val otherOwner = exact.replace("uid=\"41\"", "uid=\"42\"")
+        val otherElement = exact.replace("id=\"7\"", "id=\"17\"")
+        val otherType = Fixture().element(9, 22, corrected = true)
+        val otherVersion = fixture.element(10, 22, corrected = true)
+        val otherChangeset = fixture.element(9, 23, corrected = true)
+        val otherFingerprint = exact.replace("Existing", "Wrong")
+        val rejected = listOf(otherOwner, otherElement, otherType, otherVersion, otherChangeset, otherFingerprint)
+        for (element in rejected) {
+            fixture.download = "<osmChange><modify>$element</modify></osmChange>"
+            assertFalse(fixture.controller().close(restored.id).success)
+            assertEquals(0, fixture.closeRequests.size)
+            assertEquals(restored, fixture.store.value)
+        }
+        fixture.download = "<osmChange><create>$exact</create></osmChange>"
+        assertFalse(fixture.controller().close(restored.id).success)
+        assertEquals(0, fixture.closeRequests.size)
+
+        fixture.download = "<osmChange><modify>$exact</modify></osmChange>"
+        fixture.remoteChangesetId = 23
+        assertFalse(fixture.controller().close(restored.id).success)
+        fixture.remoteChangesetId = 22
+        fixture.remoteChangesetOwner = 42
+        assertFalse(fixture.controller().close(restored.id).success)
+        assertEquals(0, fixture.closeRequests.size)
+    }
+
+    @Test fun restoredSentCanCloseWithExactProofAndActiveOwner() = runBlocking {
+        val fixture = Fixture()
+        val restored = fixture.restoreSent()
+        fixture.download = "<osmChange><modify>${fixture.element(9, 22, corrected = true)}</modify></osmChange>"
+        fixture.requests.clear()
+        assertTrue(fixture.controller().close(restored.id).success)
+        assertEquals(listOf("GET /api/0.6/changeset/22", "GET /api/0.6/changeset/22/download", "PUT /api/0.6/changeset/22/close"),
+            fixture.requests.map { "${it.method} ${it.url.encodedPath}" })
+        assertEquals("Bearer test-token", fixture.closeRequests.single().header("Authorization"))
+        assertEquals(restored.copy(changesetClosed = true), fixture.store.value)
+    }
+
+    @Test fun forgedZipChangesetAndFingerprintDoNotAuthorizeClose() = runBlocking {
+        val fixture = Fixture()
+        val restored = fixture.restoreSent { it.copy(changesetId = 23L, reviewedFingerprint = "f".repeat(64)) }
+        fixture.remoteChangesetId = 23
+        fixture.download = "<osmChange><modify>${fixture.element(9, 23, corrected = true)}</modify></osmChange>"
+        assertFalse(fixture.controller().close(restored.id).success)
+        assertEquals(0, fixture.closeRequests.size)
+        assertEquals(restored, fixture.store.value)
+    }
+
+    @Test fun provenAlreadyClosedChangesetOnlyUpdatesLocalState() = runBlocking {
+        val fixture = Fixture()
+        val restored = fixture.restoreSent()
+        fixture.remoteOpen = false
+        fixture.download = "<osmChange><modify>${fixture.element(9, 22, corrected = true)}</modify></osmChange>"
+        assertTrue(fixture.controller().close(restored.id).success)
+        assertEquals(0, fixture.closeRequests.size)
+        assertEquals(restored.copy(changesetClosed = true), fixture.store.value)
+    }
+
+    @Test fun closeNetworkGuardRejectsReplacedRowOrAccountAfterPreflight() = runBlocking {
+        for (replaceAccount in listOf(false, true)) {
+            val fixture = Fixture()
+            val restored = fixture.restoreSent()
+            val exact = fixture.element(9, 22, corrected = true)
+            MockWebServer().use { server ->
+                server.start()
+                server.enqueue(MockResponse().setBody("""<osm><changeset id="22" uid="41" open="true"/></osm>"""))
+                server.enqueue(MockResponse().setBody("<osmChange><modify>$exact</modify></osmChange>"))
+                server.enqueue(MockResponse().setBody(""))
+                var queuedClose = false
+                val gateway = OsmMapEditClient(OkHttpClient.Builder().addInterceptor { chain ->
+                    val request = chain.request()
+                    if (request.method == "PUT") {
+                        queuedClose = true
+                        if (replaceAccount) fixture.account = OsmCredentials("renewed-test-token", fixture.account.user, null, fixture.account.scopes)
+                        else fixture.store.value = restored.copy(error = "Kayıt değişti.")
+                    }
+                    chain.proceed(request.newBuilder().url(server.url(request.url.encodedPath)).build())
+                }.build())
+                assertFalse(fixture.controller(gateway).close(restored.id).success)
+                assertTrue(queuedClose)
+                assertEquals(2, server.requestCount)
+                assertFalse(fixture.store.value.changesetClosed)
+                assertEquals(if (replaceAccount) restored else restored.copy(error = "Kayıt değişti."), fixture.store.value)
+            }
+        }
+    }
+
     @Test fun nodeModificationPreservesCoordinatesAndAllOtherTags() = runBlocking {
         val fixture = Fixture()
         val review = fixture.review()
@@ -38,6 +139,7 @@ class OsmMapCorrectionTest {
             it.getAttribute("k") to it.getAttribute("v")
         })
         assertEquals(9L, fixture.store.value.appliedVersion)
+        assertEquals(1, fixture.closeRequests.size)
         assertNull(fixture.store.value.remoteNodeId)
     }
 
@@ -178,7 +280,11 @@ class OsmMapCorrectionTest {
         var uploads = 0
         var inFlight: MapEditDraft? = null
         var onCreate: () -> Unit = {}
+        var remoteChangesetId = 22
+        var remoteChangesetOwner = 41
+        var remoteOpen = false
         val requests = mutableListOf<Request>()
+        val closeRequests get() = requests.filter { it.method == "PUT" && it.url.encodedPath.endsWith("/close") }
         private val kind = type.name.lowercase()
         private val client = OsmMapEditClient(OkHttpClient.Builder().addInterceptor { chain ->
             val request = chain.request()
@@ -198,9 +304,9 @@ class OsmMapCorrectionTest {
                     if (uploadInterrupted) throw IOException("Lost write response")
                     uploadCode to "<diffResult><$kind old_id=\"7\" new_id=\"7\" new_version=\"9\"/></diffResult>"
                 }
-                "changeset/22" -> 200 to """<osm><changeset id="22" uid="41" open="false"/></osm>"""
-                "changeset/22/download" -> 200 to download
-                "changeset/22/close" -> 200 to ""
+                "changeset/22", "changeset/23" -> 200 to """<osm><changeset id="$remoteChangesetId" uid="$remoteChangesetOwner" open="$remoteOpen"/></osm>"""
+                "changeset/22/download", "changeset/23/download" -> 200 to download
+                "changeset/22/close", "changeset/23/close" -> 200 to ""
                 else -> error("Unexpected $request")
             }
             Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(response.first).message("fixture")
@@ -208,7 +314,29 @@ class OsmMapCorrectionTest {
         }.build())
 
         fun publisher(memory: Memory = store) = OsmMapCorrectionPublisher(memory, { currentAccount() }, client, { 100L })
+        fun controller(gateway: OsmMapCorrectionGateway = client) = OsmMapEditController(store, { currentAccount() }, gateway)
         suspend fun review() = publisher().preview(store.value)
+
+        suspend fun restoreSent(rewrite: (MapEditDraft) -> MapEditDraft = { it }): MapEditDraft {
+            val review = review()
+            val sent = rewrite(store.value.copy(status = MapEditStatus.SENT, stage = MapEditStage.CLOSE_CHANGESET,
+                submittedAt = 100L, submittedBy = 41L, changesetId = 22L, reviewedVersion = 8L,
+                reviewedFingerprint = review.corrected.fingerprint(), appliedVersion = 9L))
+            val manifest = BackupJson.encode(DiarySnapshot(mapEdits = listOf(sent)))
+            assertEquals(9, manifest.getInt("version"))
+            val zipped = ByteArrayOutputStream()
+            ZipOutputStream(zipped).use { zip ->
+                zip.putNextEntry(ZipEntry("manifest.json"))
+                zip.write(manifest.toString().toByteArray(Charsets.UTF_8))
+            }
+            store.value = ZipInputStream(ByteArrayInputStream(zipped.toByteArray())).use { zip ->
+                assertEquals("manifest.json", zip.nextEntry.name)
+                BackupJson.decode(JSONObject(zip.readBytes().toString(Charsets.UTF_8))).mapEdits.single()
+            }
+            assertEquals(sent, store.value)
+            remoteOpen = true
+            return store.value
+        }
 
         fun element(version: Long, changeset: Int, corrected: Boolean = false): String {
             val position = if (type == OsmType.NODE) " lat=\"41.1234567\" lon=\"29.2345678\"" else ""
@@ -218,7 +346,8 @@ class OsmMapCorrectionTest {
         }
     }
 
-    private class Memory(var value: MapEditDraft) : OsmMapEditStore {
+    private class Memory(@Volatile var value: MapEditDraft) : OsmMapEditStore {
+        override fun isCurrentForDispatch(expected: MapEditDraft) = value == expected
         override suspend fun get(id: String) = value.takeIf { it.id == id }
         override suspend fun begin(id: String, userId: Long, time: Long): MapEditDraft? = error("Legacy create path used")
         override suspend fun compareAndSet(expected: MapEditDraft, updated: MapEditDraft): Boolean {

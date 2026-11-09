@@ -311,6 +311,10 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
 
     suspend fun getMapEdit(id: String): MapEditDraft? = mapDao.read(id)
 
+    /** Only called by the guarded HTTP dispatch on a background thread. */
+    internal fun isMapEditCurrentForDispatch(expected: MapEditDraft): Boolean =
+        mapDao.readForDispatch(expected.id) == expected
+
     suspend fun saveMapEdit(draft: MapEditDraft, canSave: (MapEditDraft?) -> Boolean = { true }) = db.withTransaction {
         val current = mapDao.read(draft.id)
         check(canSave(current)) { "OSM hesabı değişti." }

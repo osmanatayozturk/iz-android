@@ -68,6 +68,9 @@ class OsmMapEditTest {
         assertEquals(MapEditStatus.SENT, store.value.status)
         assertFalse(store.value.changesetClosed)
         publisher.send(store.value.id)
+        api.closeFailure = null
+        assertTrue(publisher.close(store.value.id).success)
+        assertTrue(store.value.changesetClosed)
         assertEquals(1, api.uploads)
     }
 
@@ -94,6 +97,7 @@ class OsmMapEditTest {
     }
 
     private class Memory(var value: MapEditDraft) : OsmMapEditStore {
+        override fun isCurrentForDispatch(expected: MapEditDraft) = value == expected
         override suspend fun get(id: String) = value.takeIf { it.id == id }
         override suspend fun begin(id: String, userId: Long, time: Long): MapEditDraft? {
             if (value.id != id || value.status !in setOf(MapEditStatus.DRAFT, MapEditStatus.FAILED)) return null

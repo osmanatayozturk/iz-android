@@ -96,7 +96,7 @@ internal class OsmMapCorrectionPublisher(
         val draft = store.get(id) ?: return failure("Taslak bulunamadı.")
         val session = account()?.takeIf { it.user.id == draft.submittedBy }
             ?: return failure("Bu düzeltmeyi yapan OSM hesabını bağla.")
-        val ref = draft.correctionRef() ?: return failure("OSM mekân kimliği bulunamadı.")
+        if (draft.correctionRef() == null) return failure("OSM mekân kimliği bulunamadı.")
         if (draft.status !in setOf(MapEditStatus.UNKNOWN, MapEditStatus.SENT)) return failure("Kontrol edilecek düzeltme yok.")
         val changeset = draft.changesetId
         if (changeset == null) {
@@ -107,12 +107,8 @@ internal class OsmMapCorrectionPublisher(
         }
         val expectedVersion = draft.reviewedVersion?.plus(1) ?: return failure(UNKNOWN)
         try {
-            val info = api.readChangeset(changeset)
-            if (info.id != changeset || info.userId != draft.submittedBy) return failure(UNKNOWN)
-            val match = api.downloadCorrection(changeset)
+            val info = readProof(draft, changeset, expectedVersion) ?: return failure(UNKNOWN)
             if (account() !== session) return failure(ACCOUNT_CHANGED)
-            if (match == null || match.ref != ref || match.version != expectedVersion || match.changesetId != changeset ||
-                match.userId != draft.submittedBy || match.fingerprint() != draft.reviewedFingerprint) return failure(UNKNOWN)
             val applied = draft.copy(status = MapEditStatus.SENT, stage = MapEditStage.CLOSE_CHANGESET, appliedVersion = expectedVersion,
                 changesetClosed = draft.changesetClosed || !info.open, error = null)
             if (!store.compareAndSet(draft, applied)) return failure("Kayıt değişti. Güncel durumu kontrol et.")
@@ -121,6 +117,46 @@ internal class OsmMapCorrectionPublisher(
             throw cancelled
         } catch (_: Exception) {
             return failure(UNKNOWN)
+        }
+    }
+
+    /** Restored publication state is a lookup key. Only an exact remote modification authorizes closing it. */
+    suspend fun close(draft: MapEditDraft): OsmContributionResult {
+        val session = account()?.takeIf { "write_api" in it.scopes && it.user.id == draft.submittedBy }
+            ?: return failure("Gönderimi yapan hesabın harita düzenleme izni gerekli.")
+        val changeset = draft.changesetId ?: return failure(UNKNOWN)
+        val expectedVersion = draft.reviewedVersion?.plus(1) ?: return failure(UNKNOWN)
+        if (draft.status != MapEditStatus.SENT || draft.appliedVersion != expectedVersion) return failure(UNKNOWN)
+        try {
+            val info = readProof(draft, changeset, expectedVersion) ?: return failure(UNKNOWN)
+            if (store.get(draft.id) != draft) return failure(ROW_CHANGED)
+            if (account() !== session) return failure(ACCOUNT_CHANGED)
+            if (info.open) {
+                if (draft.changesetClosed) return failure(UNKNOWN)
+                api.closeChangeset(session.token, changeset) {
+                    account() === session && store.isCurrentForDispatch(draft) && account() === session
+                }
+            }
+            if (account() !== session) return failure(ACCOUNT_CHANGED)
+            if (!store.compareAndSet(draft, draft.copy(changesetClosed = true, error = null))) return failure(ROW_CHANGED)
+            return OsmContributionResult(true, "OSM gönderimi tamamlandı.")
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: OsmMapEditNotDispatched) {
+            return failure(if (account() !== session) ACCOUNT_CHANGED else ROW_CHANGED)
+        } catch (_: Exception) {
+            return failure(UNKNOWN)
+        }
+    }
+
+    private suspend fun readProof(draft: MapEditDraft, changeset: Long, expectedVersion: Long): OsmChangesetInfo? {
+        val ref = draft.correctionRef() ?: return null
+        val info = api.readChangeset(changeset)
+        if (info.id != changeset || info.userId != draft.submittedBy) return null
+        val match = api.downloadCorrection(changeset) ?: return null
+        return info.takeIf {
+            match.ref == ref && match.version == expectedVersion && match.changesetId == changeset &&
+                match.userId == draft.submittedBy && match.fingerprint() == draft.reviewedFingerprint
         }
     }
 
@@ -138,6 +174,7 @@ internal class OsmMapCorrectionPublisher(
     private companion object {
         const val ACCOUNT_CHANGED = "OSM oturumu değişti. Hesabını kontrol edip düzeltmeyi yeniden incele."
         const val REVIEW_AGAIN = "Taslak veya OSM mekânı değişti. Düzeltmeyi yeniden incele."
+        const val ROW_CHANGED = "Kayıt değişti. Güncel durumu kontrol et."
         const val UNKNOWN = "OSM düzeltmesi kesin olarak doğrulanamadı. Sonucu daha sonra kontrol et."
     }
 }
