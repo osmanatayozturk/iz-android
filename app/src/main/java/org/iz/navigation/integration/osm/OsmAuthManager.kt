@@ -33,9 +33,12 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 internal const val OSM_GPX_WRITE_SCOPE = "write_gpx"
+internal const val OSM_GPX_READ_SCOPE = "read_gpx"
 
-internal fun osmGpxUpgradeScopes(existing: Set<String>): Set<String> =
-    OsmOAuthScopes.requested(existing) + OSM_GPX_WRITE_SCOPE
+internal fun osmGpxUpgradeScopes(existing: Set<String>, permission: String = OSM_GPX_WRITE_SCOPE): Set<String> {
+    require(permission == OSM_GPX_WRITE_SCOPE || permission == OSM_GPX_READ_SCOPE)
+    return OsmOAuthScopes.requested(existing) + permission
+}
 
 data class OsmAuthUiState(val user: OsmUser? = null, val busy: Boolean = false,
     val error: String? = null, val clientIdConfigured: Boolean = false, val canWriteMap: Boolean = false,
@@ -134,16 +137,19 @@ class OsmAuthManager private constructor(context: Context) {
         }
     }
 
-    internal fun currentGpxSession(): CommunitySession? {
-        val current = currentCredentials() ?: return null
-        return communitySource.sessions.value?.takeIf {
-            it.userId == current.user.id && it.token == current.token && it.scopes == current.scopes
-        }
-    }
+    internal fun currentGpxSession(): CommunitySession? =
+        currentCredentials()?.let { communitySource.sessionFor(it) }
 
-    fun requestGpxPermission(activity: Activity) {
+    internal fun currentGpxHistorySession(): CommunitySession? =
+        currentCredentials()?.let { communitySource.sessionFor(it, OSM_GPX_READ_SCOPE) }
+
+    fun requestGpxPermission(activity: Activity) = requestGpxPermission(activity, OSM_GPX_WRITE_SCOPE)
+
+    internal fun requestGpxReadPermission(activity: Activity) = requestGpxPermission(activity, OSM_GPX_READ_SCOPE)
+
+    private fun requestGpxPermission(activity: Activity, permission: String) {
         val current = currentCredentials() ?: return
-        if (OSM_GPX_WRITE_SCOPE !in current.scopes) beginLogin(activity, gpxAccountId = current.user.id)
+        if (permission !in current.scopes) beginLogin(activity, gpxUpgrade = current to permission)
     }
 
     fun startMapEditLogin(activity: Activity) = startLogin(activity, allowMapEdits = true)
@@ -153,7 +159,7 @@ class OsmAuthManager private constructor(context: Context) {
         beginLogin(activity, mapEdits = allowMapEdits)
 
     private fun beginLogin(activity: Activity, mapEdits: Boolean = false, community: Boolean = false,
-        gpxAccountId: Long? = null) {
+        gpxUpgrade: Pair<OsmCredentials, String>? = null) {
         if (state.value.busy) return
         if (activity.isFinishing || activity.isDestroyed) return
         if (clientId.isBlank()) {
@@ -161,10 +167,11 @@ class OsmAuthManager private constructor(context: Context) {
             return
         }
         try {
+            if (gpxUpgrade != null && currentCredentials() !== gpxUpgrade.first) return
             generation++
             val existing = credentials?.scopes.orEmpty()
-            val scopes = if (gpxAccountId == null) OsmOAuthScopes.requested(existing, mapEdits, community)
-                else osmGpxUpgradeScopes(existing)
+            val scopes = if (gpxUpgrade == null) OsmOAuthScopes.requested(existing, mapEdits, community)
+                else osmGpxUpgradeScopes(existing, gpxUpgrade.second)
             val request = AuthorizationRequest.Builder(configuration(), clientId, ResponseTypeValues.CODE, Uri.parse(OsmSafetyRules.REDIRECT_URI))
                 .setScopes(scopes)
                 .setState(Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32).also { SecureRandom().nextBytes(it) }))
@@ -172,7 +179,7 @@ class OsmAuthManager private constructor(context: Context) {
                 .build()
             pendingStartedAt = System.currentTimeMillis()
             pendingRequest = request.jsonSerializeString()
-            pendingGpxAccountId = gpxAccountId
+            pendingGpxAccountId = gpxUpgrade?.first?.user?.id
             persist()
             publish(busy = true)
             val flags = PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_MUTABLE
@@ -232,13 +239,17 @@ class OsmAuthManager private constructor(context: Context) {
                     .setGrantType(GrantTypeValues.AUTHORIZATION_CODE).setAuthorizationCode(response.authorizationCode)
                     .setRedirectUri(Uri.parse(OsmSafetyRules.REDIRECT_URI)).setCodeVerifier(request.codeVerifier).build()
                 val tokenResponse = exchange(tokenRequest)
-                val token = tokenResponse.accessToken?.takeIf { it.isNotBlank() } ?: error("Missing access token")
-                val granted = (tokenResponse.scope ?: request.scope.orEmpty()).split(" ").toSet()
-                require(granted.containsAll(request.scope.orEmpty().split(" ").filter(String::isNotBlank)))
+                val token = tokenResponse.accessToken?.takeIf { it.isNotBlank() && it.all { ch -> ch in '!'..'~' } }
+                    ?: error("Invalid access token")
+                require(tokenResponse.tokenType.equals(TokenResponse.TOKEN_TYPE_BEARER, ignoreCase = true))
+                val expiresAt = tokenResponse.accessTokenExpirationTime
+                val requested = request.scope.orEmpty().split(' ').filter(String::isNotBlank).toSet()
+                val granted = OsmOAuthScopes.granted(requested, tokenResponse.scope)
                 val user = api.currentUser(token)
                 if (attemptGeneration != generation) return@launch
                 require(expectedGpxAccountId == null || user.id == expectedGpxAccountId)
-                credentials = OsmCredentials(token, user, tokenResponse.accessTokenExpirationTime, granted)
+                require(expiresAt == null || expiresAt > System.currentTimeMillis())
+                credentials = OsmCredentials(token, user, expiresAt, granted)
                 persist()
                 publish()
             } catch (_: Exception) {

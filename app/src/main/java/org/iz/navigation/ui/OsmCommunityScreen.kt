@@ -62,6 +62,13 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
     val exitGuard = LocalUiExitGuard.current
     val entryKey = LocalUiEntryKey.current
     var gpsOpen by rememberSaveable(entryKey, initialGpsJourneyId) { mutableStateOf(initialGpsJourneyId != null) }
+    var gpsPage by rememberSaveable(entryKey, initialGpsJourneyId) { mutableStateOf(OsmGpsPage.AVAILABLE) }
+    LaunchedEffect(gpsOpen, authState.user?.id) {
+        if (!gpsOpen) {
+            vm.gpsSelection.bind(authState.user?.id)
+            vm.gpsUpload.bind(authState.user?.id)
+        }
+    }
     val history = LocalUiHistory.current
     val disconnect = remember(entryKey) { OsmDestructiveConfirmation<Long> { it > 0 } }
     val pendingDisconnect by disconnect.pending.collectAsStateWithLifecycle()
@@ -122,7 +129,10 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
         }
     }
     fun close() { vm.closeEditor(); onClose() }
-    fun back() { exit { if (gpsOpen || !vm.back()) close() } }
+    fun back() = exit {
+        if (gpsOpen && gpsPage != OsmGpsPage.AVAILABLE) gpsPage = OsmGpsPage.AVAILABLE
+        else if (gpsOpen || !vm.back()) close()
+    }
     if (ui.editor == null) UiEditOwner(
         UiEditState(entryKey + "/community", accountKey(), 0, 0, false, ui.busy || authState.busy || editorState.saving),
         currentState = { UiEditState(entryKey + "/community", accountKey(), 0, 0, false,
@@ -181,7 +191,7 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
         TabRow(selectedTabIndex = if (gpsOpen) CommunitySection.entries.size else ui.section.ordinal) {
             listOf("Mesajlar", "Kişiler", "Hesabım").forEachIndexed { index, label ->
                 Tab(!gpsOpen && ui.section.ordinal == index, onClick = {
-                    exit { gpsOpen = false; vm.section(CommunitySection.entries[index]) }
+                    exit { gpsOpen = false; gpsPage = OsmGpsPage.AVAILABLE; vm.section(CommunitySection.entries[index]) }
                 }, text = { Text(label) })
             }
             Tab(gpsOpen, onClick = { exit { vm.closeEditor(); gpsOpen = true } },
@@ -198,6 +208,7 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
         if (!gpsOpen) ui.notice?.let { Text(it, Modifier.padding(16.dp), color = Forest) }
         when {
             gpsOpen -> OsmGpsScreen(gpsJourneys, initialGpsJourneyId, vm.gpsSelection, vm.gpsUpload,
+                page = gpsPage, onPage = { gpsPage = it },
                 onLogin = { auth.startLogin(it) }, onSettings = onOpenSettings)
             community.accountId != liveSession?.userId || community.accountId != null && !community.ready ->
                 Text("Kayıtlı topluluk bilgileri yükleniyor…", Modifier.padding(20.dp), color = Muted)

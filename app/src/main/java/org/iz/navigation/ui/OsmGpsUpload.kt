@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import org.iz.navigation.integration.PreparedOsmGpxTrace
 import org.iz.navigation.integration.osm.OsmGpxBatchResult
 import org.iz.navigation.integration.osm.OsmGpxConfirmation
 import org.iz.navigation.integration.osm.OsmGpxController
@@ -23,26 +24,47 @@ internal class OsmGpsUpload(private val scope: CoroutineScope) {
         private set
     var receiptRevision by mutableStateOf(0)
         private set
-    val running: Boolean get() = batch?.result == null && batch != null
+    var running by mutableStateOf(false)
+        private set
+    private var accountId: Long? = null
+    private var accountGeneration = 0
     private var foreground: AtomicBoolean? = null
+
+    fun bind(account: Long?) {
+        if (accountId == account) return
+        accountId = account
+        accountGeneration++
+        stopDispatching()
+        batch = null
+    }
 
     fun stopDispatching() {
         foreground?.set(false)
     }
 
-    fun start(controller: OsmGpxController, confirmation: OsmGpxConfirmation) {
-        if (running) return
-        val started = Batch(confirmation.user.id, confirmation.traces.map { OsmGpxReceiptKey.of(it) })
+    fun start(
+        controller: OsmGpxController,
+        confirmation: OsmGpxConfirmation,
+        prepare: suspend (OsmGpxReceiptKey) -> PreparedOsmGpxTrace?,
+    ) {
+        if (running || confirmation.user.id != accountId) return
+        val started = Batch(confirmation.user.id, confirmation.keys)
+        val generation = accountGeneration
         val allowed = AtomicBoolean(true)
         foreground = allowed
+        running = true
         batch = started
         scope.launch {
-            val result = controller.upload(confirmation, allowed::get) { _, position ->
-                batch = started.copy(current = position)
+            try {
+                val result = controller.upload(confirmation, allowed::get, prepare) { _, position ->
+                    if (generation == accountGeneration) batch = started.copy(current = position)
+                }
+                if (generation == accountGeneration) batch = started.copy(result = result)
+            } finally {
+                receiptRevision++
+                foreground = null
+                running = false
             }
-            batch = started.copy(result = result)
-            receiptRevision++
-            foreground = null
         }
     }
 }

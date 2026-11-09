@@ -33,8 +33,8 @@ class OsmGpxControllerTest {
 
     private val sessions = MutableStateFlow<CommunitySession?>(session(42))
     private val first = osmGpxTestTrace("journey-first")
-    private val second = osmGpxTestTrace("journey-second")
-    private val third = osmGpxTestTrace("journey-third")
+    private val second = osmGpxTestTrace("journey-second", startedAt = 1_200_000)
+    private val third = osmGpxTestTrace("journey-third", startedAt = 1_900_000)
 
     @Test fun recordsPartialSuccessAndRequiresExactUnknownReviewBeforeFreshConsent() = runBlocking {
         val calls = mutableListOf<PreparedOsmGpxTrace>()
@@ -45,7 +45,7 @@ class OsmGpxControllerTest {
         }
         val traces = listOf(first, second, third)
         val confirmation = checkNotNull(controller.prepareConfirmation(traces))
-        assertSame(first, confirmation.traces.first())
+        assertEquals(OsmGpxReceiptKey.of(first), confirmation.keys.first())
         val result = controller.upload(confirmation, { true }) { key, index -> attempts += key to index }
         assertEquals(OsmGpxStop.UNKNOWN, result.stop)
         assertEquals(1, result.unattemptedCount)
@@ -57,7 +57,7 @@ class OsmGpxControllerTest {
 
         val unknown = result.receipts.last()
         val retry = checkNotNull(controller.prepareConfirmation(listOf(first, second), setOf(unknown)))
-        assertEquals(listOf(second), retry.traces)
+        assertEquals(listOf(OsmGpxReceiptKey.of(second)), retry.keys)
         assertEquals(OsmGpxStop.COMPLETE, controller.upload(retry, { true }).stop)
         assertNull(controller.prepareConfirmation(listOf(first, second), setOf(unknown)))
     }
@@ -109,7 +109,8 @@ class OsmGpxControllerTest {
                 val reopened = controllerWithGateway(client)
                 assertEquals(mapOf(OsmGpxReceiptKey.of(first) to receipt), reopened.receipts(traces))
                 assertNull(reopened.prepareConfirmation(listOf(first)))
-                assertEquals(listOf(rateLimited, unsent), checkNotNull(reopened.prepareConfirmation(traces)).traces)
+                assertEquals(listOf(rateLimited, unsent).map { OsmGpxReceiptKey.of(it) },
+                    checkNotNull(reopened.prepareConfirmation(traces)).keys)
                 assertEquals(2, server.requestCount)
             }
         }
@@ -131,6 +132,7 @@ class OsmGpxControllerTest {
         sessions.value = session(43)
         assertTrue(reopened.receipts(listOf(first)).isEmpty())
         assertNull(receipt.traceUrl(OsmUser(43, "A B")))
+        reopened.refreshHistory()
         assertEquals(1, reopened.prepareConfirmation(listOf(first))?.traceCount)
     }
 
@@ -216,6 +218,7 @@ class OsmGpxControllerTest {
         val controller = controller { error("An outdated consent cannot dispatch") }
         assertNull(controller.prepareConfirmation(listOf(first)))
         sessions.value = session(42)
+        controller.refreshHistory()
         val firstConsent = checkNotNull(controller.prepareConfirmation(listOf(first)))
         assertSame(sessions.value, controller.sessions.value)
         sessions.value = session(42, generation = 3)
@@ -224,21 +227,167 @@ class OsmGpxControllerTest {
         assertFalse(controller.receipts(listOf(first)).containsKey(OsmGpxReceiptKey.of(first)))
     }
 
-    private fun controller(upload: suspend (PreparedOsmGpxTrace) -> OsmGpxUploadResult) =
+    @Test fun failedHistoryAndLateOtherAccountHistoryCannotUnlockConsent() = runBlocking {
+        val entered = CompletableDeferred<Unit>()
+        val finish = CompletableDeferred<Unit>()
+        val firstKey = OsmGpxReceiptKey.of(first)
+        val secondKey = OsmGpxReceiptKey.of(second)
+        val fresh = OsmGpxHistoryEntry(19, second.fileName, 200, true)
+        var otherAccountReads = 0
+        val controller = newController(
+            OsmGpxGateway { _, _, _ -> error("Consent has not been given") },
+            OsmGpxHistoryGateway { token, accountId ->
+                if (token == "fixture") {
+                    assertEquals(42L, accountId)
+                    entered.complete(Unit)
+                    finish.await()
+                    listOf(OsmGpxHistoryEntry(12, first.fileName, 100, false))
+                } else {
+                    assertEquals(43L, accountId)
+                    if (++otherAccountReads == 1) throw java.io.IOException("fixture")
+                    listOf(fresh)
+                }
+            },
+        )
+        assertNull(controller.prepareConfirmationForKeys(listOf(firstKey)))
+        val oldRequest = launch { controller.refreshHistory() }
+        entered.await()
+        sessions.value = CommunitySession("fixture-new", 43, "Another user", setOf("read_gpx", "write_gpx"), 3)
+        controller.refreshHistory()
+        assertEquals(OsmGpxHistoryState.Failed, controller.history.value)
+        assertNull(controller.prepareConfirmationForKeys(listOf(firstKey)))
+        controller.refreshHistory()
+        finish.complete(Unit)
+        oldRequest.join()
+        assertEquals(OsmGpxHistoryState.Ready(OsmUser(43, "Another user"), listOf(fresh)), controller.history.value)
+        assertEquals(listOf(firstKey), controller.prepareConfirmationForKeys(listOf(firstKey, secondKey))?.keys)
+    }
+
+    @Test fun exactHistoryNameResolvesOnlyTheCurrentAccountsUnknownReceipt() = runBlocking {
+        val key = OsmGpxReceiptKey.of(first)
+        val store = OsmGpxFileReceipts(noBackup.root)
+        val oldAttempt = OsmGpxReceipt(42, key, OsmGpxReceiptStatus.UNKNOWN, null, "first-attempt", 10)
+        store.write(oldAttempt)
+        store.write(oldAttempt.copy(accountId = 43))
+        val controller = newController(
+            OsmGpxGateway { _, _, _ -> error("Already received") },
+            OsmGpxHistoryGateway { _, _ -> listOf(
+                OsmGpxHistoryEntry(90, first.fileName.uppercase(), 200, false),
+                OsmGpxHistoryEntry(91, first.fileName, 100, true),
+            ) },
+            store,
+        )
+        controller.refreshHistory()
+        val resolved = controller.receiptsForKeys(listOf(key)).getValue(key)
+        assertEquals(oldAttempt.copy(status = OsmGpxReceiptStatus.RECEIVED, traceId = 91), resolved)
+        assertEquals(resolved, store.read(42, key))
+        assertEquals(oldAttempt.copy(accountId = 43), store.read(43, key))
+        assertNull(controller.prepareConfirmationForKeys(listOf(key), setOf(oldAttempt)))
+    }
+
+    @Test fun perFileRejectionContinuesAndReceiptAppearsBeforeTheNextPost() = runBlocking {
+        val posted = mutableListOf<OsmGpxReceiptKey>()
+        val store = OsmGpxFileReceipts(noBackup.root)
+        val keys = listOf(first, second, third).map { OsmGpxReceiptKey.of(it) }
+        lateinit var controller: OsmGpxController
+        controller = newController(OsmGpxGateway { _, trace, _ ->
+            val key = OsmGpxReceiptKey.of(trace)
+            posted += key
+            when (key) {
+                keys[0] -> OsmGpxUploadResult.Rejected(422)
+                keys[1] -> OsmGpxUploadResult.Received(90)
+                else -> {
+                    assertEquals(90L, store.read(42, keys[1])?.traceId)
+                    assertEquals(listOf(90L), (controller.history.value as OsmGpxHistoryState.Ready).entries.map { it.id })
+                    OsmGpxUploadResult.Received(91)
+                }
+            }
+        }, store = store)
+        controller.refreshHistory()
+        val result = controller.upload(checkNotNull(controller.prepareConfirmationForKeys(keys)), { true })
+        assertEquals(keys, posted)
+        assertEquals(OsmGpxStop.COMPLETE, result.stop)
+        assertEquals(mapOf(keys[0] to 422), result.rejectedKeys)
+        assertEquals(0, result.unattemptedCount)
+        assertEquals(listOf(keys[0]), controller.prepareConfirmationForKeys(keys)?.keys)
+    }
+
+    @Test fun changedPayloadStopsBeforeReservationOrPost() = runBlocking {
+        val controller = controller { error("A different payload must not be posted") }
+        val confirmation = checkNotNull(controller.prepareConfirmation(listOf(first, second)))
+        val result = controller.upload(confirmation, { true }, prepare = { second })
+        assertEquals(OsmGpxStop.STALE_CONFIRMATION, result.stop)
+        assertEquals(2, result.unattemptedCount)
+        assertTrue(controller.receipts(listOf(first, second)).isEmpty())
+    }
+
+    @Test fun failedReceiptWriteDoesNotPublishSuccessOrDispatchAnotherTrace() = runBlocking {
+        val files = OsmGpxFileReceipts(noBackup.root)
+        val store = object : OsmGpxReceiptStore by files {
+            override fun write(receipt: OsmGpxReceipt) {
+                if (receipt.status == OsmGpxReceiptStatus.RECEIVED) throw java.io.IOException("fixture")
+                files.write(receipt)
+            }
+        }
+        val posted = mutableListOf<OsmGpxReceiptKey>()
+        val keys = listOf(first, second).map { OsmGpxReceiptKey.of(it) }
+        val controller = newController(OsmGpxGateway { _, trace, _ ->
+            posted += OsmGpxReceiptKey.of(trace)
+            OsmGpxUploadResult.Received(90)
+        }, store = store)
+        controller.refreshHistory()
+        val result = controller.upload(checkNotNull(controller.prepareConfirmationForKeys(keys)), { true })
+        assertEquals(OsmGpxStop.STORAGE_ERROR, result.stop)
+        assertEquals(1, result.unattemptedCount)
+        assertEquals(listOf(keys.first()), posted)
+        assertEquals(OsmGpxReceiptStatus.UNKNOWN, result.receipts.single().status)
+        assertTrue((controller.history.value as OsmGpxHistoryState.Ready).entries.isEmpty())
+        assertEquals(OsmGpxReceiptStatus.UNKNOWN, files.read(42, keys.first())?.status)
+    }
+
+    private suspend fun controller(upload: suspend (PreparedOsmGpxTrace) -> OsmGpxUploadResult) =
         controllerWithGateway(OsmGpxGateway { _, trace, canDispatch ->
             check(canDispatch())
             upload(trace)
         })
 
-    private fun controllerWithGateway(gateway: OsmGpxGateway) = OsmGpxController(
+    private suspend fun controllerWithGateway(gateway: OsmGpxGateway) =
+        newController(gateway).also { it.refreshHistory() }
+
+    private fun newController(
+        gateway: OsmGpxGateway,
+        history: OsmGpxHistoryGateway = OsmGpxHistoryGateway { _, _ -> emptyList() },
+        store: OsmGpxReceiptStore = OsmGpxFileReceipts(noBackup.root),
+    ) = OsmGpxController(
         currentSession = { sessions.value },
         gateway = gateway,
-        store = OsmGpxFileReceipts(noBackup.root),
+        store = store,
         authState = MutableStateFlow(OsmAuthUiState()),
         sessions = sessions,
         permissionRequest = {},
+        historyGateway = history,
     )
 
+    private val tracesByKey by lazy {
+        listOf(first, second, third,
+            osmGpxTestTrace("wire-second", startedAt = 1_400_000),
+            osmGpxTestTrace("wire-third", startedAt = 1_800_000)).associateBy { OsmGpxReceiptKey.of(it) }
+    }
+
+    private suspend fun OsmGpxController.prepareConfirmation(
+        traces: List<PreparedOsmGpxTrace>,
+        reviewedUnknown: Set<OsmGpxReceipt> = emptySet(),
+    ) = prepareConfirmationForKeys(traces.map { OsmGpxReceiptKey.of(it) }, reviewedUnknown)
+
+    private suspend fun OsmGpxController.receipts(traces: List<PreparedOsmGpxTrace>) =
+        receiptsForKeys(traces.map { OsmGpxReceiptKey.of(it) })
+
+    private suspend fun OsmGpxController.upload(
+        confirmation: OsmGpxConfirmation,
+        stillForeground: () -> Boolean,
+        onAttempt: (OsmGpxReceiptKey, Int) -> Unit = { _, _ -> },
+    ) = upload(confirmation, stillForeground, prepare = { tracesByKey[it] }, onAttempt = onAttempt)
+
     private fun session(id: Long, generation: Long = 2) =
-        CommunitySession("fixture", id, "Fixture user", setOf(OSM_GPX_WRITE_SCOPE), generation)
+        CommunitySession("fixture", id, "Fixture user", setOf("read_gpx", OSM_GPX_WRITE_SCOPE), generation)
 }

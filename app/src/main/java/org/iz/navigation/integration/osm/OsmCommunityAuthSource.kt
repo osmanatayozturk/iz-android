@@ -7,12 +7,22 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /** Retain already-granted capabilities through all later OAuth entry points. */
 internal object OsmOAuthScopes {
+    private val gpx = setOf(OSM_GPX_READ_SCOPE, OSM_GPX_WRITE_SCOPE)
+
     fun requested(existing: Set<String> = emptySet(), mapEdits: Boolean = false,
                   community: Boolean = false): Set<String> = buildSet {
         addAll(existing)
         addAll(setOf("read_prefs", "write_notes"))
         if (mapEdits) add("write_api")
         if (community) addAll(setOf("consume_messages", "send_messages"))
+    }
+
+    fun granted(requested: Set<String>, tokenScope: String?): Set<String> {
+        val requestedGpx = requested.intersect(gpx)
+        if (requestedGpx.isNotEmpty()) require(!tokenScope.isNullOrBlank())
+        val granted = tokenScope?.split(' ')?.filter(String::isNotBlank)?.toSet() ?: requested
+        require(granted.containsAll(requested) && granted.intersect(gpx) == requestedGpx)
+        return granted
     }
 }
 
@@ -34,6 +44,12 @@ internal class OsmCommunityAuthSource(
                 credentials.user.displayName, credentials.scopes, generation, credentials.expiresAt)
         }
     }
+
+    fun sessionFor(credentials: OsmCredentials, requiredScope: String? = null): CommunitySession? =
+        mutableSessions.value?.takeIf {
+            it.userId == credentials.user.id && it.token == credentials.token && it.scopes == credentials.scopes &&
+                (requiredScope == null || requiredScope in it.scopes)
+        }
 
     fun isCurrent(expected: CommunitySession): Boolean = mutableSessions.value?.let {
         it.userId == expected.userId && it.generation == expected.generation && it.token == expected.token

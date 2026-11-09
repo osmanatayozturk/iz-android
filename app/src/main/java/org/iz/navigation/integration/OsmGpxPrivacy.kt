@@ -32,7 +32,7 @@ class PreparedOsmGpxTrace private constructor(
     val sha256: String,
 ) {
     val pointCount: Int = segments.sumOf { it.size }
-    val fileName: String = "iz_gps_${sha256.take(24)}.gpx"
+    val fileName: String = osmGpxFileName(sha256)
 
     companion object {
         internal fun create(
@@ -67,6 +67,8 @@ class PreparedOsmGpxTrace private constructor(
         }
     }
 }
+
+internal fun osmGpxFileName(sha256: String): String = "iz_gps_${sha256.take(24)}.gpx"
 
 private data class MeasuredFix(val point: TrackPoint, val distanceFromStart: Double)
 private const val ENDPOINT_TRIM_METERS = 1000.0

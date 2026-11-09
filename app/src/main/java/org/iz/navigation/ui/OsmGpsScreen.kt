@@ -3,31 +3,15 @@ package org.iz.navigation.ui
 import android.app.Activity
 import android.net.Uri
 import androidx.browser.customtabs.CustomTabsIntent
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -39,18 +23,25 @@ import org.iz.navigation.data.DiaryRepository
 import org.iz.navigation.data.Journey
 import org.iz.navigation.integration.PreparedOsmGpxTrace
 import org.iz.navigation.integration.osm.OSM_GPX_MY_TRACES_URL
+import org.iz.navigation.integration.osm.OSM_GPX_READ_SCOPE
 import org.iz.navigation.integration.osm.OsmGpxConfirmation
 import org.iz.navigation.integration.osm.OsmGpxController
+import org.iz.navigation.integration.osm.OsmGpxHistoryState
 import org.iz.navigation.integration.osm.OsmGpxReceipt
 import org.iz.navigation.integration.osm.OsmGpxReceiptKey
 import org.iz.navigation.integration.osm.OsmGpxReceiptStatus
 import org.iz.navigation.integration.osm.OsmGpxStop
-import org.iz.navigation.osmcommunity.CommunitySession
+
+internal enum class OsmGpsPage(val label: String, val tag: String) {
+    AVAILABLE("Yüklenebilir izler", "available"),
+    HISTORY("Yüklenenler", "history"),
+    UNKNOWN("Kontrol bekleyenler", "unknown"),
+}
 
 private data class OsmGpsPendingConsent(
     val confirmation: OsmGpxConfirmation,
-    val selected: List<PreparedOsmGpxTrace>,
-    val session: CommunitySession,
+    val selection: Set<OsmGpxReceiptKey>,
+    val reviewed: OsmGpxReceipt?,
     val foregroundGeneration: Int,
 )
 
@@ -60,6 +51,8 @@ internal fun OsmGpsScreen(
     shortcutJourneyId: String?,
     selection: OsmGpsSelection,
     upload: OsmGpsUpload,
+    page: OsmGpsPage,
+    onPage: (OsmGpsPage) -> Unit,
     onLogin: (Activity) -> Unit,
     onSettings: () -> Unit,
 ) {
@@ -69,61 +62,104 @@ internal fun OsmGpsScreen(
     val scope = rememberCoroutineScope()
     val repository = remember(app) { DiaryRepository(app) }
     val controller = remember(app) { OsmGpxController.get(app) }
-    val authState by controller.authState.collectAsStateWithLifecycle()
-    val session by controller.sessions.collectAsStateWithLifecycle()
-    val user = authState.user?.takeIf { it.id == session?.userId }
-    val candidates = remember(journeys) { journeys.filter(::osmGpsEligibleJourney) }
-    val currentCandidates by rememberUpdatedState(candidates)
-    val stored = remember(session, user?.id) { mutableStateMapOf<OsmGpxReceiptKey, Result<OsmGpxReceipt?>>() }
-    var reviewed by remember(session) { mutableStateOf(emptySet<OsmGpxReceipt>()) }
-    var linksOpened by remember(session) { mutableStateOf(emptySet<OsmGpxReceipt>()) }
-    var retryReceipts by remember { mutableStateOf(0) }
-    var permissionRequestedFor by remember { mutableStateOf<Long?>(null) }
-    var message by remember { mutableStateOf<String?>(null) }
-    var preparingConsent by remember { mutableStateOf(false) }
-    var consent by remember { mutableStateOf<OsmGpsPendingConsent?>(null) }
-    var foregroundGeneration by remember { mutableStateOf(0) }
-    val selected = selection.traces(candidates)
-    val sameAccountBatch = upload.batch?.takeIf { user != null && it.accountId == user.id }
+    val auth by controller.authState.collectAsStateWithLifecycle()
+    val observedSession by controller.sessions.collectAsStateWithLifecycle()
+    val history by controller.history.collectAsStateWithLifecycle()
+    val session = observedSession?.takeIf { it.userId == auth.user?.id }
+    val user = auth.user?.takeIf { session != null }
+    val canRead = session?.scopes?.contains(OSM_GPX_READ_SCOPE) == true
+    val readyHistory = (history as? OsmGpxHistoryState.Ready)?.takeIf { it.user == user && canRead && !auth.busy }
 
-    fun receipt(trace: PreparedOsmGpxTrace): OsmGpxReceipt? {
-        val accountId = user?.id ?: return null
-        val key = OsmGpxReceiptKey.of(trace)
-        return (sameAccountBatch?.result?.receipts?.firstOrNull { it.key == key } ?: stored[key]?.getOrNull())
-            ?.takeIf { it.accountId == accountId }
+    var scanRevision by remember { mutableIntStateOf(0) }
+    var refreshRevision by remember { mutableIntStateOf(0) }
+    val eligible = remember(journeys) { journeys.filter(::osmGpsEligibleJourney) }
+    var scan by remember(eligible, scanRevision) { mutableStateOf<Result<List<OsmGpsCandidate>>?>(null) }
+    val summaries = scan?.getOrNull()
+    val receiptKeys = remember(summaries) { summaries.orEmpty().map { it.key } }
+    var lookup by remember(session, history, receiptKeys, upload.receiptRevision, refreshRevision) {
+        mutableStateOf<Result<Map<OsmGpxReceiptKey, OsmGpxReceipt>>?>(null)
     }
-    fun readyToSend(trace: PreparedOsmGpxTrace): Boolean {
-        if (user == null || stored[OsmGpxReceiptKey.of(trace)]?.isSuccess != true) return false
-        val previous = receipt(trace)
-        return previous == null || previous.status == OsmGpxReceiptStatus.UNKNOWN && previous in reviewed
+    val receipts = lookup?.getOrNull()
+    var opened by remember(session) { mutableStateOf(emptySet<OsmGpxReceipt>()) }
+    var message by remember(session) { mutableStateOf<String?>(null) }
+    var consent by remember(session, page) { mutableStateOf<OsmGpsPendingConsent?>(null) }
+    var preview by remember(session, page) { mutableStateOf<PreparedOsmGpxTrace?>(null) }
+    var preparing by remember { mutableStateOf(false) }
+    var foregroundGeneration by remember { mutableIntStateOf(0) }
+
+    val available = remember(summaries, receipts, readyHistory) {
+        if (receipts == null || readyHistory == null) emptyList()
+        else summaries.orEmpty().filter { it.key !in receipts }
     }
+    val availableKeys = remember(available) { available.map { it.key }.toSet() }
+    val selected = selection.keysFor(user?.id)
+    val unknowns = remember(receipts) { receipts.orEmpty().values.filter { it.status == OsmGpxReceiptStatus.UNKNOWN } }
+    val batch = upload.batch?.takeIf { it.accountId == user?.id }
+    val canAct = !auth.busy && !upload.running && !preparing
+
+    fun owns(foreground: Int): Boolean =
+        session != null && controller.sessions.value === session && !controller.authState.value.busy &&
+            controller.authState.value.user?.id == session.userId && foregroundGeneration == foreground &&
+            lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+
     fun openLink(url: String): Boolean = runCatching {
         CustomTabsIntent.Builder().setShowTitle(true).build().launchUrl(context, Uri.parse(url))
     }.onFailure { message = "OSM bağlantısı açılamadı." }.isSuccess
 
-    val sendable = selected.filter(::readyToSend)
-    val pendingLookup = user != null && selected.any { !stored.containsKey(OsmGpxReceiptKey.of(it)) }
-    val shortcutPending = candidates.any { it.id == shortcutJourneyId } &&
-        !selection.shortcutHandled && !selection.shortcutBlocked
-    val excluded = (if (user != null && !pendingLookup) selected.size - sendable.size else 0) +
-        (if (selection.shortcutBlocked) 1 else 0)
-    val expectedSession = session
+    suspend fun prepare(key: OsmGpxReceiptKey): PreparedOsmGpxTrace? {
+        val journey = repository.getJourney(key.journeyId) ?: return null
+        return selection.prepare(journey, repository::journeyPoints)
+    }
 
-    suspend fun loadReceipts(traces: List<PreparedOsmGpxTrace>) {
-        val accountId = user?.id ?: return
-        if (expectedSession == null || traces.isEmpty()) return
-        try {
-            val receipts = controller.receipts(traces)
-            if (expectedSession === controller.sessions.value) {
-                for (trace in traces) {
-                    val key = OsmGpxReceiptKey.of(trace)
-                    stored[key] = Result.success(receipts[key]?.takeIf { it.accountId == accountId })
+    fun review(keys: List<OsmGpxReceiptKey>, reviewed: OsmGpxReceipt? = null) {
+        val generation = foregroundGeneration
+        if (!canAct || consent != null || keys.isEmpty() || readyHistory == null || !owns(generation)) return
+        preparing = true
+        message = null
+        scope.launch {
+            try {
+                val confirmed = controller.prepareConfirmationForKeys(keys, setOfNotNull(reviewed))
+                if (owns(generation)) {
+                    if (confirmed != null && confirmed.keys == keys && confirmed.user.id == user?.id &&
+                        selected == selection.keysFor(confirmed.user.id)
+                    ) {
+                        consent = OsmGpsPendingConsent(confirmed, selected, reviewed, generation)
+                    } else {
+                        refreshRevision++
+                        message = "Gönderim durumu değişti. Seçimini kontrol et."
+                    }
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (owns(generation)) message = "Gönderim onayı hazırlanamadı. Yeniden dene."
+            } finally {
+                preparing = false
             }
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (failure: Exception) {
-            for (trace in traces) stored[OsmGpxReceiptKey.of(trace)] = Result.failure(failure)
+        }
+    }
+
+    fun openPreview(key: OsmGpxReceiptKey) {
+        if (!canAct || preview != null) return
+        val generation = foregroundGeneration
+        preparing = true
+        scope.launch {
+            try {
+                val trace = prepare(key)
+                if (owns(generation)) {
+                    if (trace != null && OsmGpxReceiptKey.of(trace) == key) preview = trace
+                    else {
+                        scanRevision++
+                        message = "İz değişti. Güncel izi yeniden incele."
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (owns(generation)) message = "İz önizlemesi hazırlanamadı."
+            } finally {
+                preparing = false
+            }
         }
     }
 
@@ -133,6 +169,7 @@ internal fun OsmGpsScreen(
                 foregroundGeneration++
                 upload.stopDispatching()
                 consent = null
+                preview = null
             }
         }
         lifecycle.addObserver(observer)
@@ -141,188 +178,187 @@ internal fun OsmGpsScreen(
             upload.stopDispatching()
         }
     }
-    LaunchedEffect(expectedSession, selected, authState.busy) { consent = null }
-    LaunchedEffect(expectedSession, user?.id, selected, upload.receiptRevision, retryReceipts) {
-        loadReceipts(selected)
+    LaunchedEffect(auth.user?.id) {
+        selection.bind(auth.user?.id)
+        upload.bind(auth.user?.id)
     }
-    LaunchedEffect(permissionRequestedFor, authState) {
-        val requested = permissionRequestedFor
-        val state = controller.authState.value
-        if (requested != null && !state.busy) {
-            permissionRequestedFor = null
-            if (requested == state.user?.id && !state.canWriteGpx) {
-                message = "İzin verilmedi. Seçimin duruyor."
+    LaunchedEffect(session, canRead, auth.busy, refreshRevision) {
+        if (session != null && canRead && !auth.busy) controller.refreshHistory()
+    }
+    LaunchedEffect(eligible, scanRevision) {
+        scan = osmGpsLoad { eligible.mapNotNull { selection.summarize(it, repository::journeyPoints) } }
+    }
+    LaunchedEffect(session, auth.busy, history, receiptKeys, upload.receiptRevision, refreshRevision) {
+        if (session == null || auth.busy || summaries == null) return@LaunchedEffect
+        val result = osmGpsLoad { controller.receiptsForKeys(receiptKeys).filterValues { it.accountId == session.userId } }
+        if (session === controller.sessions.value && !controller.authState.value.busy) lookup = result
+    }
+    LaunchedEffect(user?.id, summaries, receipts, readyHistory) {
+        if (user != null && summaries != null && receipts != null && readyHistory != null) {
+            selection.retain(availableKeys)
+            if (shortcutJourneyId != null) {
+                selection.preselect(available.firstOrNull { it.key.journeyId == shortcutJourneyId }?.key)
             }
         }
+    }
+    LaunchedEffect(batch?.result) {
+        if (batch?.result?.stop == OsmGpxStop.STALE_CONFIRMATION) scanRevision++
     }
 
     Column(Modifier.fillMaxSize().testTag("osm-gps-screen")) {
-        if (authState.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-        user?.let { Text(it.displayName, Modifier.padding(horizontal = 16.dp, vertical = 8.dp).testTag("osm-gps-account"),
-            style = MaterialTheme.typography.bodyMedium) }
-        OsmGpsCandidates(candidates, shortcutJourneyId, selection, repository::journeyPoints,
-            enabled = !upload.running && !preparingConsent,
-            canSelect = { trace -> user == null || readyToSend(trace) }) { trace ->
-            val key = OsmGpxReceiptKey.of(trace)
-            val selectedHere = trace in selected
-            LaunchedEffect(expectedSession, user?.id, key, selectedHere, upload.receiptRevision, retryReceipts) {
-                if (!selectedHere) loadReceipts(listOf(trace))
-            }
-            val previous = receipt(trace)
-            when {
-                sameAccountBatch != null && sameAccountBatch.result == null && key in sameAccountBatch.keys -> {
-                    val index = sameAccountBatch.keys.indexOf(key) + 1
-                    val text = when {
-                        index == sameAccountBatch.current -> "${index}/${sameAccountBatch.keys.size} iz gönderiliyor…"
-                        index < sameAccountBatch.current -> "Gönderim sonucu bekleniyor."
-                        else -> "Sırada"
-                    }
-                    Text(text, Modifier.testTag("osm-gps-result-${trace.journeyId}"))
-                }
-                previous?.status == OsmGpxReceiptStatus.RECEIVED && user != null -> {
-                    Text("OSM izi aldı. İşlenmesi zaman alabilir.", Modifier.testTag("osm-gps-result-${trace.journeyId}"))
-                    previous.traceUrl(user)?.let { url ->
-                        TextButton(onClick = { openLink(url) }, modifier = Modifier.heightIn(min = 48.dp)
-                            .testTag("osm-gps-open-${trace.journeyId}")) { Text("OSM'de aç") }
-                    }
-                }
-                previous?.status == OsmGpxReceiptStatus.UNKNOWN -> {
-                    Text("Sonuç belirsiz. Yeniden göndermeden önce OSM'de izlerini kontrol et.",
-                        Modifier.testTag("osm-gps-result-${trace.journeyId}"))
-                    Text(trace.fileName, style = MaterialTheme.typography.bodySmall)
-                    TextButton(onClick = { if (openLink(OSM_GPX_MY_TRACES_URL)) linksOpened = linksOpened + previous },
-                        modifier = Modifier.heightIn(min = 48.dp).testTag("osm-gps-check-${trace.journeyId}")) {
-                        Text("OSM'de izlerimi kontrol et")
-                    }
-                    if (previous in linksOpened && previous !in reviewed) {
-                        TextButton(enabled = !upload.running && !preparingConsent, onClick = { reviewed = reviewed + previous },
-                            modifier = Modifier.heightIn(min = 48.dp).testTag("osm-gps-unknown-reviewed-${trace.journeyId}")) {
-                            Text("İzi bulamadım, yeniden gönderebilirim")
-                        }
-                    }
-                }
-                sameAccountBatch != null && key in sameAccountBatch.keys -> {
-                    Text(osmGpsRowFailure(sameAccountBatch, key), Modifier.testTag("osm-gps-result-${trace.journeyId}"))
-                }
-                stored[key]?.isFailure == true -> {
-                    Text("Cihazdaki gönderim durumu okunamadı.")
-                    TextButton(onClick = { retryReceipts++ }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Yeniden dene") }
-                }
+        user?.let {
+            Text(it.displayName, Modifier.padding(horizontal = 16.dp, vertical = 8.dp).testTag("osm-gps-account"),
+                style = MaterialTheme.typography.bodyMedium)
+        }
+        TabRow(selectedTabIndex = page.ordinal) {
+            OsmGpsPage.entries.forEach { tab ->
+                Tab(selected = page == tab, onClick = { onPage(tab) }, enabled = !preparing,
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("osm-gps-page-${tab.tag}"),
+                    text = { Text(tab.label) })
             }
         }
-
-        HorizontalDivider()
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            val count = if (user == null || pendingLookup) "${selected.size} iz seçildi" else "${sendable.size} iz gönderilebilir"
-            Text(if (excluded == 0) count else "$count · $excluded iz dışarıda", Modifier.testTag("osm-gps-selection"),
-                style = MaterialTheme.typography.bodyMedium)
-            val status = osmGpsBatchStatus(upload.batch, sameAccountBatch)
-            if (status != null) Text(status, Modifier.testTag("osm-gps-batch-status"), style = MaterialTheme.typography.bodySmall)
-            (message ?: authState.error)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-            val canAct = !authState.busy && !upload.running && !preparingConsent
-            when {
-                authState.user == null -> Button(onClick = {
-                    if (!authState.clientIdConfigured) onSettings()
-                    else context.findActivity()?.let(onLogin) ?: run { message = "OSM giriş ekranı açılamadı." }
+        if (auth.busy || history == OsmGpxHistoryState.Loading || upload.running) {
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+        }
+        if (canRead && page != OsmGpsPage.AVAILABLE) {
+            TextButton(onClick = { refreshRevision++ }, enabled = canAct && history != OsmGpxHistoryState.Loading,
+                modifier = Modifier.padding(horizontal = 12.dp).heightIn(min = 48.dp).testTag("osm-gps-refresh")) {
+                Text("Yenile")
+            }
+        }
+        val listModifier = Modifier.weight(1f).padding(16.dp)
+        val localFailure = page != OsmGpsPage.HISTORY && (scan?.isFailure == true || lookup?.isFailure == true)
+        when {
+            user == null || !canRead -> Text("İzleri görmek için bağlı OSM hesabına okuma izni ver.", listModifier)
+            page == OsmGpsPage.HISTORY && readyHistory != null -> OsmGpsHistoryList(readyHistory.entries) { entry ->
+                if (owns(foregroundGeneration)) openLink(entry.traceUrl(readyHistory.user))
+            }
+            page == OsmGpsPage.UNKNOWN && receipts != null -> OsmGpsUnknownList(unknowns, opened, canAct,
+                canRetry = canAct && auth.canWriteGpx && readyHistory != null,
+                onCheck = { receipt ->
+                    if (owns(foregroundGeneration) && openLink(OSM_GPX_MY_TRACES_URL)) opened = opened + receipt
                 },
-                    enabled = canAct, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("osm-gps-connect")) {
-                    Text(if (authState.clientIdConfigured) "OSM hesabını bağla" else "OSM bağlantı ayarlarını aç")
-                }
-                !authState.canWriteGpx -> Button(enabled = canAct && user != null, onClick = {
-                    val activity = context.findActivity()
-                    if (activity == null) message = "OSM izin ekranı açılamadı."
-                    else {
-                        message = null
-                        permissionRequestedFor = user?.id
-                        controller.requestPermission(activity)
-                    }
-                }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("osm-gps-permission")) {
-                    Text("OSM'de iz gönderme izni ver")
-                }
-                else -> Button(enabled = canAct && !pendingLookup && !shortcutPending && sendable.isNotEmpty(), onClick = {
-                    if (preparingConsent || consent != null || expectedSession == null ||
-                        expectedSession !== controller.sessions.value) return@Button
-                    preparingConsent = true
-                    message = null
-                    val generation = foregroundGeneration
-                    scope.launch {
-                        try {
-                            val prepared = controller.prepareConfirmation(sendable, reviewed)
-                            if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) &&
-                                foregroundGeneration == generation &&
-                                expectedSession === controller.sessions.value && !controller.authState.value.busy &&
-                                selected == selection.traces(currentCandidates)) {
-                                consent = prepared?.takeIf { it.traces == sendable && it.user.id == user?.id }?.let {
-                                    OsmGpsPendingConsent(it, selected, expectedSession, generation)
-                                }
-                                if (consent == null) {
-                                    retryReceipts++
-                                    message = "Gönderim durumu değişti. Seçimini kontrol et."
-                                }
-                            }
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (_: Exception) {
-                            message = "Gönderim onayı hazırlanamadı. Yeniden dene."
-                        } finally {
-                            preparingConsent = false
-                        }
-                    }
-                }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("osm-gps-review")) {
-                    Text("Gönderimi incele")
-                }
+                onRetry = { review(listOf(it.key), it) })
+            history == OsmGpxHistoryState.Failed -> Text("OSM iz geçmişi yüklenemedi.", listModifier)
+            localFailure -> Text("İzler ve cihazdaki gönderim durumu okunamadı.", listModifier)
+            readyHistory == null || summaries == null || receipts == null -> Text("İzler yükleniyor…", listModifier)
+            else -> OsmGpsCandidates(available, selected, canAct,
+                onToggleAll = { selection.toggleAll(availableKeys) },
+                onToggle = selection::toggle, onPreview = ::openPreview,
+                rowStatus = { key -> osmGpsRowStatus(batch, key) })
+        }
+        HorizontalDivider()
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (page == OsmGpsPage.AVAILABLE) Text("${selected.size} iz seçildi", Modifier.testTag("osm-gps-selection"))
+            osmGpsBatchStatus(batch)?.let {
+                Text(it, Modifier.testTag("osm-gps-batch-status").semantics { liveRegion = LiveRegionMode.Polite },
+                    style = MaterialTheme.typography.bodySmall)
+            }
+            (message ?: auth.error)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            val action = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+            when {
+                auth.user == null -> Button(enabled = canAct, modifier = action.testTag("osm-gps-connect"), onClick = {
+                    if (!auth.clientIdConfigured) onSettings()
+                    else context.findActivity()?.let(onLogin) ?: run { message = "OSM giriş ekranı açılamadı." }
+                }) { Text(if (auth.clientIdConfigured) "OSM hesabını bağla" else "OSM bağlantı ayarlarını aç") }
+                !canRead -> Button(enabled = canAct && user != null, modifier = action.testTag("osm-gps-read-permission"),
+                    onClick = {
+                        context.findActivity()?.let(controller::requestReadPermission)
+                            ?: run { message = "OSM izin ekranı açılamadı." }
+                    }) { Text("OSM'de iz okuma izni ver") }
+                history == OsmGpxHistoryState.Failed || localFailure -> Button(enabled = canAct,
+                    modifier = action.testTag("osm-gps-retry"), onClick = {
+                        if (scan?.isFailure == true) scanRevision++
+                        refreshRevision++
+                    }) { Text("Yeniden dene") }
+                page != OsmGpsPage.HISTORY && !auth.canWriteGpx -> Button(enabled = canAct && user != null,
+                    modifier = action.testTag("osm-gps-permission"), onClick = {
+                        context.findActivity()?.let(controller::requestPermission)
+                            ?: run { message = "OSM izin ekranı açılamadı." }
+                    }) { Text("OSM'de iz gönderme izni ver") }
+                page == OsmGpsPage.AVAILABLE -> Button(enabled = canAct && available.any { it.key in selected },
+                    modifier = action.testTag("osm-gps-review"), onClick = {
+                        review(available.map { it.key }.filter { it in selected }.distinctBy { it.fileName })
+                    }) { Text("Gönderimi incele") }
             }
         }
     }
 
-    consent?.takeIf { it.session === expectedSession && it.selected == selected && !authState.busy }?.let { pending ->
-        val confirmation = pending.confirmation
-        OsmGpsConsentDialog(confirmation.user.displayName, confirmation.traceCount, onDismiss = { consent = null }, onConfirm = {
+    preview?.let { trace ->
+        AlertDialog(onDismissRequest = { preview = null }, title = { Text("Kırpılmış GPS izi") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OsmGpsPreview(trace)
+                    Text("Başlangıç ve bitişten en az 1 km çıkarıldı.")
+                    Text("${osmGpsDistance(trace.distanceMeters)} · ${trace.pointCount} nokta")
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { preview = null }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Kapat") }
+            })
+    }
+    consent?.takeIf { readyHistory != null && selected == it.selection && !auth.busy }?.let { pending ->
+        val confirmed = pending.confirmation
+        OsmGpsConsentDialog(confirmed.user.displayName, confirmed.traceCount, onDismiss = { consent = null }, onConfirm = {
             if (consent !== pending) return@OsmGpsConsentDialog
             consent = null
-            val currentAuth = controller.authState.value
-            if (pending.session === controller.sessions.value && !currentAuth.busy && currentAuth.canWriteGpx &&
-                currentAuth.user?.id == confirmation.user.id && pending.selected == selection.traces(currentCandidates) &&
-                pending.foregroundGeneration == foregroundGeneration && lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
-                upload.start(controller, confirmation)
-                reviewed = emptySet()
-                linksOpened = emptySet()
+            if (owns(pending.foregroundGeneration) && confirmed.user.id == controller.authState.value.user?.id &&
+                controller.authState.value.canWriteGpx && pending.selection == selection.keysFor(confirmed.user.id)
+            ) {
+                upload.start(controller, confirmed, ::prepare)
+                pending.reviewed?.let { opened = opened - it }
             } else message = "Hesap veya seçim değişti. Gönderimi yeniden incele."
         })
     }
 }
 
-private fun osmGpsBatchStatus(batch: OsmGpsUpload.Batch?, visible: OsmGpsUpload.Batch?): String? {
-    if (batch == null) return null
-    if (visible == null) return if (batch.result == null || batch.result.stop == OsmGpxStop.ACCOUNT_CHANGED)
-        "OSM hesabı değişti. Kalan izler gönderilmedi." else null
-    val result = visible.result ?: return if (visible.current > 0) "${visible.current}/${visible.keys.size} iz gönderiliyor…"
-        else "${visible.keys.size} iz sırada."
+private suspend fun <T> osmGpsLoad(load: suspend () -> T): Result<T> = try {
+    Result.success(load())
+} catch (cancelled: CancellationException) {
+    throw cancelled
+} catch (error: Exception) {
+    Result.failure(error)
+}
+
+private fun osmGpsBatchStatus(batch: OsmGpsUpload.Batch?): String? {
+    batch ?: return null
+    val result = batch.result ?: return if (batch.current > 0) "${batch.current}/${batch.keys.size} iz gönderiliyor…"
+        else "${batch.keys.size} iz sırada."
     val received = result.receipts.count { it.status == OsmGpxReceiptStatus.RECEIVED }
     val unknown = result.receipts.count { it.status == OsmGpxReceiptStatus.UNKNOWN }
-    val counts = "$received iz alındı · $unknown sonuç belirsiz · ${visible.keys.size - received - unknown} iz gönderilmedi"
+    val counts = "$received iz gönderildi · ${result.rejectedKeys.size} reddedildi · $unknown kontrol bekliyor" +
+        if (result.unattemptedCount == 0) "" else " · ${result.unattemptedCount} gönderilmedi"
     val reason = when (result.stop) {
         OsmGpxStop.COMPLETE, OsmGpxStop.UNKNOWN, OsmGpxStop.REJECTED -> null
-        OsmGpxStop.RATE_LIMITED -> "OSM gönderimleri geçici olarak sınırladı. Kalan izler gönderilmedi." +
+        OsmGpxStop.RATE_LIMITED -> "OSM gönderimleri geçici olarak sınırladı." +
             (result.retryAfterMillis?.takeIf { it > 0 }?.let { " En az ${(it - 1) / 1000 + 1} sn bekle." } ?: "")
-        OsmGpxStop.BACKGROUND -> "Gönderim durdu. Kalan izler gönderilmedi."
-        OsmGpxStop.ACCOUNT_CHANGED -> "OSM hesabı değişti. Kalan izler gönderilmedi."
+        OsmGpxStop.BACKGROUND -> "Uygulama arka plana geçti. Gönderim durdu."
+        OsmGpxStop.ACCOUNT_CHANGED -> "OSM hesabı değişti. Gönderim durdu."
         OsmGpxStop.STORAGE_ERROR -> "Gönderim durumu cihazda doğrulanamadı."
         OsmGpxStop.BUSY -> "Başka bir gönderim sürüyor."
+        OsmGpxStop.HISTORY_REQUIRED -> "OSM iz geçmişini yenile."
         OsmGpxStop.ALREADY_USED, OsmGpxStop.STALE_CONFIRMATION -> "Gönderimi yeniden incele."
     }
     return if (reason == null) counts else "$counts\n$reason"
 }
 
-private fun osmGpsRowFailure(batch: OsmGpsUpload.Batch, key: OsmGpxReceiptKey): String {
-    val result = requireNotNull(batch.result)
-    val lastAttempt = batch.keys.lastIndex - result.unattemptedCount
-    if (batch.keys.getOrNull(lastAttempt) != key || result.stop != OsmGpxStop.REJECTED) return "Bu iz gönderilmedi."
-    val reason = when (result.httpStatus) {
+private fun osmGpsRowStatus(batch: OsmGpsUpload.Batch?, key: OsmGpxReceiptKey): String? {
+    batch ?: return null
+    val index = batch.keys.indexOf(key)
+    if (index < 0) return null
+    val result = batch.result
+    if (result == null) return when {
+        index + 1 == batch.current -> "Gönderiliyor…"
+        index + 1 > batch.current -> "Sırada"
+        else -> null
+    }
+    return when (result.rejectedKeys[key]) {
+        400, 413, 422 -> "OSM GPX dosyasını kabul etmedi."
         401 -> "OSM oturumu sona erdi."
         403 -> "OSM bu hesap için gönderime izin vermedi."
-        400, 413 -> "OSM GPX dosyasını kabul etmedi."
+        429 -> "OSM gönderimleri geçici olarak sınırladı."
+        null -> "Bu iz gönderilmedi."
         else -> "OSM isteği kabul etmedi."
     }
-    return "İz gönderilemedi. $reason"
 }
