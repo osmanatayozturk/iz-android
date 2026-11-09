@@ -93,7 +93,7 @@ internal fun NavigationHomeContent(
     val textMeasurer = rememberTextMeasurer()
     val dashboardVisible = showDashboard && dashboard != null
     val baseShowBrand = !live && !showPlanner && !dashboardVisible
-    val showShortcuts = !nav.guidance && !showPlanner && !dashboardVisible && shortcuts.isNotEmpty()
+    val showShortcuts = !nav.guidance && !showPlanner && !dashboardVisible && (!live || shortcuts.isNotEmpty())
     val showDestinationHeader = !nav.guidance && !dashboardVisible
     val externalHeader = !showPlanner && !dashboardVisible && (nav.guidance || nav.roadSpeed.visible)
     var shortcutMeasurement by remember { mutableStateOf<Pair<List<Any?>, androidx.compose.ui.unit.Dp>?>(null) }
@@ -103,6 +103,7 @@ internal fun NavigationHomeContent(
     var dashboardButtonMeasurement by remember { mutableStateOf<Pair<List<Any?>, androidx.compose.ui.unit.Dp>?>(null) }
     val dashboardEpoch = remember(dashboardVisible) { Any() }
     BoxWithConstraints(Modifier.fillMaxSize().testTag("navigation-home")) {
+        val shortIdle = baseShowBrand && (maxWidth > maxHeight || maxHeight < 400.dp)
         val dashboardAtSide = dashboardVisible && maxWidth > maxHeight
         val dashboardKey = listOf(maxWidth, maxHeight, density.density, density.fontScale, dashboardAtSide, dashboardEpoch)
         val measuredDashboard = dashboardMeasurement?.takeIf { it.first == dashboardKey }?.second
@@ -111,7 +112,7 @@ internal fun NavigationHomeContent(
         val dashboardSideWidth = if (dashboardAtSide) measuredDashboard?.let { with(density) { it.width.toDp() } } ?: desiredSideWidth else 0.dp
         val dashboardBottomHeight = if (dashboardVisible && !dashboardAtSide) measuredDashboard?.let { with(density) { it.height.toDp() } } ?: desiredBottomHeight else 0.dp
         val dashboardButtonVisible = onDashboard != null && !dashboardVisible
-        val dashboardButtonInMap = dashboardButtonVisible && !externalHeader
+        val dashboardButtonInMap = dashboardButtonVisible && !externalHeader && !shortIdle
         val dashboardButtonKey = listOf(maxWidth, maxHeight, density.density, density.fontScale, dashboardEpoch)
         val dashboardButtonHeight = if (dashboardButtonInMap) dashboardButtonMeasurement?.takeIf { it.first == dashboardButtonKey }?.second ?: 48.dp else 0.dp
         val shortLandscape = maxWidth > maxHeight && maxHeight < 480.dp
@@ -124,22 +125,20 @@ internal fun NavigationHomeContent(
             showDestinationHeader, live, nav.guidance, nav.recording, nav.recordingPending, nav.simulation, nav.gpsStale,
             nav.approximateOrigin != null, preciseLocationAllowed,
             nav.locationActive, nav.sessionTransport, nav.message, ui.message, weatherLabel, current == null, ui.locating, voiceFault, presentation.editPreviewLabel,
-            if (showShortcuts) shortcuts.map { it.kind to it.place.name } else emptyList())
-        // A shortcut row does not depend on maneuver, speed or warning text in the other panels.
-        val showBrand = baseShowBrand && !(showShortcuts && maxHeight < 400.dp)
-        val shortcutKey = listOf(maxWidth, maxHeight, density.density, density.fontScale, ui.busy,
-            shortcuts.map { it.kind to it.place.name })
-        val headerKey = listOf(maxWidth, maxHeight, density.density, density.fontScale, showBrand)
+            showShortcuts)
+        // Slot labels are single-line and keep the same row dimensions when assignments change.
+        val shortcutKey = listOf(maxWidth, maxHeight, density.density, density.fontScale)
+        val headerKey = shortcutKey + listOf(baseShowBrand, shortIdle, shortIdle && dashboardButtonVisible)
         val shortcutHeight = shortcutMeasurement?.takeIf { it.first == shortcutKey }?.second ?: 0.dp
         val shortcutOffset = if (showShortcuts) shortcutHeight + 8.dp else 0.dp
         val headerHeight = if (!showDestinationHeader) 0.dp else
             headerMeasurement?.takeIf { it.first == headerKey }?.second ?: if (baseShowBrand) 144.dp else 80.dp
 
         val compact = maxHeight - shortcutOffset < 640.dp
-        val shortIdle = baseShowBrand && maxHeight - shortcutOffset < 400.dp
-        val horizontalMapControls = baseShowBrand && headerHeight + shortcutOffset + 24.dp + 104.dp > maxHeight - 92.dp
+        val controlsTopInset = headerHeight + shortcutOffset + if (shortIdle) 20.dp else 24.dp
+        val horizontalMapControls = baseShowBrand && (shortIdle || controlsTopInset + 104.dp > maxHeight - 92.dp)
         // Compact branches depend on measured header/shortcut extents as well as input data.
-        val panelsKey = layoutKey + listOf(showBrand, compact, shortIdle, headerHeight, shortcutOffset)
+        val panelsKey = layoutKey + listOf(compact, shortIdle, headerHeight, shortcutOffset)
         val panelsHeight = panelsMeasurement?.takeIf { it.first == panelsKey }?.second ?: 0.dp
         // Never draw controls with a provisional offset when their own row/header changed.
         val controlsReady = (!showDestinationHeader || headerMeasurement?.first == headerKey) &&
@@ -159,23 +158,32 @@ internal fun NavigationHomeContent(
                     Text(label, Modifier.padding(12.dp), style = MaterialTheme.typography.labelLarge)
                 }
             }
-            if (showShortcuts) Box(Modifier.fillMaxWidth().onSizeChanged { shortcutMeasurement = shortcutKey to with(density) { it.height.toDp() } }) {
-                ShortcutDestinationsRow(shortcuts, !ui.busy, onShortcut)
-            }
             if (showDestinationHeader) Column(Modifier.fillMaxWidth().onSizeChanged { headerMeasurement = headerKey to with(density) { it.height.toDp() } },
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (showBrand) HomeBrand()
+                if (shortIdle) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        HomeBrand(compact = true, modifier = Modifier.weight(1.2f))
+                        if (current == null) HomeLocateChip(ui.locating, onLocate, Modifier.weight(1f, fill = false))
+                        HomeWeatherChip(weatherLabel, onWeather, Modifier.weight(1f, fill = false))
+                        if (dashboardButtonVisible && onDashboard != null) HomeDashboardButton(onDashboard)
+                    }
+                } else if (baseShowBrand) HomeBrand()
                 Surface(onClick = onSearch, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("open-navigation"),
                     shape = RoundedCornerShape(24.dp), shadowElevation = 4.dp, color = MaterialTheme.colorScheme.surface) {
-                    Row(Modifier.padding(horizontal = 18.dp, vertical = 15.dp), verticalAlignment = Alignment.CenterVertically,
+                    Row(Modifier.heightIn(min = 48.dp).padding(horizontal = 18.dp, vertical = if (shortIdle) 4.dp else 15.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Icon(Icons.Outlined.Search, null, tint = Forest)
                         Column(Modifier.weight(1f)) {
-                            Text("Nereye?", style = MaterialTheme.typography.titleLarge)
+                            Text("Nereye?", style = if (shortIdle) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge)
                         }
                         Icon(Icons.Outlined.Route, "Yol tarifi", tint = Forest)
                     }
                 }
+            }
+            if (showShortcuts) Box(Modifier.fillMaxWidth().onSizeChanged { shortcutMeasurement = shortcutKey to with(density) { it.height.toDp() } }) {
+                ShortcutDestinationsRow(shortcuts, enabled = !ui.busy, showUnassigned = !live, onShortcut = onShortcut)
             }
         }
         val statusMessage: @Composable () -> Unit = {
@@ -222,11 +230,12 @@ internal fun NavigationHomeContent(
             cameraViewportReady = viewportReady, navigationControlsReady = controlsReady,
             navigationLayout = true, members = members, onLocate = onLocate, onMapLongClick = onPin,
             navigationControlsTopInset = if (presentation.editPreviewLabel != null)
-                panelsHeight + 24.dp else headerHeight + shortcutOffset + 24.dp,
+                panelsHeight + 24.dp else controlsTopInset,
             navigationControlsHorizontal = horizontalMapControls,
             attributionBottomInset = if (dashboardBottomHeight > 0.dp) dashboardBottomHeight + 92.dp else if (showPlanner && !dashboardVisible) maxHeight * .64f + 4.dp else 92.dp,
-            cameraViewportInsets = PaddingValues(start = 28.dp, top = if (externalHeader) 24.dp else panelsHeight + 24.dp,
-                end = if (externalHeader) 28.dp else 84.dp,
+            cameraViewportInsets = PaddingValues(start = 28.dp,
+                top = if (externalHeader) 24.dp else if (shortIdle) controlsTopInset else panelsHeight + 24.dp,
+                end = if (externalHeader) 28.dp else if (horizontalMapControls) 124.dp else 84.dp,
                 bottom = if (dashboardBottomHeight > 0.dp) dashboardBottomHeight + 112.dp else if (showPlanner && !dashboardVisible) maxHeight * .64f + 24.dp else 112.dp + dashboardButtonHeight),
             navigationHeader = if (externalHeader) navigationHeader else null)
         if (!externalHeader) Column(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(end = dashboardSideWidth).padding(12.dp)
@@ -238,11 +247,7 @@ internal fun NavigationHomeContent(
                     HomeSessionWarnings(nav, voiceFault, preciseLocationAllowed)
                 }
             }
-            if (shortIdle) Row(Modifier.fillMaxWidth().padding(end = if (horizontalMapControls) 116.dp else 60.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (current == null) HomeLocateChip(ui.locating, onLocate, Modifier.weight(1f, fill = false))
-                HomeWeatherChip(weatherLabel, onWeather, Modifier.weight(1f, fill = false))
-            } else if (!showPlanner && !dashboardVisible && !live && current == null) HomeLocateChip(ui.locating, onLocate)
+            if (!shortIdle && !showPlanner && !dashboardVisible && !live && current == null) HomeLocateChip(ui.locating, onLocate)
             if (!showPlanner && !dashboardVisible) statusMessage()
             if (!showPlanner && !dashboardVisible && !shortIdle) HomeWeatherChip(weatherLabel, onWeather,
                 if (compact && live) Modifier.align(Alignment.End).widthIn(max = compactWeatherWidth) else Modifier)
@@ -301,16 +306,16 @@ private fun HomeWeatherChip(label: String, onWeather: () -> Unit, modifier: Modi
 }
 
 @Composable
-private fun HomeBrand() {
-    Surface(Modifier.fillMaxWidth().testTag("home-brand").semantics(mergeDescendants = true) {},
+private fun HomeBrand(compact: Boolean = false, modifier: Modifier = Modifier) {
+    Surface(modifier.fillMaxWidth().testTag("home-brand").semantics(mergeDescendants = true) {},
         shape = RoundedCornerShape(24.dp), color = Paper, shadowElevation = 2.dp) {
-        Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.padding(horizontal = if (compact) 8.dp else 16.dp, vertical = if (compact) 4.dp else 8.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 12.dp)) {
             Image(painterResource(R.drawable.ic_launcher), contentDescription = null,
-                modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).testTag("home-brand-logo"))
+                modifier = Modifier.size(if (compact) 28.dp else 36.dp).clip(RoundedCornerShape(10.dp)).testTag("home-brand-logo"))
             Column(Modifier.weight(1f)) {
-                Text("İz", style = MaterialTheme.typography.headlineMedium, color = Forest)
-                Text("Küçük yollar, güzel anılar.", style = MaterialTheme.typography.bodySmall, color = Muted)
+                Text("İz", style = if (compact) MaterialTheme.typography.titleMedium else MaterialTheme.typography.headlineMedium, color = Forest)
+                if (!compact) Text("Küçük yollar, güzel anılar.", style = MaterialTheme.typography.bodySmall, color = Muted)
             }
         }
     }

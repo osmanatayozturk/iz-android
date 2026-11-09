@@ -1,34 +1,47 @@
 package org.iz.navigation.ui
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.AssistChip
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import org.iz.navigation.data.*
+import org.iz.navigation.data.DestinationShortcut
+import org.iz.navigation.data.DestinationShortcutKind
+import org.iz.navigation.data.Place
+import org.iz.navigation.data.isValidDestinationShortcut
 import org.iz.navigation.weather.RouteStop
 import org.iz.navigation.weather.WeatherCoordinate
 
 internal fun shortcutRouteStop(place: Place?): RouteStop? {
-    val latitude = place?.latitude ?: return null
-    val longitude = place.longitude ?: return null
-    if (place.name.isBlank() || place.name.length > 300) return null
-    if (!latitude.isFinite() || !longitude.isFinite() || latitude !in -90.0..90.0 || longitude !in -180.0..180.0) return null
-    return RouteStop(place.name, WeatherCoordinate(latitude, longitude))
+    if (place == null || !place.isValidDestinationShortcut()) return null
+    return RouteStop(place.name, WeatherCoordinate(requireNotNull(place.latitude), requireNotNull(place.longitude)))
 }
 
 @Composable
-internal fun ShortcutDestinationsRow(shortcuts: List<DestinationShortcut>, enabled: Boolean,
+internal fun ShortcutDestinationsRow(shortcuts: List<DestinationShortcut>, enabled: Boolean, showUnassigned: Boolean,
     onShortcut: (DestinationShortcutKind) -> Unit) {
-    if (shortcuts.isEmpty()) return
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        shortcuts.forEach { shortcut ->
-            val label = if (shortcut.kind == DestinationShortcutKind.HOME) "Ev" else "İş"
-            AssistChip(onClick = { onShortcut(shortcut.kind) }, label = { Text("$label · ${shortcut.place.name}", maxLines = 1) },
-                enabled = enabled && shortcutRouteStop(shortcut.place) != null,
-                modifier = Modifier.weight(1f).testTag("destination-shortcut-${shortcut.kind.name}"))
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        for (kind in DestinationShortcutKind.entries) {
+            val place = shortcuts.firstOrNull { it.kind == kind }?.place
+            if (!showUnassigned && place == null) continue
+            val valid = place?.isValidDestinationShortcut() == true
+            val label = if (kind == DestinationShortcutKind.HOME) "Ev" else "İş"
+            val title = when {
+                showUnassigned && !valid -> "$label adresi ekle"
+                place != null && place.name.isNotBlank() -> "$label · ${place.name}"
+                else -> label
+            }
+            OutlinedButton(onClick = { onShortcut(kind) }, enabled = enabled && (valid || showUnassigned),
+                modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("destination-shortcut-${kind.name}")
+                    .semantics { if (!valid) stateDescription = if (showUnassigned) "Atanmamış" else "Kullanılamıyor" },
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
+                Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
     }
 }

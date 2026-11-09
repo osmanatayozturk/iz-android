@@ -76,7 +76,10 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import org.iz.navigation.integration.osm.OsmAuthManager
 import org.iz.navigation.integration.osm.OsmContributionController
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -140,7 +143,8 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     var selectedPlace by navigator.selected(UiPage.PLACE)
     val transportState = rememberUiEntryState<TransportAction?>(history) { null }
     var transportAction by transportState
-    var addPlace by rememberUiEntryState<Boolean>(history) { false }
+    val addPlaceState = rememberUiEntryState<Boolean>(history) { false }
+    var addPlace by addPlaceState
     var targetJourney by rememberUiEntryState<String?>(history) { null }
     var pin by rememberUiEntryState<GeoCoordinate?>(history) { null }
     var osmSelection by rememberUiEntryState<SelectedOsmPlace?>(history) { null }
@@ -177,6 +181,10 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     val gpxPermissionGate = remember { GpxStartPermissionGate() }
     val library = remember { TravelLibraryRepository(context) }
     val destinationShortcuts by library.destinationShortcuts.collectAsStateWithLifecycle(initialValue = emptyList())
+    val shortcutAssignment = uiEntry.shortcutAssignmentKind()
+    val shortcutScope = rememberCoroutineScope()
+    var shortcutError by remember(uiEntry.key) { mutableStateOf<String?>(null) }
+    var shortcutLocation by remember(uiEntry.key) { mutableStateOf<Job?>(null) }
     val gpxOwnerKey = entries.lastOrNull { it.page == UiPage.GPX }?.key ?: "map"
     val gpxImports = featureOwners.get("gpx", gpxOwnerKey, GpxImportViewModel::class.java, featureFactory)
     val importedGpx by gpxImports.state.collectAsStateWithLifecycle()
@@ -266,6 +274,31 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     var trackExportOwner by remember { mutableStateOf<UiAsyncOwner?>(null) }
     fun captureResultOwner() = if (history.current.key == uiEntry.key) exitGuard.captureAsyncOwner(history.current.key) else null
     fun accepts(owner: UiAsyncOwner?) = exitGuard.acceptsAsyncOwner(owner, history.current.key)
+    fun assignShortcut(kind: DestinationShortcutKind, save: suspend () -> Unit) {
+        if (resultOwner.formBusy.value || history.current.shortcutAssignmentKind() != kind) return
+        val owner = captureResultOwner() ?: return
+        resultOwner.formBusy.value = true
+        shortcutError = null
+        shortcutLocation?.cancel()
+        shortcutScope.launch {
+            try {
+                if (!accepts(owner)) return@launch
+                save()
+                if (accepts(owner)) {
+                    addPlace = false
+                    exitGuard.update(null)
+                    history.toMap()
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                if (accepts(owner)) shortcutError = (error as? IllegalArgumentException)?.message
+                    ?: "Adres kaydedilemedi. Yeniden deneyebilirsin."
+            } finally {
+                resultOwner.formBusy.value = false
+            }
+        }
+    }
     val launcherCapture: () -> UiAsyncOwner? = {
         val actual = history.current.key
         if (actual == uiEntry.key) exitGuard.captureAsyncOwner(actual) else null
@@ -624,8 +657,25 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     continuePreparation = continueNavigationPreparation, onMap = ::returnToMap,
                     onPlannerOpened = { if (history.current.page != UiPage.DIRECTIONS) { continueNavigationPreparation = true; navigationStops = null; navigationInitialPlan = null; navigationTarget = null; history.push(UiPage.DIRECTIONS) } },
                     onMenu = { menuOpen = true }, onGroup = { groupPage = true }, onWeather = { weatherPage = true },
+                    onAssignShortcut = { kind ->
+                        if (history.current.key == uiEntry.key && uiEntry.page == UiPage.MAP) {
+                            navigator.open(UiPage.PLACES, shortcutAssignmentId(kind))
+                        }
+                    },
                     onPin = { openAddPlace(location = it) })
                 tab == 1 -> browseHolder.SaveableStateProvider(uiEntry.key) { JourneysScreen(state, now, onJourney = { selectedJourney = it.id }, onStart = { transportAction = TransportAction() }, onConfirm = { transportAction = TransportAction(it.id) }, onReject = { j -> deletion = Deletion("Bu geçici rota silinecek ve açıksa takip duracak.") { vm.tracker.reject(j.id) } }) }
+                shortcutAssignment != null -> DestinationShortcutAssignmentScreen(shortcutAssignment, state.places,
+                    busy = resultOwner.formBusy.value, error = shortcutError,
+                    onPlace = { place -> assignShortcut(shortcutAssignment) {
+                        library.setDestinationShortcut(shortcutAssignment, place.id)
+                    } },
+                    onNewPlace = {
+                        if (history.current.key == uiEntry.key && !resultOwner.formBusy.value) {
+                            shortcutError = null
+                            openAddPlace(journeyId = null)
+                        }
+                    },
+                    onCancel = ::returnToParent)
                 tab == 2 -> browseHolder.SaveableStateProvider(uiEntry.key) { PlacesScreen(state, onPlace = { selectedPlace = it.id }, onAdd = { openAddPlace() }, onReorder = vm.repository::reorderPlaces, shortcuts = destinationShortcuts,
                     onShortcut = { kind, target -> vm.execute { library.setDestinationShortcut(kind, target?.id) } }) }
                 tab == 3 -> browseHolder.SaveableStateProvider(uiEntry.key) { HeatmapScreen(state) }
@@ -748,24 +798,75 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
         }
     }
 
-    if (addPlace) PlaceEditor(pin, osmSelection, state.places,
-        onDismiss = { addPlace = false }, onSearch = { searchOsm = true }, onLocate = {
+    if (addPlace) PlaceEditor(pin, osmSelection,
+        if (shortcutAssignment == null) state.places else state.places.filter(Place::isValidDestinationShortcut),
+        assignmentKind = shortcutAssignment, saveError = shortcutError,
+        onDismiss = {
+            if (shortcutAssignment != null) {
+                shortcutLocation?.cancel()
+                shortcutError = null
+                searchOsm = false
+            }
+            addPlace = false
+        }, onSearch = { searchOsm = true }, onLocate = {
             if (!hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)) permissions.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
-            else vm.execute {
+            else if (shortcutAssignment == null) vm.execute {
                 @Suppress("MissingPermission") val location = LocationServices.getFusedLocationProviderClient(context).getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null).await()
                 if (location == null) vm.message("Konum alınamadı. Haritaya uzun basarak yer seçebilirsin.") else { osmSelection = null; pin = GeoCoordinate(location.latitude, location.longitude) }
+            } else if (shortcutLocation?.isActive != true && !resultOwner.formBusy.value) {
+                val owner = captureResultOwner()
+                val revision = addPlaceState.revision
+                if (owner != null) shortcutLocation = shortcutScope.launch {
+                    fun editorIsCurrent() = addPlace && addPlaceState.revision == revision && accepts(owner)
+                    try {
+                        @Suppress("MissingPermission")
+                        val location = LocationServices.getFusedLocationProviderClient(context)
+                            .getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null).await()
+                        if (editorIsCurrent()) {
+                            shortcutError = if (location == null) "Konum alınamadı. Yeniden dene." else null
+                            if (location != null) {
+                                osmSelection = null
+                                pin = GeoCoordinate(location.latitude, location.longitude)
+                            }
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        if (editorIsCurrent()) shortcutError = "Konum alınamadı. Yeniden dene."
+                    }
+                }
             }
         }, onSave = { name, note, existingPlace ->
-            executeEditor("Yer ziyaretin kaydedildi.") {
-                val place = existingPlace ?: Place(name = name.trim(), latitude = pin?.latitude, longitude = pin?.longitude,
-                    osmType = osmSelection?.osmRef?.type, osmId = osmSelection?.osmRef?.id,
-                    source = if (osmSelection?.osmRef != null) PlaceSource.OSM else PlaceSource.USER).also { vm.repository.savePlace(it) }
+            fun newPlace() = Place(name = name.trim(), latitude = pin?.latitude, longitude = pin?.longitude,
+                osmType = osmSelection?.osmRef?.type, osmId = osmSelection?.osmRef?.id,
+                source = if (osmSelection?.osmRef != null) PlaceSource.OSM else PlaceSource.USER)
+            if (shortcutAssignment != null) {
+                val draft = if (existingPlace == null) newPlace() else null
+                assignShortcut(shortcutAssignment) {
+                    if (draft != null) vm.repository.savePlaceAndAssignShortcut(shortcutAssignment, draft)
+                    else library.setDestinationShortcut(shortcutAssignment, checkNotNull(existingPlace).id)
+                }
+            } else executeEditor("Yer ziyaretin kaydedildi.") {
+                val place = existingPlace ?: newPlace().also { vm.repository.savePlace(it) }
                 vm.repository.saveVisit(Visit(placeId = place.id, journeyId = targetJourney, visitedAt = now, note = note.trim()))
                 addPlace = false; selectedJourney = null; selectedPlace = place.id
             }
         },
     )
-    if (searchOsm) OsmSearchDialog(onDismiss = { searchOsm = false }, onSelect = { osmSelection = it; pin = GeoCoordinate(it.latitude, it.longitude); searchOsm = false })
+    if (searchOsm) {
+        val editorRevision = addPlaceState.revision
+        fun searchIsCurrent() = shortcutAssignment == null ||
+            (searchOsm && addPlace && addPlaceState.revision == editorRevision)
+        OsmSearchDialog(onDismiss = { if (searchIsCurrent()) searchOsm = false }, onSelect = {
+            if (searchIsCurrent()) {
+                shortcutLocation?.cancel()
+                shortcutError = null
+                osmSelection = it
+                pin = GeoCoordinate(it.latitude, it.longitude)
+                searchOsm = false
+            }
+        })
+    }
     photoTarget?.let { target ->
         AlertDialog(onDismissRequest = { photoTarget = null }, title = { Text("Bir anı ekle") }, text = { Text("Seçtiğin fotoğrafların bir kopyası yalnızca bu uygulamada saklanır.") },
             confirmButton = { TextButton(onClick = { gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) { owner -> resultOwner.putPayload("gallery", owner, UiResultPayload.Photos(target.journeyId, target.visitId, photoTargetState.revision)) } }) { Text("Galeriden seç") } },

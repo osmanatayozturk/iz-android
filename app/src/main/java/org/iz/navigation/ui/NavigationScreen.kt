@@ -36,6 +36,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -278,22 +279,8 @@ internal class PhoneNavigationViewModel(application: Application) : AndroidViewM
             directions.setDestination(RouteStop(value.query.ifBlank { "Hedef" }, coordinate))
         }
     }
-    fun shortcut(kind: DestinationShortcutKind) {
-        if (commandBusy.value || ui.value.starting) return
-        work.newTarget()
-        work.read { current ->
-            val place = shortcutLibrary.destinationShortcuts.first().firstOrNull { it.kind == kind }?.place
-            val stop = shortcutRouteStop(place)
-            if (current()) {
-                if (stop == null) directions.reportMessage("Hedef artık kullanılamıyor. Yerler bölümünden Ev/İş atamasını kontrol et.")
-                else {
-                    val mode = navigation.state.value.sessionTransport ?: ui.value.transport
-                    directions.enter(System.nanoTime(), initialTransport = mode, locateOnOpen = false)
-                    directions.setDestination(stop)
-                }
-            }
-        }
-    }
+    suspend fun readShortcut(kind: DestinationShortcutKind): RouteStop? =
+        shortcutRouteStop(shortcutLibrary.destinationShortcuts.first().firstOrNull { it.kind == kind }?.place)
     fun lastDestination() {
         navigation.lastRoute?.stops?.lastOrNull()?.let(directions::setDestination)
     }
@@ -340,6 +327,8 @@ internal class PhoneNavigationViewModel(application: Application) : AndroidViewM
     }
 }
 
+private class QuickDirectionsEntry(val destination: RouteStop? = null)
+
 @Composable
 internal fun NavigationScreen(
     onClose: () -> Unit,
@@ -360,6 +349,7 @@ internal fun NavigationScreen(
     continuePreparation: Boolean = false,
     onPlannerOpened: () -> Unit = {},
     onMap: () -> Unit = onClose,
+    onAssignShortcut: (DestinationShortcutKind) -> Unit = {},
 ) {
     val context = LocalContext.current
     val ui by vm.ui.collectAsStateWithLifecycle()
@@ -398,8 +388,15 @@ internal fun NavigationScreen(
     val groupState by app.groups.state.collectAsStateWithLifecycle()
     val weather by app.weatherManager.state.collectAsStateWithLifecycle()
     var showPlanning by androidx.compose.runtime.saveable.rememberSaveable(entryId) { mutableStateOf(initiallyPlanning) }
-    var showQuickDirections by remember(entryId) { mutableStateOf(false) }
     val dashboardEntry = org.iz.navigation.ui.history.LocalUiEntryKey.current
+    val quickOwner = remember(entryId, dashboardEntry) { Any() }
+    val currentQuickOwner by rememberUpdatedState(quickOwner)
+    val assignShortcut by rememberUpdatedState(onAssignShortcut)
+    val shortcutScope = rememberCoroutineScope()
+    var quickDirections by remember(quickOwner) { mutableStateOf<QuickDirectionsEntry?>(null) }
+    var shortcutJob by remember(quickOwner) { mutableStateOf<Job?>(null) }
+    fun quickEntryCurrent(): Boolean =
+        currentQuickOwner === quickOwner && (uiHistory == null || uiHistory.current.key == dashboardEntry)
     val activeBreak = nav.plannedBreak
     val breakOwner = NavigationStopSnapshot.from(nav)
     val plannedBreakResumeEnabled = !commandBusy && !ui.starting && !nav.loading && activeBreak != null &&
@@ -412,6 +409,38 @@ internal fun NavigationScreen(
         }
     }
     var showDashboard by remember(dashboardEntry, nav.sessionId) { mutableStateOf(false) }
+    fun openShortcut(kind: DestinationShortcutKind) {
+        val before = vm.navigation.state.value
+        if (showPlanning || showDashboard || before.guidance || quickDirections != null || shortcutJob != null ||
+            !quickEntryCurrent() || vm.commandBusy.value || vm.ui.value.starting) return
+
+        fun canOpen(): Boolean {
+            val current = vm.navigation.state.value
+            return quickEntryCurrent() && !showPlanning && !showDashboard && quickDirections == null &&
+                !vm.commandBusy.value && !vm.ui.value.starting && !current.guidance &&
+                current.routeRevision == before.routeRevision &&
+                NavigationStopSnapshot.from(current) == NavigationStopSnapshot.from(before)
+        }
+
+        shortcutJob = shortcutScope.launch(start = CoroutineStart.LAZY) {
+            try {
+                val destination = vm.readShortcut(kind)
+                ensureActive()
+                if (canOpen()) {
+                    if (destination == null) assignShortcut(kind)
+                    else quickDirections = QuickDirectionsEntry(destination)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                ensureActive()
+                if (canOpen()) vm.directions.reportMessage("Kayıtlı hedef okunamadı. Yeniden dene.")
+            } finally {
+                shortcutJob = null
+            }
+        }
+        shortcutJob?.start()
+    }
     val dashboardOwner = DashboardOwner(dashboardEntry, nav.sessionId)
     val dashboardRouteRevision = nav.routeRevision
     val dashboardStillCurrent: () -> Boolean = {
@@ -666,14 +695,17 @@ internal fun NavigationScreen(
             })
     }
     NavigationHomeContent(ui = ui, nav = nav, points = points,
-        shortcuts = shortcuts, onShortcut = { kind -> showPlanning = true; onPlannerOpened(); vm.shortcut(kind) },
+        shortcuts = shortcuts, onShortcut = ::openShortcut,
         members = groupState.markers.map { org.iz.navigation.integration.RouteMapMember(it.userId, it.name, it.latitude, it.longitude, it.delayed) },
         showPlanner = showPlanning, voiceFault = phoneVoiceFault(speechStatus, nav.guidance, nav.muted),
         editPreview = routeEdits.preview?.takeIf { it.owner.matches(nav) },
         showDashboard = showDashboard, onDashboard = { if (dashboardStillCurrent()) showDashboard = true }, dashboard = dashboardContent,
         weatherLabel = weather.assessment?.samples?.firstOrNull()?.reading?.temperatureC?.let { "${it.toInt()}° · Hava" } ?: "Hava durumu",
         onSearch = {
-            showQuickDirections = true
+            if (quickEntryCurrent() && quickDirections == null) {
+                shortcutJob?.cancel()
+                quickDirections = QuickDirectionsEntry()
+            }
         },
         onRecord = {
             if (nav.recording) sessionActions = true
@@ -721,24 +753,30 @@ internal fun NavigationScreen(
         onPrepareGroup = { ui.preview?.let { app.groups.prepareRoute(it.stops, it.transport); onGroup() } },
     )
     }
-    if (showQuickDirections) QuickDirectionsDialog(
-        places = places,
-        navigationState = vm.navigation.state,
-        locate = vm.navigation::quickOrigin,
-        validateOrigin = vm.navigation::validateQuickOrigin,
-        plan = vm.directions::planQuick,
-        activate = vm.navigation::startQuickGuidance,
-        commandBusy = commandBusy || ui.starting,
-        stillOnEntry = {
-            (uiHistory == null || uiHistory.current.key == dashboardEntry) && !vm.commandBusy.value && !vm.ui.value.starting
-        },
-        onDismiss = { showQuickDirections = false },
-        onStarted = {
-            showQuickDirections = false
-            showPlanning = false
-            onStarted()
-        },
-    )
+    val quickEntry = quickDirections
+    if (quickEntry != null) key(quickEntry) {
+        QuickDirectionsDialog(
+            places = places,
+            navigationState = vm.navigation.state,
+            locate = vm.navigation::quickOrigin,
+            validateOrigin = vm.navigation::validateQuickOrigin,
+            plan = vm.directions::planQuick,
+            activate = vm.navigation::startQuickGuidance,
+            initialDestination = quickEntry.destination,
+            commandBusy = commandBusy || ui.starting,
+            stillOnEntry = {
+                quickEntryCurrent() && quickDirections === quickEntry && !vm.commandBusy.value && !vm.ui.value.starting
+            },
+            onDismiss = { if (quickDirections === quickEntry) quickDirections = null },
+            onStarted = {
+                if (quickEntryCurrent() && quickDirections === quickEntry) {
+                    quickDirections = null
+                    showPlanning = false
+                    onStarted()
+                }
+            },
+        )
+    }
     if (recordDialog) TransportDialog(ui.transport, "Yolculuğu kaydet", onDismiss = { recordDialog = false }) { selected ->
         vm.directions.transport(selected)
         vm.directions.setRecordJourney(true)

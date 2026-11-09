@@ -108,6 +108,7 @@ internal fun QuickDirectionsDialog(
     stillOnEntry: () -> Boolean = { true },
     searchPlaces: (suspend (String) -> List<SelectedOsmPlace>)? = null,
     hasLocationPermission: (() -> Boolean)? = null,
+    initialDestination: RouteStop? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -120,8 +121,8 @@ internal fun QuickDirectionsDialog(
     val results by search.state.collectAsStateWithLifecycle()
     val nav by navigationState.collectAsStateWithLifecycle()
     val destinationList = rememberLazyListState()
-    var destination by remember { mutableStateOf<RouteStop?>(null) }
-    var choosingMode by remember { mutableStateOf(false) }
+    var destination by remember(initialDestination) { mutableStateOf(initialDestination) }
+    var choosingMode by remember(initialDestination) { mutableStateOf(initialDestination != null) }
     var choices by remember { mutableStateOf(emptyMap<QuickRoutePreference, Boolean>()) }
     var recordJourney by remember { mutableStateOf(true) }
     var permissionRequest by remember { mutableStateOf<QuickRouteRequest?>(null) }
@@ -230,7 +231,11 @@ internal fun QuickDirectionsDialog(
         routeJob = null
         phase = null
         error = null
-        choosingMode = false
+        if (initialDestination == null) choosingMode = false
+        else {
+            search.close()
+            onDismiss()
+        }
     }
 
     Dialog(onDismissRequest = ::back, properties = DialogProperties(

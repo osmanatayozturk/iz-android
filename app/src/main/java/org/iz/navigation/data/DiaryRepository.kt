@@ -273,6 +273,13 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
         dao.save(entity.copy(sortOrder = position))
     }
 
+    internal suspend fun savePlaceAndAssignShortcut(kind: DestinationShortcutKind, entity: Place) = db.withTransaction {
+        require(entity.isValidDestinationShortcut()) { "Adres için geçerli bir yer adı ve konum gerekli." }
+        check(dao.place(entity.id) == null) { "Bu yer zaten kayıtlı. Kayıtlı yerlerden seç." }
+        savePlace(entity)
+        libraryDao.saveShortcut(DestinationShortcutEntity(kind.name, entity.id))
+    }
+
     suspend fun reorderPlaces(originalOrder: List<String>, newOrder: List<String>) = db.withTransaction {
         val reordered = PlaceOrderRules.reorder(dao.allPlaces(), originalOrder, newOrder)
         reordered.forEach { dao.setPlaceOrder(it.id, it.sortOrder) }

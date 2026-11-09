@@ -36,6 +36,49 @@ class TravelLibraryRepositoryTest {
     }
     @After fun close() { db.close() }
 
+    @Test fun assignsNewPlaceWithoutCreatingAVisitOrJourney() = runBlocking {
+        val place = Place(id = "new-work", name = "Atölye", latitude = 41.0, longitude = 29.0)
+        diary.savePlaceAndAssignShortcut(DestinationShortcutKind.WORK, place)
+
+        val snapshot = diary.snapshot()
+        assertEquals(listOf(place), snapshot.places)
+        assertEquals(listOf(DestinationShortcutRef(DestinationShortcutKind.WORK, place.id)), snapshot.destinationShortcuts)
+        assertTrue(snapshot.visits.isEmpty())
+        assertTrue(snapshot.journeys.isEmpty())
+    }
+
+    @Test fun shortcutWriteFailureRollsBackTheNewPlaceAndRetainsTheExistingShortcut() = runBlocking {
+        val current = Place(id = "home", name = "Ev", latitude = 41.0, longitude = 29.0)
+        diary.savePlace(current)
+        repository.setDestinationShortcut(DestinationShortcutKind.HOME, current.id)
+        val blocked = Place(id = "blocked", name = "Diğer yer", latitude = 40.0, longitude = 28.0)
+        for (operation in listOf("INSERT", "UPDATE")) {
+            db.openHelper.writableDatabase.execSQL(
+                "CREATE TRIGGER block_shortcut_$operation BEFORE $operation ON destination_shortcuts " +
+                    "WHEN NEW.placeId = 'blocked' BEGIN SELECT RAISE(ABORT, 'fixture'); END"
+            )
+        }
+
+        val failure = runCatching { diary.savePlaceAndAssignShortcut(DestinationShortcutKind.HOME, blocked) }.exceptionOrNull()
+        assertTrue(generateSequence(failure) { it.cause }.any { it.message.orEmpty().contains("fixture") })
+        val snapshot = diary.snapshot()
+        assertEquals(listOf(current), snapshot.places)
+        assertEquals(listOf(DestinationShortcutRef(DestinationShortcutKind.HOME, current.id)), snapshot.destinationShortcuts)
+        assertTrue(snapshot.visits.isEmpty())
+    }
+
+    @Test fun existingAssignmentRejectsALocationInvalidatedAfterSelection() = runBlocking {
+        val current = Place(id = "home", name = "Ev", latitude = 41.0, longitude = 29.0)
+        val selected = Place(id = "picked", name = "Seçilen yer", latitude = 40.0, longitude = 28.0)
+        diary.savePlace(current)
+        diary.savePlace(selected)
+        repository.setDestinationShortcut(DestinationShortcutKind.HOME, current.id)
+        diary.savePlace(selected.copy(latitude = null, longitude = null))
+
+        assertTrue(runCatching { repository.setDestinationShortcut(DestinationShortcutKind.HOME, selected.id) }.isFailure)
+        assertEquals(current.id, repository.destinationShortcuts.first().single().place.id)
+    }
+
     @Test fun plansAndTracksPersistWithoutCreatingDiaryJourneysAndRenameKeepsIdentity() = runBlocking {
         repository.savePlan(plan)
         repository.saveTrack(track)

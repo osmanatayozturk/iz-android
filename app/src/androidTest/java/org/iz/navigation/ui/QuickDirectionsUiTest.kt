@@ -174,6 +174,88 @@ class QuickDirectionsUiTest {
         compose.runOnIdle { assertEquals(0, activations) }
     }
 
+    @Test fun preselectedShortcutSkipsSearchAndStartsOnceWithModeDefaults() {
+        val nav = MutableStateFlow(NavigationState())
+        val destination = RouteStop("Kayıtlı ev", WeatherCoordinate(41.02, 29.02))
+        val finishPlanning = CompletableDeferred<Unit>()
+        var locations = 0
+        var starts = 0
+        compose.setContent {
+            IzTheme {
+                QuickDirectionsDialog(
+                    places = emptyList(), navigationState = nav,
+                    initialDestination = destination,
+                    locate = { locations++; origin }, validateOrigin = { assertSame(origin, it) },
+                    plan = { coordinate, stop, transport, choices ->
+                        assertEquals(destination, stop)
+                        assertEquals(Transport.WALK, transport)
+                        assertEquals(emptyMap<QuickRoutePreference, Boolean>(), choices)
+                        finishPlanning.await()
+                        testRoute(coordinate, stop, transport)
+                    },
+                    activate = { route, fix, record ->
+                        assertEquals(destination, route.stops.last())
+                        assertSame(origin, fix)
+                        assertFalse(record)
+                        starts++
+                        route.id
+                    },
+                    onDismiss = {}, onStarted = {}, hasLocationPermission = { true },
+                    searchPlaces = { error("Shortcut must not search") },
+                )
+            }
+        }
+
+        compose.onNodeWithTag("quick-destinations").assertDoesNotExist()
+        compose.onNodeWithText("Kayıtlı ev").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(0, locations) }
+        val options = compose.onNodeWithTag("quick-route-options")
+        options.performScrollToNode(hasTestTag("quick-record"))
+        compose.onNodeWithTag("quick-record").assertIsOn().performClick()
+        options.performScrollToNode(hasTestTag("quick-mode-WALK"))
+        compose.onNodeWithTag("quick-mode-WALK").performClick().assertIsNotEnabled()
+        compose.runOnIdle { finishPlanning.complete(Unit) }
+        compose.runOnIdle {
+            assertEquals(1, locations)
+            assertEquals(1, starts)
+        }
+    }
+
+    @Test fun shortcutBackDismissesAndDiscardsLatePlan() {
+        val nav = MutableStateFlow(NavigationState())
+        val destination = RouteStop("Kayıtlı iş", WeatherCoordinate(41.02, 29.02))
+        val finishPlanning = CompletableDeferred<Unit>()
+        var planning = false
+        var starts = 0
+        var dismissals = 0
+        compose.setContent {
+            IzTheme {
+                QuickDirectionsDialog(
+                    places = emptyList(), navigationState = nav,
+                    initialDestination = destination,
+                    locate = { origin }, validateOrigin = {},
+                    plan = { coordinate, stop, transport, _ ->
+                        planning = true
+                        withContext(NonCancellable) { finishPlanning.await() }
+                        testRoute(coordinate, stop, transport)
+                    },
+                    activate = { route, _, _ -> starts++; route.id },
+                    onDismiss = { dismissals++ }, onStarted = {}, hasLocationPermission = { true },
+                )
+            }
+        }
+
+        compose.onNodeWithTag("quick-route-options").performScrollToNode(hasTestTag("quick-mode-CAR"))
+        compose.onNodeWithTag("quick-mode-CAR").performClick().assertIsNotEnabled()
+        compose.onNodeWithTag("quick-back").performClick()
+        compose.runOnIdle {
+            assertEquals(true, planning)
+            assertEquals(1, dismissals)
+            finishPlanning.complete(Unit)
+        }
+        compose.runOnIdle { assertEquals(0, starts) }
+    }
+
     private fun testRoute(coordinate: WeatherCoordinate, destination: RouteStop, transport: Transport) =
         PlannedRoute("quick-test", listOf(RouteStop("Konum", coordinate), destination),
             listOf(RouteVertex(coordinate, 0.0), RouteVertex(destination.coordinate, 60.0)),

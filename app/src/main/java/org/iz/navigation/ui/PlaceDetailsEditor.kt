@@ -8,6 +8,10 @@ import androidx.compose.runtime.*
 import org.iz.navigation.ui.history.rememberUiEditExit
 import org.iz.navigation.ui.history.LocalUiOperationBusy
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import org.iz.navigation.data.*
 import java.util.Locale
@@ -47,8 +51,13 @@ fun PlaceDetailsEditor(place: Place, osm: SelectedOsmPlace?, onSearch: () -> Uni
 }
 
 @Composable
-internal fun PlaceEditor(pin: GeoCoordinate?, osm: SelectedOsmPlace?, places: List<Place>, onDismiss: () -> Unit, onSearch: () -> Unit, onLocate: () -> Unit, onSave: (String, String, Place?) -> Unit) {
+internal fun PlaceEditor(
+    pin: GeoCoordinate?, osm: SelectedOsmPlace?, places: List<Place>, onDismiss: () -> Unit,
+    onSearch: () -> Unit, onLocate: () -> Unit, assignmentKind: DestinationShortcutKind? = null,
+    saveError: String? = null, onSave: (String, String, Place?) -> Unit,
+) {
     val operationBusy = LocalUiOperationBusy.current
+    val assigning = assignmentKind != null
     val initialName = remember { osm?.name.orEmpty() }
     val initialPin = remember { pin }
     val initialReference = remember { osm?.osmRef }
@@ -67,10 +76,15 @@ internal fun PlaceEditor(pin: GeoCoordinate?, osm: SelectedOsmPlace?, places: Li
     val baseline = listOf(initialName, "", initialSelected, initialPin, initialReference)
     val back = rememberUiEditExit("new-place", working(), baseline, currentWorking = working,
         discardUnsaved = { name = initialName; note = ""; selected = places.firstOrNull { it.id == initialSelected } }, exit = onDismiss)
-    AlertDialog(onDismissRequest = back, title = { Text("Bir yer kaydet") }, text = {
+    val validPin = pin != null && pin.latitude in -90.0..90.0 && pin.longitude in -180.0..180.0
+    val canAssign = selected?.isValidDestinationShortcut() ?: (validPin && name.trim().length in 1..300)
+    AlertDialog(onDismissRequest = back,
+        title = { Text(assignmentKind?.let(::shortcutAssignmentTitle) ?: "Bir yer kaydet") }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (places.isNotEmpty()) Box {
-                OutlinedButton(onClick = { expanded = true }) { Text(selected?.name ?: "Kayıtlı yerlerimden seç") }
+                OutlinedButton(onClick = { expanded = true }, enabled = !assigning || !operationBusy()) {
+                    Text(selected?.name ?: "Kayıtlı yerlerimden seç")
+                }
                 DropdownMenu(expanded, { expanded = false }) {
                     DropdownMenuItem({ Text("Yeni yer oluştur") }, { selected = null; expanded = false })
                     places.forEach { place -> DropdownMenuItem({ Text(place.name) }, { selected = place; expanded = false }) }
@@ -78,14 +92,30 @@ internal fun PlaceEditor(pin: GeoCoordinate?, osm: SelectedOsmPlace?, places: Li
             }
             if (selected == null) {
                 OutlinedTextField(name, { if (!operationBusy()) name = it }, enabled = !operationBusy(), label = { Text("Bu yere verdiğin ad") }, singleLine = true)
-                TextButton(onClick = onLocate) { Text("Bulunduğum konumu kullan") }
-                Text(pin?.let { String.format(Locale.ROOT, "Seçilen konum: %.5f, %.5f", it.latitude, it.longitude) } ?: "Konum isteğe bağlı. Haritaya uzun basarak da seçebilirsin.", style = MaterialTheme.typography.bodySmall, color = Muted)
-                OutlinedButton(onClick = onSearch) { Text(if (osm == null) "OSM’de yer eşleştir" else "OSM eşlemesini değiştir") }
+                TextButton(onClick = onLocate, enabled = !assigning || !operationBusy()) { Text("Bulunduğum konumu kullan") }
+                val locationHint = if (assigning) "Adres için konum seç." else "Konum isteğe bağlı. Haritaya uzun basarak da seçebilirsin."
+                Text(pin?.let { String.format(Locale.ROOT, "Seçilen konum: %.5f, %.5f", it.latitude, it.longitude) }
+                    ?: locationHint, style = MaterialTheme.typography.bodySmall, color = Muted)
+                OutlinedButton(onClick = onSearch, enabled = !assigning || !operationBusy()) {
+                    Text(if (osm == null) "OSM’de yer eşleştir" else "OSM eşlemesini değiştir")
+                }
                 osm?.let { Text("OSM: ${it.name}", style = MaterialTheme.typography.bodySmall, color = Muted) }
             }
-            OutlinedTextField(note, { if (!operationBusy()) note = it }, enabled = !operationBusy(), label = { Text("Bu ziyarete özel not") }, minLines = 2)
+            if (!assigning) OutlinedTextField(note, { if (!operationBusy()) note = it }, enabled = !operationBusy(),
+                label = { Text("Bu ziyarete özel not") }, minLines = 2)
+            saveError?.let {
+                Text(it, Modifier.semantics { liveRegion = LiveRegionMode.Polite }, color = MaterialTheme.colorScheme.error)
+            }
         }
-    }, confirmButton = { TextButton(onClick = { onSave(name, note, selected) }, enabled = selected != null || name.isNotBlank()) { Text("Ziyareti kaydet") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Vazgeç") } })
+    }, confirmButton = {
+        TextButton(onClick = { onSave(name, note, selected) },
+            enabled = if (assigning) canAssign && !operationBusy() else selected != null || name.isNotBlank(),
+            modifier = if (assigning) Modifier.heightIn(min = 48.dp).testTag("shortcut-assignment-editor-save") else Modifier) {
+            Text(if (assigning) "Adresi kaydet" else "Ziyareti kaydet")
+        }
+    }, dismissButton = {
+        TextButton(onClick = if (assigning) back else onDismiss, enabled = !assigning || !operationBusy()) { Text("Vazgeç") }
+    })
 }
 
 @Composable

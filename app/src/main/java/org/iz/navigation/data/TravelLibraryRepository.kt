@@ -24,9 +24,7 @@ class TravelLibraryRepository internal constructor(private val db: DiaryDatabase
             if (placeId == null) dao.deleteShortcut(kind.name)
             else {
                 val place = requireNotNull(db.diaryDao().place(placeId)) { "Kayıtlı hedef artık mevcut değil." }
-                require(place.latitude != null && place.longitude != null &&
-                    place.latitude.isFinite() && place.latitude in -90.0..90.0 &&
-                    place.longitude.isFinite() && place.longitude in -180.0..180.0) { "Hedefin geçerli konumu yok." }
+                require(place.isValidDestinationShortcut()) { "Hedefin geçerli adı ve konumu olmalı." }
                 dao.saveShortcut(DestinationShortcutEntity(kind.name, place.id))
             }
         }

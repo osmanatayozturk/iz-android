@@ -19,6 +19,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.iz.navigation.data.DestinationShortcut
+import org.iz.navigation.data.DestinationShortcutKind
+import org.iz.navigation.data.Place
 import org.iz.navigation.data.Transport
 import org.iz.navigation.navigation.NavigationFix
 import org.iz.navigation.navigation.NavigationProgress
@@ -52,30 +55,103 @@ class NavigationHomeGeometryTest {
 
     @Test fun idleBrandFitsLandscape() {
         renderIdle(640.dp, 360.dp)
-        assertIdleBrandGeometry()
+        assertIdleBrandGeometry(expectSlogan = false)
         captureHome("home-brand-landscape-640x360")
     }
 
     @Test fun idleBrandFitsShortLandscapeWithoutCoveringBottomActions() {
         renderIdle(640.dp, 320.dp)
-        assertIdleBrandGeometry()
+        assertIdleBrandGeometry(expectSlogan = false)
         captureHome("home-brand-landscape-640x320")
     }
 
     @Test fun idleBrandFitsLandscapeWithLargeFontWithoutCoveringBottomActions() {
         renderIdle(640.dp, 360.dp, fontScale = 1.5f)
-        assertIdleBrandGeometry()
+        assertIdleBrandGeometry(expectSlogan = false)
         captureHome("home-brand-landscape-large-font-640x360")
     }
 
-    @Test fun idleBrandWrapsAtLargeFontWithoutCoveringControls() {
+    @Test fun shortLandscapeSlotsKeepOrderAndMapControlsAtNormalFont() = assertShortLandscapeSlots(1f)
+
+    @Test fun shortLandscapeSlotsKeepOrderAndMapControlsAtLargeFont() = assertShortLandscapeSlots(1.5f)
+
+    private fun assertShortLandscapeSlots(fontScale: Float) {
+        val home = DestinationShortcut(DestinationShortcutKind.HOME,
+            Place(id = "home", name = "Uzun bir ev konumu adı", latitude = 41.0, longitude = 29.0))
+        val work = DestinationShortcut(DestinationShortcutKind.WORK,
+            Place(id = "work", name = "Uzun bir iş konumu adı", latitude = 41.1, longitude = 29.1))
+        val invalidHome = home.copy(place = home.place.copy(latitude = null))
+        val shortcuts = mutableStateOf(emptyList<DestinationShortcut>())
+        val opened = mutableListOf<DestinationShortcutKind>()
+        uxHost.setContent { CompositionLocalProvider(LocalDensity provides Density(1f, fontScale)) {
+            IzTheme { Box(Modifier.requiredSize(640.dp, 320.dp)) {
+                NavigationHomeContent(PhoneDirectionsState(), NavigationState(), emptyList(), emptyList(), false, "Hava",
+                    {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, onDashboard = {}, shortcuts = shortcuts.value,
+                    onShortcut = { opened += it }, planner = {})
+            } }
+        } }
+
+        val homeTag = "destination-shortcut-HOME"
+        val workTag = "destination-shortcut-WORK"
+        fun assertSlotsAndControls() {
+            val brand = bounds("home-brand")
+            val search = bounds("open-navigation")
+            val left = bounds(homeTag)
+            val right = bounds(workTag)
+            compose.onNodeWithTag("home-brand-logo", useUnmergedTree = true).assertIsDisplayed()
+            compose.onNodeWithText("İz", useUnmergedTree = true).assertIsDisplayed()
+            compose.onNodeWithText("Küçük yollar, güzel anılar.", useUnmergedTree = true).assertDoesNotExist()
+            assertTrue(brand.bottom <= search.top && search.bottom <= left.top && left.right <= right.left)
+            assertEquals(left.top, right.top, 1f)
+            assertEquals(left.width, right.width, 1f)
+            assertEquals(left.height, right.height, 1f)
+            listOf(homeTag, workTag).forEach {
+                compose.onNodeWithTag(it).assertIsDisplayed().assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
+            }
+            val attribution = compose.onNodeWithText("© OpenStreetMap contributors").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            listOf(left, right).forEach { slot ->
+                assertFalse(slot.overlaps(attribution))
+                listOf("directions-recenter", "map-layers", "home-record", "home-group", "home-menu").forEach { tag ->
+                    compose.onNodeWithTag(tag).assertIsDisplayed()
+                    assertFalse("A shortcut covers $tag", slot.overlaps(bounds(tag)))
+                }
+            }
+            assertFalse(bounds("home-weather").overlaps(attribution))
+            val dashboard = bounds("open-navigation-dashboard")
+            compose.onNodeWithTag("open-navigation-dashboard").assertIsDisplayed()
+            listOf("directions-recenter", "map-layers").forEach { tag ->
+                val control = bounds(tag)
+                assertFalse("The dashboard entry covers $tag", dashboard.overlaps(control))
+                assertTrue("$tag must end above the bottom actions", control.bottom <= bounds("home-record").top)
+            }
+        }
+
+        compose.onNodeWithTag(homeTag).assertIsEnabled().assertTextEquals("Ev adresi ekle").performClick()
+        compose.onNodeWithTag(workTag).assertIsEnabled().assertTextEquals("İş adresi ekle").performClick()
+        compose.runOnIdle { assertEquals(listOf(DestinationShortcutKind.HOME, DestinationShortcutKind.WORK), opened) }
+        assertSlotsAndControls()
+        compose.runOnIdle { shortcuts.value = listOf(work, invalidHome) }
+        compose.onNodeWithTag(homeTag).assertIsEnabled().assertTextEquals("Ev adresi ekle")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Atanmamış")).performClick()
+        compose.onNodeWithTag(workTag).assertIsEnabled().assertTextContains(work.place.name, substring = true).performClick()
+        assertSlotsAndControls()
+        compose.runOnIdle { shortcuts.value = listOf(work, home) }
+        compose.onNodeWithTag(homeTag).assertIsEnabled().assertTextContains(home.place.name, substring = true).performClick()
+        assertSlotsAndControls()
+        compose.runOnIdle {
+            assertEquals(listOf(DestinationShortcutKind.HOME, DestinationShortcutKind.WORK, DestinationShortcutKind.HOME,
+                DestinationShortcutKind.WORK, DestinationShortcutKind.HOME), opened)
+        }
+    }
+
+    @Test fun idleBrandTitleFitsAtLargeFontWithoutCoveringControls() {
         renderIdle(360.dp, 560.dp, fontScale = 1.5f)
         assertIdleBrandGeometry()
         val title = compose.onNodeWithText("İz", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val slogan = compose.onNodeWithText("Küçük yollar, güzel anılar.", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val brand = compose.onNodeWithTag("home-brand").fetchSemanticsNode().boundsInRoot
-        assertTrue("Expanded slogan must remain inside the brand card", slogan.bottom <= brand.bottom)
-        assertTrue("Slogan must be below the name", title.bottom <= slogan.top)
+        assertTrue("Expanded title must remain inside the brand card", title.top >= brand.top && title.bottom <= brand.bottom)
+        assertTrue("Slogan stays below the title and inside the brand card", slogan.top >= title.bottom && slogan.bottom <= brand.bottom)
         captureHome("home-brand-large-font-360x560")
     }
 
@@ -87,6 +163,11 @@ class NavigationHomeGeometryTest {
         assertFalse("The logo must not add another spoken description", brand.config.contains(SemanticsProperties.ContentDescription))
         compose.onAllNodesWithText("İz", useUnmergedTree = true).assertCountEquals(1)
         compose.onAllNodesWithText("Küçük yollar, güzel anılar.", useUnmergedTree = true).assertCountEquals(1)
+    }
+
+    @Test fun shortPortraitKeepsLogoAndNameWithoutSlogan() {
+        renderIdle(360.dp, 380.dp)
+        assertIdleBrandGeometry(expectSlogan = false)
     }
 
     @Test fun brandHidesForPlanningGuidanceAndRecordingAndReturnsWhenIdle() {
@@ -129,10 +210,12 @@ class NavigationHomeGeometryTest {
         } }
     }
 
-    private fun assertIdleBrandGeometry() {
+    private fun assertIdleBrandGeometry(expectSlogan: Boolean = true) {
         compose.onNodeWithTag("home-brand").assertIsDisplayed()
+        compose.onNodeWithTag("home-brand-logo", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithText("İz", useUnmergedTree = true).assertIsDisplayed()
-        compose.onNodeWithText("Küçük yollar, güzel anılar.", useUnmergedTree = true).assertIsDisplayed()
+        val slogan = compose.onNodeWithText("Küçük yollar, güzel anılar.", useUnmergedTree = true)
+        if (expectSlogan) slogan.assertIsDisplayed() else slogan.assertDoesNotExist()
         val brand = compose.onNodeWithTag("home-brand").fetchSemanticsNode().boundsInRoot
         val search = compose.onNodeWithTag("open-navigation").fetchSemanticsNode().boundsInRoot
         val weather = compose.onNodeWithTag("home-weather").fetchSemanticsNode().boundsInRoot
@@ -344,11 +427,21 @@ class NavigationHomeGeometryTest {
         compose.onNodeWithTag("destination-shortcut-HOME").assertDoesNotExist()
         compose.runOnIdle { nav.value = nav.value.copy(guidance = false, roadSpeed = RoadSpeedState(visible = true)) }
         compose.onNodeWithTag("open-navigation").assertIsDisplayed()
-        compose.onNodeWithTag("destination-shortcut-HOME").assertIsDisplayed()
+        compose.onNodeWithTag("destination-shortcut-HOME").assertIsDisplayed().assertIsEnabled()
+        compose.onNodeWithTag("destination-shortcut-WORK").assertDoesNotExist()
         compose.onNodeWithTag("road-speed-panel").assertIsDisplayed()
         assertOutsideMap()
         compose.onNodeWithTag("home-record").assertTextContains("Kayıt açık")
         compose.runOnIdle { assertTrue(nav.value.recording); assertEquals("ux-header-session", nav.value.sessionId) }
+        compose.runOnIdle {
+            val assigned = shortcuts.value.single()
+            shortcuts.value = listOf(assigned.copy(place = assigned.place.copy(latitude = null)))
+        }
+        compose.onNodeWithTag("destination-shortcut-HOME").assertIsDisplayed().assertIsNotEnabled()
+        compose.onNodeWithTag("destination-shortcut-WORK").assertDoesNotExist()
+        compose.runOnIdle { shortcuts.value = emptyList() }
+        compose.onNodeWithTag("destination-shortcut-HOME").assertDoesNotExist()
+        compose.onNodeWithTag("destination-shortcut-WORK").assertDoesNotExist()
     }
 
     private fun bounds(tag: String) = compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
