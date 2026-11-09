@@ -100,7 +100,7 @@ internal interface DiaryDao {
 @Database(entities = [Journey::class, TrackPoint::class, Place::class, Visit::class, Photo::class, ShareDraft::class, ContributionDraft::class,
     JourneyHealthSample::class, JourneyHealthSync::class, MapEditDraft::class,
     WatchHealthSession::class, WatchHealthSample::class, SavedRoutePlanEntity::class, ImportedTrackEntity::class,
-    ImportedSegmentEntity::class, ImportedCoordinateEntity::class, JourneyCollectionEntity::class, CollectionMembershipEntity::class, DestinationShortcutEntity::class, LeanSessionEntity::class, LeanChunkEntity::class, LeanResultEntity::class], version = 8, exportSchema = true)
+    ImportedSegmentEntity::class, ImportedCoordinateEntity::class, JourneyCollectionEntity::class, CollectionMembershipEntity::class, DestinationShortcutEntity::class, LeanSessionEntity::class, LeanChunkEntity::class, LeanResultEntity::class], version = 9, exportSchema = true)
 @TypeConverters(DiaryConverters::class)
 internal abstract class DiaryDatabase : RoomDatabase() {
     abstract fun diaryDao(): DiaryDao
@@ -111,6 +111,15 @@ internal abstract class DiaryDatabase : RoomDatabase() {
     abstract fun leanDao(): LeanDao
 
     companion object {
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE map_edit_drafts ADD COLUMN targetType TEXT")
+                db.execSQL("ALTER TABLE map_edit_drafts ADD COLUMN targetId INTEGER")
+                db.execSQL("ALTER TABLE map_edit_drafts ADD COLUMN reviewedVersion INTEGER")
+                db.execSQL("ALTER TABLE map_edit_drafts ADD COLUMN reviewedFingerprint TEXT")
+                db.execSQL("ALTER TABLE map_edit_drafts ADD COLUMN appliedVersion INTEGER")
+            }
+        }
         val MIGRATION_7_8 = object : Migration(7, 8) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE saved_route_plans ADD COLUMN avoidUnpaved INTEGER NOT NULL DEFAULT 0")
@@ -193,7 +202,7 @@ internal abstract class DiaryDatabase : RoomDatabase() {
         @Volatile private var instance: DiaryDatabase? = null
         fun get(context: Context): DiaryDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, DiaryDatabase::class.java, "iz-diary.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                 .build().also { instance = it }
         }
     }

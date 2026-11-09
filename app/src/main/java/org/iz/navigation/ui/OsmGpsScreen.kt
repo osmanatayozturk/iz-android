@@ -18,7 +18,9 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.iz.navigation.data.DiaryRepository
 import org.iz.navigation.data.Journey
 import org.iz.navigation.integration.PreparedOsmGpxTrace
@@ -43,6 +45,8 @@ private data class OsmGpsPendingConsent(
     val selection: Set<OsmGpxReceiptKey>,
     val reviewed: OsmGpxReceipt?,
     val foregroundGeneration: Int,
+    val trace: PreparedOsmGpxTrace,
+    val index: Int = 0,
 )
 
 @Composable
@@ -96,6 +100,12 @@ internal fun OsmGpsScreen(
     val unknowns = remember(receipts) { receipts.orEmpty().values.filter { it.status == OsmGpxReceiptStatus.UNKNOWN } }
     val batch = upload.batch?.takeIf { it.accountId == user?.id }
     val canAct = !auth.busy && !upload.running && !preparing
+    val pendingConsent = consent
+    val validConsent = pendingConsent?.takeIf { pending ->
+        val keysStillEligible = pending.reviewed?.let { receipts?.get(it.key) == it }
+            ?: pending.confirmation.keys.all { it in availableKeys }
+        readyHistory != null && selected == pending.selection && auth.canWriteGpx && keysStillEligible
+    }
 
     fun owns(foreground: Int): Boolean =
         session != null && controller.sessions.value === session && !controller.authState.value.busy &&
@@ -111,20 +121,37 @@ internal fun OsmGpsScreen(
         return selection.prepare(journey, repository::journeyPoints)
     }
 
+    suspend fun preparePreview(key: OsmGpxReceiptKey): PreparedOsmGpxTrace? {
+        val trace = prepare(key)?.takeIf { OsmGpxReceiptKey.of(it) == key } ?: return null
+        // Decode the multipart payload off the UI thread before displaying the preview.
+        return withContext(Dispatchers.IO) { trace.takeIf { it.segments.isNotEmpty() } }
+    }
+
+    fun discardConsent() {
+        consent?.confirmation?.consume()
+        consent = null
+    }
+
     fun review(keys: List<OsmGpxReceiptKey>, reviewed: OsmGpxReceipt? = null) {
         val generation = foregroundGeneration
-        if (!canAct || consent != null || keys.isEmpty() || readyHistory == null || !owns(generation)) return
+        if (!canAct || preparing || consent != null || preview != null || keys.isEmpty() ||
+            readyHistory == null || !owns(generation)
+        ) return
         preparing = true
         message = null
         scope.launch {
             try {
                 val confirmed = controller.prepareConfirmationForKeys(keys, setOfNotNull(reviewed))
+                val first = confirmed?.takeIf { it.keys == keys && it.user.id == user?.id }
+                    ?.let { preparePreview(it.keys.first()) }
                 if (owns(generation)) {
-                    if (confirmed != null && confirmed.keys == keys && confirmed.user.id == user?.id &&
+                    if (confirmed != null && first != null &&
                         selected == selection.keysFor(confirmed.user.id)
                     ) {
-                        consent = OsmGpsPendingConsent(confirmed, selected, reviewed, generation)
+                        consent = OsmGpsPendingConsent(confirmed, selected, reviewed, generation, first)
                     } else {
+                        confirmed?.consume()
+                        scanRevision++
                         refreshRevision++
                         message = "Gönderim durumu değişti. Seçimini kontrol et."
                     }
@@ -139,15 +166,43 @@ internal fun OsmGpsScreen(
         }
     }
 
+    fun reviewTrace(pending: OsmGpsPendingConsent, index: Int) {
+        val key = pending.confirmation.keys.getOrNull(index) ?: return
+        if (preparing || consent !== pending || !owns(pending.foregroundGeneration)) return
+        preparing = true
+        scope.launch {
+            try {
+                val trace = preparePreview(key)
+                if (consent === pending && owns(pending.foregroundGeneration)) {
+                    if (trace != null) consent = pending.copy(trace = trace, index = index)
+                    else {
+                        discardConsent()
+                        scanRevision++
+                        message = "İz değişti. Gönderimi yeniden incele."
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (consent === pending && owns(pending.foregroundGeneration)) {
+                    discardConsent()
+                    message = "İz önizlemesi hazırlanamadı."
+                }
+            } finally {
+                preparing = false
+            }
+        }
+    }
+
     fun openPreview(key: OsmGpxReceiptKey) {
-        if (!canAct || preview != null) return
+        if (!canAct || preparing || preview != null || consent != null) return
         val generation = foregroundGeneration
         preparing = true
         scope.launch {
             try {
-                val trace = prepare(key)
+                val trace = preparePreview(key)
                 if (owns(generation)) {
-                    if (trace != null && OsmGpxReceiptKey.of(trace) == key) preview = trace
+                    if (trace != null) preview = trace
                     else {
                         scanRevision++
                         message = "İz değişti. Güncel izi yeniden incele."
@@ -163,13 +218,16 @@ internal fun OsmGpsScreen(
         }
     }
 
+    val closePreviews by rememberUpdatedState {
+        discardConsent()
+        preview = null
+    }
     DisposableEffect(lifecycle, upload) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP) {
                 foregroundGeneration++
                 upload.stopDispatching()
-                consent = null
-                preview = null
+                closePreviews()
             }
         }
         lifecycle.addObserver(observer)
@@ -177,6 +235,9 @@ internal fun OsmGpsScreen(
             lifecycle.removeObserver(observer)
             upload.stopDispatching()
         }
+    }
+    LaunchedEffect(pendingConsent, validConsent) {
+        if (pendingConsent != null && validConsent == null && consent === pendingConsent) discardConsent()
     }
     LaunchedEffect(auth.user?.id) {
         selection.bind(auth.user?.id)
@@ -286,30 +347,36 @@ internal fun OsmGpsScreen(
     }
 
     preview?.let { trace ->
-        AlertDialog(onDismissRequest = { preview = null }, title = { Text("Kırpılmış GPS izi") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OsmGpsPreview(trace)
-                    Text("Başlangıç ve bitişten en az 1 km çıkarıldı.")
-                    Text("${osmGpsDistance(trace.distanceMeters)} · ${trace.pointCount} nokta")
+        OsmGpsPreviewDialog(trace, onDismiss = { preview = null })
+    }
+    validConsent?.let { pending ->
+        val confirmed = pending.confirmation
+        OsmGpsConsentDialog(
+            username = confirmed.user.displayName,
+            visibility = confirmed.visibility,
+            preview = OsmGpsConsentPreview(pending.trace, pending.index, confirmed.traceCount),
+            enabled = canAct,
+            onVisibility = { visibility ->
+                if (consent === pending && !preparing && owns(pending.foregroundGeneration)) {
+                    confirmed.replaceVisibility(visibility)?.let { consent = pending.copy(confirmation = it) }
                 }
             },
-            confirmButton = {
-                TextButton(onClick = { preview = null }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Kapat") }
-            })
-    }
-    consent?.takeIf { readyHistory != null && selected == it.selection && !auth.busy }?.let { pending ->
-        val confirmed = pending.confirmation
-        OsmGpsConsentDialog(confirmed.user.displayName, confirmed.traceCount, onDismiss = { consent = null }, onConfirm = {
-            if (consent !== pending) return@OsmGpsConsentDialog
-            consent = null
-            if (owns(pending.foregroundGeneration) && confirmed.user.id == controller.authState.value.user?.id &&
-                controller.authState.value.canWriteGpx && pending.selection == selection.keysFor(confirmed.user.id)
-            ) {
-                upload.start(controller, confirmed, ::prepare)
-                pending.reviewed?.let { opened = opened - it }
-            } else message = "Hesap veya seçim değişti. Gönderimi yeniden incele."
-        })
+            onPreview = { reviewTrace(pending, it) },
+            onDismiss = ::discardConsent,
+            onConfirm = {
+                if (consent !== pending || preparing) return@OsmGpsConsentDialog
+                if (owns(pending.foregroundGeneration) && confirmed.user.id == controller.authState.value.user?.id &&
+                    controller.authState.value.canWriteGpx && pending.selection == selection.keysFor(confirmed.user.id)
+                ) {
+                    consent = null
+                    upload.start(controller, confirmed, ::prepare)
+                    pending.reviewed?.let { opened = opened - it }
+                } else {
+                    discardConsent()
+                    message = "Hesap veya seçim değişti. Gönderimi yeniden incele."
+                }
+            },
+        )
     }
 }
 

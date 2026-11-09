@@ -2,12 +2,22 @@ package org.iz.navigation.ui
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.iz.navigation.data.Journey
+import org.iz.navigation.data.TrackPoint
+import org.iz.navigation.integration.OsmGpxPreparation
 import org.iz.navigation.integration.osm.OsmGpxHistoryEntry
 import org.iz.navigation.integration.osm.OsmGpxReceiptKey
+import org.iz.navigation.integration.osm.OsmGpxVisibility
+import org.iz.navigation.integration.prepareOsmGpxTrace
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -54,17 +64,61 @@ class OsmGpsBatchUiTest {
         compose.onNode(second).assertIsOff()
     }
 
-    @Test fun consentShowsAccountCountAndVisibilityBeforeExplicitConfirmation() {
-        var confirmations = 0
+    @Test fun consentShowsEachPreparedTraceAndUsesTheVisibleBatchVisibility() {
+        val traces = listOf("coast", "park").mapIndexed { index, id ->
+            val start = 1_000_000L + index * 1_000_000L
+            val journey = Journey(id = id, startedAt = start, endedAt = start + 300_000)
+            val points = (0..10).map {
+                TrackPoint(journeyId = id, latitude = 41.0, longitude = 29.0 + it * 0.005,
+                    recordedAt = start + it * 30_000L, accuracy = 5f)
+            }
+            (prepareOsmGpxTrace(journey, points) as OsmGpxPreparation.Ready).trace
+        }
+        val confirmations = mutableListOf<OsmGpxVisibility>()
         compose.setContent {
-            IzTheme { OsmGpsConsentDialog("Fixture user", 2, onConfirm = { confirmations++ }, onDismiss = {}) }
+            var position by remember { mutableIntStateOf(0) }
+            var visibility by remember { mutableStateOf(OsmGpxVisibility.IDENTIFIABLE) }
+            IzTheme {
+                OsmGpsConsentDialog(
+                    username = "Fixture user",
+                    visibility = visibility,
+                    preview = OsmGpsConsentPreview(traces[position], position, traces.size),
+                    enabled = true,
+                    onVisibility = { visibility = it },
+                    onPreview = { position = it },
+                    onConfirm = { confirmations += visibility },
+                    onDismiss = {},
+                )
+            }
         }
         compose.onNodeWithText("2 GPS izini OSM'ye gönder?").assertIsDisplayed()
         compose.onNodeWithText("Fixture user", substring = true).assertExists()
-        compose.onNodeWithText("Görünürlük: Tanımlanabilir (Identifiable)").assertExists()
-        compose.runOnIdle { assertEquals(0, confirmations) }
+        compose.onNodeWithText("noktaları ve kayıt zamanlarını", substring = true).assertExists()
+        compose.onNodeWithText("herkese açık iz listesinde", substring = true).assertExists()
+        compose.onNodeWithTag("osm-gps-visibility-identifiable").assertIsSelected()
+        compose.onNodeWithTag("osm-gps-consent-confirm").assertIsEnabled()
+        compose.onNodeWithTag("osm-gps-preview-coast")
+            .assert(SemanticsMatcher.expectValue(OsmGpsPreparedSha256, traces[0].sha256))
+            .assert(SemanticsMatcher.expectValue(OsmGpsPreparedPointCount, 5))
+        compose.onNodeWithText("1970-01-01T00:18:10Z", substring = true).assertExists()
+        compose.onNodeWithTag("osm-gps-points-open").performScrollTo().performClick()
+        compose.onNodeWithTag("osm-gps-points-list").performScrollToNode(hasTestTag("osm-gps-point-0-2"))
+        compose.onNodeWithTag("osm-gps-point-0-2").assertTextContains("41.0, 29.025", substring = true)
+            .assertTextContains("1970-01-01T00:19:10Z", substring = true)
+        compose.onNodeWithTag("osm-gps-points-close").performClick()
         compose.onNodeWithTag("osm-gps-consent-confirm").performClick()
-        compose.runOnIdle { assertEquals(1, confirmations) }
+        compose.runOnIdle { assertEquals(listOf(OsmGpxVisibility.IDENTIFIABLE), confirmations) }
+        compose.onNodeWithTag("osm-gps-preview-next").performScrollTo().performClick()
+        compose.onNodeWithTag("osm-gps-preview-park")
+            .assert(SemanticsMatcher.expectValue(OsmGpsPreparedSha256, traces[1].sha256))
+        compose.onNodeWithTag("osm-gps-visibility-trackable").performScrollTo().performClick().assertIsSelected()
+        compose.onNodeWithTag("osm-gps-visibility-identifiable").assertIsNotSelected()
+        compose.onNodeWithText("Görünürlük Takip Edilebilir").assertExists()
+        compose.runOnIdle { assertEquals(listOf(OsmGpxVisibility.IDENTIFIABLE), confirmations) }
+        compose.onNodeWithTag("osm-gps-consent-confirm").performClick()
+        compose.runOnIdle {
+            assertEquals(listOf(OsmGpxVisibility.IDENTIFIABLE, OsmGpxVisibility.TRACKABLE), confirmations)
+        }
     }
 
     @Test fun historyOpensNewestMetadataEvenWithoutALocalJourney() {

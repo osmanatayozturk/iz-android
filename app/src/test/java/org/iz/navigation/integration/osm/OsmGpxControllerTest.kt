@@ -36,6 +36,30 @@ class OsmGpxControllerTest {
     private val second = osmGpxTestTrace("journey-second", startedAt = 1_200_000)
     private val third = osmGpxTestTrace("journey-third", startedAt = 1_900_000)
 
+    @Test fun changedVisibilityRetiresOldConsentAndCannotBypassAnUnknownOrDuplicate() = runBlocking {
+        val calls = mutableListOf<Pair<OsmGpxReceiptKey, OsmGpxVisibility>>()
+        val controller = controllerWithGateway(OsmGpxGateway { _, trace, visibility, canDispatch ->
+            check(canDispatch())
+            calls += OsmGpxReceiptKey.of(trace) to visibility
+            if (calls.size == 1) OsmGpxUploadResult.Unknown else OsmGpxUploadResult.Received(42)
+        })
+        val key = OsmGpxReceiptKey.of(first)
+        val initial = checkNotNull(controller.prepareConfirmation(listOf(first, first)))
+        assertEquals(OsmGpxVisibility.IDENTIFIABLE, initial.visibility)
+        val trackable = checkNotNull(initial.replaceVisibility(OsmGpxVisibility.TRACKABLE))
+        assertEquals(initial.user, trackable.user)
+        assertEquals(listOf(key), trackable.keys)
+        assertEquals(OsmGpxStop.ALREADY_USED, controller.upload(initial, { true }).stop)
+        assertTrue(calls.isEmpty())
+        val unknown = controller.upload(trackable, { true }).receipts.single()
+        assertEquals(OsmGpxReceiptStatus.UNKNOWN, unknown.status)
+        assertNull(controller.prepareConfirmationForKeys(listOf(key), visibility = OsmGpxVisibility.IDENTIFIABLE))
+        val reviewed = checkNotNull(controller.prepareConfirmation(listOf(first), setOf(unknown)))
+        assertEquals(OsmGpxStop.COMPLETE, controller.upload(reviewed, { true }).stop)
+        assertNull(controller.prepareConfirmationForKeys(listOf(key), visibility = OsmGpxVisibility.TRACKABLE))
+        assertEquals(listOf(key to OsmGpxVisibility.TRACKABLE, key to OsmGpxVisibility.IDENTIFIABLE), calls)
+    }
+
     @Test fun recordsPartialSuccessAndRequiresExactUnknownReviewBeforeFreshConsent() = runBlocking {
         val calls = mutableListOf<PreparedOsmGpxTrace>()
         val attempts = mutableListOf<Pair<OsmGpxReceiptKey, Int>>()
@@ -204,7 +228,9 @@ class OsmGpxControllerTest {
             entered.complete(Unit)
             awaitCancellation()
         }
-        val confirmation = checkNotNull(controller.prepareConfirmation(listOf(first)))
+        val confirmation = checkNotNull(controller.prepareConfirmationForKeys(
+            listOf(OsmGpxReceiptKey.of(first)), visibility = OsmGpxVisibility.TRACKABLE,
+        ))
         val upload = launch { controller.upload(confirmation, { true }) }
         entered.await()
         upload.cancelAndJoin()
@@ -235,7 +261,7 @@ class OsmGpxControllerTest {
         val fresh = OsmGpxHistoryEntry(19, second.fileName, 200, true)
         var otherAccountReads = 0
         val controller = newController(
-            OsmGpxGateway { _, _, _ -> error("Consent has not been given") },
+            OsmGpxGateway { _, _, _, _ -> error("Consent has not been given") },
             OsmGpxHistoryGateway { token, accountId ->
                 if (token == "fixture") {
                     assertEquals(42L, accountId)
@@ -270,7 +296,7 @@ class OsmGpxControllerTest {
         store.write(oldAttempt)
         store.write(oldAttempt.copy(accountId = 43))
         val controller = newController(
-            OsmGpxGateway { _, _, _ -> error("Already received") },
+            OsmGpxGateway { _, _, _, _ -> error("Already received") },
             OsmGpxHistoryGateway { _, _ -> listOf(
                 OsmGpxHistoryEntry(90, first.fileName.uppercase(), 200, false),
                 OsmGpxHistoryEntry(91, first.fileName, 100, true),
@@ -290,7 +316,7 @@ class OsmGpxControllerTest {
         val store = OsmGpxFileReceipts(noBackup.root)
         val keys = listOf(first, second, third).map { OsmGpxReceiptKey.of(it) }
         lateinit var controller: OsmGpxController
-        controller = newController(OsmGpxGateway { _, trace, _ ->
+        controller = newController(OsmGpxGateway { _, trace, _, _ ->
             val key = OsmGpxReceiptKey.of(trace)
             posted += key
             when (key) {
@@ -331,7 +357,7 @@ class OsmGpxControllerTest {
         }
         val posted = mutableListOf<OsmGpxReceiptKey>()
         val keys = listOf(first, second).map { OsmGpxReceiptKey.of(it) }
-        val controller = newController(OsmGpxGateway { _, trace, _ ->
+        val controller = newController(OsmGpxGateway { _, trace, _, _ ->
             posted += OsmGpxReceiptKey.of(trace)
             OsmGpxUploadResult.Received(90)
         }, store = store)
@@ -346,7 +372,7 @@ class OsmGpxControllerTest {
     }
 
     private suspend fun controller(upload: suspend (PreparedOsmGpxTrace) -> OsmGpxUploadResult) =
-        controllerWithGateway(OsmGpxGateway { _, trace, canDispatch ->
+        controllerWithGateway(OsmGpxGateway { _, trace, _, canDispatch ->
             check(canDispatch())
             upload(trace)
         })

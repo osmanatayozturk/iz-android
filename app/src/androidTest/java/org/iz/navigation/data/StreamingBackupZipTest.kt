@@ -23,7 +23,7 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class StreamingBackupZipTest {
-    @Test fun preparedZipKeepsTiedPointsAndReadsWithExistingV8Decoder() = runBlocking {
+    @Test fun preparedZipKeepsTiedPointsAndCorrectionProofThroughRestore() = runBlocking {
         val app = ApplicationProvider.getApplicationContext<Context>()
         val id = UUID.randomUUID()
         val root = File(app.cacheDir, "streaming-backup-$id")
@@ -45,7 +45,8 @@ class StreamingBackupZipTest {
             .build()
 
         try {
-            val backup = DiaryBackup(context, DiaryRepository(context, database))
+            val repository = DiaryRepository(context, database)
+            val backup = DiaryBackup(context, repository)
             val journey = Journey(
                 id = "confirmed", title = "Çığlık ve \"İz\" 🧭",
                 note = "Şanlıurfa\nGüzergâh \\ dönüş", startedAt = 1_000, endedAt = 5_000,
@@ -75,6 +76,11 @@ class StreamingBackupZipTest {
             val watchSample = WatchHealthSample(
                 watchSession.id, 1, journey.id, HealthMetric.HEART_RATE_BPM, 2_000, 2_000, 95.0,
             )
+            val correction = MapEditDraft(latitude = 41.0, longitude = 29.0, name = "Düzeltilen ad",
+                surveyConfirmed = true, status = MapEditStatus.SENDING, stage = MapEditStage.UPDATE_ELEMENT,
+                targetType = OsmType.WAY, targetId = 17L, reviewedVersion = 8L, reviewedFingerprint = "c".repeat(64),
+                submittedAt = 2_000, submittedBy = 3L, changesetId = 11L)
+            val recovered = correction.copy(status = MapEditStatus.UNKNOWN)
 
             database.withTransaction {
                 val dao = database.diaryDao()
@@ -87,6 +93,7 @@ class StreamingBackupZipTest {
                 dao.saveHealthSamples(listOf(importedHealth))
                 database.watchHealthDao().restoreSessions(listOf(watchSession))
                 database.watchHealthDao().restoreSamples(listOf(watchSample))
+                database.mapEditDao().save(correction)
                 database.travelLibraryDao().save(JourneyCollectionEntity.from(collection))
                 database.travelLibraryDao().saveMemberships(
                     listOf(membership, excludedMembership).map(CollectionMembershipEntity::from),
@@ -97,7 +104,7 @@ class StreamingBackupZipTest {
             val expected = DiarySnapshot(
                 journeys = listOf(journey), points = points, places = listOf(place),
                 visits = listOf(visits[0], visits[1].copy(journeyId = null)),
-                collections = listOf(collection), memberships = listOf(membership),
+                collections = listOf(collection), memberships = listOf(membership), mapEdits = listOf(recovered),
             )
             val rejected = runCatching {
                 backup.prepareExport(includeHealth = false, options = BackupExportOptions(manifestLimit = 64L))
@@ -131,7 +138,7 @@ class StreamingBackupZipTest {
                     val decoded = ZipFile(destination).use { zip ->
                         val entry = zip.getEntry("manifest.json") ?: error("Missing manifest.json")
                         val json = JSONObject(zip.getInputStream(entry).bufferedReader(Charsets.UTF_8).use { it.readText() })
-                        assertEquals(8, json.getInt("version"))
+                        assertEquals(9, json.getInt("version"))
                         BackupJson.decode(json)
                     }
                     val expectedWithHealth = if (includeHealth) expected.copy(
@@ -144,6 +151,10 @@ class StreamingBackupZipTest {
                         expectedWithHealth,
                         decoded.copy(points = decoded.points.sortedBy { it.id }, visits = decoded.visits.sortedBy { it.id }),
                     )
+                    if (includeHealth) {
+                        backup.importFrom(uri)
+                        assertEquals(recovered, repository.getMapEdit(correction.id))
+                    }
                 } finally {
                     backup.discardPrepared(prepared)
                     destination.delete()

@@ -4,9 +4,15 @@ import org.iz.navigation.data.DiaryRules
 import org.iz.navigation.data.Journey
 import org.iz.navigation.data.JourneyStatus
 import org.iz.navigation.data.TrackPoint
-import java.security.MessageDigest
 import java.time.Instant
 import java.util.Collections
+import javax.xml.parsers.SAXParserFactory
+import okio.Buffer
+import okio.ByteString
+import okio.ByteString.Companion.encodeUtf8
+import org.xml.sax.Attributes
+import org.xml.sax.SAXException
+import org.xml.sax.ext.DefaultHandler2
 
 enum class OsmGpxBlockedReason { NOT_CONFIRMED_COMPLETED, TOO_SHORT, NO_DRAWABLE_SEGMENT }
 
@@ -23,16 +29,17 @@ data class OsmGpxPoint(val latitude: Double, val longitude: Double, val recorded
 /** One immutable artifact supplies both preview and upload. Raw diary fields never leave this factory. */
 class PreparedOsmGpxTrace private constructor(
     val journeyId: String,
-    val segments: List<List<OsmGpxPoint>>,
     val measuredDistanceMeters: Double,
     val distanceMeters: Double,
     val removedStartMeters: Double,
     val removedEndMeters: Double,
-    val gpxXml: String,
-    val sha256: String,
+    internal val gpxBytes: ByteString,
 ) {
-    val pointCount: Int = segments.sumOf { it.size }
+    val gpxXml: String get() = gpxBytes.utf8()
+    val sha256: String = gpxBytes.sha256().hex()
     val fileName: String = osmGpxFileName(sha256)
+    val segments: List<List<OsmGpxPoint>> by lazy { readPreviewSegments(gpxBytes) }
+    val pointCount: Int get() = segments.sumOf { it.size }
 
     companion object {
         internal fun create(
@@ -43,13 +50,10 @@ class PreparedOsmGpxTrace private constructor(
             removedStartMeters: Double,
             removedEndMeters: Double,
         ): PreparedOsmGpxTrace {
-            val frozen = Collections.unmodifiableList(segments.map { segment ->
-                Collections.unmodifiableList(segment.map { OsmGpxPoint(it.latitude, it.longitude, it.recordedAt) })
-            })
             val xml = buildString {
                 append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
                 append("<gpx version=\"1.1\" creator=\"İz\" xmlns=\"http://www.topografix.com/GPX/1/1\">\n<trk>\n")
-                frozen.forEach { segment ->
+                segments.forEach { segment ->
                     append("<trkseg>\n")
                     segment.forEach { point ->
                         append("<trkpt lat=\"").append(point.latitude).append("\" lon=\"")
@@ -60,12 +64,54 @@ class PreparedOsmGpxTrace private constructor(
                 }
                 append("</trk>\n</gpx>\n")
             }
-            val digest = MessageDigest.getInstance("SHA-256").digest(xml.toByteArray(Charsets.UTF_8))
-                .joinToString("") { "%02x".format(it) }
-            return PreparedOsmGpxTrace(journeyId, frozen, measuredDistanceMeters, distanceMeters,
-                removedStartMeters, removedEndMeters, xml, digest)
+            return PreparedOsmGpxTrace(journeyId, measuredDistanceMeters, distanceMeters,
+                removedStartMeters, removedEndMeters, xml.encodeUtf8())
         }
     }
+}
+
+/** Decodes only the immutable GPX produced above, using the same bytes as the multipart file. */
+private fun readPreviewSegments(bytes: ByteString): List<List<OsmGpxPoint>> {
+    val segments = mutableListOf<List<OsmGpxPoint>>()
+    val handler = object : DefaultHandler2() {
+        private var segment = mutableListOf<OsmGpxPoint>()
+        private var latitude = 0.0
+        private var longitude = 0.0
+        private var time: StringBuilder? = null
+
+        override fun startDTD(name: String?, publicId: String?, systemId: String?) {
+            throw SAXException("GPX preview cannot contain a DTD")
+        }
+
+        override fun startElement(uri: String, name: String, qName: String, attributes: Attributes) {
+            when (name) {
+                "trkseg" -> segment = mutableListOf()
+                "trkpt" -> {
+                    latitude = attributes.getValue("lat").toDouble()
+                    longitude = attributes.getValue("lon").toDouble()
+                }
+                "time" -> time = StringBuilder()
+            }
+        }
+
+        override fun characters(chars: CharArray, start: Int, length: Int) {
+            time?.append(chars, start, length)
+        }
+
+        override fun endElement(uri: String, name: String, qName: String) {
+            when (name) {
+                "time" -> {
+                    segment.add(OsmGpxPoint(latitude, longitude, Instant.parse(checkNotNull(time)).toEpochMilli()))
+                    time = null
+                }
+                "trkseg" -> segments.add(Collections.unmodifiableList(segment))
+            }
+        }
+    }
+    val parser = SAXParserFactory.newInstance().apply { isNamespaceAware = true }.newSAXParser()
+    parser.setProperty("http://xml.org/sax/properties/lexical-handler", handler)
+    Buffer().write(bytes).inputStream().use { parser.parse(it, handler) }
+    return Collections.unmodifiableList(segments)
 }
 
 internal fun osmGpxFileName(sha256: String): String = "iz_gps_${sha256.take(24)}.gpx"

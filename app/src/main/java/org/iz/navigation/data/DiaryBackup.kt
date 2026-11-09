@@ -147,7 +147,7 @@ class DiaryBackup(context: Context, private val repository: DiaryRepository) {
     }
 }
 internal object BackupJson {
-    private const val VERSION = 8
+    private const val VERSION = 9
     private const val FORMAT = "org.iz.navigation.backup"
     // Read compatibility for user-created backups from the former application identity.
     private const val LEGACY_FORMAT = "com.atay.iz.backup"
@@ -192,7 +192,10 @@ internal object BackupJson {
             "status" to value.status.name, "stage" to value.stage.name, "submittedAt" to value.submittedAt,
             "submittedBy" to value.submittedBy, "changesetId" to value.changesetId,
             "remoteNodeId" to value.remoteNodeId, "remoteNodeVersion" to value.remoteNodeVersion,
-            "changesetClosed" to value.changesetClosed, "error" to value.error)
+            "changesetClosed" to value.changesetClosed, "error" to value.error,
+            "targetType" to value.targetType?.name, "targetId" to value.targetId,
+            "reviewedVersion" to value.reviewedVersion, "reviewedFingerprint" to value.reviewedFingerprint,
+            "appliedVersion" to value.appliedVersion)
 
     internal fun recordWatchHealthSessions(value: WatchHealthSession): JSONObject = json("id" to value.id, "journeyId" to value.journeyId, "watchId" to value.watchId,
                 "deviceName" to value.deviceName, "createdAt" to value.createdAt)
@@ -285,6 +288,12 @@ internal object BackupJson {
                     endAt = it.strictLong("endAt"), value = it.strictDouble("value"))
             },
             mapEdits = if (version < 5) emptyList() else records("mapEdits") {
+                val targetType = it.nullString("targetType")?.let(OsmType::valueOf)
+                val targetId = it.strictNullLong("targetId")
+                val reviewedVersion = it.strictNullLong("reviewedVersion")
+                val reviewedFingerprint = it.nullString("reviewedFingerprint")
+                val appliedVersion = it.strictNullLong("appliedVersion")
+                require(version >= 9 || listOf(targetType, targetId, reviewedVersion, reviewedFingerprint, appliedVersion).all { field -> field == null })
                 MapEditDraft(id = it.strictString("id"), placeId = it.nullString("placeId"),
                     latitude = it.strictDouble("latitude"), longitude = it.strictDouble("longitude"),
                     preset = MapPlacePreset.valueOf(it.strictString("preset")), name = it.strictString("name"),
@@ -294,7 +303,8 @@ internal object BackupJson {
                     submittedAt = it.strictNullLong("submittedAt"), submittedBy = it.strictNullLong("submittedBy"),
                     changesetId = it.strictNullLong("changesetId"), remoteNodeId = it.strictNullLong("remoteNodeId"),
                     remoteNodeVersion = it.strictNullLong("remoteNodeVersion"), changesetClosed = it.strictBoolean("changesetClosed"),
-                    error = it.nullString("error"))
+                    error = it.nullString("error"), targetType = targetType, targetId = targetId,
+                    reviewedVersion = reviewedVersion, reviewedFingerprint = reviewedFingerprint, appliedVersion = appliedVersion)
             },
             watchHealthSessions = if (version < 5) emptyList() else records("watchHealthSessions") {
                 WatchHealthSession(it.strictString("id"), it.strictString("journeyId"), it.strictString("watchId"),

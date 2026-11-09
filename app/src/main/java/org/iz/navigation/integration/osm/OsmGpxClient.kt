@@ -28,8 +28,18 @@ internal sealed interface OsmGpxUploadResult {
     data object NotDispatched : OsmGpxUploadResult
 }
 
+enum class OsmGpxVisibility(internal val wireValue: String) {
+    IDENTIFIABLE("identifiable"),
+    TRACKABLE("trackable"),
+}
+
 internal fun interface OsmGpxGateway {
-    suspend fun upload(token: String, trace: PreparedOsmGpxTrace, canDispatch: () -> Boolean): OsmGpxUploadResult
+    suspend fun upload(
+        token: String,
+        trace: PreparedOsmGpxTrace,
+        visibility: OsmGpxVisibility,
+        canDispatch: () -> Boolean,
+    ): OsmGpxUploadResult
 }
 
 internal class OsmGpxClient(baseUrl: String = "https://api.openstreetmap.org/api/0.6") : OsmGpxGateway {
@@ -69,15 +79,16 @@ internal class OsmGpxClient(baseUrl: String = "https://api.openstreetmap.org/api
     override suspend fun upload(
         token: String,
         trace: PreparedOsmGpxTrace,
-        canDispatch: () -> Boolean
+        visibility: OsmGpxVisibility,
+        canDispatch: () -> Boolean,
     ): OsmGpxUploadResult {
         if (!canDispatch()) return OsmGpxUploadResult.NotDispatched
         require(token.isNotBlank() && token.all { it in '!'..'~' })
         val multipart = MultipartBody.Builder().setType(MultipartBody.FORM)
-            .addFormDataPart("file", trace.fileName, trace.gpxXml.toRequestBody("application/gpx+xml".toMediaType()))
+            .addFormDataPart("file", trace.fileName, trace.gpxBytes.toRequestBody("application/gpx+xml".toMediaType()))
             .addFormDataPart("description", "Iz GPS trace")
             .addFormDataPart("tags", "")
-            .addFormDataPart("visibility", "identifiable")
+            .addFormDataPart("visibility", visibility.wireValue)
             .build()
         val request = Request.Builder().url(url)
             .header("Authorization", "Bearer $token")

@@ -161,8 +161,11 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     var communityPage by navigator.pageFlag(UiPage.COMMUNITY)
     var communityMessageId by rememberSaveable { mutableStateOf<Long?>(null) }
     var communityAccountId by rememberSaveable { mutableStateOf<Long?>(null) }
-    var osmActions by navigator.pageFlag(UiPage.OSM_ACTIONS)
+    var contributionHub by navigator.pageFlag(UiPage.OSM_ACTIONS)
     var mapEditsPage by navigator.pageFlag(UiPage.MAP_EDITS)
+    var correctionPicker by rememberUiEntryState<Boolean>(history) { false }
+    val correctionTargetState = rememberUiEntryState<Place?>(history) { null }
+    val correctionTarget by correctionTargetState
     var weatherPage by navigator.pageFlag(UiPage.WEATHER)
     var navigationPage by navigator.pageFlag(UiPage.DIRECTIONS)
     val navigationEntryId = uiEntry.key.removePrefix("entry-").toLongOrNull() ?: 0L
@@ -191,7 +194,8 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     val navigation = (context.applicationContext as org.iz.navigation.IzApplication).navigation
     val navigationState by navigation.state.collectAsStateWithLifecycle()
     var contributionPicker by rememberUiEntryState<Boolean>(history) { false }
-    var contributionPlace by rememberUiEntryState<Place?>(history) { null }
+    var contributionLocation by rememberUiEntryState<SelectedOsmPlace?>(history) { null }
+    var contributionPlaceId by rememberUiEntryState<String?>(history) { null }
     var contributionEditId by rememberSaveable { mutableStateOf<String?>(null) }
     var contributionEdit by rememberUiEntryState<ContributionDraft?>(history, onDrop = { contributionEditId = null }) { null }
     var contributionBusy by resultOwner.contributionBusy
@@ -202,6 +206,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     val gpxStore = remember { PendingGpxStore(File(context.noBackupFilesDir, "pending-gpx")) }
     val osmAuth = remember { OsmAuthManager.get(context) }
     val authState by osmAuth.state.collectAsStateWithLifecycle()
+    val contributionAccountId = authState.user?.id?.takeUnless { authState.busy }
     val contributionController = remember { OsmContributionController(vm.repository, osmAuth) }
     var deletion by rememberUiEntryState<Deletion?>(history) { null }
     val detectionState = rememberUiEntryState<Boolean>(history) { false }
@@ -463,7 +468,8 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
         history.prune { row -> when (row.page) {
             UiPage.JOURNEY -> row.entityId in journeys
             UiPage.PLACE -> row.entityId in places
-            UiPage.COMMUNITY -> account.busy || row.accountKey == null || row.accountKey == account.user?.id?.toString()
+            UiPage.COMMUNITY, UiPage.MAP_EDITS ->
+                account.busy || row.accountKey == null || row.accountKey == account.user?.id?.toString()
             else -> true
         } }
     }
@@ -512,6 +518,53 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
 
     fun returnToMap() { navigator.toMap() }
     fun returnToParent() { navigator.back() }
+    fun openMapNote(location: SelectedOsmPlace? = null, placeId: String? = null) {
+        contributionLocation = location
+        contributionPlaceId = placeId
+        contributionPicker = true
+    }
+    fun openPlaceNote(place: Place) {
+        val location = if (place.latitude != null && place.longitude != null) {
+            val ref = if (place.osmType != null && place.osmId != null) OsmRef(place.osmType, place.osmId) else null
+            SelectedOsmPlace(place.name, place.latitude, place.longitude, ref)
+        } else null
+        openMapNote(location, place.id.takeIf { id -> state.places.any { it.id == id } })
+    }
+    fun openCorrection(place: Place) {
+        val placeId = place.id.takeIf { id -> state.places.any { it.id == id } }
+        exitGuard.requestExit {
+            exitGuard.update(null)
+            val entry = history.push(UiPage.MAP_EDITS, placeId?.let { "place:$it" })
+            if (placeId == null) correctionTargetState.setForEntry(entry.key, place)
+        }
+    }
+    fun openOsmCorrection(place: SelectedOsmPlace) {
+        val ref = place.osmRef ?: return
+        openCorrection(Place(name = place.name, latitude = place.latitude, longitude = place.longitude,
+            osmType = ref.type, osmId = ref.id, source = PlaceSource.OSM))
+    }
+    fun checkMapNote(draft: ContributionDraft) {
+        if (contributionBusy) return
+        contributionBusy = true
+        vm.execute {
+            try {
+                vm.osmReady.await()
+                val result = if (draft.status == ContributionStatus.UNKNOWN) contributionController.reconcile(draft.id)
+                    else contributionController.refreshRemoteStatus(draft.id)
+                vm.message(result.message)
+            } finally { contributionBusy = false }
+        }
+    }
+    fun openMapEditDraft(draft: MapEditDraft) {
+        navigator.open(UiPage.MAP_EDITS, "draft:${draft.id}", draft.submittedBy?.toString())
+    }
+    LaunchedEffect(contributionEdit?.id, authState.busy, contributionAccountId) {
+        val owner = contributionEdit?.submittedBy
+        if (!authState.busy && owner != null && contributionAccountId != owner) {
+            contributionEdit = null
+            contributionEditId = null
+        }
+    }
     val backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
     val keyboard = LocalSoftwareKeyboardController.current
     val imeVisible = WindowInsets.isImeVisible
@@ -525,7 +578,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     CompositionLocalProvider(LocalUiOwnerRegistrations provides resultOwner.registrations, LocalUiExitGuard provides exitGuard, LocalUiEntryKey provides uiEntry.key, LocalUiHistory provides history, LocalUiVoiceSettingsAction provides openVoiceSettings, LocalUiDirectionsPermissions provides openDirectionsPermissions,
         LocalUiOperationBusy provides { resultOwner.backupBusy.value || backupExport.busy || resultOwner.libraryBusy.value || resultOwner.gpxStarting.value || resultOwner.preparingGpx.value || resultOwner.formBusy.value || resultOwner.contributionBusy.value }) {
     UiEditOwner(UiEditState(uiEntry.key + "/ui", null, 0, 0, false, false))
-    if (!libraryOpen && !collectionsOpen && !mapEditsPage && !osmActions) Scaffold(containerColor = Paper, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
+    if (!libraryOpen && !collectionsOpen && !mapEditsPage) Scaffold(containerColor = Paper, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             if (!homeVisible) Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = ::backFromTop, modifier = Modifier.testTag("return-home-map")) {
@@ -599,20 +652,36 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                 communityPage -> OsmCommunityScreen(vm = featureOwners.getSavedState("community", uiEntry.key, OsmCommunityViewModel::class.java, context.applicationContext as android.app.Application, savedStateHost), onClose = { communityPage = false; communityMessageId = null; communityAccountId = null },
                     initialMessageId = remember(uiEntry.key) { uiEntry.entityId?.toLongOrNull()?.takeIf { !history.isRestoredEntry(uiEntry.key) && resultOwner.deliveredCommunityTargets.add(uiEntry.key) } }, initialAccountId = uiEntry.accountKey?.toLongOrNull(),
                     initialGpsJourneyId = osmGpsJourneyFromEntry(uiEntry, entries.getOrNull(entries.lastIndex - 1)), gpsJourneys = state.journeys,
+                    initialGpsPage = when (uiEntry.entityId) {
+                        "gps-share" -> OsmGpsPage.AVAILABLE
+                        "gps-history" -> OsmGpsPage.HISTORY
+                        else -> null
+                    },
                     onOpenSettings = { tab = 4 })
+                contributionHub -> OsmContributionHub(
+                    repository = vm.repository, onClose = ::returnToParent,
+                    onNewNote = { openMapNote() },
+                    onNewPlace = { navigator.open(UiPage.MAP_EDITS, "new") },
+                    onPickExistingPlace = { correctionPicker = true },
+                    onGps = { navigator.open(UiPage.COMMUNITY, "gps-share") },
+                    onResumeNote = { contributionEdit = it; contributionEditId = it.id },
+                    onResumePlace = ::openMapEditDraft,
+                    onNoteResult = ::checkMapNote,
+                    onPlaceResult = ::openMapEditDraft,
+                    onGpsHistory = { navigator.open(UiPage.COMMUNITY, "gps-history") },
+                    onManageNotes = { contributionsPage = true },
+                )
                 weatherPage -> WeatherPlannerScreen(onClose = { weatherPage = false },
                     vm = featureOwners.get("weather", uiEntry.key, WeatherPlannerViewModel::class.java, featureFactory), initialTransport = active?.transport,
                     onDirections = { stops, transport -> openDirections(stops, transport) },
                     onDirectionsWithPlan = { plan -> openDirections(plan.stops, plan.transport, plan) },
                     onSaveRoute = ::prepareSaveRoute,
                     onNavigationStarted = { exitGuard.update(null); history.toMap() })
-                contributionsPage -> ContributionsScreen(state.contributions, contributionBusy,
-                    onNew = { contributionPlace = null; contributionPicker = true }, onEdit = { contributionEdit = it; contributionEditId = it.id },
-                    onCheck = { draft -> vm.execute {
-                        contributionBusy = true
-                        try { vm.osmReady.await(); val result = if (draft.status == ContributionStatus.UNKNOWN) contributionController.reconcile(draft.id) else contributionController.refreshRemoteStatus(draft.id); vm.message(result.message) }
-                        finally { contributionBusy = false }
-                    } },
+                contributionsPage -> ContributionsScreen(state.contributions.filter {
+                    it.submittedBy == null || it.submittedBy == contributionAccountId
+                }, contributionBusy,
+                    onNew = { openMapNote() }, onEdit = { contributionEdit = it; contributionEditId = it.id },
+                    onCheck = ::checkMapNote,
                     onDelete = { draft -> deletion = Deletion("Bu kayıt yalnızca uygulamadaki katkı listenden silinecek. OSM’de yayımlanmış bildirim silinmez.") { vm.repository.deleteContribution(draft.id) } },
                 )
                 journey != null -> JourneyDetail(journey, state, now,
@@ -638,7 +707,9 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                 place != null -> PlaceDetail(place, state,
                     listState = rememberUiBrowseListState(browseHolder, uiEntry.key),
                     onEdit = { osmSelection = null; editPlace = place }, onMaps = { vm.execute { MediaShare.openPlace(context, place) } },
-                    onContribute = { contributionPlace = place; contributionPicker = true },
+                    onContribute = { openPlaceNote(place) },
+                    onCorrect = if (place.osmType != null && place.osmId != null && place.latitude != null &&
+                        place.longitude != null) ({ openCorrection(place) }) else null,
                     onAddVisit = { vm.execute("Yeni ziyaret eklendi.") { vm.repository.saveVisit(Visit(placeId = place.id, journeyId = active?.id, visitedAt = now)) } },
                     onEditVisit = { editVisit = it }, onShare = { visit -> photosToShare = state.photos.filter { it.visitId == visit.id } },
                     onPhoto = { photoTarget = PhotoTarget(it.journeyId, it.id) },
@@ -697,7 +768,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                             importBackup.launch(arrayOf("application/zip", "application/octet-stream"))
                         }
                     },
-                    onContributions = { osmActions = true }, onMessage = vm::message,
+                    onContributions = { contributionHub = true }, onMessage = vm::message,
                     onCommunity = { communityMessageId = null; communityAccountId = null; navigator.open(UiPage.COMMUNITY) },
                 )
             }
@@ -717,7 +788,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
             TextButton({ open { tab = 3 } }, Modifier.fillMaxWidth().testTag("menu-heatmap")) { Text("Yoğunluk haritası") }
             TextButton({ open { openAddPlace() } }, Modifier.fillMaxWidth().testTag("menu-add-place")) { Text("Bir yer kaydet") }
             TextButton({ open { navigator.open(UiPage.COMMUNITY) } }, Modifier.fillMaxWidth().testTag("menu-community")) { Text("OSM Topluluğu") }
-            TextButton({ open { osmActions = true } }, Modifier.fillMaxWidth().testTag("menu-osm")) { Text("OSM'ye katkı") }
+            TextButton({ open { contributionHub = true } }, Modifier.fillMaxWidth().testTag("menu-osm")) { Text("OSM'ye katkı") }
             TextButton({ open { weatherPage = true } }, Modifier.fillMaxWidth().testTag("menu-weather")) { Text("Hava durumu") }
             TextButton({ open { tab = 4 } }, Modifier.fillMaxWidth().testTag("menu-settings")) { Text("Ayarlar") }
         }
@@ -761,14 +832,23 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                 finally { libraryBusy = false }
             }
         }) }
-    if (osmActions) AlertDialog(onDismissRequest = { osmActions = false }, title = { Text("OpenStreetMap'e katkı") }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedButton(onClick = { mapEditsPage = true }, Modifier.fillMaxWidth()) { Text("Doğrudan mekân ekle") }
-            OutlinedButton(onClick = { contributionsPage = true }, Modifier.fillMaxWidth()) { Text("Harita notları ve bildirimler") }
+    if (correctionPicker) OsmSearchDialog(onDismiss = { correctionPicker = false }, onSelect = { selected ->
+        if (selected.osmRef == null) vm.message("Düzenlemek için OSM kimliği olan bir mekân seç.")
+        else {
+            correctionPicker = false
+            openOsmCorrection(selected)
         }
-    }, confirmButton = { TextButton(onClick = { osmActions = false }) { Text("Kapat") } })
-    if (mapEditsPage) Dialog(onDismissRequest = { mapEditsPage = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxSize()) { MapEditPage(onClose = { mapEditsPage = false }) }
+    })
+    if (mapEditsPage && (uiEntry.accountKey == null || uiEntry.accountKey == contributionAccountId?.toString()))
+        Dialog(onDismissRequest = { mapEditsPage = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        val targetId = uiEntry.entityId?.takeIf { it.startsWith("place:") }?.removePrefix("place:")
+        Surface(Modifier.fillMaxSize()) {
+            MapEditPage(onClose = { mapEditsPage = false },
+                initialCorrection = correctionTarget ?: state.places.firstOrNull { it.id == targetId },
+                initialDraftId = uiEntry.entityId?.takeIf { it.startsWith("draft:") }?.removePrefix("draft:"),
+                startNew = uiEntry.entityId == "new",
+                onNoteFallback = ::openPlaceNote)
+        }
     }
 
     transportAction?.let { action ->
@@ -801,6 +881,15 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     if (addPlace) PlaceEditor(pin, osmSelection,
         if (shortcutAssignment == null) state.places else state.places.filter(Place::isValidDestinationShortcut),
         assignmentKind = shortcutAssignment, saveError = shortcutError,
+        onMapNote = pin?.takeIf { shortcutAssignment == null }?.let { coordinate ->
+            {
+                addPlace = false
+                openMapNote(osmSelection ?: SelectedOsmPlace("Seçilen konum", coordinate.latitude, coordinate.longitude))
+            }
+        },
+        onOsmCorrection = osmSelection?.takeIf { shortcutAssignment == null && it.osmRef != null }?.let { selected ->
+            { openOsmCorrection(selected) }
+        },
         onDismiss = {
             if (shortcutAssignment != null) {
                 shortcutLocation?.cancel()
@@ -898,20 +987,20 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
         onShare = { selected -> vm.execute { MediaShare.sharePhotos(context, selected) } },
         onGallery = { selected -> vm.execute { val count = MediaShare.savePhotosToGallery(context, selected); vm.message("$count fotoğraf, dosyaya ekli konum ve çekim bilgileri kaldırılarak galeriye kaydedildi.") } }) }
     if (contributionPicker) {
-        val source = contributionPlace?.takeIf { it.source == PlaceSource.OSM && it.osmType != null && it.osmId != null && it.latitude != null && it.longitude != null }
-        ContributionLocationPicker(source?.let { SelectedOsmPlace(it.name, it.latitude!!, it.longitude!!, OsmRef(it.osmType!!, it.osmId!!)) }, contributionPlace?.id,
+        ContributionLocationPicker(contributionLocation, contributionPlaceId,
             onDismiss = { contributionPicker = false }, onChoose = { draft -> vm.execute {
                 vm.osmReady.await(); vm.repository.saveContribution(draft)
                 contributionPicker = false; contributionEdit = draft; contributionEditId = draft.id
             } })
     }
-    contributionEdit?.let { draft -> ContributionEditor(draft, authState.user != null, contributionBusy || authState.busy,
+    contributionEdit?.takeIf { it.submittedBy == null || it.submittedBy == contributionAccountId }?.let { draft ->
+        ContributionEditor(draft, authState.user != null, contributionBusy || authState.busy,
         onDismiss = { contributionEdit = null; contributionEditId = null }, onSave = { updated -> contributionBusy = true; vm.execute("Gözlem taslağı saklandı.") {
-            try { vm.osmReady.await(); vm.repository.saveContribution(updated); acknowledgedContribution = updated; contributionEdit = null; contributionEditId = null; contributionsPage = true }
+            try { vm.osmReady.await(); vm.repository.saveContribution(updated); acknowledgedContribution = updated; contributionEdit = null; contributionEditId = null }
             finally { contributionBusy = false }
         } },
         onPublish = { updated -> contributionBusy = true; vm.execute {
-            try { vm.osmReady.await(); vm.repository.saveContribution(updated); acknowledgedContribution = updated; val result = contributionController.send(updated.id); contributionEdit = null; contributionEditId = null; contributionsPage = true; vm.message(result.message) }
+            try { vm.osmReady.await(); vm.repository.saveContribution(updated); acknowledgedContribution = updated; val result = contributionController.send(updated.id); contributionEdit = null; contributionEditId = null; vm.message(result.message) }
             finally { contributionBusy = false }
         } },
         onLogin = { updated -> contributionBusy = true; vm.execute {
@@ -1167,12 +1256,22 @@ private fun JourneyDetail(journey: Journey, state: DiaryState, now: Long, onEdit
 }
 
 @Composable
-private fun PlaceDetail(place: Place, state: DiaryState, onEdit: () -> Unit, onMaps: () -> Unit, onContribute: () -> Unit, onAddVisit: () -> Unit, onEditVisit: (Visit) -> Unit, onShare: (Visit) -> Unit, onPhoto: (Visit) -> Unit, onDelete: () -> Unit, onDeleteVisit: (Visit) -> Unit, onDeletePhoto: (Photo) -> Unit, onEditPhoto: (Photo) -> Unit, listState: LazyListState = rememberLazyListState()) {
+private fun PlaceDetail(place: Place, state: DiaryState, onEdit: () -> Unit, onMaps: () -> Unit, onContribute: () -> Unit,
+    onCorrect: (() -> Unit)?, onAddVisit: () -> Unit, onEditVisit: (Visit) -> Unit, onShare: (Visit) -> Unit, onPhoto: (Visit) -> Unit,
+    onDelete: () -> Unit, onDeleteVisit: (Visit) -> Unit, onDeletePhoto: (Photo) -> Unit, onEditPhoto: (Photo) -> Unit,
+    listState: LazyListState = rememberLazyListState()) {
     val visits = state.visits.filter { it.placeId == place.id }.sortedByDescending { it.visitedAt }
     LazyColumn(state = listState, contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item { Row(verticalAlignment = Alignment.Top) { Column(Modifier.weight(1f)) { PageHeading(place.name, "${visits.size} ziyaret · Kişisel yer günlüğü") }; IconButton(onClick = onEdit) { Icon(Icons.Outlined.Edit, "Yer adını düzenle") } } }
         if (place.latitude != null && place.longitude != null) item { DiaryMap(emptyList(), listOf(place), Modifier.fillMaxWidth().height(200.dp).clip(RoundedCornerShape(24.dp))) }
-        item { FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton(onClick = onMaps) { Text("Başka haritada aç") }; OutlinedButton(onClick = onContribute) { Text("Düzeltme bildir") }; Button(onClick = onAddVisit) { Text("Yeni ziyaret") } } }
+        item {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onMaps) { Text("Başka haritada aç") }
+                OutlinedButton(onClick = onContribute) { Text("Harita notu yaz") }
+                onCorrect?.let { OutlinedButton(onClick = it) { Text("OSM mekânını düzelt") } }
+                Button(onClick = onAddVisit) { Text("Yeni ziyaret") }
+            }
+        }
         items(visits, key = { it.id }) { visit ->
             Surface(color = Color.White, shape = RoundedCornerShape(22.dp)) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) { Text(date(visit.visitedAt), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium); IconButton(onClick = { onEditVisit(visit) }) { Icon(Icons.Outlined.EditNote, "Notu düzenle") } }

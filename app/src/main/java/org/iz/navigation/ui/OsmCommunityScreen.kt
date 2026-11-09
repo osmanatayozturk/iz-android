@@ -51,6 +51,7 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
     vm: OsmCommunityViewModel = viewModel(),
     initialGpsJourneyId: String? = null,
     gpsJourneys: List<Journey> = emptyList(),
+    initialGpsPage: OsmGpsPage? = null,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val auth = remember { OsmAuthManager.get(context) }
@@ -61,8 +62,11 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
     val editorState by vm.editorState.collectAsStateWithLifecycle()
     val exitGuard = LocalUiExitGuard.current
     val entryKey = LocalUiEntryKey.current
-    var gpsOpen by rememberSaveable(entryKey, initialGpsJourneyId) { mutableStateOf(initialGpsJourneyId != null) }
-    var gpsPage by rememberSaveable(entryKey, initialGpsJourneyId) { mutableStateOf(OsmGpsPage.AVAILABLE) }
+    val gpsEntryPage = initialGpsPage ?: OsmGpsPage.AVAILABLE
+    var gpsOpen by rememberSaveable(entryKey, initialGpsJourneyId, initialGpsPage) {
+        mutableStateOf(initialGpsJourneyId != null || initialGpsPage != null)
+    }
+    var gpsPage by rememberSaveable(entryKey, initialGpsJourneyId, initialGpsPage) { mutableStateOf(gpsEntryPage) }
     LaunchedEffect(gpsOpen, authState.user?.id) {
         if (!gpsOpen) {
             vm.gpsSelection.bind(authState.user?.id)
@@ -130,7 +134,7 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
     }
     fun close() { vm.closeEditor(); onClose() }
     fun back() = exit {
-        if (gpsOpen && gpsPage != OsmGpsPage.AVAILABLE) gpsPage = OsmGpsPage.AVAILABLE
+        if (gpsOpen && gpsPage != gpsEntryPage) gpsPage = gpsEntryPage
         else if (gpsOpen || !vm.back()) close()
     }
     if (ui.editor == null) UiEditOwner(

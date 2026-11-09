@@ -21,14 +21,32 @@ class DiaryMigrationTest {
 
     @After fun cleanup() { context.deleteDatabase(name) }
 
+    @Test fun migratingVersionEightKeepsExistingMapDraftAsNewPlace() = runBlocking {
+        val old = MapEditDraft(latitude = 41.0, longitude = 29.0, name = "Eski taslak", observedAt = 1_000)
+        helper.createDatabase(name, 8).apply {
+            execSQL(
+                "INSERT INTO map_edit_drafts (id, latitude, longitude, preset, name, street, houseNumber, observedAt, " +
+                    "surveyConfirmed, status, stage, changesetClosed) VALUES (?, ?, ?, ?, ?, '', '', ?, 0, 'DRAFT', 'NONE', 0)",
+                arrayOf(old.id, old.latitude, old.longitude, old.preset.name, old.name, old.observedAt),
+            )
+            close()
+        }
+        helper.runMigrationsAndValidate(name, 9, true, DiaryDatabase.MIGRATION_8_9).close()
+        val db = Room.databaseBuilder(context, DiaryDatabase::class.java, name)
+            .addMigrations(DiaryDatabase.MIGRATION_8_9).build()
+        try {
+            assertEquals(old, db.mapEditDao().read(old.id))
+        } finally { db.close() }
+    }
+
     @Test fun migratingVersionThreePreservesDiaryAndCreatesCascadingHealthTables() = runBlocking {
         helper.createDatabase(name, 3).apply {
             execSQL("INSERT INTO journeys VALUES ('trip', 'Keep run', 'WALK', 'CONFIRMED', 1000, 5000, NULL, 'Private note', 0, 42)")
             execSQL("INSERT INTO contribution_drafts VALUES ('draft', NULL, 41.0, 29.0, 1000, 'OTHER', 'Public observation', 'DRAFT', NULL, NULL, NULL, NULL, NULL, NULL, NULL)")
             close()
         }
-        helper.runMigrationsAndValidate(name, 7, true, DiaryDatabase.MIGRATION_3_4, DiaryDatabase.MIGRATION_4_5, DiaryDatabase.MIGRATION_5_6, DiaryDatabase.MIGRATION_6_7).close()
-        val db = Room.databaseBuilder(context, DiaryDatabase::class.java, name).addMigrations(DiaryDatabase.MIGRATION_3_4, DiaryDatabase.MIGRATION_4_5, DiaryDatabase.MIGRATION_5_6, DiaryDatabase.MIGRATION_6_7).build()
+        helper.runMigrationsAndValidate(name, 9, true, DiaryDatabase.MIGRATION_3_4, DiaryDatabase.MIGRATION_4_5, DiaryDatabase.MIGRATION_5_6, DiaryDatabase.MIGRATION_6_7, DiaryDatabase.MIGRATION_7_8, DiaryDatabase.MIGRATION_8_9).close()
+        val db = Room.databaseBuilder(context, DiaryDatabase::class.java, name).addMigrations(DiaryDatabase.MIGRATION_3_4, DiaryDatabase.MIGRATION_4_5, DiaryDatabase.MIGRATION_5_6, DiaryDatabase.MIGRATION_6_7, DiaryDatabase.MIGRATION_7_8, DiaryDatabase.MIGRATION_8_9).build()
         try {
             val dao = db.diaryDao()
             assertEquals(42L, dao.journey("trip")?.stepCount)
@@ -54,9 +72,9 @@ class DiaryMigrationTest {
             execSQL("INSERT INTO share_drafts VALUES ('draft', 'visit', 'Saved review', 4, 'photo', NULL)")
             close()
         }
-        helper.runMigrationsAndValidate(name, 7, true, DiaryDatabase.MIGRATION_1_2, DiaryDatabase.MIGRATION_2_3, DiaryDatabase.MIGRATION_3_4, DiaryDatabase.MIGRATION_4_5, DiaryDatabase.MIGRATION_5_6, DiaryDatabase.MIGRATION_6_7).close()
+        helper.runMigrationsAndValidate(name, 9, true, DiaryDatabase.MIGRATION_1_2, DiaryDatabase.MIGRATION_2_3, DiaryDatabase.MIGRATION_3_4, DiaryDatabase.MIGRATION_4_5, DiaryDatabase.MIGRATION_5_6, DiaryDatabase.MIGRATION_6_7, DiaryDatabase.MIGRATION_7_8, DiaryDatabase.MIGRATION_8_9).close()
         val db = Room.databaseBuilder(context, DiaryDatabase::class.java, name)
-            .addMigrations(DiaryDatabase.MIGRATION_1_2, DiaryDatabase.MIGRATION_2_3, DiaryDatabase.MIGRATION_3_4, DiaryDatabase.MIGRATION_4_5, DiaryDatabase.MIGRATION_5_6, DiaryDatabase.MIGRATION_6_7).build()
+            .addMigrations(DiaryDatabase.MIGRATION_1_2, DiaryDatabase.MIGRATION_2_3, DiaryDatabase.MIGRATION_3_4, DiaryDatabase.MIGRATION_4_5, DiaryDatabase.MIGRATION_5_6, DiaryDatabase.MIGRATION_6_7, DiaryDatabase.MIGRATION_7_8, DiaryDatabase.MIGRATION_8_9).build()
         try {
             val dao = db.diaryDao()
             val old = dao.journey("walk")!!
@@ -89,8 +107,8 @@ class DiaryMigrationTest {
             execSQL("INSERT INTO share_drafts VALUES ('draft', 'visit', 'Saved review', 4, 'photo', 400)")
             close()
         }
-        helper.runMigrationsAndValidate(name, 7, true, DiaryDatabase.MIGRATION_2_3, DiaryDatabase.MIGRATION_3_4, DiaryDatabase.MIGRATION_4_5, DiaryDatabase.MIGRATION_5_6, DiaryDatabase.MIGRATION_6_7).close()
-        val db = Room.databaseBuilder(context, DiaryDatabase::class.java, name).addMigrations(DiaryDatabase.MIGRATION_2_3, DiaryDatabase.MIGRATION_3_4, DiaryDatabase.MIGRATION_4_5, DiaryDatabase.MIGRATION_5_6, DiaryDatabase.MIGRATION_6_7).build()
+        helper.runMigrationsAndValidate(name, 9, true, DiaryDatabase.MIGRATION_2_3, DiaryDatabase.MIGRATION_3_4, DiaryDatabase.MIGRATION_4_5, DiaryDatabase.MIGRATION_5_6, DiaryDatabase.MIGRATION_6_7, DiaryDatabase.MIGRATION_7_8, DiaryDatabase.MIGRATION_8_9).close()
+        val db = Room.databaseBuilder(context, DiaryDatabase::class.java, name).addMigrations(DiaryDatabase.MIGRATION_2_3, DiaryDatabase.MIGRATION_3_4, DiaryDatabase.MIGRATION_4_5, DiaryDatabase.MIGRATION_5_6, DiaryDatabase.MIGRATION_6_7, DiaryDatabase.MIGRATION_7_8, DiaryDatabase.MIGRATION_8_9).build()
         try {
             val dao = db.diaryDao()
             assertEquals(321L, dao.journey("walk")?.stepCount)
@@ -113,8 +131,8 @@ class DiaryMigrationTest {
             execSQL("INSERT INTO journey_health_samples VALUES ('trip', 'source', 'com.sec.android.app.shealth', 1, 'Samsung', 'Watch8 Classic', 'HEART_RATE_BPM', 2000, 2000, 84.0)")
             close()
         }
-        helper.runMigrationsAndValidate(name, 7, true, DiaryDatabase.MIGRATION_4_5, DiaryDatabase.MIGRATION_5_6, DiaryDatabase.MIGRATION_6_7).close()
-        val db = Room.databaseBuilder(context, DiaryDatabase::class.java, name).addMigrations(DiaryDatabase.MIGRATION_4_5, DiaryDatabase.MIGRATION_5_6, DiaryDatabase.MIGRATION_6_7).build()
+        helper.runMigrationsAndValidate(name, 9, true, DiaryDatabase.MIGRATION_4_5, DiaryDatabase.MIGRATION_5_6, DiaryDatabase.MIGRATION_6_7, DiaryDatabase.MIGRATION_7_8, DiaryDatabase.MIGRATION_8_9).close()
+        val db = Room.databaseBuilder(context, DiaryDatabase::class.java, name).addMigrations(DiaryDatabase.MIGRATION_4_5, DiaryDatabase.MIGRATION_5_6, DiaryDatabase.MIGRATION_6_7, DiaryDatabase.MIGRATION_7_8, DiaryDatabase.MIGRATION_8_9).build()
         try {
             assertEquals("Private note", db.diaryDao().journey("trip")?.note)
             assertEquals(42L, db.diaryDao().journey("trip")?.stepCount)

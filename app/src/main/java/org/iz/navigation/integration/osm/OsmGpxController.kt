@@ -76,6 +76,7 @@ internal data class OsmGpxSelection(val key: OsmGpxReceiptKey, val prior: OsmGpx
 class OsmGpxConfirmation internal constructor(
     internal val session: CommunitySession,
     selection: List<OsmGpxSelection>,
+    val visibility: OsmGpxVisibility,
 ) {
     internal val selection: List<OsmGpxSelection> = Collections.unmodifiableList(selection.toList())
     val user = OsmUser(session.userId, session.displayName)
@@ -83,6 +84,11 @@ class OsmGpxConfirmation internal constructor(
     val traceCount: Int get() = keys.size
     private val used = AtomicBoolean()
     internal fun consume(): Boolean = used.compareAndSet(false, true)
+
+    internal fun replaceVisibility(visibility: OsmGpxVisibility): OsmGpxConfirmation? {
+        if (visibility == this.visibility || !consume()) return null
+        return OsmGpxConfirmation(session, selection, visibility)
+    }
 }
 
 enum class OsmGpxStop {
@@ -241,6 +247,7 @@ class OsmGpxController internal constructor(
     suspend fun prepareConfirmationForKeys(
         keys: List<OsmGpxReceiptKey>,
         reviewedUnknown: Set<OsmGpxReceipt> = emptySet(),
+        visibility: OsmGpxVisibility = OsmGpxVisibility.IDENTIFIABLE,
     ): OsmGpxConfirmation? {
         val session = usableSession() ?: return null
         val verified = readyHistory(session) ?: return null
@@ -253,7 +260,7 @@ class OsmGpxController internal constructor(
             }.distinctBy { it.key.fileName }
         }
         return if (selection.isNotEmpty() && usableSession() === session && readyHistory(session) === verified) {
-            OsmGpxConfirmation(session, selection)
+            OsmGpxConfirmation(session, selection, visibility)
         } else null
     }
 
@@ -309,7 +316,7 @@ class OsmGpxController internal constructor(
                 if (stopped() == null) onAttempt(key, index + 1)
                 val response = try {
                     if (stopped() != null) OsmGpxUploadResult.NotDispatched
-                    else gateway.upload(session.token, trace) { stopped() == null }
+                    else gateway.upload(session.token, trace, confirmation.visibility) { stopped() == null }
                 } catch (cancel: CancellationException) {
                     throw cancel
                 } catch (_: Exception) {

@@ -161,7 +161,7 @@ internal fun ContributionLocationPicker(initial: SelectedOsmPlace?, placeId: Str
                 Button(enabled = coordinate != null, modifier = Modifier.fillMaxWidth(), onClick = {
                     val pin = coordinate ?: return@Button
                     onChoose(ContributionDraft(placeId = placeId, latitude = pin.latitude, longitude = pin.longitude,
-                        observedAt = System.currentTimeMillis(), kind = if (selection == null) ContributionKind.MISSING_PLACE else ContributionKind.WRONG_DETAILS,
+                        observedAt = System.currentTimeMillis(), kind = if (selection?.osmRef == null) ContributionKind.MISSING_PLACE else ContributionKind.WRONG_DETAILS,
                         text = "", osmType = selection?.osmRef?.type, osmId = selection?.osmRef?.id))
                 }) { Text("Bu konum için gözlem yaz") }
             }

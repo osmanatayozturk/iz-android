@@ -6,7 +6,7 @@ import androidx.room.PrimaryKey
 import java.util.UUID
 
 enum class MapEditStatus { DRAFT, SENDING, SENT, FAILED, UNKNOWN }
-enum class MapEditStage { NONE, CREATE_CHANGESET, UPLOAD_NODE, CLOSE_CHANGESET }
+enum class MapEditStage { NONE, CREATE_CHANGESET, UPLOAD_NODE, UPDATE_ELEMENT, CLOSE_CHANGESET }
 enum class MapPlacePreset(val label: String, val key: String, val value: String) {
     CAFE("Kafe", "amenity", "cafe"),
     RESTAURANT("Restoran", "amenity", "restaurant"),
@@ -42,8 +42,14 @@ data class MapEditDraft(
     val remoteNodeVersion: Long? = null,
     val changesetClosed: Boolean = false,
     val error: String? = null,
+    val targetType: OsmType? = null,
+    val targetId: Long? = null,
+    val reviewedVersion: Long? = null,
+    val reviewedFingerprint: String? = null,
+    val appliedVersion: Long? = null,
 ) {
-    fun publicTags(): Map<String, String> = linkedMapOf(preset.key to preset.value).apply {
+    fun publicTags(): Map<String, String> = linkedMapOf<String, String>().apply {
+        if (targetType == null) put(preset.key, preset.value)
         if (name.isNotBlank()) put("name", name.trim())
         if (street.isNotBlank()) put("addr:street", street.trim())
         if (houseNumber.isNotBlank()) put("addr:housenumber", houseNumber.trim())
@@ -53,7 +59,8 @@ data class MapEditDraft(
     fun editableCopy(): MapEditDraft {
         require(status in setOf(MapEditStatus.DRAFT, MapEditStatus.FAILED))
         return copy(status = MapEditStatus.DRAFT, stage = MapEditStage.NONE, submittedAt = null, submittedBy = null,
-            changesetId = null, remoteNodeId = null, remoteNodeVersion = null, changesetClosed = false, error = null)
+            changesetId = null, remoteNodeId = null, remoteNodeVersion = null, changesetClosed = false, error = null,
+            reviewedVersion = null, reviewedFingerprint = null, appliedVersion = null)
     }
 }
 
@@ -69,6 +76,7 @@ fun validateMapEdit(value: MapEditDraft) {
     require((value.remoteNodeId == null && value.remoteNodeVersion == null) ||
         (value.remoteNodeId != null && value.remoteNodeId > 0 && value.remoteNodeVersion != null && value.remoteNodeVersion > 0 && value.changesetId != null))
     require(!value.changesetClosed || value.changesetId != null)
+    validateMapEditTarget(value)
     if (value.status == MapEditStatus.DRAFT) {
         require(value.stage == MapEditStage.NONE && value.submittedAt == null && value.submittedBy == null &&
             value.changesetId == null && value.remoteNodeId == null && !value.changesetClosed)
@@ -76,9 +84,31 @@ fun validateMapEdit(value: MapEditDraft) {
         require(value.stage != MapEditStage.NONE && value.submittedAt != null && value.submittedAt > 0 && value.submittedBy != null && value.submittedBy > 0)
         require(value.surveyConfirmed)
         if (value.stage != MapEditStage.CREATE_CHANGESET) require(value.changesetId != null)
-        if (value.status == MapEditStatus.SENT) require(value.remoteNodeId != null && value.stage == MapEditStage.CLOSE_CHANGESET)
+        if (value.status == MapEditStatus.SENT) require(
+            (value.remoteNodeId != null || value.appliedVersion != null) && value.stage == MapEditStage.CLOSE_CHANGESET,
+        )
         if (value.status == MapEditStatus.FAILED) require(value.remoteNodeId == null)
     }
+}
+
+private fun validateMapEditTarget(value: MapEditDraft) {
+    if (value.targetType == null) {
+        require(value.targetId == null && value.reviewedVersion == null && value.reviewedFingerprint == null &&
+            value.appliedVersion == null && value.stage != MapEditStage.UPDATE_ELEMENT)
+        return
+    }
+    require(value.targetType == OsmType.NODE || value.targetType == OsmType.WAY)
+    require(value.targetId != null && value.targetId > 0)
+    require(value.remoteNodeId == null && value.stage != MapEditStage.UPLOAD_NODE)
+    if (value.status == MapEditStatus.DRAFT) {
+        require(value.reviewedVersion == null && value.reviewedFingerprint == null && value.appliedVersion == null)
+        return
+    }
+    val reviewed = requireNotNull(value.reviewedVersion)
+    require(reviewed in 1 until Long.MAX_VALUE)
+    require(value.reviewedFingerprint?.let { it.length == 64 && it.all { c -> c in '0'..'9' || c in 'a'..'f' } } == true)
+    require(value.publicTags().isNotEmpty())
+    require(value.appliedVersion == if (value.status == MapEditStatus.SENT) reviewed + 1 else null)
 }
 
 fun validateMapEditForPublish(value: MapEditDraft) {

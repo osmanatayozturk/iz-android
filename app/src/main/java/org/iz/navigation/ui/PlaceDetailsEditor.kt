@@ -54,9 +54,11 @@ fun PlaceDetailsEditor(place: Place, osm: SelectedOsmPlace?, onSearch: () -> Uni
 internal fun PlaceEditor(
     pin: GeoCoordinate?, osm: SelectedOsmPlace?, places: List<Place>, onDismiss: () -> Unit,
     onSearch: () -> Unit, onLocate: () -> Unit, assignmentKind: DestinationShortcutKind? = null,
-    saveError: String? = null, onSave: (String, String, Place?) -> Unit,
+    saveError: String? = null, onMapNote: (() -> Unit)? = null, onOsmCorrection: (() -> Unit)? = null,
+    onSave: (String, String, Place?) -> Unit,
 ) {
     val operationBusy = LocalUiOperationBusy.current
+    val exitGuard = org.iz.navigation.ui.history.LocalUiExitGuard.current
     val assigning = assignmentKind != null
     val initialName = remember { osm?.name.orEmpty() }
     val initialPin = remember { pin }
@@ -100,6 +102,13 @@ internal fun PlaceEditor(
                     Text(if (osm == null) "OSM’de yer eşleştir" else "OSM eşlemesini değiştir")
                 }
                 osm?.let { Text("OSM: ${it.name}", style = MaterialTheme.typography.bodySmall, color = Muted) }
+                onMapNote?.let { openNote ->
+                    OutlinedButton(onClick = { if (exitGuard == null) openNote() else exitGuard.requestExit(openNote) },
+                        enabled = !operationBusy()) { Text("Harita notu yaz") }
+                }
+                onOsmCorrection?.let { correction ->
+                    OutlinedButton(onClick = correction, enabled = !operationBusy()) { Text("OSM mekânını düzelt") }
+                }
             }
             if (!assigning) OutlinedTextField(note, { if (!operationBusy()) note = it }, enabled = !operationBusy(),
                 label = { Text("Bu ziyarete özel not") }, minLines = 2)

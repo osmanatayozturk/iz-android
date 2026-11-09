@@ -52,6 +52,49 @@ class SharedDataV5Test {
         assertTrue(repository.snapshot().places.isEmpty())
     }
 
+    @Test fun correctionClaimCannotUseLegacyCreateAndDoesNotCreateAPrivatePlace() = runBlocking {
+        val draft = draft().copy(name = "Düzeltilen ad", targetType = OsmType.WAY, targetId = 42L)
+        repository.saveMapEdit(draft)
+        assertNull(repository.beginMapEditSend(draft.id, 77L, 200L))
+        val claimed = draft.copy(status = MapEditStatus.SENDING, stage = MapEditStage.CREATE_CHANGESET,
+            submittedAt = 200L, submittedBy = 77L, reviewedVersion = 5L, reviewedFingerprint = "a".repeat(64))
+        assertTrue(repository.compareAndSetMapEdit(draft, claimed))
+        assertFalse(repository.compareAndSetMapEdit(draft, claimed))
+        val uploading = claimed.copy(changesetId = 17L, stage = MapEditStage.UPDATE_ELEMENT)
+        assertTrue(repository.compareAndSetMapEdit(claimed, uploading))
+        repository.restore(repository.snapshot())
+        val unknown = requireNotNull(repository.getMapEdit(draft.id))
+        assertEquals(uploading.copy(status = MapEditStatus.UNKNOWN), unknown)
+        val sent = unknown.copy(status = MapEditStatus.SENT, stage = MapEditStage.CLOSE_CHANGESET, appliedVersion = 6L)
+        assertTrue(repository.compareAndSetMapEdit(unknown, sent))
+        assertTrue(repository.snapshot().places.isEmpty())
+    }
+
+    @Test fun anAccountChangeDuringEditRollsBackTheLocalAttempt() = runBlocking {
+        val draft = draft().copy(name = "Düzeltilen ad", targetType = OsmType.NODE, targetId = 42L)
+        repository.saveMapEdit(draft)
+        val claimed = draft.copy(status = MapEditStatus.SENDING, stage = MapEditStage.CREATE_CHANGESET,
+            submittedAt = 200L, submittedBy = 77L, reviewedVersion = 5L, reviewedFingerprint = "b".repeat(64))
+        assertTrue(repository.compareAndSetMapEdit(draft, claimed))
+        val failed = claimed.copy(status = MapEditStatus.FAILED)
+        assertTrue(repository.compareAndSetMapEdit(claimed, failed))
+        var checks = 0
+        val save = runCatching {
+            repository.saveMapEdit(failed.copy(name = "Başka ad")) { current ->
+                assertEquals(failed, current)
+                ++checks == 1
+            }
+        }
+        assertEquals(2, checks)
+        assertTrue(save.exceptionOrNull() is IllegalStateException)
+        assertEquals(failed, repository.getMapEdit(failed.id))
+        checks = 0
+        val delete = runCatching { repository.deleteMapEditIfUnchanged(failed) { ++checks == 1 } }
+        assertEquals(2, checks)
+        assertTrue(delete.exceptionOrNull() is IllegalStateException)
+        assertEquals(failed, repository.getMapEdit(failed.id))
+    }
+
     @Test fun aPublishedNodeCreatesOneLocalPlaceAndClosingDoesNotDuplicateIt() = runBlocking {
         val draft = draft(); repository.saveMapEdit(draft)
         val first = repository.beginMapEditSend(draft.id, 77, 200)!!

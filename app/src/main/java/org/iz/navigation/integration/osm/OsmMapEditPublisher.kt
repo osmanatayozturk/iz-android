@@ -24,6 +24,7 @@ internal class OsmMapEditPublisher(
         val session = account()?.takeIf { "write_api" in it.scopes }
             ?: return failure("Mekân yayımlamak için OSM harita düzenleme iznini etkinleştir.")
         val draft = store.get(id) ?: return failure("Taslak bulunamadı.")
+        if (draft.targetType != null) return failure("Düzeltmeyi güncel OSM bilgileriyle incele.")
         if (draft.status !in setOf(MapEditStatus.DRAFT, MapEditStatus.FAILED))
             return failure("Bu kayıt yeniden gönderilemez. Önce OSM sonucunu kontrol et.")
         try {
@@ -53,7 +54,7 @@ internal class OsmMapEditPublisher(
                 remoteNodeId = node.id, remoteNodeVersion = node.version, error = null)
             check(store.compareAndSet(current, published)) { "Published result could not be persisted" }
             current = published
-            closePublished(current, session)
+            store.closePublishedMapEdit(current, session, api)
             return success("Mekân OSM haritasında yayımlandı.")
         } catch (cancelled: CancellationException) {
             withContext(NonCancellable) { markInterrupted(current) }
@@ -112,26 +113,18 @@ internal class OsmMapEditPublisher(
         catch (_: Exception) { return failure("OSM sonucu şu an kontrol edilemiyor. Yeniden gönderim yapılmadı.") }
     }
 
-    /** Explicit user action for an already published node; never re-uploads the node. */
+    /** Explicit user action for an already published edit. */
     suspend fun close(id: String): OsmContributionResult {
         val value = store.get(id) ?: return failure("Kayıt bulunamadı.")
         val session = account()?.takeIf { "write_api" in it.scopes && it.user.id == value.submittedBy }
             ?: return failure("Gönderimi yapan hesabın harita düzenleme izni gerekli.")
-        if (value.status != MapEditStatus.SENT || value.remoteNodeId == null) return failure("Önce yayımlama sonucunu kontrol et.")
-        return if (closePublished(value, session)) success("OSM gönderimi tamamlandı.") else failure("Mekân yayımlanmış durumda. Gönderimin son adımı şu an tamamlanamadı.")
+        if (value.status != MapEditStatus.SENT || (value.remoteNodeId == null && value.appliedVersion == null))
+            return failure("Önce yayımlama sonucunu kontrol et.")
+        val canDispatch = if (value.targetType != null) ({ account() === session }) else null
+        return if (store.closePublishedMapEdit(value, session, api, canDispatch)) success("OSM gönderimi tamamlandı.")
+        else failure("Mekân yayımlanmış durumda. Gönderimin son adımı şu an tamamlanamadı.")
     }
 
-    private suspend fun closePublished(value: MapEditDraft, session: OsmCredentials): Boolean {
-        if (value.changesetClosed) return true
-        return try {
-            api.closeChangeset(session.token, requireNotNull(value.changesetId))
-            store.compareAndSet(value, value.copy(changesetClosed = true, error = null))
-        } catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) {
-            runCatching { store.compareAndSet(value, value.copy(error = "Mekân yayımlandı; gönderimin son adımı bekliyor.")) }
-            false
-        }
-    }
     private suspend fun markInterrupted(value: MapEditDraft) {
         if (value.status != MapEditStatus.SENT) runCatching { store.compareAndSet(value, value.copy(status = MapEditStatus.UNKNOWN, error = UNKNOWN_MESSAGE)) }
     }
@@ -140,15 +133,40 @@ internal class OsmMapEditPublisher(
     companion object { private const val UNKNOWN_MESSAGE = "Gönderimin sonucu belirsiz. Tekrar gönderme; OSM sonucunu kontrol et." }
 }
 
-class OsmMapEditController(repository: DiaryRepository, auth: OsmAuthManager, overpassEndpoint: () -> String) {
+internal suspend fun OsmMapEditStore.closePublishedMapEdit(
+    value: MapEditDraft,
+    session: OsmCredentials,
+    api: OsmMapEditGateway,
+    canDispatch: (() -> Boolean)? = null,
+): Boolean {
+    if (value.changesetClosed) return true
+    return try {
+        val changeset = requireNotNull(value.changesetId)
+        if (canDispatch == null) api.closeChangeset(session.token, changeset)
+        else api.closeChangeset(session.token, changeset, canDispatch)
+        compareAndSet(value, value.copy(changesetClosed = true, error = null))
+    } catch (cancelled: CancellationException) { throw cancelled }
+    catch (_: Exception) {
+        runCatching { compareAndSet(value, value.copy(error = "Mekân yayımlandı; gönderimin son adımı bekliyor.")) }
+        false
+    }
+}
+
+class OsmMapEditController(private val repository: DiaryRepository, auth: OsmAuthManager, overpassEndpoint: () -> String) {
     private val api = OsmMapEditClient(overpassEndpoint = overpassEndpoint)
-    private val publisher = OsmMapEditPublisher(object : OsmMapEditStore {
+    private val store = object : OsmMapEditStore {
         override suspend fun get(id: String) = repository.getMapEdit(id)
         override suspend fun begin(id: String, userId: Long, time: Long) = repository.beginMapEditSend(id, userId, time)
         override suspend fun compareAndSet(expected: MapEditDraft, updated: MapEditDraft) = repository.compareAndSetMapEdit(expected, updated)
-    }, auth::currentCredentials, api, onUnauthorized = auth::rejectExpiredSession)
+    }
+    private val publisher = OsmMapEditPublisher(store, auth::currentCredentials, api, onUnauthorized = auth::rejectExpiredSession)
+    private val correction = OsmMapCorrectionPublisher(store, auth::currentCredentials, api, onUnauthorized = auth::rejectExpiredSession)
     suspend fun nearby(draft: MapEditDraft): List<OsmDuplicateCandidate> = api.nearby(draft)
     suspend fun send(id: String, reviewedCandidates: Set<OsmRef>) = publisher.send(id, reviewedCandidates)
-    suspend fun reconcile(id: String) = publisher.reconcile(id)
+    internal suspend fun readCorrectionTarget(ref: OsmRef) = correction.readSupported(ref)
+    internal suspend fun previewCorrection(draft: MapEditDraft) = correction.preview(draft)
+    internal suspend fun sendCorrection(review: OsmCorrectionReview) = correction.send(review)
+    suspend fun reconcile(id: String) =
+        if (repository.getMapEdit(id)?.targetType != null) correction.reconcile(id) else publisher.reconcile(id)
     suspend fun close(id: String) = publisher.close(id)
 }

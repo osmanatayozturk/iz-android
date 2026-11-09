@@ -14,7 +14,7 @@ import org.junit.rules.TemporaryFolder
 class OfflineLabelledProfileTest {
     @get:Rule val temporary = TemporaryFolder()
     private val assets = File(System.getProperty("iz.offline.assets",
-        "D:/CodexWorktrees/iz-roadmap-five-services-20261102/app/src/main/assets/offline/labelled-latin-v1"))
+        "src/main/assets/offline/labelled-latin-v1"))
     private fun asset(path: String) = File(assets, path).readBytes()
     private val metadata = """{"tiles":["https://tiles.openfreemap.org/planet/fixture/{z}/{x}/{y}.pbf"],"minzoom":0,"maxzoom":0,"scheme":"xyz"}"""
     private val raw = """{"version":8,"glyphs":"https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf","sprite":"https://tiles.openfreemap.org/sprites/ofm_f384/ofm","sources":{"earth":{"type":"raster","tiles":["https://tiles.openfreemap.org/natural_earth/ne2sr/{z}/{x}/{y}.png"]},"openmaptiles":{"type":"vector","url":"https://tiles.openfreemap.org/planet"}},"layers":[{"id":"raster","type":"raster","source":"earth"},{"id":"road","type":"line","source":"openmaptiles","paint":{"line-pattern":"unknown-art"}},{"id":"road-label","type":"symbol","source":"openmaptiles","source-layer":"transportation_name","layout":{"text-field":["get","name:latin"],"text-font":["Noto Sans Regular"],"icon-image":"unknown-art"}},{"id":"place","type":"symbol","source":"openmaptiles","source-layer":"place","layout":{"text-field":["get","name:latin"]}}]}"""

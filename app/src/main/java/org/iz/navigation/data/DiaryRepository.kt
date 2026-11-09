@@ -311,17 +311,21 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
 
     suspend fun getMapEdit(id: String): MapEditDraft? = mapDao.read(id)
 
-    suspend fun saveMapEdit(draft: MapEditDraft) = db.withTransaction {
+    suspend fun saveMapEdit(draft: MapEditDraft, canSave: (MapEditDraft?) -> Boolean = { true }) = db.withTransaction {
         val current = mapDao.read(draft.id)
+        check(canSave(current)) { "OSM hesabı değişti." }
         require(current == null || current.status in setOf(MapEditStatus.DRAFT, MapEditStatus.FAILED))
+        require(current == null || (current.targetType == draft.targetType && current.targetId == draft.targetId))
         val editable = draft.editableCopy()
         validateMapEdit(editable)
         mapDao.save(editable)
+        check(canSave(current)) { "OSM hesabı değişti." }
     }
 
     suspend fun beginMapEditSend(id: String, userId: Long, time: Long): MapEditDraft? = db.withTransaction {
         require(userId > 0 && time > 0)
         val current = mapDao.read(id) ?: return@withTransaction null
+        if (current.targetType != null) return@withTransaction null
         if (current.status !in setOf(MapEditStatus.DRAFT, MapEditStatus.FAILED)) return@withTransaction null
         validateMapEditForPublish(current)
         val previous = current.submittedAt ?: 0L
@@ -337,16 +341,30 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
     /** Compare the complete attempt so delayed callbacks cannot mutate a replaced or restored draft. */
     suspend fun compareAndSetMapEdit(expected: MapEditDraft, updated: MapEditDraft): Boolean = db.withTransaction {
         if (mapDao.read(expected.id) != expected) return@withTransaction false
+        if (expected.targetType != null && expected.status in setOf(MapEditStatus.DRAFT, MapEditStatus.FAILED)) {
+            require(updated.status == MapEditStatus.SENDING && updated.stage == MapEditStage.CREATE_CHANGESET)
+            require(updated.submittedAt != null && updated.submittedAt > (expected.submittedAt ?: 0))
+            require(updated.changesetId == null && !updated.changesetClosed && updated.error == null)
+            require(updated.copy(status = expected.status, stage = expected.stage, surveyConfirmed = expected.surveyConfirmed,
+                submittedAt = expected.submittedAt, submittedBy = expected.submittedBy, changesetId = expected.changesetId,
+                changesetClosed = expected.changesetClosed, error = expected.error,
+                reviewedVersion = expected.reviewedVersion, reviewedFingerprint = expected.reviewedFingerprint) == expected)
+            validateMapEditForPublish(updated)
+            mapDao.save(updated)
+            return@withTransaction true
+        }
         require(expected.status in setOf(MapEditStatus.SENDING, MapEditStatus.UNKNOWN, MapEditStatus.SENT))
         require(updated.copy(status = expected.status, stage = expected.stage, changesetId = expected.changesetId,
             remoteNodeId = expected.remoteNodeId, remoteNodeVersion = expected.remoteNodeVersion,
-            changesetClosed = expected.changesetClosed, error = expected.error) == expected)
+            changesetClosed = expected.changesetClosed, error = expected.error,
+            appliedVersion = expected.appliedVersion) == expected)
         require(updated.status != MapEditStatus.DRAFT)
         require(expected.changesetId == null || updated.changesetId == expected.changesetId)
         require(expected.remoteNodeId == null || updated.remoteNodeId == expected.remoteNodeId)
+        require(expected.appliedVersion == null || updated.appliedVersion == expected.appliedVersion)
         validateMapEdit(updated)
         mapDao.save(updated)
-        if (expected.remoteNodeId == null && updated.remoteNodeId != null) {
+        if (expected.targetType == null && expected.remoteNodeId == null && updated.remoteNodeId != null) {
             val place = expected.placeId?.let { id -> dao.allPlaces().firstOrNull { it.id == id } }
             if (place != null) dao.save(place.copy(osmType = OsmType.NODE, osmId = updated.remoteNodeId, source = PlaceSource.OSM))
             else if (expected.placeId == null) savePlace(Place(name = updated.name.ifBlank { updated.preset.label },
@@ -362,9 +380,10 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
     }
 
     /** Compare and delete in one transaction; stale or no-longer-editable consent is a no-op. */
-    suspend fun deleteMapEditIfUnchanged(expected: MapEditDraft): Boolean = db.withTransaction {
-        if (!mapEditDeletionMatches(expected, mapDao.read(expected.id))) return@withTransaction false
+    suspend fun deleteMapEditIfUnchanged(expected: MapEditDraft, canDelete: () -> Boolean = { true }): Boolean = db.withTransaction {
+        if (!mapEditDeletionMatches(expected, mapDao.read(expected.id)) || !canDelete()) return@withTransaction false
         mapDao.delete(expected.id)
+        check(canDelete()) { "OSM hesabı değişti." }
         true
     }
 

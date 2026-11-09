@@ -1,6 +1,6 @@
 # OpenStreetMap uygulama mimarisi
 
-İz 0.8.1 çevrimiçi harita, yer arama, yakındaki nesneleri bulma ve kullanıcı onaylı OSM Notes katkıları için OpenStreetMap ekosistemini kullanır. Google Maps/Places ve yorum ya da puan gönderme akışları uygulamada yoktur. Google Play konum ve hareket servisleri ile Wear OS Data Layer bağımlılıkları devam eder.
+İz çevrimiçi harita, yer arama, yakındaki nesneleri bulma ve kullanıcı onaylı katkılar için OpenStreetMap ekosistemini kullanır. Katkı Merkezi harita notlarını, mekân düzenlemelerini ve GPS izlerini bir araya getirir.
 
 ## Servisler
 
@@ -9,7 +9,7 @@
 - Yapılandırılabilir sağlayıcı, `format=jsonv2`, `limit=10`, `addressdetails=0` ve Türkçe dil tercihi korunur. **Nereye?** aramasında her ham yanıt Türkçe dil tercihi ve tam istek URL’siyle v3 sayfa önbelleğine yazılır. Diğer aramalar v2 anahtarlarını kullanır. İkinci sayfa başarısız olursa ilk sayfa korunur. Mevcut istek hızı, yanıt boyutu, bekleme ve iptal sınırları sürer.
 - **Nereye?** sonuçlarında `name` başlık olarak kalır. Mevcut yanıttaki `display_name` ayrı bir satıra yazılır ve başta yinelenen yer adı çıkarılır. Adres satırı boş kalırsa “Adres bilgisi yok” gösterilir. Adres için ek sorgu yapılmaz. Bu sunum alanı günlük, rota veya yedek veri biçimine eklenmez.
 - Overpass küçük, görünür harita alanlarında yakındaki OSM nesnelerini bulur. Yanıt boyutu ve günlük kullanım sınırlandırılır. Servis kota yanıtı verdiğinde yeniden deneme geciktirilir.
-- OSM Notes yazma, yalnız kullanıcı metni ve konumu önizleyip açıkça onayladıktan sonra gerçekleşir. Özel günlük notları, fotoğraflar ve sağlık verileri gönderilmez.
+- Harita notu, kullanıcı metni ve konumu önizleyip onayladığında OSM’ye gönderilir. Özel günlük notları, fotoğraflar ve sağlık verileri gönderilmez. [OSM Notes](https://wiki.openstreetmap.org/wiki/Notes)
 
 Servis adresleri uygulamanın gelişmiş ayarlarından değiştirilebilir. Bir dağıtımı çok sayıda kullanıcıya açmadan önce seçilen karo, Nominatim ve Overpass sunucularının kullanım politikaları ve kapasitesi değerlendirilmelidir.
 
@@ -17,6 +17,17 @@ Servis adresleri uygulamanın gelişmiş ayarlarından değiştirilebilir. Bir d
 
 - **Yakınlık önceliği** — Telefonda **Nereye?** aramasında **Ara** düğmesi veya klavyenin **Ara** eylemiyle başlar. Hazır ve izinli konum en fazla 60 saniye eski olabilir. Hazır konum yoksa ve izin varsa yaklaşık konum için en fazla 5 saniye beklenir. Gelen sonuçlar cihazda en yakından en uzağa sıralanır. Eşit mesafede veya konum alınamadığında servis sırası korunur.
 - **Yaklaşık arama alanı** — Nominatim’e gönderilen, merkezi 0,1 dereceye yuvarlanmış `viewbox`. Alan merkezden enlemde 0,20°, boylamda 0,25° uzanır. `bounded=0` ile alan dışındaki eşleşmeler de dönebilir. [Nominatim arama belgesi](https://nominatim.org/release-docs/latest/api/Search/)
+- **Harita notu** — Bir konuma bağlı, haritacıların incelemesine açık gözlem.
+- **Mekân düzenlemesi** — OSM’ye yeni bir nokta ekleme veya mevcut mekânın yerinde doğrulanmış bilgilerini düzeltme.
+- **GPS izi** — OSM ile paylaşılan sıralı konum noktaları ve bu noktaların zaman damgaları.
+
+## Katkı Merkezi
+
+Merkez, cihazdaki taslakları, bağlı hesabın gönderimlerini ve GPS geçmişini yeniden eskiye gösterir. GPS geçmişi alınamazsa not ve mekân kayıtları erişilebilir kalır. **Yüklenenler** ayrı GPS ayrıntılarını açar.
+
+Paylaşılacak GPS izinin her ucundan en az 1 km çıkarılır. Önizleme gönderilecek GPX’ten üretilir. Toplu onay bağlı hesaba, seçili izlere ve görünürlüğe bağlıdır. Varsayılan **Tanımlanabilir** seçeneği izi hesapla ilişkilendirir ve herkese açık iz listesinde gösterir. **Takip Edilebilir** seçeneğinde bu bağlantı ve liste kaydı yoktur. Her iki seçenekte de noktalar ve zaman damgaları OSM API’si üzerinden erişilebilir. [OSM GPS görünürlük kuralları](https://wiki.openstreetmap.org/wiki/Visibility_of_GPS_traces)
+
+Yerinde doğrulanan bir noktanın veya tek kapalı çizgiyle tanımlanmış alanın `name`, `addr:street` ve `addr:housenumber` alanları güncellenebilir. Boş alan mevcut değeri korur. Koordinatlar, sıralı düğüm referansları ve diğer etiketler korunur. Sürüm değişikliği veya HTTP 409, güncel değerlerle yeniden önizleme gerektirir. Belirsiz gönderim, aynı değişiklik kümesindeki nesne ve düzenleme kanıtından çözülür. [OSM düzenleme API’si](https://wiki.openstreetmap.org/wiki/API_v0.6) · [Yerinde doğrulama](https://wiki.openstreetmap.org/wiki/Good_practice)
 
 ## Kimlik doğrulama ve veri güvenliği
 
@@ -26,7 +37,7 @@ OAuth oturumu Android Keystore ile korunan, yedek dışı yerel depoda saklanır
 
 ## Sınırlar ve kaynak gösterimi
 
-Uygulama doğrudan OSM harita geometrisini düzenlemez; OSM Notes yayımlar. Harita ve yol verisi © OpenStreetMap katkıcılarıdır. Uygulama ve türev dağıtımlar [OSM telif ve lisans bildirimini](https://www.openstreetmap.org/copyright) görünür tutmalıdır.
+Harita ve yol verisi © OpenStreetMap katkıcılarıdır. Uygulama ve türev dağıtımlar telif ve lisans bildirimini görünür tutmalıdır. [OSM telif ve lisans bildirimi](https://www.openstreetmap.org/copyright)
 
 Davranışsal kontroller yerel sahte HTTP sunucuları ve Android testleriyle yapılabilir. Otomatik testler gerçek hesaba not veya özel mesaj göndermemelidir; gerçek hesapla yayınlama ayrı, açık kullanıcı işlemi olmalıdır.
 
