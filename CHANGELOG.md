@@ -12,11 +12,11 @@ Bilgisayarda 1.410 birim testi geçti, Debug lint hata vermedi ve Debug uygulama
 
 ### OSM toplu iz ve Ev/İş — telefon kaynak adayı
 
-OpenStreetMap’e göndermek istediğiniz tamamlanmış yolculuk izlerini birlikte seçip gönderimden önce inceleyebilirsiniz. Gönderim durumu ve iz geçmişi bağlı OSM hesabına göre gösterilir.
+OpenStreetMap’e göndermek istediğiniz tamamlanmış yolculuk izlerini birlikte seçip gönderimden önce inceleyebilirsiniz. Gönderim durumu bağlı OSM hesabına göre gösterilir. Hesabın iz geçmişi ayrı **Yüklenenler** sayfasında açılır.
 
-Telefonun ana haritasındaki **Ev** ve **İş** kısayollarına kayıtlı bir yer atayabilir veya yeni bir yer ekleyebilirsiniz. Atanmış kısayol, **Nereye?** ekranını hedef seçili olarak açar.
+Ana harita boşta olduğunda logo ve **İz** başlığının altında **Nereye?**, ardından **Ev** ve **İş** kısayolları görünür. Kısayollara kayıtlı bir yer atayabilir veya yeni bir yer ekleyebilirsiniz. Atanmış kısayol, **Nereye?** ekranını hedef seçili olarak açar.
 
-`a1d1ad5d` adayında bilgisayarda 1.426 birim testi geçti, Debug lint hata vermedi ve Debug uygulama ile AndroidTest APK’ları derlendi. Fiziksel telefon doğrulaması bekliyor.
+`a1d1ad5d` adayında bilgisayarda 1.426 birim testi geçti, Debug lint hata vermedi ve Debug uygulama ile AndroidTest APK’ları derlendi. Fiziksel Samsung telefonda ayrı çevrimdışı QA paketiyle Ev/İş kapsamındaki 7 kontrolün tamamı geçti. Canlı rota ve OSM gönderimi kapsam dışıydı.
 
 ## Telefon 0.12.0 numarasıyla tutulan tarihsel aday kayıtları
 
