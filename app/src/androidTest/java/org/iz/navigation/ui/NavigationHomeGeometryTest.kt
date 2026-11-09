@@ -85,9 +85,27 @@ class NavigationHomeGeometryTest {
         val opened = mutableListOf<DestinationShortcutKind>()
         uxHost.setContent { CompositionLocalProvider(LocalDensity provides Density(1f, fontScale)) {
             IzTheme { Box(Modifier.requiredSize(640.dp, 320.dp)) {
-                NavigationHomeContent(PhoneDirectionsState(), NavigationState(), emptyList(), emptyList(), false, "Hava",
-                    {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, onDashboard = {}, shortcuts = shortcuts.value,
-                    onShortcut = { opened += it }, planner = {})
+                NavigationHomeContent(
+                    ui = PhoneDirectionsState(),
+                    nav = NavigationState(),
+                    points = emptyList(),
+                    members = emptyList(),
+                    showPlanner = false,
+                    weatherLabel = "Hava",
+                    onSearch = {},
+                    onRecord = {},
+                    onGroup = {},
+                    onMenu = {},
+                    onWeather = {},
+                    onMute = {},
+                    onManageSession = {},
+                    onLocate = {},
+                    onPin = {},
+                    shortcuts = shortcuts.value,
+                    onShortcut = { opened += it },
+                    onDashboard = {},
+                    planner = {},
+                )
             } }
         } }
 
