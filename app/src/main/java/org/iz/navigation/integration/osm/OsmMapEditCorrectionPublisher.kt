@@ -5,6 +5,7 @@ import org.iz.navigation.data.MapEditStage
 import org.iz.navigation.data.MapEditStatus
 import org.iz.navigation.data.OsmRef
 import org.iz.navigation.data.validateMapEditForPublish
+import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
@@ -57,22 +58,21 @@ internal class OsmMapCorrectionPublisher(
             submittedBy = session.user.id,
             reviewedVersion = fresh.version,
             reviewedFingerprint = corrected.fingerprint(),
+            localAttemptId = UUID.randomUUID().toString(),
         )
         if (!store.compareAndSet(draft, current)) return failure(REVIEW_AGAIN)
         val canDispatch = { account() === session }
         try {
             if (!canDispatch()) return reject(current, ACCOUNT_CHANGED)
             val changeset = api.createChangeset(session.token, current, canDispatch)
-            val prepared = current.copy(changesetId = changeset, stage = MapEditStage.UPDATE_ELEMENT)
-            check(store.compareAndSet(current, prepared))
-            current = prepared
+            current = checkNotNull(store.recordLocalChangeset(current, changeset))
             if (!canDispatch()) return reject(current, ACCOUNT_CHANGED)
             val version = api.updateElement(session.token, corrected, changeset, canDispatch)
             require(version == fresh.version + 1)
             val applied = current.copy(status = MapEditStatus.SENT, stage = MapEditStage.CLOSE_CHANGESET, appliedVersion = version)
             check(store.compareAndSet(current, applied))
             current = applied
-            if (canDispatch()) store.closePublishedMapEdit(current, session, api, canDispatch)
+            if (canDispatch()) store.closePublishedMapEdit(current, session, api, account)
             return OsmContributionResult(true, "Mekân düzeltmesi OSM'de yayımlandı.")
         } catch (cancelled: CancellationException) {
             withContext(NonCancellable) {
@@ -127,6 +127,7 @@ internal class OsmMapCorrectionPublisher(
         val changeset = draft.changesetId ?: return failure(UNKNOWN)
         val expectedVersion = draft.reviewedVersion?.plus(1) ?: return failure(UNKNOWN)
         if (draft.status != MapEditStatus.SENT || draft.appliedVersion != expectedVersion) return failure(UNKNOWN)
+        if (!draft.localChangesetCreated) return failure(LOCAL_CLOSE_REQUIRED)
         try {
             val info = readProof(draft, changeset, expectedVersion) ?: return failure(UNKNOWN)
             if (store.get(draft.id) != draft) return failure(ROW_CHANGED)
@@ -134,7 +135,7 @@ internal class OsmMapCorrectionPublisher(
             if (info.open) {
                 if (draft.changesetClosed) return failure(UNKNOWN)
                 api.closeChangeset(session.token, changeset) {
-                    account() === session && store.isCurrentForDispatch(draft) && account() === session
+                    store.canDispatchMapEditClose(draft, session, account)
                 }
             }
             if (account() !== session) return failure(ACCOUNT_CHANGED)

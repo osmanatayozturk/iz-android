@@ -57,14 +57,15 @@ class SharedDataV5Test {
         repository.saveMapEdit(draft)
         assertNull(repository.beginMapEditSend(draft.id, 77L, 200L))
         val claimed = draft.copy(status = MapEditStatus.SENDING, stage = MapEditStage.CREATE_CHANGESET,
-            submittedAt = 200L, submittedBy = 77L, reviewedVersion = 5L, reviewedFingerprint = "a".repeat(64))
+            submittedAt = 200L, submittedBy = 77L, reviewedVersion = 5L, reviewedFingerprint = "a".repeat(64),
+            localAttemptId = "fixture-correction-attempt")
         assertTrue(repository.compareAndSetMapEdit(draft, claimed))
         assertFalse(repository.compareAndSetMapEdit(draft, claimed))
-        val uploading = claimed.copy(changesetId = 17L, stage = MapEditStage.UPDATE_ELEMENT)
-        assertTrue(repository.compareAndSetMapEdit(claimed, uploading))
+        val uploading = requireNotNull(repository.recordLocalMapEditChangeset(claimed, 17L))
+        assertTrue(uploading.localChangesetCreated)
         repository.restore(repository.snapshot())
         val unknown = requireNotNull(repository.getMapEdit(draft.id))
-        assertEquals(uploading.copy(status = MapEditStatus.UNKNOWN), unknown)
+        assertEquals(uploading.copy(status = MapEditStatus.UNKNOWN, localAttemptId = null, localChangesetCreated = false), unknown)
         val sent = unknown.copy(status = MapEditStatus.SENT, stage = MapEditStage.CLOSE_CHANGESET, appliedVersion = 6L)
         assertTrue(repository.compareAndSetMapEdit(unknown, sent))
         assertTrue(repository.snapshot().places.isEmpty())
@@ -74,7 +75,8 @@ class SharedDataV5Test {
         val draft = draft().copy(name = "Düzeltilen ad", targetType = OsmType.NODE, targetId = 42L)
         repository.saveMapEdit(draft)
         val claimed = draft.copy(status = MapEditStatus.SENDING, stage = MapEditStage.CREATE_CHANGESET,
-            submittedAt = 200L, submittedBy = 77L, reviewedVersion = 5L, reviewedFingerprint = "b".repeat(64))
+            submittedAt = 200L, submittedBy = 77L, reviewedVersion = 5L, reviewedFingerprint = "b".repeat(64),
+            localAttemptId = "fixture-account-attempt")
         assertTrue(repository.compareAndSetMapEdit(draft, claimed))
         val failed = claimed.copy(status = MapEditStatus.FAILED)
         assertTrue(repository.compareAndSetMapEdit(claimed, failed))
@@ -93,6 +95,34 @@ class SharedDataV5Test {
         assertEquals(2, checks)
         assertTrue(delete.exceptionOrNull() is IllegalStateException)
         assertEquals(failed, repository.getMapEdit(failed.id))
+    }
+
+    @Test fun restoreSameIdClearsLocalReceiptAndRejectsLateCreateResponse() = runBlocking {
+        val draft = draft()
+        repository.saveMapEdit(draft)
+        val claim = requireNotNull(repository.beginMapEditSend(draft.id, 77, 200))
+        val local = requireNotNull(repository.recordLocalMapEditChangeset(claim, 7))
+        assertTrue(local.localChangesetCreated)
+        val published = uploaded(local)
+        assertTrue(repository.compareAndSetMapEdit(local, published))
+        repository.restore(repository.snapshot())
+        val restored = requireNotNull(repository.getMapEdit(draft.id))
+        assertEquals(published.copy(localAttemptId = null, localChangesetCreated = false), restored)
+        assertFalse(repository.isMapEditCurrentForDispatch(published))
+        assertNull(repository.recordLocalMapEditChangeset(claim, 7))
+    }
+
+    @Test fun sameIdAndTimestampAfterRestoreCannotClaimThePriorCreateResponse() = runBlocking {
+        val draft = draft()
+        repository.saveMapEdit(draft)
+        val first = requireNotNull(repository.beginMapEditSend(draft.id, 77, 200))
+        val portable = first.copy(status = MapEditStatus.FAILED, submittedAt = 199L, localAttemptId = null)
+        repository.restore(DiarySnapshot(mapEdits = listOf(portable)))
+        val second = requireNotNull(repository.beginMapEditSend(draft.id, 77, 200))
+        assertNotEquals(first.localAttemptId, second.localAttemptId)
+        assertEquals(first.copy(localAttemptId = second.localAttemptId), second)
+        assertNull(repository.recordLocalMapEditChangeset(first, 7))
+        assertTrue(requireNotNull(repository.recordLocalMapEditChangeset(second, 8)).localChangesetCreated)
     }
 
     @Test fun aPublishedNodeCreatesOneLocalPlaceAndClosingDoesNotDuplicateIt() = runBlocking {

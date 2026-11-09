@@ -1,5 +1,6 @@
 package org.iz.navigation.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -47,6 +48,9 @@ data class MapEditDraft(
     val reviewedVersion: Long? = null,
     val reviewedFingerprint: String? = null,
     val appliedVersion: Long? = null,
+    // Installation-local attempt identity and receipt. Neither is portable backup data.
+    val localAttemptId: String? = null,
+    @ColumnInfo(defaultValue = "0") val localChangesetCreated: Boolean = false,
 ) {
     fun publicTags(): Map<String, String> = linkedMapOf<String, String>().apply {
         if (targetType == null) put(preset.key, preset.value)
@@ -60,8 +64,16 @@ data class MapEditDraft(
         require(status in setOf(MapEditStatus.DRAFT, MapEditStatus.FAILED))
         return copy(status = MapEditStatus.DRAFT, stage = MapEditStage.NONE, submittedAt = null, submittedBy = null,
             changesetId = null, remoteNodeId = null, remoteNodeVersion = null, changesetClosed = false, error = null,
-            reviewedVersion = null, reviewedFingerprint = null, appliedVersion = null)
+            reviewedVersion = null, reviewedFingerprint = null, appliedVersion = null,
+            localAttemptId = null, localChangesetCreated = false)
     }
+}
+
+internal fun MapEditDraft.withLocalChangeset(changeset: Long): MapEditDraft {
+    require(status == MapEditStatus.SENDING && stage == MapEditStage.CREATE_CHANGESET)
+    require(changesetId == null && localAttemptId != null && !localChangesetCreated && changeset > 0)
+    return copy(changesetId = changeset, localChangesetCreated = true,
+        stage = if (targetType == null) MapEditStage.UPLOAD_NODE else MapEditStage.UPDATE_ELEMENT)
 }
 
 fun validateMapEdit(value: MapEditDraft) {
@@ -73,13 +85,14 @@ fun validateMapEdit(value: MapEditDraft) {
     }
     require(value.observedAt >= 0 && (value.error == null || value.error.length <= 4000))
     require(value.changesetId == null || value.changesetId > 0)
+    require(!value.localChangesetCreated || (value.localAttemptId != null && value.changesetId != null))
     require((value.remoteNodeId == null && value.remoteNodeVersion == null) ||
         (value.remoteNodeId != null && value.remoteNodeId > 0 && value.remoteNodeVersion != null && value.remoteNodeVersion > 0 && value.changesetId != null))
     require(!value.changesetClosed || value.changesetId != null)
     validateMapEditTarget(value)
     if (value.status == MapEditStatus.DRAFT) {
         require(value.stage == MapEditStage.NONE && value.submittedAt == null && value.submittedBy == null &&
-            value.changesetId == null && value.remoteNodeId == null && !value.changesetClosed)
+            value.changesetId == null && value.remoteNodeId == null && !value.changesetClosed && value.localAttemptId == null)
     } else {
         require(value.stage != MapEditStage.NONE && value.submittedAt != null && value.submittedAt > 0 && value.submittedBy != null && value.submittedBy > 0)
         require(value.surveyConfirmed)

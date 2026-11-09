@@ -40,11 +40,7 @@ internal interface OsmMapEditGateway {
         return createChangeset(token, draft)
     }
     suspend fun uploadNode(token: String, draft: MapEditDraft, changesetId: Long): OsmUploadedNode
-    suspend fun closeChangeset(token: String, id: Long)
-    suspend fun closeChangeset(token: String, id: Long, canDispatch: () -> Boolean) {
-        if (!canDispatch()) throw OsmMapEditNotDispatched()
-        closeChangeset(token, id)
-    }
+    suspend fun closeChangeset(token: String, id: Long, canDispatch: () -> Boolean)
     suspend fun downloadChangeset(id: Long): List<OsmCreatedNode>
     suspend fun downloadSingleCreatedNode(id: Long): OsmCreatedNode?
     suspend fun readChangeset(id: Long): OsmChangesetInfo
@@ -128,12 +124,7 @@ internal class OsmMapEditClient(
         OsmUploadedNode(nodes.single().getAttribute("new_id").toLong(), nodes.single().getAttribute("new_version").toLong())
             .also { require(it.id > 0 && it.version == 1L) }
     }
-    override suspend fun closeChangeset(token: String, id: Long) = closeMapChangeset(token, id, null)
-
     override suspend fun closeChangeset(token: String, id: Long, canDispatch: () -> Boolean) =
-        closeMapChangeset(token, id, canDispatch)
-
-    private suspend fun closeMapChangeset(token: String, id: Long, canDispatch: (() -> Boolean)?) =
         withContext(Dispatchers.IO) {
             require(id > 0)
             execute(api("changeset/$id/close", token).put(body("")).build(), canDispatch)

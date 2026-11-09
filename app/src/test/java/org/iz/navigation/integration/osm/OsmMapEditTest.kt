@@ -2,6 +2,7 @@ package org.iz.navigation.integration.osm
 
 import org.iz.navigation.data.*
 import java.io.IOException
+import java.util.UUID
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
@@ -76,6 +77,27 @@ class OsmMapEditTest {
         assertEquals(1, api.uploads)
     }
 
+    @Test fun retryGetsANewLocalAttemptAndAutomaticCloseRejectsARestoredReplacement() = runBlocking {
+        val store = Memory(draft())
+        val api = Gateway().apply { uploadFailure = OsmApiException(409) }
+        val publisher = OsmMapEditPublisher(store, { session }, api, { time })
+        assertFalse(publisher.send(store.value.id).success)
+        val first = store.value
+        assertEquals(MapEditStatus.FAILED, first.status)
+        assertTrue(first.localChangesetCreated)
+        assertFalse(first.editableCopy().localChangesetCreated)
+        api.uploadFailure = null
+        api.onClose = {
+            assertTrue(store.value.localChangesetCreated)
+            assertNotEquals(first.localAttemptId, store.value.localAttemptId)
+            store.value = store.value.copy(localAttemptId = null, localChangesetCreated = false)
+        }
+        assertTrue(publisher.send(first.id).success)
+        assertEquals(0, api.closes)
+        assertFalse(store.value.changesetClosed)
+        assertFalse(store.value.localChangesetCreated)
+    }
+
     @Test fun reconciliationRejectsDifferentAccountAndAmbiguousNodes() = runBlocking {
         val store = Memory(draft().copy(status = MapEditStatus.UNKNOWN, stage = MapEditStage.UPLOAD_NODE,
             submittedAt = time, submittedBy = 41, changesetId = 7))
@@ -104,8 +126,14 @@ class OsmMapEditTest {
         override suspend fun begin(id: String, userId: Long, time: Long): MapEditDraft? {
             if (value.id != id || value.status !in setOf(MapEditStatus.DRAFT, MapEditStatus.FAILED)) return null
             value = value.copy(status = MapEditStatus.SENDING, stage = MapEditStage.CREATE_CHANGESET, submittedBy = userId,
-                submittedAt = time, changesetId = null, remoteNodeId = null, remoteNodeVersion = null, changesetClosed = false)
+                submittedAt = maxOf(time, (value.submittedAt ?: 0) + 1), changesetId = null, remoteNodeId = null,
+                remoteNodeVersion = null, changesetClosed = false, error = null,
+                localAttemptId = UUID.randomUUID().toString(), localChangesetCreated = false)
             return value
+        }
+        override suspend fun recordLocalChangeset(expected: MapEditDraft, changeset: Long): MapEditDraft? {
+            if (value != expected) return null
+            return expected.withLocalChangeset(changeset).also { value = it }
         }
         override suspend fun compareAndSet(expected: MapEditDraft, updated: MapEditDraft): Boolean {
             if (value != expected) return false
@@ -114,7 +142,8 @@ class OsmMapEditTest {
     }
 
     private class Gateway : OsmMapEditGateway {
-        var creates = 0; var uploads = 0
+        var creates = 0; var uploads = 0; var closes = 0
+        var onClose: () -> Unit = {}
         var uploadFailure: Exception? = null; var closeFailure: Exception? = null
         var open = false
         var nodes = emptyList<OsmCreatedNode>()
@@ -124,7 +153,12 @@ class OsmMapEditTest {
         override suspend fun uploadNode(token: String, draft: MapEditDraft, changesetId: Long): OsmUploadedNode {
             uploads++; uploadFailure?.let { throw it }; return OsmUploadedNode(9, 1)
         }
-        override suspend fun closeChangeset(token: String, id: Long) { closeFailure?.let { throw it } }
+        override suspend fun closeChangeset(token: String, id: Long, canDispatch: () -> Boolean) {
+            onClose()
+            if (!canDispatch()) throw OsmMapEditNotDispatched()
+            closes++
+            closeFailure?.let { throw it }
+        }
         override suspend fun downloadChangeset(id: Long) = nodes
         override suspend fun downloadSingleCreatedNode(id: Long) = nodes.singleOrNull()
         override suspend fun readChangeset(id: Long) = OsmChangesetInfo(id, 41, open)

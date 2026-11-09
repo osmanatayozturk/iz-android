@@ -220,7 +220,7 @@ fun MapEditPage(
                             draft.correctionRef()?.let { ref -> TextButton(onClick = {
                                 MediaShare.openUrl(context, "https://www.openstreetmap.org/${ref.type.apiName()}/${ref.id}")
                             }, enabled = !busy) { Text("OSM kaydını aç") } }
-                            if (draft.status == MapEditStatus.SENT && !draft.changesetClosed) TextButton(onClick = {
+                            if (draft.status == MapEditStatus.SENT && draft.localChangesetCreated && !draft.changesetClosed) TextButton(onClick = {
                                 action { controller.close(draft.id).message }
                             }, enabled = !busy) { Text("Gönderimi kapat") }
                             if (draft.status in setOf(MapEditStatus.DRAFT, MapEditStatus.FAILED)) TextButton(onClick = {

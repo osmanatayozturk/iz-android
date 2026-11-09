@@ -336,10 +336,20 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
         require(previous < Long.MAX_VALUE)
         val sending = current.copy(status = MapEditStatus.SENDING, stage = MapEditStage.CREATE_CHANGESET,
             submittedAt = maxOf(time, previous + 1), submittedBy = userId, changesetId = null,
-            remoteNodeId = null, remoteNodeVersion = null, changesetClosed = false, error = null)
+            remoteNodeId = null, remoteNodeVersion = null, changesetClosed = false, error = null,
+            localAttemptId = java.util.UUID.randomUUID().toString(), localChangesetCreated = false)
         validateMapEdit(sending)
         mapDao.save(sending)
         sending
+    }
+
+    /** Persist the create response and its local authorization in one exact-attempt transaction. */
+    internal suspend fun recordLocalMapEditChangeset(expected: MapEditDraft, changeset: Long): MapEditDraft? = db.withTransaction {
+        if (mapDao.read(expected.id) != expected) return@withTransaction null
+        expected.withLocalChangeset(changeset).also {
+            validateMapEdit(it)
+            mapDao.save(it)
+        }
     }
 
     /** Compare the complete attempt so delayed callbacks cannot mutate a replaced or restored draft. */
@@ -348,11 +358,13 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
         if (expected.targetType != null && expected.status in setOf(MapEditStatus.DRAFT, MapEditStatus.FAILED)) {
             require(updated.status == MapEditStatus.SENDING && updated.stage == MapEditStage.CREATE_CHANGESET)
             require(updated.submittedAt != null && updated.submittedAt > (expected.submittedAt ?: 0))
-            require(updated.changesetId == null && !updated.changesetClosed && updated.error == null)
+            require(updated.changesetId == null && !updated.changesetClosed && updated.error == null &&
+                updated.localAttemptId != null && updated.localAttemptId != expected.localAttemptId && !updated.localChangesetCreated)
             require(updated.copy(status = expected.status, stage = expected.stage, surveyConfirmed = expected.surveyConfirmed,
                 submittedAt = expected.submittedAt, submittedBy = expected.submittedBy, changesetId = expected.changesetId,
                 changesetClosed = expected.changesetClosed, error = expected.error,
-                reviewedVersion = expected.reviewedVersion, reviewedFingerprint = expected.reviewedFingerprint) == expected)
+                reviewedVersion = expected.reviewedVersion, reviewedFingerprint = expected.reviewedFingerprint,
+                localAttemptId = expected.localAttemptId, localChangesetCreated = expected.localChangesetCreated) == expected)
             validateMapEditForPublish(updated)
             mapDao.save(updated)
             return@withTransaction true
@@ -515,7 +527,10 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
             dao.saveHealthSamples(restoredHealth)
             watchDao.restoreSessions(restoredWatchSessions)
             watchDao.restoreSamples(restoredWatchSamples)
-            snapshot.mapEdits.forEach { mapDao.save(if (it.status == MapEditStatus.SENDING) it.copy(status = MapEditStatus.UNKNOWN) else it) }
+            snapshot.mapEdits.forEach {
+                mapDao.save(it.copy(status = if (it.status == MapEditStatus.SENDING) MapEditStatus.UNKNOWN else it.status,
+                    localAttemptId = null, localChangesetCreated = false))
+            }
             snapshot.savedPlans.forEach { libraryDao.save(SavedRoutePlanEntity.from(TravelLibraryRules.normalizePlan(it))) }
             snapshot.importedTracks.forEach { libraryDao.storeTrack(TravelLibraryRules.normalizeTrack(it)) }
             snapshot.collections.forEach { libraryDao.save(JourneyCollectionEntity.from(it)) }

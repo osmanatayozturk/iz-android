@@ -185,6 +185,7 @@ internal object BackupJson {
                 "deviceType" to value.deviceType, "deviceManufacturer" to value.deviceManufacturer, "deviceModel" to value.deviceModel,
                 "metric" to value.metric.name, "startAt" to value.startAt, "endAt" to value.endAt, "value" to value.value)
 
+    // Never serialize installation-local map edit attempts or close receipts.
     internal fun recordMapEdits(value: MapEditDraft): JSONObject = json("id" to value.id, "placeId" to value.placeId,
             "latitude" to value.latitude, "longitude" to value.longitude, "preset" to value.preset.name,
             "name" to value.name, "street" to value.street, "houseNumber" to value.houseNumber,
@@ -304,7 +305,8 @@ internal object BackupJson {
                     changesetId = it.strictNullLong("changesetId"), remoteNodeId = it.strictNullLong("remoteNodeId"),
                     remoteNodeVersion = it.strictNullLong("remoteNodeVersion"), changesetClosed = it.strictBoolean("changesetClosed"),
                     error = it.nullString("error"), targetType = targetType, targetId = targetId,
-                    reviewedVersion = reviewedVersion, reviewedFingerprint = reviewedFingerprint, appliedVersion = appliedVersion)
+                    reviewedVersion = reviewedVersion, reviewedFingerprint = reviewedFingerprint, appliedVersion = appliedVersion,
+                    localAttemptId = null, localChangesetCreated = false)
             },
             watchHealthSessions = if (version < 5) emptyList() else records("watchHealthSessions") {
                 WatchHealthSession(it.strictString("id"), it.strictString("journeyId"), it.strictString("watchId"),

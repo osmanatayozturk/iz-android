@@ -118,6 +118,8 @@ internal abstract class DiaryDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE map_edit_drafts ADD COLUMN reviewedVersion INTEGER")
                 db.execSQL("ALTER TABLE map_edit_drafts ADD COLUMN reviewedFingerprint TEXT")
                 db.execSQL("ALTER TABLE map_edit_drafts ADD COLUMN appliedVersion INTEGER")
+                db.execSQL("ALTER TABLE map_edit_drafts ADD COLUMN localAttemptId TEXT")
+                db.execSQL("ALTER TABLE map_edit_drafts ADD COLUMN localChangesetCreated INTEGER NOT NULL DEFAULT 0")
             }
         }
         val MIGRATION_7_8 = object : Migration(7, 8) {

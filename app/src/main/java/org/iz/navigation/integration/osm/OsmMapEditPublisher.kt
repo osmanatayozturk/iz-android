@@ -11,6 +11,7 @@ internal interface OsmMapEditStore {
     suspend fun get(id: String): MapEditDraft?
     fun isCurrentForDispatch(expected: MapEditDraft): Boolean
     suspend fun begin(id: String, userId: Long, time: Long): MapEditDraft?
+    suspend fun recordLocalChangeset(expected: MapEditDraft, changeset: Long): MapEditDraft?
     suspend fun compareAndSet(expected: MapEditDraft, updated: MapEditDraft): Boolean
 }
 
@@ -41,13 +42,12 @@ internal class OsmMapEditPublisher(
             // The claim must be the same form whose duplicate list was reviewed before the suspending query.
             check(current.copy(status = draft.status, stage = draft.stage, submittedAt = draft.submittedAt,
                 submittedBy = draft.submittedBy, changesetId = draft.changesetId, remoteNodeId = draft.remoteNodeId,
-                remoteNodeVersion = draft.remoteNodeVersion, changesetClosed = draft.changesetClosed, error = draft.error) == draft) {
+                remoteNodeVersion = draft.remoteNodeVersion, changesetClosed = draft.changesetClosed, error = draft.error,
+                localAttemptId = draft.localAttemptId, localChangesetCreated = draft.localChangesetCreated) == draft) {
                 "Draft changed during duplicate check"
             }
             val changesetId = api.createChangeset(session.token, current)
-            val prepared = current.copy(changesetId = changesetId, stage = MapEditStage.UPLOAD_NODE)
-            check(store.compareAndSet(current, prepared)) { "Changeset could not be persisted" }
-            current = prepared
+            current = checkNotNull(store.recordLocalChangeset(current, changesetId)) { "Changeset could not be persisted" }
             // A disconnect/account change after creation must not publish with stale authorization.
             check(account()?.token == session.token) { "OSM account changed" }
             val node = api.uploadNode(session.token, current, changesetId)
@@ -56,7 +56,7 @@ internal class OsmMapEditPublisher(
                 remoteNodeId = node.id, remoteNodeVersion = node.version, error = null)
             check(store.compareAndSet(current, published)) { "Published result could not be persisted" }
             current = published
-            store.closePublishedMapEdit(current, session, api)
+            store.closePublishedMapEdit(current, session, api, account)
             return success("Mekân OSM haritasında yayımlandı.")
         } catch (cancelled: CancellationException) {
             withContext(NonCancellable) { markInterrupted(current) }
@@ -122,6 +122,7 @@ internal class OsmMapEditPublisher(
             ?: return failure("Gönderimi yapan hesabın harita düzenleme izni gerekli.")
         if (value.status != MapEditStatus.SENT || value.remoteNodeId == null || value.remoteNodeVersion != 1L)
             return failure("Önce yayımlama sonucunu kontrol et.")
+        if (!value.localChangesetCreated) return failure(LOCAL_CLOSE_REQUIRED)
         val changeset = value.changesetId ?: return failure(CLOSE_UNVERIFIED)
         try {
             val info = api.readChangeset(changeset)
@@ -134,7 +135,7 @@ internal class OsmMapEditPublisher(
             if (info.open) {
                 if (value.changesetClosed) return failure(CLOSE_UNVERIFIED)
                 api.closeChangeset(session.token, changeset) {
-                    account() === session && store.isCurrentForDispatch(value) && account() === session
+                    store.canDispatchMapEditClose(value, session, account)
                 }
             }
             if (account() !== session || !store.compareAndSet(value, value.copy(changesetClosed = true, error = null)))
@@ -171,19 +172,27 @@ private fun osmStoredCoordinate(value: Double): Double {
     return (if (scaled < 0) -units else units) / 10_000_000.0
 }
 
+internal const val LOCAL_CLOSE_REQUIRED = "Bu kurulumda oluşturulan OSM gönderimleri buradan kapatılabilir."
+
+internal fun OsmMapEditStore.canDispatchMapEditClose(
+    value: MapEditDraft, session: OsmCredentials, account: () -> OsmCredentials?,
+): Boolean = value.localChangesetCreated && account() === session &&
+    isCurrentForDispatch(value) && account() === session
+
 internal suspend fun OsmMapEditStore.closePublishedMapEdit(
     value: MapEditDraft,
     session: OsmCredentials,
     api: OsmMapEditGateway,
-    canDispatch: (() -> Boolean)? = null,
+    account: () -> OsmCredentials?,
 ): Boolean {
+    if (!value.localChangesetCreated || get(value.id) != value || account() !== session) return false
     if (value.changesetClosed) return true
     return try {
         val changeset = requireNotNull(value.changesetId)
-        if (canDispatch == null) api.closeChangeset(session.token, changeset)
-        else api.closeChangeset(session.token, changeset, canDispatch)
-        compareAndSet(value, value.copy(changesetClosed = true, error = null))
+        api.closeChangeset(session.token, changeset) { canDispatchMapEditClose(value, session, account) }
+        account() === session && compareAndSet(value, value.copy(changesetClosed = true, error = null))
     } catch (cancelled: CancellationException) { throw cancelled }
+    catch (_: OsmMapEditNotDispatched) { false }
     catch (_: Exception) {
         runCatching { compareAndSet(value, value.copy(error = "Mekân yayımlandı; gönderimin son adımı bekliyor.")) }
         false
@@ -201,6 +210,8 @@ class OsmMapEditController internal constructor(
             override suspend fun get(id: String) = repository.getMapEdit(id)
             override fun isCurrentForDispatch(expected: MapEditDraft) = repository.isMapEditCurrentForDispatch(expected)
             override suspend fun begin(id: String, userId: Long, time: Long) = repository.beginMapEditSend(id, userId, time)
+            override suspend fun recordLocalChangeset(expected: MapEditDraft, changeset: Long) =
+                repository.recordLocalMapEditChangeset(expected, changeset)
             override suspend fun compareAndSet(expected: MapEditDraft, updated: MapEditDraft) = repository.compareAndSetMapEdit(expected, updated)
         },
         auth::currentCredentials,
