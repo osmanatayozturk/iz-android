@@ -24,6 +24,16 @@ Konum kullanılabiliyorsa **Nereye?** araması OpenStreetMap servisine merkezi y
 
 Özellik commit’i `22678f2d` üzerinde 1.438 birim testi geçti, Debug lint hata vermedi, Debug uygulama ve AndroidTest APK’ları derlendi. Son aday `aeb44d5d` ile fiziksel Samsung telefonda iki sentetik arama senaryosu geçti.
 
+### OpenStreetMap Katkı Merkezi — telefon kaynak adayı
+
+**Katkı Merkezi** cihazdaki taslakları, bağlı OSM hesabının gönderimlerini ve GPS iz geçmişini bir araya getirir. Ayrıntılı iz geçmişi **Yüklenenler** sayfasında açılır.
+
+Paylaşılacak GPS izi her uçta sabit 1 km eşiğiyle kırpılır. Önizleme gönderilecek GPX’i gösterir. Gönderim için **Tanımlanabilir** veya **Takip Edilebilir** görünürlüğü seçilir. Her iki seçenekte de iz noktaları ve zaman damgaları OSM üzerinden erişilebilir.
+
+Yerinde doğrulanan nokta ve tek kapalı çizgiyle tanımlanan alanlarda ad, sokak ve kapı numarası düzeltilebilir. Geometri ve diğer etiketler korunur. Düzeltme kayıtları için yerel Room şeması ve ZIP yedek biçimi v9’a geçti.
+
+Bilgisayarda 1.458 birim testi geçti, Debug lint hata vermedi ve Debug uygulama ile AndroidTest APK’ları derlendi. `485b5619` adayına bağlı ayrı QA paketiyle fiziksel Samsung telefonda 10/10 sentetik kontrol geçti. Canlı OSM gönderimi test kapsamı dışındaydı.
+
 ## Telefon 0.12.0 numarasıyla tutulan tarihsel aday kayıtları
 
 Bu bölüm, 0.12.0 yayımlanmadan önceki aday doğrulama anlık görüntüsünü ve yayımlanmış 0.12.0’dan sonra 6–7 Kasım’da aynı 0.12.0 numarasıyla yapılan kamera, Molalı rota ve OSM GPS izi paylaşımı kaynak güncellemelerini birlikte kaydeder. Sonraki kaynak güncellemeleri yayımlanmış 0.12.0 sürümünün içeriği değildir. Bu tarihsel doğrulama ve kaynak kayıtları 0.13.0 için kabul veya doğrulama oluşturmaz. Yayımlanmış 0.12.0’ın release notları için [GitHub sürüm kaydı](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.12.0) esas alınır.
