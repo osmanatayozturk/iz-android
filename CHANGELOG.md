@@ -32,9 +32,9 @@ Paylaşılacak GPS izi her uçta sabit 1 km eşiğiyle kırpılır. Önizleme g�
 
 Yerinde doğrulanan nokta ve tek kapalı çizgiyle tanımlanan alanlarda ad, sokak ve kapı numarası düzeltilebilir. Geometri ve diğer etiketler korunur. Düzeltme kayıtları için yerel Room şeması ve ZIP yedek biçimi v9’a geçti.
 
-Geri yüklenen bir düzeltmenin değişiklik kümesini kapatmak için OSM’de tam eşleşen düzenleme kanıtı gerekir. Geri yüklenen yeni nokta kaydında kapanış, aynı değişiklik kümesinde tam eşleşen tek bir nokta oluşturma kaydı gerektirir.
+Yedekten geri yüklenen OSM gönderimlerinin durumu İz’de kontrol edilebilir ve OSM bağlantısı açılabilir. İz’den kapatma, bu kurulumun OSM’den aldığı gerçek oluşturma yanıtıyla kaydettiği değişiklik kümelerine açıktır.
 
-`b86d77b` adayında 1.465 birim testinin tamamı geçti, Debug lint hata vermedi ve Debug uygulama ile AndroidTest APK’ları derlendi. Fiziksel Samsung’da çevrimdışı QA ile 10/10 sentetik kontrol geçti ve iki QA paketi de kaldırıldı. Canlı OSM gönderimi test kapsamı dışındaydı.
+`aa13500` adayında 1.467 birim testinin tamamı geçti, Debug lint hata vermedi ve Debug uygulama ile AndroidTest APK’ları derlendi. Bu adayın fiziksel telefon testi henüz çalıştırılmadı.
 
 ## Telefon 0.12.0 numarasıyla tutulan tarihsel aday kayıtları
 
