@@ -141,7 +141,7 @@ class QuickDirectionsUiTest {
         // Title, search field and preferences precede the two settled results.
         destinations.performScrollToIndex(3)
         val nearRow = compose.onNodeWithText(nearby.name).assertIsDisplayed()
-        val farRow = compose.onNodeWithText(distant.name).assertIsDisplayed()
+        val farRow = compose.onNode(hasText(distant.name) and !hasSetTextAction()).assertIsDisplayed()
         assertTrue(nearRow.fetchSemanticsNode().boundsInRoot.top < farRow.fetchSemanticsNode().boundsInRoot.top)
         compose.onNodeWithText("İstanbul", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithText("Ankara", useUnmergedTree = true).assertIsDisplayed()
