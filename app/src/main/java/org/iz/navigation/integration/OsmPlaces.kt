@@ -13,9 +13,7 @@ import org.iz.navigation.weather.WeatherCoordinate
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import okhttp3.FormBody
 import okhttp3.OkHttpClient
-import okhttp3.Request
 import okhttp3.Response
 import org.json.JSONArray
 import org.json.JSONObject
@@ -39,16 +37,28 @@ class OsmPlaces(context: Context) {
     private val settings = OsmServiceSettings(app)
     private val preferences = app.getSharedPreferences("osm_read_limits", Context.MODE_PRIVATE)
     private val cacheDirectory = File(app.cacheDir, "osm_place_queries")
+    private val overpassRead = OverpassRead(
+        readBudget = { OsmReadBudget.fromJson(preferences.getString("overpass_budget", null)) },
+        writeBudget = { preferences.edit().putString("overpass_budget", it.toJson()).commit() },
+        execute = { client.newCall(it).execute() },
+    )
 
     private val nominatimSearch = NominatimSearch(
         mutex = nominatimLock,
         endpoint = { settings.read().nominatim },
-        readCached = { cached(it, 86_400_000, ::parseNominatimPlaces) },
+        readCached = { cachedJson(it, 86_400_000) },
         writeCache = ::storeCache,
         readLong = { preferences.getLong(it, 0) },
         writeLong = { key, value -> preferences.edit().putLong(key, value).commit() },
         execute = { client.newCall(it).execute() },
     )
+
+    private val partialNameSearch = PartialNameOverpassSearch(
+        mutex = overpassLock, endpoint = { settings.read().overpass },
+        readCached = { cachedJson(it, 86_400_000) }, writeCache = ::storeCache,
+        execute = { query, endpoint -> performOverpass(query, endpoint) },
+    )
+    private val directionsSearch = DirectionsPlaceSearch(nominatimSearch, partialNameSearch)
 
     suspend fun search(query: String): List<SelectedOsmPlace> = withContext(Dispatchers.IO) {
         nominatimSearch.search(query)
@@ -57,16 +67,7 @@ class OsmPlaces(context: Context) {
     internal suspend fun searchForDirections(
         query: String,
         location: suspend () -> WeatherCoordinate?,
-    ): List<SelectedOsmPlace> {
-        coroutineContext.ensureActive()
-        val normalized = normalizeNominatimQuery(query)
-        if (normalized.length < 2) return emptyList()
-        val origin = location()
-        return withContext(Dispatchers.IO) {
-            val places = nominatimSearch.searchForDirections(normalized, origin?.let(DirectionsViewbox::around))
-            rankDirectionsPlaces(places, origin)
-        }
-    }
+    ): List<SelectedOsmPlace> = directionsSearch.search(query, location)
 
     suspend fun nearby(latitude: Double, longitude: Double): List<SelectedOsmPlace> = withContext(Dispatchers.IO) {
         require(validCoordinate(latitude, longitude)) { "Geçersiz harita koordinatı." }
@@ -121,32 +122,10 @@ class OsmPlaces(context: Context) {
         overpassLock.withLock { performOverpass(query) }
     }
 
-    private fun performOverpass(query: String, endpoint: String = settings.read().overpass): String {
-        val now = System.currentTimeMillis()
-        var budget = OsmReadBudget.fromJson(preferences.getString("overpass_budget", null))
-        if (!budget.canRequest(now)) throw OsmServiceException("Harita sorgu sınırı veya servis bekleme süresi dolmadı.")
-        val maxResponseBytes = minOf(512_000, 9_000_000 - budget.currentBytes(now))
-        budget = budget.startRequest(now, reservedBytes = maxResponseBytes)
-        check(preferences.edit().putString("overpass_budget", budget.toJson()).commit()) { "Harita sorgu sınırı kaydedilemedi." }
-        val request = readRequest(endpoint).post(FormBody.Builder().add("data", query).build()).build()
-        var downloaded = 0L
-        try {
-            return client.newCall(request).execute().use { response ->
-                val coolingDown = response.code == 429 || response.code == 406
-                if (coolingDown) {
-                    budget = budget.withCooldown(System.currentTimeMillis(), retryAfterMillis(response) / 1_000)
-                    check(preferences.edit().putString("overpass_budget", budget.toJson()).commit()) { "Harita bekleme süresi kaydedilemedi." }
-                }
-                val json = readLimited(response, maxResponseBytes) { downloaded += it }
-                if (coolingDown) throw OsmServiceException("Harita servisi beklememizi istiyor.")
-                if (!response.isSuccessful) throw OsmServiceException("Harita verisi alınamadı (${response.code}).")
-                json
-            }
-        } finally {
-            budget = budget.finishResponse(maxResponseBytes, downloaded)
-            preferences.edit().putString("overpass_budget", budget.toJson()).commit()
-        }
-    }
+    private suspend fun performOverpass(query: String, endpoint: String = settings.read().overpass): String =
+        overpassRead.query(query, endpoint)
+    private fun cachedJson(key: String, maxAge: Long): String? =
+        readValidCachedJson(File(cacheDirectory, cacheKey(key)), System.currentTimeMillis(), maxAge)
     private fun cached(key: String, maxAge: Long, parse: (String) -> List<SelectedOsmPlace>): List<SelectedOsmPlace>? =
         readValidCachedPlaces(File(cacheDirectory, cacheKey(key)), System.currentTimeMillis(), maxAge, parse)
 
@@ -162,9 +141,6 @@ class OsmPlaces(context: Context) {
             cacheDirectory.listFiles()?.sortedByDescending { it.lastModified() }?.drop(128)?.forEach { it.delete() }
         }
     }
-
-    private fun readRequest(url: String) = Request.Builder().url(url)
-        .header("User-Agent", osmUserAgent).header("Accept", "application/json").header("Accept-Language", "tr")
 
     companion object {
         // Shared by every map and search screen in the process; no automatic retries or endpoint rotation.
@@ -269,6 +245,10 @@ internal fun readValidCachedPlaces(
 ): List<SelectedOsmPlace>? = runCatching {
     if (!file.isFile || file.length() > 512_000 || now - file.lastModified() !in 0..maxAge) null
     else parse(file.readText())
+}.getOrNull()
+
+internal fun readValidCachedJson(file: File, now: Long, maxAge: Long): String? = runCatching {
+    if (!file.isFile || file.length() > 512_000 || now - file.lastModified() !in 0..maxAge) null else file.readText()
 }.getOrNull()
 
 private fun osmRef(type: String, id: Long): OsmRef? {

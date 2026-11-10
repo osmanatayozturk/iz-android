@@ -364,7 +364,7 @@ class NominatimSearchTest {
                 assertFalse(url.toString().contains("12345"))
             }
             assertEquals("W15", urls.last().queryParameter("exclude_place_ids"))
-            assertEquals(urls.map { "search-v3:accept-language=tr:$it" }, f.writtenKeys)
+            assertEquals(urls.map { "search-v4:accept-language=tr:$it" }, f.writtenKeys)
             assertEquals(first, f.newSearch().searchForDirections("Yahya Çavuş", viewbox))
             assertEquals(2, f.server.requestCount)
             f.enqueue(page())
@@ -392,7 +392,7 @@ class NominatimSearchTest {
     @Test fun directionsForwardTheExplicitCityAndKeepTheFartherExactName() = runTest {
         fixture().use { f ->
             val origin = org.iz.navigation.weather.WeatherCoordinate(39.93, 32.85)
-            f.enqueue(page(place(15, "Yahya Çavuş", lat = 41.01, lon = 29.01),
+            f.enqueue(page(place(15, "Yahya Çavuş", lat = 41.01, lon = 29.01).replace("Example", "İstanbul"),
                 place(363072750, "Yahya Çavuş İlkokulu", lat = 39.94, lon = 32.86)))
             f.enqueue(page())
             val places = f.search.searchForDirections("Yahya Çavuş, İstanbul", DirectionsViewbox.around(origin))
@@ -422,7 +422,7 @@ class NominatimSearchTest {
             mutex = mutex,
             endpoint = { endpoint },
             readCached = { key ->
-                readValidCachedPlaces(file(key), System.currentTimeMillis(), 86_400_000, ::parseNominatimPlaces)
+                file(key).takeIf { it.isFile && it.length() <= 512_000 }?.readText()
                     .also { afterCacheRead?.invoke() }
             },
             writeCache = { key, json -> cache(key, json); writtenKeys += key },

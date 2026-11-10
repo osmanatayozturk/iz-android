@@ -1,13 +1,39 @@
 package org.iz.navigation.integration
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 import org.iz.navigation.data.SelectedOsmPlace
 import org.iz.navigation.weather.WeatherCoordinate
 import org.iz.navigation.weather.WeatherEngine
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.util.Locale
+import kotlin.coroutines.coroutineContext
+
+/** Shared production seam for the explicit phone submission, including the one-time origin lookup. */
+internal class DirectionsPlaceSearch(
+    private val nominatim: NominatimSearch,
+    private val nearby: PartialNameOverpassSearch,
+) {
+    suspend fun search(query: String, location: suspend () -> WeatherCoordinate?): List<SelectedOsmPlace> {
+        coroutineContext.ensureActive()
+        val normalized = normalizeNominatimQuery(query)
+        if (normalized.length < 2) return emptyList()
+        val origin = location()
+        val box = origin?.let(DirectionsViewbox::around)
+        return withContext(Dispatchers.IO) {
+            val places = nominatim.searchForDirections(normalized, box) {
+                if (box == null) emptyList() else nearby.search(normalized, box, origin)
+            }
+            coroutineContext.ensureActive()
+            rankDirectionsPlaces(places, origin)
+        }
+    }
+}
 
 internal class DirectionsViewbox private constructor(val value: String) {
+    val overpassValue: String get() = value.split(',').let { (west, north, east, south) -> "$south,$west,$north,$east" }
     companion object {
         fun around(origin: WeatherCoordinate): DirectionsViewbox? {
             // Round the center before expanding it. Use integer hundredths for the boundary checks.
