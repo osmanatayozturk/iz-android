@@ -12,6 +12,7 @@ Büyük yedekler sayfalı hazırlanır. ZIP kaydedildiğinde geri okunup doğrul
 | OSM GPS izi paylaşımı | Tamamlanmış yolculuk izlerini açık kullanıcı onayıyla isteğe bağlı paylaş. |
 | Nereye? (telefon kaynak adayı) | Ana ekrandan kayıtlı bir yer veya OpenStreetMap arama sonucu seç. Ulaşım türünü belirleyip mevcut konumdan rota başlat. |
 | Nereye? yakınlık önceliği (telefon kaynak adayı) | Konum kullanılabiliyorsa yaklaşık arama alanıyla yakındaki eşleşmelere öncelik ver ve sonuçları cihazda mesafeye göre sırala. Konum yoksa servis sırasını kullan. |
+| Nereye? kısmi ad araması (canlı kabul bekliyor) | Nominatim’de uygun eşleşme yoksa aynı alanda tek Overpass ad araması kullan. Özgün sorguyu sözcük başlangıçları ve kısaltmalarla doğrula. Toplam istek sayısını ikiyle sınırla. |
 | OSM toplu iz (telefon kaynak adayı) | Tamamlanmış yolculuk izlerini birlikte seç, gönderimi inceleyip onayla ve sonucu bağlı hesabın ayrı **Yüklenenler** sayfasında kontrol et. |
 | Ev/İş (telefon kaynak adayı) | Boştaki ana haritada logo ve İz başlığının altında Nereye?, ardından Ev ve İş yer alır. Yer atadıktan sonra kısayol, hızlı hedef ekranını seçili hedefle açar. |
 | OSM Katkı Merkezi (telefon kaynak adayı) | Yerel taslakları ve bağlı hesabın gönderimlerini gör. GPS izini her uçta sabit 1 km eşiğiyle kırpılmış önizlemeden incele ve iki görünürlükten birini seç. |
@@ -28,6 +29,10 @@ Fiziksel Samsung telefonda ağsız QA paketiyle yapılan ilk koşuda üç sentet
 **Geri yükleme koruması.** Geri yüklenen mekân gönderimlerinde İz’den durum kontrolü yapılabilir ve kayıt OSM’de açılabilir. İz’den bir değişiklik kümesini kapatmak için bu kurulumun OSM’den aldığı gerçek oluşturma yanıtını kaydetmiş olması gerekir.
 
 **OSM Katkı Merkezi doğrulaması.** `aa13500` üzerinde 1.467/1.467 birim testi geçti. Debug lint 0 hata verdi. Debug uygulama ile AndroidTest APK’ları derlendi. Aynı adayın ayrı QA APK çiftiyle fiziksel Samsung telefonda çevrimdışı 12/12 sentetik kontrol geçti ve iki QA paketi kaldırıldı. İki ek kontrol, aynı kimlikle geri yüklenen kayıtta yerel kapatma yetkisinin temizlendiğini ve gecikmiş oluşturma yanıtının reddedildiğini, ayrıca kimlik ve zaman damgası eşleşse bile önceki yanıtın geri yüklenen kayda bağlanamadığını doğruladı. Canlı OSM işlemleri test kapsamı dışındaydı.
+
+**Nereye? kısmi ad araması.** Canlı Overpass kabulü bekliyor. Yapılandırılmış uç noktada HTTP 502 alındı, önceki denemelerde zaman aşımı da görüldü. Gerekli iki canlı sorgunun kabulü tamamlanmadı.
+
+`ae038e7` üzerinde 1.487/1.487 birim testi geçti. Debug lint 0 hata, 96 uyarı ve 1 ipucu verdi. Debug APK üretimi ve AndroidTest Kotlin derlemesi geçti. Derlenen ayrı QA APK çiftiyle fiziksel Samsung’da kısmi ad ve kısaltma sonuçlarının seçilen koordinatlarla ulaşım türü seçimine ulaştığı iki sentetik kontrol geçti. QA temizliği 2/2 tamamlandı.
 
 Yayımlanmış önceki sürüm Telefon 0.12.0 / code 28’dir. Bu bölüm, 0.12.0 yayımlanmadan önceki aday doğrulama anlık görüntüsünü ve yayımlanmış 0.12.0’dan sonra 6–7 Kasım’da aynı 0.12.0 numarasıyla yapılan kamera, Molalı rota ve OSM GPS izi paylaşımı kaynak güncellemelerini birlikte kaydeder. Sonraki kaynak güncellemeleri yayımlanmış 0.12.0 sürümünün içeriği değildir. Bu tarihsel doğrulama ve kaynak kayıtları 0.13.0 için kabul veya doğrulama oluşturmaz. Yayımlanmış 0.12.0’ın release notları için [GitHub sürüm kaydı](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.12.0) esas alınır.
 
