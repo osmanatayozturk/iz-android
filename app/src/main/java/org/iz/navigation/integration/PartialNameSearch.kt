@@ -53,7 +53,7 @@ internal class PartialNameMatcher(query: String) {
         }
         val regex = patterns.joinToString(".*")
         val escaped = regex.replace("\\", "\\\\").replace("\"", "\\\"")
-        return "[out:json][timeout:12];nwr(${box.overpassValue})[~\"^(name|name:tr|short_name|alt_name|official_name)$\"~\"$escaped\",i];out center tags 50;"
+        return "[out:json][timeout:12][maxsize:16777216];nwr(${box.overpassValue})[~\"^(name|name:tr|short_name|alt_name|official_name)$\"~\"$escaped\",i];out center tags 50;"
     }
 
     private fun isInitials(word: String) = word.length in 2..4 && word.all(Char::isLetter)

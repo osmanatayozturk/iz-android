@@ -237,6 +237,7 @@ class DirectionsPartialSearchTest {
         assertFalse(ql.contains("out meta;")); assertFalse(ql.contains("(1,2,3,4)"))
         assertEquals(3, ql.count { it == ';' })
         assertTrue(ql.contains("[timeout:12]")); assertTrue(ql.endsWith("out center tags 50;"))
+        assertTrue(ql.contains("[maxsize:16777216]"))
         assertTrue(PartialNameMatcher("a ".repeat(100).trim()).overpassQuery(box).length < 2_000)
     }
 
