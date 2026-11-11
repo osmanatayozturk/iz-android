@@ -79,7 +79,7 @@ class MotorcycleSurfacePreferencesTest {
         }
     }
 
-    @Test fun cacheFourRetainsSurfaceChoiceAndWarningsButOldCacheDoesNotClaimProof() {
+    @Test fun currentCacheRetainsSurfaceChoiceAndWarningsButOldCacheDoesNotClaimProof() {
         val dir = temp.newFolder()
         val p = WeatherCoordinate(40.0, 29.0)
         val route = PlannedRoute("surface", listOf(RouteStop("A", p), RouteStop("B", p)),
@@ -88,7 +88,7 @@ class MotorcycleSurfacePreferencesTest {
         val cache = NavigationRouteCache(dir)
         cache.write(route)
         val file = java.io.File(dir, "route.json")
-        assertEquals(4, JSONObject(file.readText()).getInt("version"))
+        assertEquals(5, JSONObject(file.readText()).getInt("version"))
         assertEquals(route, cache.read())
         val legacy = JSONObject(file.readText()).put("version", 2)
         legacy.getJSONObject("preferences").remove("avoidUnpaved")

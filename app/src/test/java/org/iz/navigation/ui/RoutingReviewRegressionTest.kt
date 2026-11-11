@@ -44,7 +44,8 @@ class RoutingReviewRegressionTest {
         val planner = planner()
         var started: PlannedRoute? = null
         val coordinator = PhoneDirectionsCoordinator(this, { current }, { stops, _ -> route(stops) }, { started = it },
-            routeAlternatives = { stops, mode, speed, preferences -> planner.alternatives(stops, now, mode, speed, preferences) }, clock = { now })
+            routeAlternatives = { stops, mode, speed, preferences -> planner.alternatives(stops, now, mode, speed, preferences) },
+            startRoutePlanner = { planner }, clock = { now })
         coordinator.enter(1L, listOf(a, b), Transport.CAR, locateOnOpen = false)
         coordinator.preview()!!.join(); coordinator.requestAlternatives()!!.join(); coordinator.selectAlternative("selected")
         coordinator.start()!!.join()
@@ -52,6 +53,19 @@ class RoutingReviewRegressionTest {
         assertEquals(listOf(current, a.coordinate, b.coordinate), started!!.stops.map { it.coordinate })
         assertTrue(started!!.vertices.any { it.coordinate == WeatherCoordinate(.001, .0005) })
         assertEquals(1L, coordinator.state.value.startedCount)
+    }
+
+    @Test fun timeBlindLegacyCallbackCannotClaimAValidatedApproachArrival() = runBlocking {
+        var started: PlannedRoute? = null
+        val coordinator = PhoneDirectionsCoordinator(this, { current }, { stops, _ -> route(stops) }, { started = it },
+            routeAlternatives = { stops, _, _, _ -> RouteAlternatives(listOf(route(stops, chosen = stops.first() == a))) },
+            clock = { now })
+        coordinator.enter(1L, listOf(a, b), Transport.CAR, locateOnOpen = false)
+        coordinator.preview()!!.join(); coordinator.requestAlternatives()!!.join(); coordinator.selectAlternative("selected")
+        coordinator.start()!!.join()
+        assertNull(started)
+        assertEquals(0L, coordinator.state.value.startedCount)
+        assertTrue(coordinator.state.value.message.orEmpty().contains("varış saati"))
     }
 
     @Test fun weatherStartsSelectedAlternativeAfterApproachingDistantCustomOrigin() = runBlocking {

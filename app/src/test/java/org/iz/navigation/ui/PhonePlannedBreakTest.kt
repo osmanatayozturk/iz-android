@@ -75,7 +75,7 @@ class PhonePlannedBreakTest {
         assertNull(phone.state.value.preview)
         assertNull(phone.start())
         assertEquals(stops, phone.state.value.stops)
-        assertTrue(phone.state.value.message.orEmpty().contains("Mola"))
+        assertTrue(phone.state.value.message.orEmpty().contains("mola", ignoreCase = true))
     }
 
     @Test fun savedDuplicateStopsCarrySeparateBreaksThroughReorderAndExplicitStart() = runBlocking {
@@ -88,7 +88,7 @@ class PhonePlannedBreakTest {
         val phone = PhoneDirectionsCoordinator(this, locate = { approach }, plan = { points, _ -> route(points) },
             activate = { started = it }, clock = { 1_000L },
             suggestOrder = { input, _, _ ->
-                StopOrderProposal(input, ordered, route(input), route(ordered), 121_000L, false, 1_000L, "")
+                StopOrderProposal(input, ordered, route(input, legSeconds = 90.0), route(ordered), 121_000L, false, 1_000L, "")
             })
         phone.enter(1L, initialPlan = saved, locateOnOpen = false)
         assertEquals(saved.stops, phone.state.value.stops)
@@ -107,8 +107,23 @@ class PhonePlannedBreakTest {
         assertEquals(240.0, active.durationSeconds, 0.0)
     }
 
-    private fun route(stops: List<RouteStop>): PlannedRoute {
-        val elapsed = stops.indices.map { it * 60.0 }
+    @Test fun equalDurationProposalCannotReorderDuplicateStopsOrTheirBreaks() = runBlocking {
+        val stops = listOf(origin, via.copy(plannedBreakSeconds = 300), via.copy(plannedBreakSeconds = 1_200), destination)
+        val ordered = listOf(stops.first(), stops[2], stops[1], stops.last())
+        val phone = PhoneDirectionsCoordinator(this, locate = { origin.coordinate }, plan = { points, _ -> route(points) },
+            activate = { error("Rejected proposal must never start") }, clock = { 1_000L },
+            suggestOrder = { input, _, _ -> StopOrderProposal(input, ordered, route(input), route(ordered),
+                121_000L, false, 1_000L, "") })
+        phone.enter(1L, stops, Transport.CAR, locateOnOpen = false)
+        phone.suggestStopOrder()!!.join()
+        phone.acceptStopOrder()
+        assertEquals(stops, phone.state.value.stops)
+        assertNull(phone.state.value.orderProposal)
+        assertTrue(phone.state.value.message.orEmpty().contains("güncel değil"))
+    }
+
+    private fun route(stops: List<RouteStop>, legSeconds: Double = 60.0): PlannedRoute {
+        val elapsed = stops.indices.map { it * legSeconds }
         return PlannedRoute("synthetic-phone", stops, stops.zip(elapsed, { stop, at -> RouteVertex(stop.coordinate, at) }),
             2_000.0, elapsed.last(), 1_000L, stopElapsedSeconds = elapsed, transport = Transport.CAR)
     }

@@ -44,7 +44,7 @@ class NavigationRouteExclusionCacheTest {
             assertEquals(areas, restored.avoidAreas)
             assertEquals(expected.stops.last(), restored.stops.last())
             val json = JSONObject(saved(dir).readText())
-            assertEquals(4, json.getInt("version"))
+            assertEquals(5, json.getInt("version"))
             assertEquals(3, json.getJSONArray("avoidAreas").length())
         }
     }
@@ -54,7 +54,7 @@ class NavigationRouteExclusionCacheTest {
         val expected = route(emptyList())
         NavigationRouteCache(dir).write(expected)
         val json = JSONObject(saved(dir).readText())
-        assertEquals(4, json.getInt("version"))
+        assertEquals(5, json.getInt("version"))
         assertEquals(0, json.getJSONArray("avoidAreas").length())
         assertEquals(expected, NavigationRouteCache(dir).read())
     }
