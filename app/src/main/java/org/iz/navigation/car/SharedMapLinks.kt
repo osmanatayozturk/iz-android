@@ -50,7 +50,8 @@ object SharedMapLinks {
         }
         if (found.startsWith("geo:", true) || found.startsWith("google.navigation:", true)) {
             val target = NavigationIntents.parseLegacy(found) ?: return null
-            return SharedMapInput.Single(SharedMapStop(target.query, target.coordinate))
+            val label = target.coordinate?.let { pinLabel(target.query, "${it.latitude},${it.longitude}") } ?: target.query
+            return SharedMapInput.Single(SharedMapStop(label, target.coordinate))
         }
         val uri = allowedUrl(found) ?: return unsupported()
         return try { parseUrl(uri, found) } catch (_: IllegalArgumentException) { unsupported(found) }
@@ -66,7 +67,13 @@ object SharedMapLinks {
         val apple = host == "maps.apple.com"
         val destinationValues = params.filter { it.first in if (apple) setOf("destination", "daddr") else setOf("destination", "daddr") }.map { it.second }
         val viaValues = params.filter { it.first in setOf("waypoints", "waypoint") }.flatMap { it.second.split('|') }
-        val explicitOrigin = first("origin", "source", "saddr")?.let { stop(it, origin = true) }
+        val originText = first("origin", "source", "saddr")
+        val explicitOrigin = originText?.let { stop(it, origin = true) ?: return unsupported(original) }
+        // An opaque source/waypoint cannot silently become current location or disappear.
+        if (originText == null && first("origin_place_id", "source-place-id") != null) return unsupported(original)
+        val waypointIds = params.filter { it.first in setOf("waypoint_place_ids", "waypoint-place-id") }
+            .flatMap { it.second.split('|') }.filter(String::isNotBlank)
+        if (waypointIds.size > viaValues.size) return unsupported(original)
         if (destinationValues.isNotEmpty()) {
             val destination = stop(destinationValues.last()) ?: return unsupported(original)
             val via = (viaValues + destinationValues.dropLast(1)).map { stop(it) ?: return unsupported(original) }
@@ -93,7 +100,7 @@ object SharedMapLinks {
         if (explicitCoordinate != null) {
             val target = stop(explicitCoordinate) ?: return unsupported(original)
             if (target.coordinate == null) return unsupported(original)
-            return SharedMapInput.Single(target.copy(name = name?.take(300) ?: target.name), original)
+            return SharedMapInput.Single(target.copy(name = pinLabel(name, target.name)), original)
         }
         // A /place label is useful search text; @lat,lon remains framing only.
         val placeIndex = path.indexOf("place")
@@ -103,7 +110,7 @@ object SharedMapLinks {
         if (!apple && placeIndex >= 0 && pins.size == 1) {
             val pin = pins.single()
             val target = stop("${pin.groupValues[1]},${pin.groupValues[2]}") ?: return unsupported(original)
-            return SharedMapInput.Single(target.copy(name = name ?: pathLabel ?: target.name), original)
+            return SharedMapInput.Single(target.copy(name = pinLabel(name ?: pathLabel, target.name)), original)
         }
         val usable = name ?: pathLabel
         if (usable != null) return stop(usable)?.let { SharedMapInput.Single(it, original) } ?: unsupported(original)
@@ -130,6 +137,8 @@ object SharedMapLinks {
         return SharedMapStop(text)
     }
     private fun decode(value: String) = URLDecoder.decode(value, "UTF-8")
+    private fun pinLabel(value: String?, fallback: String): String = value?.filterNot { it.code < 32 }
+        ?.trim()?.take(300)?.takeIf(String::isNotBlank) ?: fallback
     private fun decodePath(value: String) = decode(value.replace("+", "%20"))
     private fun unsupported(original: String? = null) = SharedMapInput.Unsupported("Bu bağlantıda kullanılabilir hedef bulunamadı. Harita uygulamasında açabilir veya yer adıyla arayabilirsin.", original)
 }

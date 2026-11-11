@@ -28,6 +28,7 @@ class SharedTargetPreviewUiTest {
         precise = false, routeRevision = 0, sessionId = null, requiresFinePermission = false)
     private val target = RouteStop("Sentetik hedef", WeatherCoordinate(41.01, 29.01))
     private var plans = 0
+    private var locations = 0
     private val navigation = MutableStateFlow(NavigationState())
     private val starts = mutableListOf<Boolean>()
     private val startedTargets = mutableListOf<String>()
@@ -38,7 +39,7 @@ class SharedTargetPreviewUiTest {
         delayedFirst: CompletableDeferred<Unit>? = null) {
         delayedFirst?.let { pending += it }
         compose.setContent { IzTheme {
-            QuickDirectionsDialog(emptyList(), navigation, locate = { origin },
+            QuickDirectionsDialog(emptyList(), navigation, locate = { locations++; origin },
                 validateOrigin = {}, plan = { coordinate, destination, mode, _ ->
                     plans++
                     if (failFirst && plans == 1) error("Synthetic provider failure")
@@ -65,6 +66,26 @@ class SharedTargetPreviewUiTest {
         compose.runOnIdle { assertEquals(1, plans); assertTrue(starts.isEmpty()) }
         compose.onNodeWithTag("shared-start").performClick().assertIsNotEnabled()
         compose.runOnIdle { assertEquals(listOf(true), starts) }
+    }
+    @Test fun activeMotorcycleRecordingRequiresMatchingVehicleBeforePreviewWithoutAutoStarting() {
+        val active = NavigationState(recording = true, sessionTransport = Transport.MOTORCYCLE,
+            sessionId = "synthetic-active-motorcycle")
+        navigation.value = active
+        show()
+        compose.onNodeWithTag("shared-preview").assertIsNotEnabled()
+        options("quick-mode-CAR").assertIsSelected().assertIsNotEnabled()
+        options("quick-record").assertIsOn().assertIsNotEnabled()
+        compose.runOnIdle {
+            assertEquals(0, locations); assertEquals(0, plans); assertTrue(starts.isEmpty())
+            assertEquals(active, navigation.value)
+        }
+        options("quick-mode-MOTORCYCLE").assertIsEnabled().performClick().assertIsSelected()
+        compose.onNodeWithTag("shared-preview").assertIsEnabled()
+        compose.onNodeWithTag("shared-start").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(0, locations); assertEquals(0, plans); assertTrue(starts.isEmpty())
+            assertEquals(active, navigation.value)
+        }
     }
     @Test fun backFromPreviewRetainsRecordChoiceAndChangingModeRequiresNewPreview() {
         show()

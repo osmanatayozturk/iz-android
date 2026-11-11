@@ -2,8 +2,39 @@ package org.iz.navigation.car
 
 import org.junit.Assert.*
 import org.junit.Test
+import org.iz.navigation.weather.RouteStop
+import org.iz.navigation.weather.WeatherCoordinate
 
 class SharedMapLinksTest {
+    @Test fun invalidExplicitSourcesAndUnrepresentedWaypointIdsAreNeverSilentlyDropped() {
+        listOf(
+            "https://www.google.com/maps/dir/?origin=place_id:ChIJ123&destination=41,29",
+            "https://www.google.com/maps/dir/?origin=place_id:ChIJ123&waypoints=A&destination=41,29",
+            "https://maps.apple.com/directions?source=place_id:ChIJ123&destination=41,29",
+            "https://maps.apple.com/?saddr=${"A".repeat(301)}&daddr=41,29",
+            "https://www.google.com/maps/dir/?origin_place_id=ChIJ123&destination=41,29",
+            "https://maps.apple.com/directions?source-place-id=I123&destination=41,29",
+            "https://www.google.com/maps/dir/?waypoint_place_ids=ChIJ123&destination=41,29",
+            "https://maps.apple.com/directions?waypoint-place-id=I123&destination=41,29",
+        ).forEach { assertTrue(it, SharedMapLinks.parse(it) is SharedMapInput.Unsupported) }
+        assertTrue(SharedMapLinks.parse("https://www.google.com/maps/dir/?origin=&destination=41,29") is SharedMapInput.Single)
+    }
+    @Test fun explicitPinLabelsAreBoundedBeforeAutomaticRouteStopHandoff() {
+        listOf(
+            "https://www.google.com/maps/place/${"A".repeat(301)}/data=!3d41!4d29",
+            "https://www.google.com/maps/place/Pin/data=!3d41!4d29?name=${"A".repeat(301)}",
+            "https://maps.apple.com/place?coordinate=41,29&name=${"A".repeat(301)}",
+            "https://www.google.com/maps/place/Pin/data=!3d41!4d29?name=%0APin%0DName",
+            "https://maps.apple.com/place?coordinate=41,29&name=%0A%0D",
+            "geo:${"0".repeat(350)}41,29",
+        ).forEach { raw ->
+            val target=single(raw).target
+            assertTrue(target.name.length in 1..300)
+            assertTrue(target.name.none { it.code < 32 })
+            assertEquals(WeatherCoordinate(41.0,29.0),target.coordinate)
+            assertEquals(target.name,RouteStop(target.name,checkNotNull(target.coordinate)).label)
+        }
+    }
     private fun single(raw: String) = SharedMapLinks.parse(raw) as SharedMapInput.Single
     @Test fun whatsAppTextUsesExplicitPinInsteadOfCamera() {
         val result = single("Konum burada\nhttps://www.google.com/maps/place/Okul/@5,6,12z/data=!3d41.1!4d29.2")

@@ -331,7 +331,7 @@ internal fun QuickDirectionsDialog(
                     ) }
                     if (sharedPreview) Button(onClick = {
                         lastMode?.let { pickMode(it, previewRequest = true) }
-                    }, enabled = lastMode != null && phase == null && !commandBusy && permissionRequest == null,
+                    }, enabled = lastMode?.let(nav::canQuickStart) == true && phase == null && !commandBusy && permissionRequest == null,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("shared-preview")) { Text("Rota önizle") }
                     }
                 } else {
