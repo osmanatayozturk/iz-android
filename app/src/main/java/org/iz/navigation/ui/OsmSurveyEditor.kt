@@ -9,7 +9,6 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -29,7 +28,6 @@ import org.iz.navigation.ui.history.LocalUiEntryKey
 import org.iz.navigation.ui.history.LocalUiHistory
 import java.time.LocalDate
 import java.time.ZoneId
-import java.util.UUID
 
 /** The page owns persistence/network. This editor owns only saveable input and reviewed UI state. */
 @Composable
@@ -42,7 +40,6 @@ internal fun OsmSurveyEditor(
     isReviewCurrent: (OsmCorrectionReview) -> Boolean, onLogin: (MapEditDraft) -> Unit,
     onPublish: (OsmCorrectionReview) -> Unit, onNoteFallback: (Place) -> Unit,
     today: LocalDate = LocalDate.now(),
-    diagnosticObserver: OsmSurveyEditorDiagnosticObserver? = null,
 ) {
     val first = remember(initial.id) { requireNotNull(initial.surveyObservation()) }
     var payload by rememberSaveable(initial.id) { mutableStateOf(first.encode()) }
@@ -81,59 +78,23 @@ internal fun OsmSurveyEditor(
     val publishable = validDate && replacement == null && observation.baseVersion == current?.version &&
         changes?.getOrNull()?.isNotEmpty() == true
     val locked = busy || authBusy || querying
-    val diagnostics = if (diagnosticObserver != null && osmSurveyDiagnosticAllowed()) {
-        remember(initial.id, diagnosticObserver) { OsmSurveyEditorDiagnostics(diagnosticObserver) }
-    } else null
-    fun diagnosticState(): OsmSurveyEditorDiagnosticState {
-        return Snapshot.withoutReadObservation {
-            val accepted = runCatching { decodeSurveyObservation(payload) }.getOrNull()
-            OsmSurveyEditorDiagnosticState(accepted?.hours?.value?.length, accepted?.wheelchair?.value?.length,
-                accepted?.hours?.action, simple, locked, surveyDiagnosticError(error), surveyDiagnosticError(error ?: authError))
-        }
-    }
-    fun trace(stage: SurveyDiagnosticStage, field: String? = null, incoming: Int? = null,
-        before: OsmSurveyEditorDiagnosticState? = null, reason: SurveyDiagnosticReason? = null,
-        changed: Boolean? = null, seen: OsmSurveyEditorDiagnosticState? = null,
-        warning: SurveyDiagnosticError? = null) {
-        diagnostics?.record(stage, seen ?: diagnosticState(), field, incoming, before, reason, changed, warning)
-    }
-    fun writeError(message: String?, reason: SurveyDiagnosticReason, fieldInstance: String? = null) {
-        val before = diagnostics?.let { diagnosticState() }
-        error = message
-        trace(SurveyDiagnosticStage.ERROR_WRITE, fieldInstance, before = before, reason = reason)
-    }
-    if (diagnostics != null) {
-        DisposableEffect(diagnostics) {
-            trace(SurveyDiagnosticStage.EDITOR_MOUNT)
-            onDispose { trace(SurveyDiagnosticStage.EDITOR_DISPOSE) }
-        }
-        val seen = diagnosticState()
-        SideEffect { trace(SurveyDiagnosticStage.COMPOSITION_COMMIT, seen = seen) }
-    }
 
     fun resetReview() { review = null; reviewed = false }
-    fun update(value: SurveyObservation, fieldInstance: String? = null): Boolean {
-        val before = diagnostics?.let { diagnosticState() }
-        trace(SurveyDiagnosticStage.UPDATE_ENTER, fieldInstance, value.hours.value.length, before)
+    fun update(value: SurveyObservation): Boolean {
         if (value.hours.value.length > 8192 || value.wheelchair.value.length > 8192) {
-            writeError("Taslak alanı en fazla 8192 karakter olabilir. Son kabul edilen metin korunuyor.", SurveyDiagnosticReason.FIELD_LIMIT, fieldInstance)
-            trace(SurveyDiagnosticStage.REJECT_FIELD_LIMIT, fieldInstance, value.hours.value.length, before, changed = false)
+            error = "Taslak alanı en fazla 8192 karakter olabilir. Son kabul edilen metin korunuyor."
             return false
         }
         // The valid date is stored separately so incomplete date input cannot discard the raw field text.
         val encoded = runCatching { value.copy(observedOn = first.observedOn).encode() }.getOrNull()
         if (encoded == null) {
-            writeError("Taslak sınırı aşıldı. Son kabul edilen metin korunuyor.", SurveyDiagnosticReason.ENCODING, fieldInstance)
-            trace(SurveyDiagnosticStage.REJECT_ENCODING, fieldInstance, value.hours.value.length, before, changed = false)
+            error = "Taslak sınırı aşıldı. Son kabul edilen metin korunuyor."
             return false
         }
-        val changed = if (diagnostics != null) Snapshot.withoutReadObservation { payload != encoded } else null
         payload = encoded
         confirmed = false
-        writeError(null, SurveyDiagnosticReason.ACCEPTED_UPDATE, fieldInstance)
+        error = null
         resetReview()
-        trace(if (changed == false) SurveyDiagnosticStage.ACCEPT_NO_DATA_CHANGE else SurveyDiagnosticStage.ACCEPT,
-            fieldInstance, value.hours.value.length, before, changed = changed)
         return true
     }
     fun field(field: SurveyField, action: SurveyAction) {
@@ -172,12 +133,12 @@ internal fun OsmSurveyEditor(
                 require(it.ref == initial.correctionRef() && it.preset() == initial.preset)
             }
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { writeError("Güncel OSM bilgileri alınamadı. Taslağını saklayıp yeniden deneyebilirsin.", SurveyDiagnosticReason.TARGET_READ) }
+        catch (_: Exception) { error = "Güncel OSM bilgileri alınamadı. Taslağını saklayıp yeniden deneyebilirsin." }
         finally { querying = false }
     }
     val activeReview = review?.takeIf(isReviewCurrent)
     LaunchedEffect(review, activeReview) {
-        if (review != null && activeReview == null) { resetReview(); writeError("OSM hesabı değişti. Gözlemi yeniden incele.", SurveyDiagnosticReason.ACCOUNT_CHANGED) }
+        if (review != null && activeReview == null) { resetReview(); error = "OSM hesabı değişti. Gözlemi yeniden incele." }
     }
 
     Dialog(onDismissRequest = {
@@ -195,13 +156,7 @@ internal fun OsmSurveyEditor(
                         Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineSmall)
                     Text(current?.tags?.get("name:tr") ?: current?.tags?.get("name") ?: initial.preset.label)
                 }
-                (error ?: authError)?.let { message -> item {
-                    if (diagnostics != null) {
-                        val seen = diagnosticState()
-                        SideEffect { trace(SurveyDiagnosticStage.WARNING_ITEM_COMMIT, seen = seen, warning = surveyDiagnosticError(message)) }
-                    }
-                    Text(message, color = MaterialTheme.colorScheme.error)
-                } }
+                (error ?: authError)?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
                 if (querying) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
                 if (activeReview != null) {
                     item {
@@ -225,7 +180,7 @@ internal fun OsmSurveyEditor(
                         Button(onClick = {
                             resetReview()
                             if (entryIsCurrent() && isReviewCurrent(activeReview)) onPublish(activeReview)
-                            else writeError("OSM hesabı değişti. Gözlemi yeniden incele.", SurveyDiagnosticReason.ACCOUNT_CHANGED)
+                            else error = "OSM hesabı değişti. Gözlemi yeniden incele."
                         }, enabled = reviewed && canWriteMap && !locked,
                             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("osm-survey-publish")) {
                             Text("Gözlemi yayımla")
@@ -246,11 +201,11 @@ internal fun OsmSurveyEditor(
                                     if (entryIsCurrent() && auth.currentCredentials() === owner) {
                                         if (found.version == observation.baseVersion) {
                                             current = found
-                                            writeError(null, SurveyDiagnosticReason.TARGET_REFRESH)
+                                            error = null
                                         } else replacement = found
                                     }
                                 } catch (cancelled: CancellationException) { throw cancelled }
-                                catch (_: Exception) { writeError("Güncel OSM bilgileri alınamadı. Taslağın korunuyor.", SurveyDiagnosticReason.TARGET_READ) }
+                                catch (_: Exception) { error = "Güncel OSM bilgileri alınamadı. Taslağın korunuyor." }
                                 finally { querying = false }
                             }
                         }, enabled = !locked, modifier = Modifier.heightIn(min = 48.dp).testTag("osm-survey-read-current")) {
@@ -322,20 +277,18 @@ internal fun OsmSurveyEditor(
                                 SurveyHoursDay(index, day, !locked) { changed ->
                                     val next = requireNotNull(formWeek).editDay(index, changed)
                                     val privateDraft = runCatching { next.encodeDraft() }.getOrNull()
-                                    if (privateDraft == null) writeError("Saat formu sınırı aşıldı. Son kabul edilen aralıklar korunuyor.", SurveyDiagnosticReason.FORM_LIMIT)
+                                    if (privateDraft == null) error = "Saat formu sınırı aşıldı. Son kabul edilen aralıklar korunuyor."
                                     else if (update(observation.copy(hours = observation.hours.copy(
                                         value = next.expression(), formDraft = privateDraft, fullyObserved = false)))) formWeek = next
                                 }
                             }
                         } else item {
-                            val fieldInstance = if (diagnostics != null) remember(diagnostics) { UUID.randomUUID().toString() } else null
-                            if (diagnostics != null) DisposableEffect(diagnostics, fieldInstance) {
-                                trace(SurveyDiagnosticStage.FIELD_MOUNT, fieldInstance)
-                                onDispose { trace(SurveyDiagnosticStage.FIELD_DISPOSE, fieldInstance) }
-                            }
                             OutlinedTextField(observation.hours.value, {
-                                trace(SurveyDiagnosticStage.ADVANCED_CALLBACK_ENTER, fieldInstance, it.length)
-                                update(observation.copy(hours = observation.hours.copy(value = it, formDraft = null, fullyObserved = false)), fieldInstance)
+                                // Repeated accepted text must preserve warning, consent and review state.
+                                val accepted = decodeSurveyObservation(payload)
+                                if (it != accepted.hours.value) {
+                                    update(accepted.copy(hours = accepted.hours.copy(value = it, formDraft = null, fullyObserved = false)))
+                                }
                             }, enabled = !locked, label = { Text("Gelişmiş OSM saat ifadesi") },
                                 modifier = Modifier.fillMaxWidth().testTag("osm-survey-hours-advanced"),
                                 isError = !SurveyOpeningHours.isValid(observation.hours.value), minLines = 2)
@@ -390,10 +343,10 @@ internal fun OsmSurveyEditor(
                                     if (entryIsCurrent() && auth.currentCredentials() === owner && isReviewCurrent(found)) {
                                         review = found
                                         reviewed = false
-                                    } else writeError("OSM hesabı veya ekran değişti. Gözlemi yeniden incele.", SurveyDiagnosticReason.ACCOUNT_CHANGED)
+                                    } else error = "OSM hesabı veya ekran değişti. Gözlemi yeniden incele."
                                 }
                                 catch (cancelled: CancellationException) { throw cancelled }
-                                catch (_: Exception) { writeError("OSM bilgileri değişmiş veya gözlem doğrulanamadı. Taslağını saklayıp yeniden incele.", SurveyDiagnosticReason.REVIEW_FAILED) }
+                                catch (_: Exception) { error = "OSM bilgileri değişmiş veya gözlem doğrulanamadı. Taslağını saklayıp yeniden incele." }
                                 finally { querying = false }
                             }
                         }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("osm-survey-review")) {

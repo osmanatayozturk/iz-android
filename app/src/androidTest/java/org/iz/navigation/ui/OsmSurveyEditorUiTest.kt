@@ -7,18 +7,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.ViewRootForTest
-import androidx.compose.ui.semantics.SemanticsActions
-import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.semantics.getOrNull
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.platform.app.InstrumentationRegistry
-import org.iz.navigation.BuildConfig
 import org.iz.navigation.data.*
 import org.iz.navigation.integration.SurveyDayState
 import org.iz.navigation.integration.SurveyHoursInterval
@@ -32,9 +25,6 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.time.LocalDate
-import org.json.JSONArray
-import org.json.JSONObject
-import java.io.File
 
 /** Survey editor follows the existing correction editor callback boundary and the shared survey payload. */
 @RunWith(AndroidJUnit4::class)
@@ -60,15 +50,14 @@ class OsmSurveyEditorUiTest {
 
     private fun show(target: OsmCorrectionElement, initial: MapEditDraft = draft(target),
         onSave: (MapEditDraft) -> Unit = {}, onReview: (MapEditDraft) -> Unit = {}, onPublish: (OsmCorrectionReview) -> Unit = {},
-        readTarget: OsmCorrectionElement = target, reviewTarget: OsmCorrectionElement = target,
-        diagnosticObserver: OsmSurveyEditorDiagnosticObserver? = null) {
+        readTarget: OsmCorrectionElement = target, reviewTarget: OsmCorrectionElement = target) {
         compose.setContent { MaterialTheme {
             OsmSurveyEditor(initial = initial, target = target, today = today,
                 busy = false, canWriteMap = true, authBusy = false, authError = null,
                 liveBaseline = { initial }, liveBusy = { false }, onClose = {}, onSave = onSave,
                 onReadTarget = { readTarget }, onReview = { value -> onReview(value); reviewTarget.review(value, credentials) },
                 isReviewCurrent = { it.credentials === credentials }, onLogin = { error("Unexpected OAuth") },
-                onPublish = onPublish, onNoteFallback = {}, diagnosticObserver = diagnosticObserver)
+                onPublish = onPublish, onNoteFallback = {})
         } }
     }
 
@@ -318,107 +307,39 @@ class OsmSurveyEditorUiTest {
 
     @Test fun oversizedAdvancedPasteIsExplicitlyRejectedWithoutLosingAcceptedText() {
         val accepted = "Mo-Fr 09:00-18:00; PH off"
-        val warning = "Taslak alanı en fazla 8192 karakter olabilir. Son kabul edilen metin korunuyor."
-        val diagnostics = BoundedSurveyProbeCapture()
-        val args = InstrumentationRegistry.getArguments()
-        val capture = if (args.getString("izSurveyPasteDiagnostic") == "one-capture") {
-            check(BuildConfig.DEBUG && BuildConfig.APPLICATION_ID != "org.iz.navigation")
-            check(osmSurveyDiagnosticAllowed()) { "Observer requires the isolated OSM-survey QA namespace" }
-            check(args.getString("izExpectedPackage") == BuildConfig.APPLICATION_ID)
-            val commit = args.getString("izCandidateCommit").orEmpty()
-            check(commit.matches(Regex("[0-9a-f]{40}")))
-            val directory = File(InstrumentationRegistry.getInstrumentation().targetContext.noBackupFilesDir,
-                "qa-osm-survey-paste").apply { check(isDirectory || mkdirs()) }
-            File(directory, "$commit.json").apply { check(!exists()) { "Diagnostic capture already exists" } }
-        } else null
-        fun trace(stage: String) {
-            compose.waitForIdle()
-            val fields = compose.onAllNodesWithTag("osm-survey-hours-advanced").fetchSemanticsNodes()
-            val text = fields.singleOrNull()?.config?.getOrNull(SemanticsProperties.EditableText)?.text
-            val editor = compose.onNodeWithTag("osm-survey-editor-list").fetchSemanticsNode()
-            val range = editor.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange)
-            val focused = compose.onAllNodes(isFocused(), useUnmergedTree = true).fetchSemanticsNodes()
-            val dialogRoot = editor.root
-            val dialogFocused = dialogRoot?.let { root -> focused.count { it.root === root } }
-            val dialogView = (dialogRoot as? ViewRootForTest)?.view
-            val dialogViewHasFocus = compose.runOnIdle { dialogView?.hasFocus() }
-            diagnostics.put(JSONObject().put("stage", stage).put("fieldNodes", fields.size)
-                .put("editableChars", text?.length ?: JSONObject.NULL)
-                .put("matchesAccepted", text?.let { it == accepted } ?: JSONObject.NULL)
-                .put("warningNodes", compose.onAllNodesWithText(warning, useUnmergedTree = true).fetchSemanticsNodes().size)
-                .put("focusedNodes", focused.size).put("dialogFocusedNodes", dialogFocused ?: JSONObject.NULL)
-                .put("dialogFocusCleared", dialogFocused?.let { it == 0 } ?: JSONObject.NULL)
-                .put("dialogViewHasFocus", dialogViewHasFocus ?: JSONObject.NULL)
-                .put("scroll", range?.value?.invoke() ?: JSONObject.NULL)
-                .put("maxScroll", range?.maxValue?.invoke() ?: JSONObject.NULL))
-        }
         var saved: MapEditDraft? = null
-        show(element(accepted), onSave = { saved = it }, diagnosticObserver = diagnostics.takeIf { capture != null })
+        show(element(accepted), onSave = { saved = it })
         node("osm-survey-opening_hours-EDIT").performClick()
+        node("osm-survey-hours-advanced").performTextReplacement("x".repeat(8193))
+        compose.onNodeWithTag("osm-survey-editor-list").performScrollToNode(
+            hasText("Taslak alanı en fazla 8192 karakter olabilir. Son kabul edilen metin korunuyor."))
+        compose.onNodeWithText("Taslak alanı en fazla 8192 karakter olabilir. Son kabul edilen metin korunuyor.")
+            .assertIsDisplayed()
         node("osm-survey-hours-advanced").assertTextContains(accepted)
-        trace("before-8193-replacement")
-        var originalFailure: AssertionError? = null
-        var outcome = "NOT_COMPLETED"
-        try {
-            // Compose ui-test1.8.0 TextActionsKt.getNodeAndFocus + performTextReplacement:
-            // the same checks/focus request and one SetText(AnnotatedString), recording its ignored Boolean.
-            val input = compose.onNodeWithTag("osm-survey-hours-advanced")
-            val beforeFocus = input.fetchSemanticsNode()
-            input.assertIsEnabled().assert(hasRequestFocusAction()).assert(hasSetTextAction())
-                .assert(hasInsertTextAtCursorAction())
-            if (!isFocused().matches(beforeFocus)) input.performSemanticsAction(SemanticsActions.RequestFocus)
-            val proposed = AnnotatedString("x".repeat(8193))
-            input.performSemanticsAction(SemanticsActions.SetText) { action ->
-                diagnostics.put(JSONObject().put("stage", "set-text-invocation")
-                    .put("argumentUtf16Units", proposed.length).put("invocationCount", 1))
-                val result = action(proposed)
-                diagnostics.put(JSONObject().put("stage", "set-text-returned").put("actionBoolean", result))
-            }
-            trace("after-8193-replacement-before-scroll")
-            compose.onNodeWithTag("osm-survey-editor-list").performScrollToNode(hasText(warning))
-            compose.onNodeWithText(warning).assertIsDisplayed()
-            trace("warning-displayed")
-            node("osm-survey-hours-advanced").assertTextContains(accepted)
-            node("osm-survey-save").assertIsEnabled().performClick()
-            compose.runOnIdle { assertEquals(accepted, saved?.surveyObservation()?.hours?.value) }
-            outcome = "PASS"
-        } catch (failure: AssertionError) {
-            originalFailure = failure
-            outcome = "FAIL"
-            // Failure-only probes never convert the original assertion into a pass or retry input.
-            runCatching { trace("original-assertion-failed") }
-            runCatching {
-                compose.onNodeWithTag("osm-survey-editor-list").performScrollToIndex(0)
-                trace("after-explicit-index-zero-focus-unchanged")
-            }.onFailure { diagnostics.put(JSONObject().put("probeFailure", it.javaClass.simpleName)) }
-            runCatching {
-                val dialogRoot = compose.onNodeWithTag("osm-survey-editor-list").fetchSemanticsNode().root
-                val dialogView = requireNotNull((dialogRoot as? ViewRootForTest)?.view)
-                // Use the editor's own Android Compose root, not the parent host's LocalFocusManager.
-                compose.runOnIdle { dialogView.clearFocus() }
-                compose.onNodeWithTag("osm-survey-editor-list").performScrollToIndex(0)
-                check(compose.onNodeWithTag("osm-survey-editor-list").fetchSemanticsNode().root === dialogRoot)
-                trace("after-dialog-clearFocus-attempt-and-explicit-index-zero")
-            }.onFailure { diagnostics.put(JSONObject().put("blurProbeFailure", it.javaClass.simpleName)) }
-            throw AssertionError("${failure.message}\nSURVEY_PASTE_DIAGNOSTICS=$diagnostics", failure)
-        } finally {
-            if (capture != null) runCatching {
-                val encoded = JSONObject().put("schemaVersion", 2)
-                    .put("candidateCommit", args.getString("izCandidateCommit"))
-                    .put("package", BuildConfig.APPLICATION_ID)
-                    .put("method", "OsmSurveyEditorUiTest#oversizedAdvancedPasteIsExplicitlyRejectedWithoutLosingAcceptedText")
-                    .put("operation", "COMPOSE_SEMANTICS_SETTEXT_NOT_CLIPBOARD")
-                    .put("requestedUtf16Units", 8193).put("originalAssertionOutcome", outcome)
-                    .put("capturedAt", System.currentTimeMillis()).put("stages", diagnostics.stages())
-                    .put("editorProbe", diagnostics.probe()).put("saveCallbackObserved", saved != null)
-                    .put("repositorySaveMeasured", false).toString().toByteArray(Charsets.UTF_8)
-                check(encoded.size <= 65_536) { "Diagnostic capture exceeds64KiB" }
-                check(capture.createNewFile()) { "Diagnostic evidence must not be overwritten" }
-                capture.writeBytes(encoded)
-            }.onFailure { captureFailure ->
-                if (originalFailure != null) originalFailure.addSuppressed(captureFailure)
-                else throw AssertionError("Diagnostic capture failed", captureFailure)
-            }
+        node("osm-survey-save").assertIsEnabled().performClick()
+        compose.runOnIdle { assertEquals(accepted, saved?.surveyObservation()?.hours?.value) }
+    }
+
+    @Test fun differentValidHoursAfterOversizedRejectionClearWarningAndSaveExactly() {
+        val accepted = "Mo-Fr 09:00-18:00; PH off"
+        val corrected = "Mo-Fr 10:00-17:00; PH off"
+        val warning = "Taslak alanı en fazla 8192 karakter olabilir. Son kabul edilen metin korunuyor."
+        var saved: MapEditDraft? = null
+        show(element(accepted), onSave = { saved = it })
+        node("osm-survey-opening_hours-EDIT").performClick()
+        node("osm-survey-hours-advanced").performTextReplacement("x".repeat(8193))
+        compose.onNodeWithTag("osm-survey-editor-list").performScrollToNode(hasText(warning))
+        compose.onNodeWithText(warning).assertIsDisplayed()
+        node("osm-survey-hours-advanced").assertTextContains(accepted).performTextReplacement(corrected)
+        compose.onNodeWithTag("osm-survey-editor-list").performScrollToIndex(0)
+        compose.onNodeWithText(warning).assertDoesNotExist()
+        node("osm-survey-hours-advanced").assertTextContains(corrected)
+        node("osm-survey-save").assertIsEnabled().performClick()
+        compose.runOnIdle {
+            val observation = requireNotNull(saved?.surveyObservation())
+            assertEquals(corrected, observation.hours.value)
+            assertEquals(accepted, observation.hours.before)
+            assertEquals(SurveyAction.EDIT, observation.hours.action)
         }
     }
 
@@ -487,59 +408,4 @@ class OsmSurveyEditorUiTest {
         node("osm-survey-review").assertIsEnabled().performClick()
         compose.runOnIdle { assertEquals(13L, reviewed?.surveyObservation()?.baseVersion) }
     }
-}
-
-/** Plain test memory only; a shared limit covers app events and UI/action checkpoints. */
-private class BoundedSurveyProbeCapture : OsmSurveyEditorDiagnosticObserver {
-    private val uiStages = JSONArray()
-    private val editorEvents = JSONArray()
-    private var nextSequence = 0
-    private var recorded = 0
-    private var eventBytes = 0
-    private var dropped = 0
-    private var collectorFailure = false
-    private var installed = false
-
-    private fun state(value: OsmSurveyEditorDiagnosticState?): Any = value?.let {
-        JSONObject().put("hoursChars", it.hoursChars ?: JSONObject.NULL)
-            .put("wheelchairChars", it.wheelchairChars ?: JSONObject.NULL)
-            .put("action", it.action?.name ?: JSONObject.NULL).put("simple", it.simple).put("locked", it.locked)
-            .put("error", it.error.name).put("displayedError", it.displayedError.name)
-    } ?: JSONObject.NULL
-
-    private fun append(array: JSONArray, value: JSONObject) {
-        value.put("captureSequence", ++nextSequence)
-        val bytes = value.toString().toByteArray(Charsets.UTF_8).size + 1
-        // Reserve8KiB for fixed capture metadata and limit flags; final file also has an exact64KiB check.
-        if (recorded >= 128 || eventBytes + bytes > 56 * 1024) { dropped++; return }
-        array.put(value)
-        recorded++
-        eventBytes += bytes
-    }
-
-    @Synchronized fun put(value: JSONObject) {
-        try { append(uiStages, value) } catch (_: Throwable) { collectorFailure = true }
-    }
-
-    @Synchronized override fun record(event: OsmSurveyEditorDiagnosticEvent) {
-        try {
-            if (event.stage == SurveyDiagnosticStage.EDITOR_MOUNT) installed = true
-            append(editorEvents, JSONObject().put("editorInstance", event.editorInstance)
-                .put("editorSequence", event.sequence).put("stage", event.stage.name)
-                .put("fieldInstance", event.fieldInstance ?: JSONObject.NULL)
-                .put("incomingHoursChars", event.incomingHoursChars ?: JSONObject.NULL)
-                .put("origin", if (event.fieldInstance == null) "OTHER" else "ADVANCED")
-                .put("before", state(event.before)).put("state", state(event.state))
-                .put("reason", event.reason?.name ?: JSONObject.NULL)
-                .put("payloadChanged", event.payloadChanged ?: JSONObject.NULL)
-                .put("composedWarning", event.composedWarning?.name ?: JSONObject.NULL))
-        } catch (_: Throwable) { collectorFailure = true }
-    }
-
-    @Synchronized fun stages(): JSONArray = JSONArray(uiStages.toString())
-    @Synchronized fun probe(): JSONObject = JSONObject().put("installed", installed)
-        .put("overflow", dropped != 0).put("droppedEvents", dropped).put("collectorFailure", collectorFailure)
-        .put("recordedEvents", recorded).put("maxEvents", 128).put("maxCaptureBytes", 65_536)
-        .put("events", JSONArray(editorEvents.toString()))
-    @Synchronized override fun toString(): String = uiStages.toString()
 }
