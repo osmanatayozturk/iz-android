@@ -67,6 +67,23 @@ class SharedTargetPreviewUiTest {
         compose.onNodeWithTag("shared-start").performClick().assertIsNotEnabled()
         compose.runOnIdle { assertEquals(listOf(true), starts) }
     }
+    @Test fun sharedVehicleSelectionMarkMovesAndPreviewStillRequiresExplicitAction() {
+        show()
+        options("quick-mode-CAR").assertIsSelected().assertHeightIsAtLeast(48.dp)
+        compose.onNodeWithTag("quick-mode-selected-CAR", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag("quick-mode-selected-MOTORCYCLE", useUnmergedTree = true).assertDoesNotExist()
+        options("quick-mode-MOTORCYCLE").performClick().assertIsSelected().assertHeightIsAtLeast(48.dp)
+        compose.onNodeWithTag("quick-mode-selected-MOTORCYCLE", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag("quick-mode-selected-CAR", useUnmergedTree = true).assertDoesNotExist()
+        options("quick-mode-CAR").assertIsNotSelected()
+        compose.onNodeWithTag("shared-start").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(0, locations); assertEquals(0, plans); assertTrue(starts.isEmpty()) }
+        compose.onNodeWithTag("shared-preview").performClick()
+        compose.onNodeWithTag("shared-start").assertIsEnabled()
+        compose.runOnIdle { assertEquals(1, plans); assertTrue(starts.isEmpty()) }
+        compose.onNodeWithTag("shared-start").performClick()
+        compose.runOnIdle { assertEquals(listOf(Transport.MOTORCYCLE), startedModes); assertEquals(listOf(true), starts) }
+    }
     @Test fun activeMotorcycleRecordingRequiresMatchingVehicleBeforePreviewWithoutAutoStarting() {
         val active = NavigationState(recording = true, sessionTransport = Transport.MOTORCYCLE,
             sessionId = "synthetic-active-motorcycle")

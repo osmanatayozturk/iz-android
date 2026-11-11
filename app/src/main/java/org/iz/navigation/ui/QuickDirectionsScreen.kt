@@ -9,6 +9,7 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -460,9 +461,23 @@ private fun QuickModePicker(destination: RouteStop, nav: NavigationState, choice
         item {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 transportDisplayOrder.forEach { mode ->
+                    val visiblySelected = shared && selectedMode == mode
                     OutlinedButton({ onMode(mode) }, enabled = !busy && nav.canQuickStart(mode),
+                        colors = if (visiblySelected) ButtonDefaults.outlinedButtonColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
+                        else ButtonDefaults.outlinedButtonColors(),
+                        border = if (visiblySelected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+                            else ButtonDefaults.outlinedButtonBorder,
                         modifier = Modifier.heightIn(min = 48.dp).testTag("quick-mode-${mode.name}")
                             .semantics { selected = selectedMode == mode }) {
+                        if (shared) {
+                            Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) {
+                                if (visiblySelected) Icon(Icons.Outlined.Check, null, Modifier.size(20.dp)
+                                    .testTag("quick-mode-selected-${mode.name}"))
+                            }
+                            Spacer(Modifier.width(6.dp))
+                        }
                         Icon(mode.icon(), null, Modifier.size(20.dp))
                         Spacer(Modifier.width(6.dp))
                         Text(mode.label())
