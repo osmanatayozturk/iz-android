@@ -60,14 +60,15 @@ class OsmSurveyEditorUiTest {
 
     private fun show(target: OsmCorrectionElement, initial: MapEditDraft = draft(target),
         onSave: (MapEditDraft) -> Unit = {}, onReview: (MapEditDraft) -> Unit = {}, onPublish: (OsmCorrectionReview) -> Unit = {},
-        readTarget: OsmCorrectionElement = target, reviewTarget: OsmCorrectionElement = target) {
+        readTarget: OsmCorrectionElement = target, reviewTarget: OsmCorrectionElement = target,
+        diagnosticObserver: OsmSurveyEditorDiagnosticObserver? = null) {
         compose.setContent { MaterialTheme {
             OsmSurveyEditor(initial = initial, target = target, today = today,
                 busy = false, canWriteMap = true, authBusy = false, authError = null,
                 liveBaseline = { initial }, liveBusy = { false }, onClose = {}, onSave = onSave,
                 onReadTarget = { readTarget }, onReview = { value -> onReview(value); reviewTarget.review(value, credentials) },
                 isReviewCurrent = { it.credentials === credentials }, onLogin = { error("Unexpected OAuth") },
-                onPublish = onPublish, onNoteFallback = {})
+                onPublish = onPublish, onNoteFallback = {}, diagnosticObserver = diagnosticObserver)
         } }
     }
 
@@ -318,10 +319,11 @@ class OsmSurveyEditorUiTest {
     @Test fun oversizedAdvancedPasteIsExplicitlyRejectedWithoutLosingAcceptedText() {
         val accepted = "Mo-Fr 09:00-18:00; PH off"
         val warning = "Taslak alanı en fazla 8192 karakter olabilir. Son kabul edilen metin korunuyor."
-        val diagnostics = JSONArray()
+        val diagnostics = BoundedSurveyProbeCapture()
         val args = InstrumentationRegistry.getArguments()
         val capture = if (args.getString("izSurveyPasteDiagnostic") == "one-capture") {
             check(BuildConfig.DEBUG && BuildConfig.APPLICATION_ID != "org.iz.navigation")
+            check(osmSurveyDiagnosticAllowed()) { "Observer requires the isolated OSM-survey QA namespace" }
             check(args.getString("izExpectedPackage") == BuildConfig.APPLICATION_ID)
             val commit = args.getString("izCandidateCommit").orEmpty()
             check(commit.matches(Regex("[0-9a-f]{40}")))
@@ -351,7 +353,7 @@ class OsmSurveyEditorUiTest {
                 .put("maxScroll", range?.maxValue?.invoke() ?: JSONObject.NULL))
         }
         var saved: MapEditDraft? = null
-        show(element(accepted), onSave = { saved = it })
+        show(element(accepted), onSave = { saved = it }, diagnosticObserver = diagnostics.takeIf { capture != null })
         node("osm-survey-opening_hours-EDIT").performClick()
         node("osm-survey-hours-advanced").assertTextContains(accepted)
         trace("before-8193-replacement")
@@ -401,13 +403,18 @@ class OsmSurveyEditorUiTest {
             throw AssertionError("${failure.message}\nSURVEY_PASTE_DIAGNOSTICS=$diagnostics", failure)
         } finally {
             if (capture != null) runCatching {
-                check(capture.createNewFile()) { "Diagnostic evidence must not be overwritten" }
-                capture.writeText(JSONObject().put("candidateCommit", args.getString("izCandidateCommit"))
+                val encoded = JSONObject().put("schemaVersion", 2)
+                    .put("candidateCommit", args.getString("izCandidateCommit"))
                     .put("package", BuildConfig.APPLICATION_ID)
                     .put("method", "OsmSurveyEditorUiTest#oversizedAdvancedPasteIsExplicitlyRejectedWithoutLosingAcceptedText")
                     .put("operation", "COMPOSE_SEMANTICS_SETTEXT_NOT_CLIPBOARD")
                     .put("requestedUtf16Units", 8193).put("originalAssertionOutcome", outcome)
-                    .put("capturedAt", System.currentTimeMillis()).put("stages", diagnostics).toString())
+                    .put("capturedAt", System.currentTimeMillis()).put("stages", diagnostics.stages())
+                    .put("editorProbe", diagnostics.probe()).put("saveCallbackObserved", saved != null)
+                    .put("repositorySaveMeasured", false).toString().toByteArray(Charsets.UTF_8)
+                check(encoded.size <= 65_536) { "Diagnostic capture exceeds64KiB" }
+                check(capture.createNewFile()) { "Diagnostic evidence must not be overwritten" }
+                capture.writeBytes(encoded)
             }.onFailure { captureFailure ->
                 if (originalFailure != null) originalFailure.addSuppressed(captureFailure)
                 else throw AssertionError("Diagnostic capture failed", captureFailure)
@@ -480,4 +487,59 @@ class OsmSurveyEditorUiTest {
         node("osm-survey-review").assertIsEnabled().performClick()
         compose.runOnIdle { assertEquals(13L, reviewed?.surveyObservation()?.baseVersion) }
     }
+}
+
+/** Plain test memory only; a shared limit covers app events and UI/action checkpoints. */
+private class BoundedSurveyProbeCapture : OsmSurveyEditorDiagnosticObserver {
+    private val uiStages = JSONArray()
+    private val editorEvents = JSONArray()
+    private var nextSequence = 0
+    private var recorded = 0
+    private var eventBytes = 0
+    private var dropped = 0
+    private var collectorFailure = false
+    private var installed = false
+
+    private fun state(value: OsmSurveyEditorDiagnosticState?): Any = value?.let {
+        JSONObject().put("hoursChars", it.hoursChars ?: JSONObject.NULL)
+            .put("wheelchairChars", it.wheelchairChars ?: JSONObject.NULL)
+            .put("action", it.action?.name ?: JSONObject.NULL).put("simple", it.simple).put("locked", it.locked)
+            .put("error", it.error.name).put("displayedError", it.displayedError.name)
+    } ?: JSONObject.NULL
+
+    private fun append(array: JSONArray, value: JSONObject) {
+        value.put("captureSequence", ++nextSequence)
+        val bytes = value.toString().toByteArray(Charsets.UTF_8).size + 1
+        // Reserve8KiB for fixed capture metadata and limit flags; final file also has an exact64KiB check.
+        if (recorded >= 128 || eventBytes + bytes > 56 * 1024) { dropped++; return }
+        array.put(value)
+        recorded++
+        eventBytes += bytes
+    }
+
+    @Synchronized fun put(value: JSONObject) {
+        try { append(uiStages, value) } catch (_: Throwable) { collectorFailure = true }
+    }
+
+    @Synchronized override fun record(event: OsmSurveyEditorDiagnosticEvent) {
+        try {
+            if (event.stage == SurveyDiagnosticStage.EDITOR_MOUNT) installed = true
+            append(editorEvents, JSONObject().put("editorInstance", event.editorInstance)
+                .put("editorSequence", event.sequence).put("stage", event.stage.name)
+                .put("fieldInstance", event.fieldInstance ?: JSONObject.NULL)
+                .put("incomingHoursChars", event.incomingHoursChars ?: JSONObject.NULL)
+                .put("origin", if (event.fieldInstance == null) "OTHER" else "ADVANCED")
+                .put("before", state(event.before)).put("state", state(event.state))
+                .put("reason", event.reason?.name ?: JSONObject.NULL)
+                .put("payloadChanged", event.payloadChanged ?: JSONObject.NULL)
+                .put("composedWarning", event.composedWarning?.name ?: JSONObject.NULL))
+        } catch (_: Throwable) { collectorFailure = true }
+    }
+
+    @Synchronized fun stages(): JSONArray = JSONArray(uiStages.toString())
+    @Synchronized fun probe(): JSONObject = JSONObject().put("installed", installed)
+        .put("overflow", dropped != 0).put("droppedEvents", dropped).put("collectorFailure", collectorFailure)
+        .put("recordedEvents", recorded).put("maxEvents", 128).put("maxCaptureBytes", 65_536)
+        .put("events", JSONArray(editorEvents.toString()))
+    @Synchronized override fun toString(): String = uiStages.toString()
 }
