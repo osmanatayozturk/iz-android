@@ -37,6 +37,7 @@ class OsmPlaces(context: Context) {
     private val settings = OsmServiceSettings(app)
     private val preferences = app.getSharedPreferences("osm_read_limits", Context.MODE_PRIVATE)
     private val cacheDirectory = File(app.cacheDir, "osm_place_queries")
+    private val surveyCacheDirectory = File(app.cacheDir, "osm_survey_queries")
     private val overpassRead = OverpassRead(
         readBudget = { OsmReadBudget.fromJson(preferences.getString("overpass_budget", null)) },
         writeBudget = { preferences.edit().putString("overpass_budget", it.toJson()).commit() },
@@ -59,6 +60,24 @@ class OsmPlaces(context: Context) {
         execute = { query, endpoint -> performOverpass(query, endpoint) },
     )
     private val directionsSearch = DirectionsPlaceSearch(nominatimSearch, partialNameSearch)
+    private val surveySearch = OsmSurveySearch(
+        mutex = overpassLock, endpoint = { settings.read().overpass },
+        readCached = ::cachedSurveyJson,
+        writeCache = { key, json -> storeCacheIn(surveyCacheDirectory, key, json) },
+        execute = { query, endpoint -> performOverpass(query, endpoint) },
+    )
+
+    internal suspend fun cachedSurvey(accountKey: String?): OsmSurveySnapshot? = withContext(Dispatchers.IO) {
+        surveySearch.cachedSurvey(accountKey)
+    }
+
+    internal suspend fun surveyNearby(
+        origin: WeatherCoordinate,
+        accountKey: String?,
+        isCurrent: () -> Boolean,
+    ): OsmSurveySnapshot = withContext(Dispatchers.IO) {
+        surveySearch.surveyNearby(origin, accountKey, isCurrent)
+    }
 
     suspend fun search(query: String): List<SelectedOsmPlace> = withContext(Dispatchers.IO) {
         nominatimSearch.search(query)
@@ -126,20 +145,26 @@ class OsmPlaces(context: Context) {
         overpassRead.query(query, endpoint)
     private fun cachedJson(key: String, maxAge: Long): String? =
         readValidCachedJson(File(cacheDirectory, cacheKey(key)), System.currentTimeMillis(), maxAge)
+    private fun cachedSurveyJson(key: String): String? = runCatching {
+        val file = File(surveyCacheDirectory, cacheKey(key))
+        if (!file.isFile || file.length() !in 1..MAX_SURVEY_CACHE_BYTES.toLong()) null else file.readText()
+    }.getOrNull()
     private fun cached(key: String, maxAge: Long, parse: (String) -> List<SelectedOsmPlace>): List<SelectedOsmPlace>? =
         readValidCachedPlaces(File(cacheDirectory, cacheKey(key)), System.currentTimeMillis(), maxAge, parse)
 
     private fun storeCache(key: String, json: String) {
-        runCatching {
-            cacheDirectory.mkdirs()
-            val target = File(cacheDirectory, cacheKey(key))
-            val temporary = File(cacheDirectory, "${target.name}.${UUID.randomUUID()}.tmp")
-            try {
-                temporary.writeText(json)
-                Files.move(temporary.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
-            } finally { temporary.delete() }
-            cacheDirectory.listFiles()?.sortedByDescending { it.lastModified() }?.drop(128)?.forEach { it.delete() }
-        }
+        runCatching { storeCacheIn(cacheDirectory, key, json) }
+    }
+
+    private fun storeCacheIn(directory: File, key: String, json: String) {
+        check(directory.isDirectory || directory.mkdirs())
+        val target = File(directory, cacheKey(key))
+        val temporary = File(directory, "${target.name}.${UUID.randomUUID()}.tmp")
+        try {
+            temporary.writeText(json)
+            Files.move(temporary.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+        } finally { temporary.delete() }
+        directory.listFiles()?.sortedByDescending { it.lastModified() }?.drop(128)?.forEach { it.delete() }
     }
 
     companion object {

@@ -80,7 +80,9 @@ class StreamingBackupZipTest {
                 surveyConfirmed = true, status = MapEditStatus.SENDING, stage = MapEditStage.UPDATE_ELEMENT,
                 targetType = OsmType.WAY, targetId = 17L, reviewedVersion = 8L, reviewedFingerprint = "c".repeat(64),
                 submittedAt = 2_000, submittedBy = 3L, changesetId = 11L,
-                localAttemptId = "fixture-export-attempt", localChangesetCreated = true)
+                localAttemptId = "fixture-export-attempt", localChangesetCreated = true,
+                surveyPayload = SurveyObservation(8, "2024-02-29", hours = SurveyFieldObservation(SurveyAction.EDIT, "raw invalid advanced text", false),
+                    wheelchair = SurveyFieldObservation(SurveyAction.UNKNOWN)).encode())
             val recovered = correction.copy(status = MapEditStatus.UNKNOWN, localAttemptId = null, localChangesetCreated = false)
 
             database.withTransaction {
@@ -139,7 +141,7 @@ class StreamingBackupZipTest {
                     val decoded = ZipFile(destination).use { zip ->
                         val entry = zip.getEntry("manifest.json") ?: error("Missing manifest.json")
                         val json = JSONObject(zip.getInputStream(entry).bufferedReader(Charsets.UTF_8).use { it.readText() })
-                        assertEquals(9, json.getInt("version"))
+                        assertEquals(10, json.getInt("version"))
                         val mapEdit = json.getJSONArray("mapEdits").getJSONObject(0)
                         assertTrue(!mapEdit.has("localAttemptId") && !mapEdit.has("localChangesetCreated"))
                         BackupJson.decode(json)

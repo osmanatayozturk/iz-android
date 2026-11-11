@@ -413,7 +413,7 @@ class OsmMapCorrectionTest {
 
         fun restoreFromZip(sent: MapEditDraft): MapEditDraft {
             val manifest = BackupJson.encode(DiarySnapshot(mapEdits = listOf(sent)))
-            assertEquals(9, manifest.getInt("version"))
+            assertEquals(10, manifest.getInt("version"))
             val row = manifest.getJSONArray("mapEdits").getJSONObject(0)
             assertFalse(row.has("localAttemptId"))
             assertFalse(row.has("localChangesetCreated"))

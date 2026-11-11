@@ -44,6 +44,7 @@ fun MapEditPage(
     initialCorrection: Place? = null,
     initialDraftId: String? = null,
     startNew: Boolean = false,
+    startSurvey: Boolean = false,
     onNoteFallback: (Place) -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -53,6 +54,7 @@ fun MapEditPage(
     val auth = remember { OsmAuthManager.get(context) }
     val settings = remember { OsmServiceSettings(context) }
     val controller = remember { OsmMapEditController(repository, auth) { settings.read().overpass } }
+    val surveyReads = LocalOsmSurveyReads.current
     val session by auth.state.collectAsStateWithLifecycle()
     val liveSession by auth.communitySessionSource.sessions.collectAsStateWithLifecycle()
     val isCorrectionReviewCurrent = remember(auth, session, liveSession, auth.currentCredentials()) {
@@ -100,6 +102,26 @@ fun MapEditPage(
                 unsupportedEntry = true
                 correctionEntryHandled = true
                 return@action "Bu mekân için doğrudan düzeltme açılamadı."
+            }
+            if (startSurvey) {
+                val owner = auth.currentCredentials()
+                val accountId = auth.state.value.user?.id
+                fun current() = !auth.state.value.busy && auth.currentCredentials() === owner &&
+                    auth.state.value.user?.id == accountId && (history == null || history.current.key == entryKey)
+                if (!current()) return@action "OSM hesabı veya ekran değişti. Yeniden aç."
+                val opened = try {
+                    openSurveyDraftEntry(repository, place, correctionEntryId, accountId, ::current,
+                        readTarget = surveyReads?.target ?: controller::readCorrectionTarget)
+                } catch (_: OsmUnsupportedCorrection) {
+                    unsupportedEntry = true
+                    correctionEntryHandled = true
+                    return@action "Bu OSM kaydı için İz'de doğrudan düzeltme kullanılamıyor."
+                }
+                initialTarget = opened.target
+                correctionEntryHandled = true
+                editorMessage = null
+                editingId = opened.draft.id
+                return@action "Yerinde gözlem taslağı açıldı."
             }
             val existing = repository.getMapEdit(correctionEntryId)
             if (existing == null) {
@@ -259,7 +281,24 @@ fun MapEditPage(
             "OSM hesabında harita düzenleme iznini onayla. Dönüşte önizlemeden yayımlayabilirsin."
         }
     }
-    if (editing?.targetType != null) MapEditCorrectionEditor(
+    if (editing?.surveyPayload != null && editing.targetType != null) OsmSurveyEditor(
+        initial = editing.editableCopy(), target = initialTarget?.takeIf { it.ref == editing.correctionRef() },
+        busy = busy, canWriteMap = session.canWriteMap, authBusy = session.busy, authError = editorMessage ?: session.error,
+        liveBaseline = { drafts.firstOrNull { it.id == editing.id && it.status in setOf(MapEditStatus.DRAFT, MapEditStatus.FAILED) }
+            ?.editableCopy() ?: editing.editableCopy() },
+        liveBusy = { busy || auth.state.value.busy }, onClose = { editingId = null },
+        onSave = { draft -> action { saveEditableDraft(draft); editingId = null; "Taslak saklandı." } },
+        onReadTarget = { ref -> osmReady?.await(); surveyReads?.target?.invoke(ref) ?: controller.readCorrectionTarget(ref) },
+        onReview = { draft -> osmReady?.await(); editorMessage = null; saveEditableDraft(draft); controller.previewCorrection(draft) },
+        isReviewCurrent = isCorrectionReviewCurrent, onLogin = ::login,
+        onPublish = { review -> action {
+            val result = controller.sendCorrection(review)
+            editorMessage = result.message.takeUnless { result.success }
+            if (result.success || repository.getMapEdit(review.draft.id)?.status !in setOf(MapEditStatus.DRAFT, MapEditStatus.FAILED)) editingId = null
+            result.message
+        } },
+        onNoteFallback = onNoteFallback,
+    ) else if (editing?.targetType != null) MapEditCorrectionEditor(
         initial = editing.editableCopy(), target = initialTarget?.takeIf { it.ref == editing.correctionRef() },
         busy = busy, canWriteMap = session.canWriteMap, authBusy = session.busy, authError = editorMessage ?: session.error,
         liveBaseline = { drafts.firstOrNull { it.id == editing.id && it.status in setOf(MapEditStatus.DRAFT, MapEditStatus.FAILED) }
@@ -395,7 +434,7 @@ internal fun MapEditEditor(initial: MapEditDraft, busy: Boolean, canWriteMap: Bo
                     TextButton(onClick = { preview = false; reviewed = false }, enabled = !locked) { Text("Düzenlemeye dön") }
                 } else {
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        MapPlacePreset.entries.forEach { option -> FilterChip(preset == option, { preset = option; survey = false }, { Text(option.label) }, enabled = !locked) }
+                        MapPlacePreset.entries.filter { it.canCreate }.forEach { option -> FilterChip(preset == option, { preset = option; survey = false }, { Text(option.label) }, enabled = !locked) }
                     }
                     OutlinedTextField(name, { name = it; survey = false }, label = { Text("Gerçek adı (varsa)") },
                         supportingText = { Text("Adı olmayan yer için boş bırak. En fazla 255 karakter.") }, isError = name.codePointCount(0, name.length) > 255,

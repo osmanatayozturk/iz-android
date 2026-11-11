@@ -5,11 +5,22 @@ import org.iz.navigation.data.MapPlacePreset
 import org.iz.navigation.data.OsmRef
 import org.iz.navigation.data.OsmType
 import org.iz.navigation.data.validateMapEditForPublish
+import org.iz.navigation.data.publicChanges
+import org.iz.navigation.data.surveyObservation
 import java.util.Locale
 import okio.ByteString.Companion.encodeUtf8
 import org.w3c.dom.Element
 
 internal class OsmUnsupportedCorrection : IllegalArgumentException()
+
+internal fun osmCorrectionPreset(type: OsmType, nodeRefs: List<Long>, tags: Map<String, String>): MapPlacePreset {
+    if (type != OsmType.NODE && type != OsmType.WAY) throw OsmUnsupportedCorrection()
+    if (type == OsmType.WAY && (tags["area"] == "no" || nodeRefs.size < 4 ||
+            nodeRefs.first() != nodeRefs.last() || nodeRefs.dropLast(1).toSet().size != nodeRefs.size - 1)) {
+        throw OsmUnsupportedCorrection()
+    }
+    return MapPlacePreset.entries.singleOrNull { tags[it.key] == it.value } ?: throw OsmUnsupportedCorrection()
+}
 
 internal fun OsmType.apiName() = name.lowercase(Locale.ROOT)
 
@@ -37,19 +48,21 @@ internal data class OsmCorrectionElement(
     val nodeRefs: List<Long>,
     val tags: Map<String, String>,
 ) {
-    fun preset(): MapPlacePreset {
-        if (ref.type == OsmType.WAY && (tags["area"] == "no" || nodeRefs.size < 4 || nodeRefs.first() != nodeRefs.last() ||
-                nodeRefs.dropLast(1).toSet().size != nodeRefs.size - 1)) throw OsmUnsupportedCorrection()
-        return MapPlacePreset.entries.singleOrNull { tags[it.key] == it.value } ?: throw OsmUnsupportedCorrection()
-    }
+    fun preset(): MapPlacePreset = osmCorrectionPreset(ref.type, nodeRefs, tags)
 
     fun review(draft: MapEditDraft, credentials: OsmCredentials): OsmCorrectionReview {
         validateMapEditForPublish(draft)
         require(ref == draft.correctionRef())
         if (preset() != draft.preset) throw OsmUnsupportedCorrection()
         require(version < Long.MAX_VALUE)
-        val fields = listOf("name" to draft.name, "addr:street" to draft.street, "addr:housenumber" to draft.houseNumber)
+        val nameFields = listOf("name" to draft.name, "addr:street" to draft.street, "addr:housenumber" to draft.houseNumber)
             .map { (key, input) -> OsmCorrectionField(key, tags[key], input.trim().ifEmpty { tags[key] }) }
+        val observation = draft.surveyObservation()
+        val surveyFields = observation?.let {
+            require(it.baseVersion == version) { "OSM mekânı değişti. Yeniden incele." }
+            it.publicChanges(tags).map { (key, value) -> OsmCorrectionField(key, tags[key], value) }
+        }.orEmpty()
+        val fields = nameFields + surveyFields
         require(fields.any { it.before != it.after }) { "En az bir bilgiyi değiştir." }
         val corrected = copy(tags = tags + fields.mapNotNull { field -> field.after?.let { field.key to it } })
         return OsmCorrectionReview(draft, this, corrected, credentials, fields)

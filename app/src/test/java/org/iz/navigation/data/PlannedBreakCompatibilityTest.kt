@@ -17,7 +17,7 @@ class PlannedBreakCompatibilityTest {
     @Test fun savedPlanAndBackupEightRoundTripOptionalBreakMetadata() {
         val plan=SavedRoutePlan(id="break-plan",name="Break",stops=stops(),transport=Transport.CAR,createdAt=10)
         val encoded=BackupJson.encode(DiarySnapshot(savedPlans=listOf(plan)))
-        assertEquals(9, encoded.getInt("version"))
+        assertEquals(10, encoded.getInt("version"))
         assertEquals(1200,BackupJson.decode(encoded).savedPlans.single().stops[1].plannedBreakSeconds)
         encoded.getJSONArray("savedPlans").getJSONObject(0).getJSONArray("stops").getJSONObject(1).remove("plannedBreakSeconds")
         assertEquals(0,BackupJson.decode(encoded).savedPlans.single().stops[1].plannedBreakSeconds)

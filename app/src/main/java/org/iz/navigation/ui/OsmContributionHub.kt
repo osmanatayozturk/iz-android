@@ -54,6 +54,7 @@ internal fun OsmContributionHub(
     onPlaceResult: (MapEditDraft) -> Unit,
     onGpsHistory: () -> Unit,
     onManageNotes: (() -> Unit)? = null,
+    onSurvey: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val auth = remember(context) { OsmAuthManager.get(context) }
@@ -81,7 +82,7 @@ internal fun OsmContributionHub(
     OsmContributionHubContent(rows, history, canRefresh = historySession != null,
         onClose = onClose, onNewNote = onNewNote, onNewPlace = onNewPlace,
         onPickExistingPlace = onPickExistingPlace, onGps = onGps, onGpsHistory = onGpsHistory,
-        onRefresh = { refreshRevision++ }, onManageNotes = onManageNotes, onOpen = { row ->
+        onRefresh = { refreshRevision++ }, onManageNotes = onManageNotes, onSurvey = onSurvey, onOpen = { row ->
             val current = session != null && auth.currentGpxSession() === session
             when (row) {
                 is OsmContributionHubRow.Note -> if (row.draft.status == ContributionStatus.DRAFT || current) {
@@ -111,6 +112,7 @@ internal fun OsmContributionHubContent(
     onRefresh: () -> Unit,
     onOpen: (OsmContributionHubRow) -> Unit,
     onManageNotes: (() -> Unit)? = null,
+    onSurvey: () -> Unit = {},
 ) {
     Column(Modifier.fillMaxSize().testTag("osm-contribution-hub")) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
@@ -125,6 +127,7 @@ internal fun OsmContributionHubContent(
             item { ContributionHubAction("Harita notu yaz", "new-note", onNewNote) }
             item { ContributionHubAction("Yeni mekân ekle", "new-place", onNewPlace) }
             item { ContributionHubAction("Mevcut mekânı düzelt", "existing-place", onPickExistingPlace) }
+            item { ContributionHubAction("Yerinde tamamla", "survey", onSurvey) }
             item { ContributionHubAction("GPS izi gönder", "gps", onGps) }
             item { ContributionHubAction("Yüklenenler", "uploads", onGpsHistory) }
             item {

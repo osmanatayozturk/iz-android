@@ -23,7 +23,7 @@ class BackupMapCorrectionTest {
 
     @Test fun correctionRoundTripsAndAnInterruptedAttemptKeepsItsProofWithoutResending() {
         val json = BackupJson.encode(DiarySnapshot(mapEdits = listOf(sending)))
-        assertEquals(9, json.getInt("version"))
+        assertEquals(10, json.getInt("version"))
         assertEquals(sending.copy(status = MapEditStatus.UNKNOWN), BackupJson.decode(json).mapEdits.single())
         val sent = sending.copy(status = MapEditStatus.SENT, stage = MapEditStage.CLOSE_CHANGESET, appliedVersion = 4L)
         assertEquals(sent, BackupJson.decode(BackupJson.encode(DiarySnapshot(mapEdits = listOf(sent)))).mapEdits.single())

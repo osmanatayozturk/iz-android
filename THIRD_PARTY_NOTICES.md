@@ -27,6 +27,7 @@ Upstream licenses and notices continue to apply to each dependency.
 | Google Play Services Location and Wearable client libraries | Android Software Development Kit License; proprietary dependencies |
 | JUnit 4 (test dependency) | EPL-1.0 |
 | JSON-java (test dependency) | Public domain as declared by its upstream release |
+| OpeningHoursParser 0.29.0 (`ch.poole:OpeningHoursParser:0.29.0`) | MIT; copyright Simon Poole. Full license is packaged in `app/src/main/assets/licenses/OpeningHoursParser-0.29.0-MIT.txt`. |
 
 Relevant upstream notices and terms:
 
@@ -35,6 +36,7 @@ Relevant upstream notices and terms:
 - [MapLibre Native license](https://github.com/maplibre/maplibre-native/blob/main/LICENSE.md)
 - [Google Android SDK terms](https://developer.android.com/studio/terms)
 - [PGlite source and licenses](https://github.com/electric-sql/pglite)
+- [OpeningHoursParser 0.29.0 source and MIT license](https://github.com/simonpoole/OpeningHoursParser/tree/0.29.0)
 
 The phone preview APK is distributed through GitHub Releases together with
 license notices and version-specific dependency source materials. The original

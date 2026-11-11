@@ -73,6 +73,9 @@ internal fun OsmMapView(
     onMapDisposing: (MapLibreMap) -> Unit = {},
 ) {
     val context = LocalContext.current
+    val presentation = LocalOsmMapPresentation.current
+    val renderedStyle = remember(styleJson, presentation) { presentation?.style?.invoke(styleJson) ?: styleJson }
+    val observeReady by rememberUpdatedState(presentation?.onReady)
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val registry = LocalSaveableStateRegistry.current
     val savedKey = rememberSaveable { "osm-map-${UUID.randomUUID()}" }
@@ -83,7 +86,7 @@ internal fun OsmMapView(
     val attributionClick by rememberUpdatedState(onAttributionClick)
     val touchActive by rememberUpdatedState(onMapTouchActive)
     val mapDisposing by rememberUpdatedState(onMapDisposing)
-    val mapView = remember(context, styleJson) {
+    val mapView = remember(context, renderedStyle) {
         OsmMapRuntime.initialize(context)
         MapView(context, MapLibreMapOptions.createFromAttributes(context)
             .setPrefetchZoomDelta(0).attributionEnabled(false).logoEnabled(false)
@@ -122,11 +125,12 @@ internal fun OsmMapView(
             map.setMaxZoomPreference(19.0)
             map.addOnMapClickListener { coordinate -> click(map, GeoCoordinate(coordinate.latitude, coordinate.longitude)) }
             map.addOnMapLongClickListener { coordinate -> longClick(GeoCoordinate(coordinate.latitude, coordinate.longitude)); true }
-            map.setStyle(Style.Builder().fromJson(styleJson)) {
+            map.setStyle(Style.Builder().fromJson(renderedStyle)) {
                 if (active) {
                     fps?.let { mapView.setMaximumFps(it.coerceIn(1, 30)) }
                     ownedMap = map
                     ready(map)
+                    observeReady?.invoke(map)
                 }
             }
         }

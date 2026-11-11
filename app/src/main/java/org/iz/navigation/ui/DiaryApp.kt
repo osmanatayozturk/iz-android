@@ -163,6 +163,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     var communityAccountId by rememberSaveable { mutableStateOf<Long?>(null) }
     var contributionHub by navigator.pageFlag(UiPage.OSM_ACTIONS)
     var mapEditsPage by navigator.pageFlag(UiPage.MAP_EDITS)
+    var surveyPage by navigator.pageFlag(UiPage.OSM_SURVEY)
     var correctionPicker by rememberUiEntryState<Boolean>(history) { false }
     val correctionTargetState = rememberUiEntryState<Place?>(history) { null }
     val correctionTarget by correctionTargetState
@@ -468,7 +469,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
         history.prune { row -> when (row.page) {
             UiPage.JOURNEY -> row.entityId in journeys
             UiPage.PLACE -> row.entityId in places
-            UiPage.COMMUNITY, UiPage.MAP_EDITS ->
+            UiPage.COMMUNITY, UiPage.MAP_EDITS, UiPage.OSM_SURVEY ->
                 account.busy || row.accountKey == null || row.accountKey == account.user?.id?.toString()
             else -> true
         } }
@@ -530,11 +531,12 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
         } else null
         openMapNote(location, place.id.takeIf { id -> state.places.any { it.id == id } })
     }
-    fun openCorrection(place: Place) {
+    fun openCorrection(place: Place, survey: Boolean = false) {
         val placeId = place.id.takeIf { id -> state.places.any { it.id == id } }
         exitGuard.requestExit {
             exitGuard.update(null)
-            val entry = history.push(UiPage.MAP_EDITS, placeId?.let { "place:$it" })
+            val target = if (survey) placeId?.let { "survey-place:$it" } ?: "survey" else placeId?.let { "place:$it" }
+            val entry = history.push(UiPage.MAP_EDITS, target)
             if (placeId == null) correctionTargetState.setForEntry(entry.key, place)
         }
     }
@@ -670,7 +672,14 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     onPlaceResult = ::openMapEditDraft,
                     onGpsHistory = { navigator.open(UiPage.COMMUNITY, "gps-history") },
                     onManageNotes = { contributionsPage = true },
+                    onSurvey = { navigator.open(UiPage.OSM_SURVEY) },
                 )
+                surveyPage -> OsmSurveyScreen(vm.repository, onClose = ::returnToParent,
+                    onOpen = { venue ->
+                        val ref = venue.ref
+                        openCorrection(Place(name = venue.place.name, latitude = venue.latitude, longitude = venue.longitude,
+                            osmType = ref.type, osmId = ref.id, source = PlaceSource.OSM), survey = true)
+                    })
                 weatherPage -> WeatherPlannerScreen(onClose = { weatherPage = false },
                     vm = featureOwners.get("weather", uiEntry.key, WeatherPlannerViewModel::class.java, featureFactory), initialTransport = active?.transport,
                     onDirections = { stops, transport -> openDirections(stops, transport) },
@@ -710,6 +719,8 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     onContribute = { openPlaceNote(place) },
                     onCorrect = if (place.osmType != null && place.osmId != null && place.latitude != null &&
                         place.longitude != null) ({ openCorrection(place) }) else null,
+                    onSurvey = if (place.osmType != null && place.osmId != null && place.latitude != null &&
+                        place.longitude != null) ({ openCorrection(place, survey = true) }) else null,
                     onAddVisit = { vm.execute("Yeni ziyaret eklendi.") { vm.repository.saveVisit(Visit(placeId = place.id, journeyId = active?.id, visitedAt = now)) } },
                     onEditVisit = { editVisit = it }, onShare = { visit -> photosToShare = state.photos.filter { it.visitId == visit.id } },
                     onPhoto = { photoTarget = PhotoTarget(it.journeyId, it.id) },
@@ -841,12 +852,19 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     })
     if (mapEditsPage && (uiEntry.accountKey == null || uiEntry.accountKey == contributionAccountId?.toString()))
         Dialog(onDismissRequest = { mapEditsPage = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        val targetId = uiEntry.entityId?.takeIf { it.startsWith("place:") }?.removePrefix("place:")
+        val targetId = uiEntry.entityId?.let {
+            when {
+                it.startsWith("survey-place:") -> it.removePrefix("survey-place:")
+                it.startsWith("place:") -> it.removePrefix("place:")
+                else -> null
+            }
+        }
         Surface(Modifier.fillMaxSize()) {
             MapEditPage(onClose = { mapEditsPage = false },
                 initialCorrection = correctionTarget ?: state.places.firstOrNull { it.id == targetId },
                 initialDraftId = uiEntry.entityId?.takeIf { it.startsWith("draft:") }?.removePrefix("draft:"),
                 startNew = uiEntry.entityId == "new",
+                startSurvey = uiEntry.entityId == "survey" || uiEntry.entityId?.startsWith("survey-place:") == true,
                 onNoteFallback = ::openPlaceNote)
         }
     }
@@ -889,6 +907,11 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
         },
         onOsmCorrection = osmSelection?.takeIf { shortcutAssignment == null && it.osmRef != null }?.let { selected ->
             { openOsmCorrection(selected) }
+        },
+        onOsmSurvey = osmSelection?.takeIf { shortcutAssignment == null && it.osmRef != null }?.let { selected ->
+            { val ref = requireNotNull(selected.osmRef)
+                openCorrection(Place(name = selected.name, latitude = selected.latitude, longitude = selected.longitude,
+                    osmType = ref.type, osmId = ref.id, source = PlaceSource.OSM), survey = true) }
         },
         onDismiss = {
             if (shortcutAssignment != null) {
@@ -1259,6 +1282,7 @@ private fun JourneyDetail(journey: Journey, state: DiaryState, now: Long, onEdit
 private fun PlaceDetail(place: Place, state: DiaryState, onEdit: () -> Unit, onMaps: () -> Unit, onContribute: () -> Unit,
     onCorrect: (() -> Unit)?, onAddVisit: () -> Unit, onEditVisit: (Visit) -> Unit, onShare: (Visit) -> Unit, onPhoto: (Visit) -> Unit,
     onDelete: () -> Unit, onDeleteVisit: (Visit) -> Unit, onDeletePhoto: (Photo) -> Unit, onEditPhoto: (Photo) -> Unit,
+    onSurvey: (() -> Unit)? = null,
     listState: LazyListState = rememberLazyListState()) {
     val visits = state.visits.filter { it.placeId == place.id }.sortedByDescending { it.visitedAt }
     LazyColumn(state = listState, contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -1269,6 +1293,8 @@ private fun PlaceDetail(place: Place, state: DiaryState, onEdit: () -> Unit, onM
                 OutlinedButton(onClick = onMaps) { Text("Başka haritada aç") }
                 OutlinedButton(onClick = onContribute) { Text("Harita notu yaz") }
                 onCorrect?.let { OutlinedButton(onClick = it) { Text("OSM mekânını düzelt") } }
+                onSurvey?.let { OutlinedButton(onClick = it, modifier = Modifier.heightIn(min = 48.dp)
+                    .testTag("osm-place-survey")) { Text("Yerinde tamamla") } }
                 Button(onClick = onAddVisit) { Text("Yeni ziyaret") }
             }
         }

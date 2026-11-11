@@ -147,7 +147,7 @@ class DiaryBackup(context: Context, private val repository: DiaryRepository) {
     }
 }
 internal object BackupJson {
-    private const val VERSION = 9
+    private const val VERSION = 10
     private const val FORMAT = "org.iz.navigation.backup"
     // Read compatibility for user-created backups from the former application identity.
     private const val LEGACY_FORMAT = "com.atay.iz.backup"
@@ -196,7 +196,7 @@ internal object BackupJson {
             "changesetClosed" to value.changesetClosed, "error" to value.error,
             "targetType" to value.targetType?.name, "targetId" to value.targetId,
             "reviewedVersion" to value.reviewedVersion, "reviewedFingerprint" to value.reviewedFingerprint,
-            "appliedVersion" to value.appliedVersion)
+            "appliedVersion" to value.appliedVersion, "surveyPayload" to value.surveyPayload)
 
     internal fun recordWatchHealthSessions(value: WatchHealthSession): JSONObject = json("id" to value.id, "journeyId" to value.journeyId, "watchId" to value.watchId,
                 "deviceName" to value.deviceName, "createdAt" to value.createdAt)
@@ -294,6 +294,8 @@ internal object BackupJson {
                 val reviewedVersion = it.strictNullLong("reviewedVersion")
                 val reviewedFingerprint = it.nullString("reviewedFingerprint")
                 val appliedVersion = it.strictNullLong("appliedVersion")
+                val surveyPayload = it.nullString("surveyPayload")
+                require(version >= 10 || surveyPayload == null) { "Eski yedek yerinde gözlem alanı içeremez." }
                 require(version >= 9 || listOf(targetType, targetId, reviewedVersion, reviewedFingerprint, appliedVersion).all { field -> field == null })
                 MapEditDraft(id = it.strictString("id"), placeId = it.nullString("placeId"),
                     latitude = it.strictDouble("latitude"), longitude = it.strictDouble("longitude"),
@@ -306,7 +308,7 @@ internal object BackupJson {
                     remoteNodeVersion = it.strictNullLong("remoteNodeVersion"), changesetClosed = it.strictBoolean("changesetClosed"),
                     error = it.nullString("error"), targetType = targetType, targetId = targetId,
                     reviewedVersion = reviewedVersion, reviewedFingerprint = reviewedFingerprint, appliedVersion = appliedVersion,
-                    localAttemptId = null, localChangesetCreated = false)
+                    localAttemptId = null, localChangesetCreated = false, surveyPayload = surveyPayload)
             },
             watchHealthSessions = if (version < 5) emptyList() else records("watchHealthSessions") {
                 WatchHealthSession(it.strictString("id"), it.strictString("journeyId"), it.strictString("watchId"),

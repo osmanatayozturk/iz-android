@@ -19,6 +19,11 @@ enum class MapPlacePreset(val label: String, val key: String, val value: String)
     DRINKING_WATER("İçme suyu", "amenity", "drinking_water"),
     TOILETS("Tuvalet", "amenity", "toilets"),
     BICYCLE_REPAIR("Bisiklet tamir istasyonu", "amenity", "bicycle_repair_station"),
+    HOSPITAL("Hastane", "amenity", "hospital"),
+    UNIVERSITY("Üniversite", "amenity", "university"),
+    PUBLIC_BATH("Hamam", "amenity", "public_bath");
+
+    val canCreate: Boolean get() = this !in setOf(HOSPITAL, UNIVERSITY, PUBLIC_BATH)
 }
 
 /** Public map contribution; deliberately independent of visits, photos and health records. */
@@ -51,6 +56,7 @@ data class MapEditDraft(
     // Installation-local attempt identity and receipt. Neither is portable backup data.
     val localAttemptId: String? = null,
     @ColumnInfo(defaultValue = "0") val localChangesetCreated: Boolean = false,
+    val surveyPayload: String? = null,
 ) {
     fun publicTags(): Map<String, String> = linkedMapOf<String, String>().apply {
         if (targetType == null) put(preset.key, preset.value)
@@ -77,6 +83,8 @@ internal fun MapEditDraft.withLocalChangeset(changeset: Long): MapEditDraft {
 }
 
 fun validateMapEdit(value: MapEditDraft) {
+    require(value.targetType != null || value.preset.canCreate) { "Bu tür yalnızca mevcut OSM mekânlarında düzenlenebilir." }
+    value.surveyObservation()?.let { require(value.targetType != null); it.validateDraft() }
     require(runCatching { UUID.fromString(value.id).toString().equals(value.id, true) }.getOrDefault(false))
     require(value.placeId == null || (value.placeId.isNotBlank() && value.placeId.length <= 200 && value.placeId.none { it.code < 32 }))
     require(value.latitude.isFinite() && value.latitude in -90.0..90.0 && value.longitude.isFinite() && value.longitude in -180.0..180.0)
@@ -120,13 +128,24 @@ private fun validateMapEditTarget(value: MapEditDraft) {
     val reviewed = requireNotNull(value.reviewedVersion)
     require(reviewed in 1 until Long.MAX_VALUE)
     require(value.reviewedFingerprint?.let { it.length == 64 && it.all { c -> c in '0'..'9' || c in 'a'..'f' } } == true)
-    require(value.publicTags().isNotEmpty())
+    val hasSurveyIntent = value.surveyObservation()?.let { observation ->
+        listOf(observation.hours, observation.wheelchair).any { it.action in setOf(SurveyAction.EDIT, SurveyAction.VERIFY) }
+    } == true
+    require(value.publicTags().isNotEmpty() || hasSurveyIntent)
     require(value.appliedVersion == if (value.status == MapEditStatus.SENT) reviewed + 1 else null)
 }
 
 fun validateMapEditForPublish(value: MapEditDraft) {
     validateMapEdit(value)
     require(value.surveyConfirmed) { "Yalnızca yerinde doğruladığın bilgileri yayımla." }
+    value.surveyObservation()?.let { observation ->
+        val before = buildMap {
+            for ((field, input) in listOf(SurveyField.OPENING_HOURS to observation.hours, SurveyField.WHEELCHAIR to observation.wheelchair)) {
+                input.before?.let { put(field.key, it) }; input.beforeDate?.let { put(field.dateKey, it) }
+            }
+        }
+        observation.publicChanges(before)
+    }
 }
 
 /** Keep the Room 4→5 migration identical to the generated entity schema. */

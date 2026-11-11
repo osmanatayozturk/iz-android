@@ -7,7 +7,7 @@ import kotlin.properties.ReadWriteProperty
 import kotlin.reflect.KProperty
 
 enum class UiPage { MAP, JOURNEYS, JOURNEY, PLACES, PLACE, STATISTICS, COLLECTIONS, ROUTES,
-    DIRECTIONS, GPX, WEATHER, GROUP, COMMUNITY, CONTRIBUTIONS, MAP_EDITS, OSM_ACTIONS, SETTINGS, HEATMAP }
+    DIRECTIONS, GPX, WEATHER, GROUP, COMMUNITY, CONTRIBUTIONS, MAP_EDITS, OSM_ACTIONS, OSM_SURVEY, SETTINGS, HEATMAP }
 
 data class UiBrowseState(val query: String = "", val filter: String = "", val sort: String = "",
     val anchorId: String = "", val offset: Int = 0)

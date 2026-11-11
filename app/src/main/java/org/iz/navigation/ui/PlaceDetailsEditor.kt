@@ -55,6 +55,7 @@ internal fun PlaceEditor(
     pin: GeoCoordinate?, osm: SelectedOsmPlace?, places: List<Place>, onDismiss: () -> Unit,
     onSearch: () -> Unit, onLocate: () -> Unit, assignmentKind: DestinationShortcutKind? = null,
     saveError: String? = null, onMapNote: (() -> Unit)? = null, onOsmCorrection: (() -> Unit)? = null,
+    onOsmSurvey: (() -> Unit)? = null,
     onSave: (String, String, Place?) -> Unit,
 ) {
     val operationBusy = LocalUiOperationBusy.current
@@ -108,6 +109,10 @@ internal fun PlaceEditor(
                 }
                 onOsmCorrection?.let { correction ->
                     OutlinedButton(onClick = correction, enabled = !operationBusy()) { Text("OSM mekânını düzelt") }
+                }
+                onOsmSurvey?.let { survey ->
+                    OutlinedButton(onClick = survey, enabled = !operationBusy(),
+                        modifier = Modifier.heightIn(min = 48.dp).testTag("osm-place-survey")) { Text("Yerinde tamamla") }
                 }
             }
             if (!assigning) OutlinedTextField(note, { if (!operationBusy()) note = it }, enabled = !operationBusy(),

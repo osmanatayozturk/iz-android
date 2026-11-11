@@ -8,7 +8,7 @@ import org.junit.Test
 class BackupV7Test {
     @Test fun newBackupHasVersionEightAndEmptyLibraryLists() {
         val encoded = BackupJson.encode(DiarySnapshot())
-        assertEquals(9, encoded.getInt("version"))
+        assertEquals(10, encoded.getInt("version"))
         listOf("savedPlans", "importedTracks", "collections", "memberships").forEach {
             assertEquals(0, encoded.getJSONArray(it).length())
         }

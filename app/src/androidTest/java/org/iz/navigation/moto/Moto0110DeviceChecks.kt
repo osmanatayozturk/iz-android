@@ -150,7 +150,7 @@ class Moto0110DeviceChecks {
         }
         migration.runMigrationsAndValidate(name, 8, true, DiaryDatabase.MIGRATION_7_8).close()
         val db = Room.databaseBuilder(context, DiaryDatabase::class.java, name)
-            .addMigrations(DiaryDatabase.MIGRATION_8_9).build()
+            .addMigrations(DiaryDatabase.MIGRATION_8_9, DiaryDatabase.MIGRATION_9_10).build()
         try {
             val dao = db.diaryDao()
             assertEquals("Keep note", dao.journey("legacy")!!.note)
@@ -203,7 +203,7 @@ class Moto0110DeviceChecks {
             backup.exportTo(uri(zipEight))
             ZipFile(zipEight).use { zip ->
                 val manifest = JSONObject(zip.getInputStream(zip.getEntry("manifest.json")).bufferedReader().use { it.readText() })
-                assertEquals(9, manifest.getInt("version"))
+                assertEquals(10, manifest.getInt("version"))
                 assertEquals(2, manifest.getJSONArray("leanSessions").length())
                 assertTrue("Sealed pending raw must have a typed binary ZIP member", zip.entries().asSequence().any { it.name != "manifest.json" && !it.isDirectory })
             }

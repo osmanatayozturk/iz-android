@@ -15,7 +15,7 @@ class OsmMapEditTest {
 
     @Test fun unnamedWaterDoesNotSendCategoryAsName() {
         assertEquals(mapOf("amenity" to "drinking_water"), draft().publicTags())
-        assertEquals(10, MapPlacePreset.entries.size)
+        assertEquals(10, MapPlacePreset.entries.count { it.canCreate })
     }
 
     @Test fun unconfirmedSurveyCannotBePublished() {

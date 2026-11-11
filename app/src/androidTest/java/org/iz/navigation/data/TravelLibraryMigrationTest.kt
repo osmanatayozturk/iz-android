@@ -22,7 +22,7 @@ class TravelLibraryMigrationTest {
     @get:Rule val helper = MigrationTestHelper(InstrumentationRegistry.getInstrumentation(), DiaryDatabase::class.java)
     private val migrations = arrayOf(DiaryDatabase.MIGRATION_1_2, DiaryDatabase.MIGRATION_2_3, DiaryDatabase.MIGRATION_3_4,
         DiaryDatabase.MIGRATION_4_5, DiaryDatabase.MIGRATION_5_6, DiaryDatabase.MIGRATION_6_7,
-        DiaryDatabase.MIGRATION_7_8, DiaryDatabase.MIGRATION_8_9)
+        DiaryDatabase.MIGRATION_7_8, DiaryDatabase.MIGRATION_8_9, DiaryDatabase.MIGRATION_9_10)
     @After fun cleanup() { names.forEach { context.deleteDatabase(it) } }
 
     @Test fun everyLegacySchemaReachesNineWithoutLosingDiaryRelationships() = runBlocking {
@@ -36,7 +36,7 @@ class TravelLibraryMigrationTest {
                 db.execSQL("INSERT INTO photos VALUES ('photo','photos/synthetic.jpg','trip','visit',3000,NULL,NULL,'Caption')")
                 db.execSQL("INSERT INTO share_drafts VALUES ('draft','visit','Review',4,'photo',NULL)")
             }
-            helper.runMigrationsAndValidate(name, 9, true, *migrations).close()
+            helper.runMigrationsAndValidate(name, 10, true, *migrations).close()
             val db = Room.databaseBuilder(context, DiaryDatabase::class.java, name).addMigrations(*migrations).build()
             try {
                 val diary = db.diaryDao()

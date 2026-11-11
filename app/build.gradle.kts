@@ -72,6 +72,7 @@ android {
 ksp { arg("room.schemaLocation", "$projectDir/schemas") }
 
 dependencies {
+    implementation("ch.poole:OpeningHoursParser:0.29.0")
     implementation("androidx.car.app:app:1.7.0")
     implementation("androidx.car.app:app-projected:1.7.0")
     testImplementation("androidx.car.app:app-testing:1.7.0")
