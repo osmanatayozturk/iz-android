@@ -2,6 +2,7 @@ package org.iz.navigation.ui
 
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.graphics.Bitmap
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.geometry.Offset
@@ -28,6 +29,8 @@ import org.junit.runner.RunWith
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapLibreMap
 import java.time.LocalDate
+import java.io.File
+import java.security.MessageDigest
 import java.util.UUID
 
 /** Opt-in only on the separately allocated offline QA package. No publisher/auth replacement. */
@@ -75,12 +78,15 @@ class OsmSurveyNativeRoutingTest {
         val presentation = OsmMapPresentation(style = ::offlineStyle, onReady = { map = it })
         val raw = "Mo 09:00-10:00; definitely-invalid"
         val date = LocalDate.now().minusDays(2).toString()
+        val frames = File(app.noBackupFilesDir, "qa-osm-survey-native/$namespace")
+        check(frames.mkdirs()) { "Evidence namespace must be new" }
+        val capture = { state: String -> capture(frames, state, args.getString("izCandidateCommit")!!, ref) }
         try {
             runBlocking { repository.savePlace(place) }
             compose.setContent {
                 CompositionLocalProvider(LocalOsmSurveyReads provides reads,
                     LocalOsmMapPresentation provides presentation) {
-                    androidx.compose.material3.MaterialTheme { DiaryApp(null, {}) }
+                    IzTheme { DiaryApp(null, {}) }
                 }
             }
             compose.onNodeWithTag("home-menu").performClick()
@@ -104,12 +110,15 @@ class OsmSurveyNativeRoutingTest {
                 }
                 rendered
             }
+            capture("01-nearby-native-map")
             compose.onNodeWithTag("osm-survey-native-map").performTouchInput { click(pin) }
             waitForEditor()
             editor("osm-survey-observed-on").performTextReplacement(date)
             editor("osm-survey-opening_hours-EDIT").performClick()
             editor("osm-survey-hours-advanced").performTextReplacement(raw)
             editor("osm-survey-wheelchair-UNKNOWN").performClick()
+            editor("osm-survey-hours-advanced").assertTextContains(raw)
+            capture("02-editor-raw-hours")
             editor("osm-survey-save").performClick()
             compose.waitUntil(10_000) { compose.onAllNodesWithTag("osm-survey-editor-list").fetchSemanticsNodes().isEmpty() }
             val saved = runBlocking { repository.snapshot().mapEdits.single { it.targetType == ref.type && it.targetId == ref.id } }
@@ -121,6 +130,8 @@ class OsmSurveyNativeRoutingTest {
             assertEquals(tags["check_date:opening_hours"], observation.hours.beforeDate)
             assertEquals(date, observation.observedOn)
             compose.onNodeWithText("Kapat").performClick() // actual map-edit page -> nearby
+            compose.onNodeWithTag(row).assertIsDisplayed()
+            capture("03-nearby-saved-list")
             compose.onNodeWithTag(row).performClick() // actual distance-list route
             assertReopened(raw, date)
             assertSameDraft(repository, saved, ref)
@@ -132,9 +143,13 @@ class OsmSurveyNativeRoutingTest {
             compose.onNodeWithTag("menu-places").performScrollTo().performClick()
             compose.onNodeWithTag("places-search").performTextReplacement(namespace)
             compose.onNodeWithTag("place-row-${place.id}").performScrollTo().performClick()
-            compose.onNodeWithTag("osm-place-survey").performScrollTo().performClick()
+            compose.onNodeWithTag("osm-place-survey").performScrollTo().assertIsDisplayed()
+            capture("04-saved-place-detail")
+            compose.onNodeWithTag("osm-place-survey").performClick()
             assertReopened(raw, date)
             assertSameDraft(repository, saved, ref)
+            editor("osm-survey-hours-advanced").assertTextContains(raw)
+            capture("05-same-editor-reopened")
             compose.runOnIdle { assertEquals(listOf(ref, ref, ref), readRefs) }
         } finally {
             // Dispose entry-owned coroutines first, then remove only this proven random namespace.
@@ -166,13 +181,31 @@ class OsmSurveyNativeRoutingTest {
     }
     private fun editorClose() {
         compose.onNodeWithTag("osm-survey-editor-list").performScrollToNode(hasText("Kapat"))
-        compose.onNodeWithText("Kapat").performClick()
+        compose.onNode(hasText("Kapat") and hasAnyAncestor(hasTestTag("osm-survey-editor-list"))).performClick()
     }
     private fun assertSameDraft(repository: DiaryRepository, saved: MapEditDraft, ref: OsmRef) {
         val current = runBlocking { repository.snapshot().mapEdits.filter { it.targetType == ref.type && it.targetId == ref.id } }
         assertEquals(listOf(saved), current)
         assertNull(current.single().localAttemptId)
         assertEquals(MapEditStatus.DRAFT, current.single().status)
+    }
+
+    /** Retained QA evidence only; Test owns package/commit admission and retrieval of this path. */
+    private fun capture(directory: File, state: String, commit: String, ref: OsmRef) {
+        compose.waitForIdle()
+        val bitmap = checkNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot())
+        val png = File(directory, "$state.png")
+        try {
+            check(!png.exists())
+            png.outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+            val hash = MessageDigest.getInstance("SHA-256").digest(png.readBytes())
+                .joinToString("") { "%02x".format(it) }
+            File(directory, "$state.json").writeText(JSONObject()
+                .put("state", state).put("candidateCommit", commit).put("package", BuildConfig.APPLICATION_ID)
+                .put("originKind", "SYNTHETIC_PUBLIC_NOT_DEVICE_GPS").put("osmType", ref.type.name).put("osmId", ref.id)
+                .put("capturedAt", System.currentTimeMillis()).put("width", bitmap.width).put("height", bitmap.height)
+                .put("pngBytes", png.length()).put("pngSha256", hash).toString())
+        } finally { bitmap.recycle() }
     }
 
     private fun offlineStyle(value: String): String = JSONObject(value).apply {
