@@ -106,7 +106,7 @@ class ConfiguredRoutePlanner internal constructor(
     }
 
     override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport, travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences): PlannedRoute = withContext(Dispatchers.IO) {
-        require(stops.size in 2..6)
+        RouteStopLimits.requireEffective(stops.size)
         routeTravelSpeedKmh(transport, travelSpeedKmh)
         if (transport !in TRAFFIC_MODES) return@withContext fallback(transport).plan(stops, departureAt, transport, travelSpeedKmh, preferences)
             .copy(trafficUnavailableReason = "Bu ulaşım türünde trafik verisi kullanılmaz; trafiksiz rota.")

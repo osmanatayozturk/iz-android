@@ -1,0 +1,86 @@
+package org.iz.navigation.ui
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Text
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.Assert.*
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+
+/** Pure HUD rendering: no native map, network, location, recorder or provider. */
+@RunWith(AndroidJUnit4::class)
+class CompactDrivingHudUiTest {
+    @get:Rule val compose = createComposeRule()
+    private val initial = CompactHudData("Sağa dön", "Manevra 200 m", "Kalan 3 km · 8 dk · 2 dk mola dahil",
+        "30/50 km/sa", "Hızım30, sınır50", "18°", emptyList(), false, true)
+    @Test fun portraitPanelHeightDoesNotFollowInstructionsOrWarnings() = verify(false, 1f)
+    @Test fun landscapeFontTwoKeepsCriticalGpsAndRecordWarningsVisible() = verify(true, 2f)
+    @Test fun preparedDisclosureUsesReservedSlotWithoutChangingPanelHeight() {
+        var visible by mutableStateOf(false)
+        compose.setContent { CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) { IzTheme {
+            Box(Modifier.requiredSize(640.dp, 360.dp)) {
+                CompactDrivingHud(initial, true, {}, {}, {}, disclosure = {
+                    if (visible) Text("Hazır rota: harita paketi yok", Modifier.testTag("prepared-map-status"),
+                        style = androidx.compose.material3.MaterialTheme.typography.labelSmall, maxLines = 1)
+                }) {
+                    IconButton({}, Modifier.size(48.dp).testTag("directions-recenter")) { Text("◎") }
+                }
+            }
+        } } }
+        val before = compose.onNodeWithTag("compact-guidance-header").fetchSemanticsNode().boundsInRoot
+        compose.runOnIdle { visible = true }
+        assertEquals(before, compose.onNodeWithTag("compact-guidance-header").fetchSemanticsNode().boundsInRoot)
+        val status = compose.onNodeWithTag("prepared-map-status", useUnmergedTree = true).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val slot = compose.onNodeWithTag("hud-prepared-status-slot", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertTrue(status.top >= slot.top && status.bottom <= slot.bottom)
+        assertTrue(slot.top >= before.top && slot.bottom <= before.bottom)
+    }
+    private fun verify(landscape: Boolean, fontScale: Float) {
+        var data by mutableStateOf(initial)
+        compose.setContent { CompositionLocalProvider(LocalDensity provides Density(1f, fontScale)) { IzTheme {
+            Box(Modifier.requiredSize(if (landscape) 640.dp else 360.dp, if (landscape) 360.dp else 640.dp)) {
+                CompactDrivingHud(data, landscape, {}, {}, {}) {
+                    IconButton({}, Modifier.size(48.dp).testTag("directions-recenter")) { Text("◎") }
+                }
+            }
+        } } }
+        val originalHeight = compose.onNodeWithTag("compact-guidance-header").fetchSemanticsNode().boundsInRoot.height
+        val full = "Sentetik kavşaktan sağa dön ve uzun sahil caddesini izleyerek ikinci yol ayrımından şehir merkezi yönünde devam et"
+        val warning = "GPS konumu bekleniyor · Kayıt: hassas ve güvenilir konum bekleniyor"
+        compose.runOnIdle { data = data.copy(instruction = full,
+            warnings = listOf("GPS konumu bekleniyor", "Kayıt: hassas ve güvenilir konum bekleniyor"), weather = "Bilinmiyor",
+            gpsWarning = true, recordingWarning = true) }
+        assertEquals(originalHeight, compose.onNodeWithTag("compact-guidance-header").fetchSemanticsNode().boundsInRoot.height, .1f)
+        compose.onNodeWithContentDescription(full).assertIsDisplayed()
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithTag("hud-instruction", useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        assertTrue(layouts.single().lineCount <= 2)
+        compose.onNodeWithContentDescription(warning, useUnmergedTree = true).assertIsDisplayed()
+        val header = compose.onNodeWithTag("compact-guidance-header").fetchSemanticsNode().boundsInRoot
+        for (copy in listOf("GPS bekleniyor", "Kayıt bekleniyor")) {
+            val node = compose.onNodeWithText(copy, useUnmergedTree = true).assertIsDisplayed()
+            val measured = mutableListOf<TextLayoutResult>()
+            node.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(measured) }
+            assertEquals(1, measured.single().lineCount)
+            assertFalse(measured.single().hasVisualOverflow)
+            val bounds = node.fetchSemanticsNode().boundsInRoot
+            assertTrue(bounds.top >= header.top && bounds.bottom <= header.bottom)
+        }
+        for (tag in listOf("compact-card-mute", "home-finish-session", "hud-weather", "directions-recenter")) {
+            compose.onNodeWithTag(tag).assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp).assertHasClickAction()
+        }
+        compose.onNodeWithTag("hud-remaining", useUnmergedTree = true).assertTextContains("mola dahil")
+    }
+}

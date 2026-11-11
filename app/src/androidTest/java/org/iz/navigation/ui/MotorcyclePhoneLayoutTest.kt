@@ -46,10 +46,11 @@ class MotorcyclePhoneLayoutTest {
         render(640.dp, 320.dp, false)
         compose.onNodeWithTag("destination-shortcut-HOME").assertIsDisplayed()
         compose.onNodeWithTag("directions-recenter").assertIsDisplayed()
-        compose.onNodeWithTag("map-layers").assertIsDisplayed()
+        compose.onNodeWithTag("map-layers").assertDoesNotExist()
+        compose.onNodeWithTag("open-navigation-dashboard").assertDoesNotExist()
         val search = bounds("open-navigation")
         val bottom = bounds("home-record")
-        for (tag in listOf("directions-recenter", "map-layers")) {
+        for (tag in listOf("directions-recenter")) {
             val control = bounds(tag)
             assertTrue(control.top >= search.bottom)
             assertTrue(control.bottom <= bottom.top)

@@ -39,6 +39,28 @@ class NavigationHomeShellTest {
         compose.onNodeWithTag("record-navigation-choice").assertIsOn()
     }
 
+    @Test fun menuKeepsDashboardAndLayersReachableWithoutStartingOrChangingSession() {
+        val navigation = (compose.activity.application as IzApplication).navigation
+        val before = navigation.state.value
+        compose.onNodeWithTag("map-layers").assertDoesNotExist()
+        compose.onNodeWithTag("open-navigation-dashboard").assertDoesNotExist()
+        compose.onNodeWithTag("home-menu").performClick()
+        compose.onNodeWithTag("menu-navigation-dashboard").performScrollTo().performClick()
+        compose.onNodeWithTag("navigation-dashboard").assertIsDisplayed()
+        compose.onNodeWithTag("close-navigation-dashboard").performClick()
+        compose.onNodeWithTag("home-menu").performClick()
+        compose.onNodeWithTag("menu-map-layers").performScrollTo().performClick()
+        compose.onNodeWithText("Planlanan rota", substring = true).assertIsDisplayed()
+        androidx.test.espresso.Espresso.pressBack()
+        compose.onNodeWithTag("navigation-home-map").assertIsDisplayed()
+        compose.runOnIdle {
+            assertEquals(before.guidance, navigation.state.value.guidance)
+            assertEquals(before.recording, navigation.state.value.recording)
+            assertEquals(before.sessionId, navigation.state.value.sessionId)
+            assertEquals(before.journey?.id, navigation.state.value.journey?.id)
+        }
+    }
+
     private fun openPlannerFromMenu() {
         compose.onNodeWithTag("home-menu").performClick()
         compose.onNodeWithTag("menu-route-plan").performScrollTo().performClick()

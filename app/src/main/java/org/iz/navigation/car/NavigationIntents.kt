@@ -10,7 +10,21 @@ data class NavigationTarget(val coordinate: WeatherCoordinate?, val query: Strin
 object NavigationIntents {
     fun parse(intent: Intent): NavigationTarget? = parse(intent.dataString)
 
-    fun parse(raw: String?): NavigationTarget? = runCatching {
+    fun sharedInput(intent: Intent): SharedMapInput? = when {
+        intent.action == Intent.ACTION_SEND && intent.type == "text/plain" -> SharedMapLinks.parse(intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString())
+        intent.action == Intent.ACTION_VIEW || intent.action == null -> intent.dataString?.let(SharedMapLinks::parse)
+        else -> null
+    }
+
+    fun parse(raw: String?): NavigationTarget? {
+        if (raw?.startsWith("https://", true) == true) {
+            val single = SharedMapLinks.parse(raw) as? SharedMapInput.Single ?: return null
+            return NavigationTarget(single.target.coordinate, single.target.name)
+        }
+        return parseLegacy(raw)
+    }
+
+    internal fun parseLegacy(raw: String?): NavigationTarget? = runCatching {
         if (raw == null || raw.length > 2_048 || raw.any { it.code < 32 }) return null
         val scheme = raw.substringBefore(':').lowercase()
         if (scheme !in setOf("geo", "google.navigation")) return null

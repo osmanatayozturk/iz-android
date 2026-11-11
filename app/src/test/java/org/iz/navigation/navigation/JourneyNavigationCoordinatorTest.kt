@@ -1051,4 +1051,182 @@ class JourneyNavigationCoordinatorTest {
         assertTrue(controller.finishUnattachedJourney("orphan"))
         assertEquals(1, runtime.finished)
     }
+
+    // Independent shared intake/core integration. Runtime replaces only platform side effects.
+    private fun sharedIntakeIdentity(controller: JourneyNavigationCoordinator, configuration: String) =
+        org.iz.navigation.ui.SharedIntakeIdentity("shared-test-entry", configuration,
+            controller.state.value.routeRevision, NavigationStopSnapshot.from(controller.state.value))
+
+    @Test fun sharedReceiptAndPreviewPreserveActiveRecordingAndExplicitQuickStartReusesItOnce() = runTest {
+        val runtime = Runtime().also { it.cachedLocation = NavigationFix(route().stops.first().coordinate, 1000, 5f) }
+        val controller = JourneyNavigationCoordinator(runtime, null, { 1000L }, backgroundScope)
+        val session = controller.startFreeDrive(Transport.CAR)
+        runCurrent()
+        val before = controller.state.value
+        val diary = runtime.journeys.value.toList()
+        val recorder = runtime.recordingId()
+        val owner = org.iz.navigation.ui.SharedMapRequestOwner(backgroundScope,
+            resolve = { raw ->
+                assertEquals("https://maps.app.goo.gl/synthetic", raw)
+                org.iz.navigation.car.SharedMapInput.Single(
+                    org.iz.navigation.car.SharedMapStop("Synthetic target", WeatherCoordinate(40.01, 29.0)))
+            }, identity = { sharedIntakeIdentity(controller, "config-a") })
+        owner.submit("https://maps.app.goo.gl/synthetic")
+        runCurrent()
+        val delivered = owner.state.value
+        assertTrue(owner.accepts(delivered))
+        val selected = (delivered.result as org.iz.navigation.car.SharedMapInput.Single).target
+        assertEquals("Synthetic target", selected.name)
+        assertEquals(WeatherCoordinate(40.01, 29.0), selected.coordinate)
+        runtime.onPlan = { stops, mode -> route().copy(stops = stops, transport = mode) }
+        val origin = controller.quickOrigin()
+        controller.validateQuickOrigin(origin)
+        val preview = controller.previewRoute(listOf(RouteStop("Synthetic origin", origin.fix.coordinate),
+            RouteStop(selected.name, checkNotNull(selected.coordinate))), Transport.CAR)
+        runCurrent()
+        assertEquals(before, controller.state.value)
+        assertEquals(diary, runtime.journeys.value)
+        assertEquals(recorder, runtime.recordingId())
+        assertEquals(1, runtime.started)
+        assertEquals(0, runtime.finished)
+        assertEquals(1, runtime.planCalls)
+
+        // Quick startup preserves a compatible existing recording even when the new choice is OFF.
+        assertEquals(session, controller.startQuickGuidance(preview, origin, recordJourney = false))
+        // Initial projection runs on Dispatchers.Default; runCurrent is not its completion barrier.
+        val committed = withContext(Dispatchers.Default) {
+            withTimeout(5_000) {
+                controller.state.first { it.fix == origin.fix && it.progress != null && !it.gpsStale }
+            }
+        }
+        assertTrue(committed.guidance && committed.recording)
+        assertEquals(session, committed.sessionId)
+        assertEquals(recorder, committed.journey?.id)
+        assertEquals(preview, committed.route)
+        assertEquals(diary, runtime.journeys.value)
+        assertTrue(runCatching { controller.startQuickGuidance(preview, origin, false) }.isFailure)
+        runCurrent()
+        assertEquals(committed, controller.state.value)
+        assertEquals(diary, runtime.journeys.value)
+        assertEquals(1, runtime.started)
+        assertEquals(0, runtime.finished)
+        owner.close()
+    }
+
+    @Test fun cancelledSharedResolverIgnoringCancellationCannotOverwriteNewGenerationOrRecording() = runTest {
+        val runtime = Runtime()
+        val controller = JourneyNavigationCoordinator(runtime, null, { 1000L }, backgroundScope)
+        controller.startFreeDrive(Transport.CAR)
+        runCurrent()
+        val before = controller.state.value
+        val diary = runtime.journeys.value.toList()
+        val recorder = runtime.recordingId()
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<org.iz.navigation.car.SharedMapInput?>()
+        val old = org.iz.navigation.car.SharedMapInput.Single(
+            org.iz.navigation.car.SharedMapStop("OLD must not publish", WeatherCoordinate(40.02, 29.0)))
+        val newest = org.iz.navigation.car.SharedMapInput.Single(
+            org.iz.navigation.car.SharedMapStop("NEW synthetic target", WeatherCoordinate(40.03, 29.0)))
+        val owner = org.iz.navigation.ui.SharedMapRequestOwner(backgroundScope,
+            resolve = { raw ->
+                if (raw == "old") {
+                    entered.complete(Unit)
+                    withContext(NonCancellable) { release.await() }
+                } else { assertEquals("new", raw); newest }
+            }, identity = { sharedIntakeIdentity(controller, "config-a") })
+        try {
+            owner.submit("old")
+            runCurrent()
+            assertTrue(entered.isCompleted)
+            owner.close() // same lifecycle invalidation used when the Dialog's request owner leaves
+            owner.submit("new")
+            runCurrent()
+            val accepted = owner.state.value
+            assertEquals(newest, accepted.result)
+            assertTrue(owner.accepts(accepted))
+            release.complete(old)
+            runCurrent()
+            assertSame(accepted, owner.state.value)
+            assertTrue(owner.accepts(accepted))
+            assertEquals(before, controller.state.value)
+            assertEquals(diary, runtime.journeys.value)
+            assertEquals(recorder, runtime.recordingId())
+            assertEquals(1, runtime.started)
+            assertEquals(0, runtime.finished)
+        } finally { release.complete(null); owner.close(); runCurrent() }
+    }
+
+    @Test fun sharedResolverRejectsChangedConfigurationAndPreservesActiveRecording() = runTest {
+        val runtime = Runtime()
+        val controller = JourneyNavigationCoordinator(runtime, null, { 1000L }, backgroundScope)
+        controller.startFreeDrive(Transport.CAR)
+        runCurrent()
+        val before = controller.state.value
+        val diary = runtime.journeys.value.toList()
+        val recorder = runtime.recordingId()
+        var configuration = "config-a"
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<org.iz.navigation.car.SharedMapInput?>()
+        val owner = org.iz.navigation.ui.SharedMapRequestOwner(backgroundScope,
+            resolve = { entered.complete(Unit); withContext(NonCancellable) { release.await() } },
+            identity = { sharedIntakeIdentity(controller, configuration) })
+        try {
+            owner.submit("synthetic")
+            runCurrent()
+            assertTrue(entered.isCompleted)
+            configuration = "config-b"
+            release.complete(org.iz.navigation.car.SharedMapInput.Single(
+                org.iz.navigation.car.SharedMapStop("STALE configuration", WeatherCoordinate(40.02, 29.0))))
+            runCurrent()
+            assertFalse(owner.state.value.busy)
+            assertNull(owner.state.value.result)
+            assertNotNull(owner.state.value.error)
+            assertFalse(owner.accepts(owner.state.value))
+            assertEquals(before, controller.state.value)
+            assertEquals(diary, runtime.journeys.value)
+            assertEquals(recorder, runtime.recordingId())
+            assertEquals(1, runtime.started)
+            assertEquals(0, runtime.finished)
+        } finally { release.complete(null); owner.close(); runCurrent() }
+    }
+
+    @Test fun sharedResolverAndOldPreviewRejectReplacementSessionWithoutChangingItsRecording() = runTest {
+        val runtime = Runtime().also { it.cachedLocation = NavigationFix(route().stops.first().coordinate, 1000, 5f) }
+        val controller = JourneyNavigationCoordinator(runtime, null, { 1000L }, backgroundScope)
+        val oldSession = controller.startFreeDrive(Transport.CAR)
+        runCurrent()
+        val obsoleteOrigin = controller.quickOrigin()
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<org.iz.navigation.car.SharedMapInput?>()
+        val owner = org.iz.navigation.ui.SharedMapRequestOwner(backgroundScope,
+            resolve = { entered.complete(Unit); withContext(NonCancellable) { release.await() } },
+            identity = { sharedIntakeIdentity(controller, "config-a") })
+        try {
+            owner.submit("synthetic")
+            runCurrent()
+            assertTrue(entered.isCompleted)
+            controller.finishSession(oldSession)
+            val replacementSession = controller.startFreeDrive(Transport.CAR)
+            runCurrent()
+            assertNotEquals(oldSession, replacementSession)
+            val replacement = controller.state.value
+            val diary = runtime.journeys.value.toList()
+            val recorder = runtime.recordingId()
+            release.complete(org.iz.navigation.car.SharedMapInput.Single(
+                org.iz.navigation.car.SharedMapStop("STALE session", WeatherCoordinate(40.02, 29.0))))
+            runCurrent()
+            assertNull(owner.state.value.result)
+            assertNotNull(owner.state.value.error)
+            assertFalse(owner.accepts(owner.state.value))
+            assertTrue(runCatching { controller.startQuickGuidance(route(), obsoleteOrigin, true) }.isFailure)
+            runCurrent()
+            assertEquals(replacement, controller.state.value)
+            assertEquals(replacementSession, controller.state.value.sessionId)
+            assertEquals(diary, runtime.journeys.value)
+            assertEquals(recorder, runtime.recordingId())
+            assertEquals(2, runtime.started)
+            assertEquals(1, runtime.finished)
+        } finally { release.complete(null); owner.close(); runCurrent() }
+    }
+
 }

@@ -26,6 +26,7 @@ import org.iz.navigation.weather.RouteSchedule
 import org.iz.navigation.weather.RouteTravelTime
 import org.iz.navigation.weather.RouteStop
 import org.iz.navigation.weather.RoutePreferences
+import org.iz.navigation.weather.RouteStopLimits.MAX_PLANNED_STOPS
 import org.iz.navigation.weather.geometryKey
 import org.iz.navigation.weather.matrixUnavailableReason
 import kotlinx.coroutines.delay
@@ -196,7 +197,9 @@ internal fun PhoneDirectionsContent(
                     onPlannedBreakMinutesChanged(index, minutes)
                 }
             }
-            TextButton(addVia, enabled = !locked && ui.via.size < 3, modifier = Modifier.testTag("directions-add-via")) { Text("Ara durak ekle") }
+            TextButton(addVia, enabled = !locked && ui.via.size < MAX_PLANNED_STOPS - 2, modifier = Modifier.testTag("directions-add-via")) { Text("Ara durak ekle") }
+            if (ui.via.size >= MAX_PLANNED_STOPS - 2) Text("Başlangıç ve varış dahil en fazla $MAX_PLANNED_STOPS durak.",
+                style = MaterialTheme.typography.bodySmall)
             if (!ui.originCurrent) Text("Başlatınca önce A noktasına, ardından planlanan duraklara gidilir.", style = MaterialTheme.typography.bodySmall)
         }
         item {
@@ -216,7 +219,7 @@ internal fun PhoneDirectionsContent(
             if (activeMode && ui.preferences.avoidHighways) Text("Otoyolsuz rota servis haritasından doğrulanır; doğrulanamazsa başlatılmaz. Harita verileri eksik olabilir.", style = MaterialTheme.typography.bodySmall)
             Text(if (activeMode) "Feribottan kaçınma tercihi mümkün olduğunda uygulanır; kesin feribot yasağı değildir."
                 else "Otoyol, ücretli yol ve feribottan kaçınma tercihleri mümkün olduğunda uygulanır; kesin yol yasağı değildir.", style = MaterialTheme.typography.bodySmall)
-            saveRoute?.let { OutlinedButton(it, enabled = ui.stops.size in 2..5 && !locked, modifier = Modifier.testTag("directions-save-route")) { Text("Rotayı kaydet") } }
+            saveRoute?.let { OutlinedButton(it, enabled = ui.stops.size in 2..MAX_PLANNED_STOPS && !locked, modifier = Modifier.testTag("directions-save-route")) { Text("Rotayı kaydet") } }
         }
         if (ui.preview != null) item {
             OutlinedButton(requestAlternatives, enabled = !ui.busy && !locked, modifier = Modifier.testTag("directions-alternatives")) { Text("Alternatif rotalar") }
@@ -251,14 +254,15 @@ internal fun PhoneDirectionsContent(
             }
             Text("Önizleme oturum başlatmaz. Başlat, seçtiğin kayıt tercihiyle sesli yönlendirmeyi açar.", style = MaterialTheme.typography.bodySmall)
         }
-        if (ui.origin != null && ui.destination != null && ui.stops.size in 4..5 && ui.transport in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE)) item {
-            val matrixReason = ui.preferences.matrixUnavailableReason(ui.transport)
+        if (ui.origin != null && ui.destination != null && ui.stops.size in 4..MAX_PLANNED_STOPS &&
+            (if (ui.stops.size >= 6) ui.transport != Transport.UNKNOWN else ui.transport in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE))) item {
+            val matrixReason = if (ui.stops.size <= 5) ui.preferences.matrixUnavailableReason(ui.transport) else null
             OutlinedButton(suggestStopOrder, enabled = matrixReason == null && !ui.busy && !locked,
                 modifier = Modifier.testTag("directions-matrix-order")) {
                 Text(if (ui.ordering) "Durak sırası hesaplanıyor…" else "Daha hızlı durak sırası öner")
             }
             matrixReason?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-            if (ui.transport == Transport.MOTORCYCLE) Text("Matrix sıra önerisi otomobil tahminidir; motosiklet rotasıyla doğrulanır.",
+            if (ui.stops.size <= 5 && ui.transport == Transport.MOTORCYCLE) Text("Matrix sıra önerisi otomobil tahminidir; motosiklet rotasıyla doğrulanır.",
                 style = MaterialTheme.typography.bodySmall)
         }
         ui.orderProposal?.let { proposal -> item {

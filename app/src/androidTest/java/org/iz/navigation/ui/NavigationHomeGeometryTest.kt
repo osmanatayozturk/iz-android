@@ -129,17 +129,15 @@ class NavigationHomeGeometryTest {
             val attribution = compose.onNodeWithText("© OpenStreetMap contributors").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
             listOf(left, right).forEach { slot ->
                 assertFalse(slot.overlaps(attribution))
-                listOf("directions-recenter", "map-layers", "home-record", "home-group", "home-menu").forEach { tag ->
+                listOf("directions-recenter", "home-record", "home-group", "home-menu").forEach { tag ->
                     compose.onNodeWithTag(tag).assertIsDisplayed()
                     assertFalse("A shortcut covers $tag", slot.overlaps(bounds(tag)))
                 }
             }
             assertFalse(bounds("home-weather").overlaps(attribution))
-            val dashboard = bounds("open-navigation-dashboard")
-            compose.onNodeWithTag("open-navigation-dashboard").assertIsDisplayed()
-            listOf("directions-recenter", "map-layers").forEach { tag ->
+            assertNoObsoleteMapControls()
+            listOf("directions-recenter").forEach { tag ->
                 val control = bounds(tag)
-                assertFalse("The dashboard entry covers $tag", dashboard.overlaps(control))
                 assertTrue("$tag must end above the bottom actions", control.bottom <= bounds("home-record").top)
             }
         }
@@ -229,6 +227,7 @@ class NavigationHomeGeometryTest {
     }
 
     private fun assertIdleBrandGeometry(expectSlogan: Boolean = true) {
+        assertNoObsoleteMapControls()
         compose.onNodeWithTag("home-brand").assertIsDisplayed()
         compose.onNodeWithTag("home-brand-logo", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithText("İz", useUnmergedTree = true).assertIsDisplayed()
@@ -241,7 +240,7 @@ class NavigationHomeGeometryTest {
         val attribution = compose.onNodeWithText("© OpenStreetMap contributors").fetchSemanticsNode().boundsInRoot
         assertTrue("Brand must finish above search", brand.bottom <= search.top)
         assertFalse("Weather covers map attribution", weather.overlaps(attribution))
-        listOf("directions-recenter", "map-layers", "home-record", "home-group", "home-menu").forEach { tag ->
+        listOf("directions-recenter", "home-record", "home-group", "home-menu").forEach { tag ->
             compose.onNodeWithTag(tag).assertIsDisplayed()
             val control = compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
             assertTrue("$tag must remain within the home viewport", home.contains(control.topLeft) && home.contains(control.bottomRight - androidx.compose.ui.geometry.Offset(1f, 1f)))
@@ -249,7 +248,7 @@ class NavigationHomeGeometryTest {
             assertFalse("Search covers $tag", search.overlaps(control))
             assertFalse("Weather covers $tag", weather.overlaps(control))
         }
-        listOf("directions-recenter", "map-layers").forEach { mapTag ->
+        listOf("directions-recenter").forEach { mapTag ->
             val mapControl = compose.onNodeWithTag(mapTag).fetchSemanticsNode().boundsInRoot
             listOf("home-record", "home-group", "home-menu").forEach { actionTag ->
                 val action = compose.onNodeWithTag(actionTag).fetchSemanticsNode().boundsInRoot
@@ -283,13 +282,13 @@ class NavigationHomeGeometryTest {
                 {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
         } } }
         val card = compose.onNodeWithTag("live-guidance-card").fetchSemanticsNode().boundsInRoot
-        val weather = compose.onNodeWithTag("home-weather").fetchSemanticsNode().boundsInRoot
+        val weather = compose.onNodeWithTag("hud-weather").fetchSemanticsNode().boundsInRoot
         val speed = compose.onNodeWithTag("road-speed-panel").fetchSemanticsNode().boundsInRoot
         compose.onNodeWithTag("road-speed-panel").assertContentDescriptionEquals(
             "Hızım 0 kilometre/saat, GPS. Hız sınırı 50 kilometre/saat, Genel yol sınırı · TomTom.")
         assertOutsideMap()
         assertTrue("Portrait controls belong below the instruction", bounds("navigation-map-controls-row").top >= card.bottom)
-        listOf("directions-recenter", "map-layers").forEach { tag ->
+        listOf("directions-recenter").forEach { tag ->
             compose.onNodeWithTag(tag).assertIsDisplayed()
             val control = compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
             assertFalse("Live guidance covers $tag", card.overlaps(control))
@@ -373,24 +372,25 @@ class NavigationHomeGeometryTest {
         assertOutsideMap()
         val card = bounds("live-guidance-card")
         val row = bounds("navigation-map-controls-row")
-        assertTrue("Landscape controls sit alongside the instruction", card.right <= row.left && row.top < card.bottom)
+        assertTrue("Speed/weather/recenter row stays below the instruction/status area", row.top >= card.bottom)
         val map = bounds("navigation-home-map")
         compose.onNodeWithTag("navigation-home-map").assertHeightIsAtLeast(191.dp)
-        val primaryActions = listOf("compact-card-mute", "home-finish-session", "open-navigation-dashboard")
+        val primaryActions = listOf("compact-card-mute", "home-finish-session")
         for (tag in primaryActions) {
             compose.onAllNodesWithTag(tag).assertCountEquals(1)
             compose.onNodeWithTag(tag).assertIsDisplayed().assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
             assertTrue("$tag must end above the real map", bounds(tag).bottom <= map.top + 1f)
         }
-        assertTrue("Dashboard stays below the speed and map-controls row", bounds("open-navigation-dashboard").top >= row.bottom)
-        compose.onNodeWithTag("road-speed-panel").assertDoesNotExist()
+        assertNoObsoleteMapControls()
+        compose.onNodeWithTag("road-speed-panel").assertIsDisplayed()
         compose.onNodeWithText("© OpenStreetMap contributors").assertIsDisplayed()
-        compose.onNodeWithTag("compact-guidance-overflow", useUnmergedTree = true).assertIsDisplayed()
-            .assertTextContains("Uyarı var", substring = true)
-        compose.onNodeWithText(warning, useUnmergedTree = true).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("compact-guidance-overflow", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithText(warning, useUnmergedTree = true).assertIsDisplayed()
+        val warningBounds = compose.onNodeWithText(warning, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertTrue("Warning remains in the fixed panel without scrolling", warningBounds.bottom <= map.top)
         primaryActions.forEach { compose.onNodeWithTag(it).assertIsDisplayed() }
         assertOutsideMap()
-        compose.onNodeWithTag("open-navigation-dashboard").performClick()
+        compose.runOnIdle { dashboard.value = true }
         compose.onNodeWithText("Sentetik gösterge").assertIsDisplayed()
     }
 
@@ -465,14 +465,26 @@ class NavigationHomeGeometryTest {
     private fun bounds(tag: String) = compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
 
     private fun assertOutsideMap() {
+        assertNoObsoleteMapControls()
         val map = bounds("navigation-home-map")
         assertTrue("The actual map must remain visible", map.height > 0)
-        assertTrue("The header must not cover the real map", bounds("compact-guidance-header").bottom <= map.top + 1f)
-        for (tag in listOf("directions-recenter", "map-layers")) {
+        val header = compose.onAllNodesWithTag("compact-guidance-header").fetchSemanticsNodes().singleOrNull()
+        if (header != null) assertTrue("The header must not cover the real map", header.boundsInRoot.bottom <= map.top + 1f)
+        for (tag in listOf("directions-recenter")) {
             compose.onAllNodesWithTag(tag).assertCountEquals(1)
             compose.onNodeWithTag(tag).assertIsDisplayed().assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
-            assertTrue("$tag must end before the map", bounds(tag).bottom <= map.top + 1f)
+            if (header != null) assertTrue("$tag must end before the map", bounds(tag).bottom <= map.top + 1f)
+            else {
+                compose.onNodeWithTag("open-navigation").assertIsDisplayed()
+                assertFalse("$tag must not cover search", bounds(tag).overlaps(bounds("open-navigation")))
+                assertFalse("$tag must not cover recording", bounds(tag).overlaps(bounds("home-record")))
+            }
         }
+    }
+
+    private fun assertNoObsoleteMapControls() {
+        compose.onNodeWithTag("map-layers").assertDoesNotExist()
+        compose.onNodeWithTag("open-navigation-dashboard").assertDoesNotExist()
     }
 
     @Test fun uxIdlePreviewAndRecordingOnlyKeepDestinationHeader() {

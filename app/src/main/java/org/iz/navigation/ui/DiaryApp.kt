@@ -174,6 +174,11 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     var navigationStops by remember { mutableStateOf<List<org.iz.navigation.weather.RouteStop>?>(null) }
     var navigationTransport by remember { mutableStateOf<Transport?>(null) }
     var navigationTarget by remember { mutableStateOf<org.iz.navigation.car.NavigationTarget?>(null) }
+    var navigationShared by rememberSaveable(stateSaver = SharedMapInputSaver) {
+        mutableStateOf<org.iz.navigation.car.SharedMapInput?>(null)
+    }
+    var navigationDashboardRequest by remember { mutableIntStateOf(0) }
+    var navigationLayersRequest by remember { mutableIntStateOf(0) }
     var navigationInitialPlan by remember { mutableStateOf<SavedWeatherPlan?>(null) }
     var libraryOpen by navigator.pageFlag(UiPage.ROUTES)
     var collectionsOpen by navigator.pageFlag(UiPage.COLLECTIONS)
@@ -242,6 +247,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
         navigationTransport = transport
         navigationInitialPlan = plan
         navigationTarget = null
+        navigationShared = null
         history.push(UiPage.DIRECTIONS, sourcePlanId)
         groupPage = false
         weatherPage = false
@@ -261,7 +267,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     }
     fun prepareSaveRoute(stops: List<RouteStop>, transport: Transport, preferences: RoutePreferences,
         originCurrent: Boolean, speed: Double?) {
-        if (stops.size !in 2..5) { vm.message("Kaydetmek için başlangıç ve varış seç."); return }
+        if (stops.size !in 2..org.iz.navigation.weather.RouteStopLimits.MAX_PLANNED_STOPS) { vm.message("Kaydetmek için başlangıç ve varış dahil en fazla 20 durak seç."); return }
         routeToSave = SavedRoutePlan(name = "${stops.first().label} → ${stops.last().label}".take(300),
             stops = stops.toList(), transport = transport, preferences = preferences,
             originUsesCurrentLocation = originCurrent, travelSpeedKmh = speed)
@@ -478,6 +484,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { refresh++; vm.execute { vm.repository.cleanupExpired() } }
     LaunchedEffect(incoming) {
         val delivered = incoming ?: return@LaunchedEffect
+        val sharedMapInput = org.iz.navigation.car.NavigationIntents.sharedInput(delivered)
         val id = delivered.getStringExtra("journeyId")
         val prompt = delivered.getStringExtra("trackingPrompt")
         val suggestion = runCatching { Transport.valueOf(delivered.getStringExtra("suggestedTransport").orEmpty()) }.getOrDefault(Transport.WALK)
@@ -496,9 +503,14 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     communityAccountId = delivered.getLongExtra(org.iz.navigation.osmcommunity.CommunityNotifications.EXTRA_ACCOUNT_ID, -1L)
                     history.openExternal(UiPage.COMMUNITY, communityMessageId?.toString(), communityAccountId?.toString(), incomingIsCold)
                 }
-                delivered.getBooleanExtra("openNavigation", false) || org.iz.navigation.car.NavigationIntents.parse(delivered) != null -> {
+                sharedMapInput != null -> {
+                    navigationStops = null; navigationTransport = null; navigationInitialPlan = null; navigationTarget = null
+                    navigationShared = sharedMapInput
+                    history.openExternal(UiPage.DIRECTIONS, cold = incomingIsCold)
+                }
+                delivered.getBooleanExtra("openNavigation", false) -> {
                     navigationStops = null; navigationTransport = null; navigationInitialPlan = null
-                    navigationTarget = org.iz.navigation.car.NavigationIntents.parse(delivered)
+                    navigationTarget = null; navigationShared = null
                     history.openExternal(UiPage.DIRECTIONS, cold = incomingIsCold)
                 }
                 delivered.getBooleanExtra("openWeather", false) -> history.openExternal(UiPage.WEATHER, cold = incomingIsCold)
@@ -730,9 +742,16 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     onEditPhoto = { editPhoto = it },
                 )
                 uiEntry.page == UiPage.JOURNEY || uiEntry.page == UiPage.PLACE -> Text("Kayıt açılıyor…", Modifier.padding(24.dp))
-                uiEntry.page == UiPage.MAP || navigationPage -> NavigationScreen(onClose = { navigationPage = false; navigationTarget = null },
+                uiEntry.page == UiPage.MAP || navigationPage -> NavigationScreen(onClose = { navigationPage = false; navigationTarget = null; navigationShared = null },
                     vm = phoneModel(uiEntry),
                     incomingTarget = navigationTarget, initialStops = navigationStops, initialTransport = navigationTransport,
+                    incomingShared = navigationShared.takeIf { navigationPage },
+                    dashboardRequest = navigationDashboardRequest, layersRequest = navigationLayersRequest,
+                    onSharedMap = { input -> exitGuard.requestExit {
+                        navigationShared = input; navigationTarget = null; navigationInitialPlan = null
+                        navigationStops = null; navigationTransport = null
+                        history.push(UiPage.DIRECTIONS)
+                    } },
                     entryId = navigationEntryId, initiallyPlanning = navigationPage,
                     initialPlan = if (navigationPage) navigationInitialPlan else null, onSaveRoute = ::prepareSaveRoute,
                     onStarted = { exitGuard.update(null); history.toMap() }, restoringEntry = history.isRestoredEntry(uiEntry.key),
@@ -791,6 +810,10 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
             fun open(action: () -> Unit) { menuOpen = false; action() }
             TextButton({ open { tab = 1 } }, Modifier.fillMaxWidth().testTag("menu-journeys")) { Text("Yolculuklar") }
             TextButton({ open { openDirections() } }, Modifier.fillMaxWidth().testTag("menu-route-plan")) { Text("Rota planla") }
+            if (uiEntry.page in setOf(UiPage.MAP, UiPage.DIRECTIONS)) {
+                TextButton({ open { navigationDashboardRequest++ } }, Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("menu-navigation-dashboard")) { Text("Yolculuk göstergesi") }
+                TextButton({ open { navigationLayersRequest++ } }, Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("menu-map-layers")) { Text("Harita katmanları") }
+            }
             TextButton({ open { libraryOpen = true } }, Modifier.fillMaxWidth().testTag("menu-route-library")) { Text("Rotalarım") }
             TextButton({ open { collectionsOpen = true } }, Modifier.fillMaxWidth().testTag("menu-collections")) { Text("Geziler") }
             TextButton({ open { openGpx() } }, Modifier.fillMaxWidth().testTag("menu-gpx-follow")) { Text("GPX izi takip et") }

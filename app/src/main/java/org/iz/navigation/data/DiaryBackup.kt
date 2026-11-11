@@ -147,7 +147,7 @@ class DiaryBackup(context: Context, private val repository: DiaryRepository) {
     }
 }
 internal object BackupJson {
-    private const val VERSION = 10
+    private const val VERSION = 11
     private const val FORMAT = "org.iz.navigation.backup"
     // Read compatibility for user-created backups from the former application identity.
     private const val LEGACY_FORMAT = "com.atay.iz.backup"
@@ -318,7 +318,10 @@ internal object BackupJson {
                 WatchHealthSample(it.strictString("sessionId"), it.strictLong("sequence"), it.strictString("journeyId"),
                     HealthMetric.valueOf(it.strictString("metric")), it.strictLong("startAt"), it.strictLong("endAt"), it.strictDouble("value"))
             },
-            savedPlans = libraryRecords("savedPlans", parse = TravelLibraryJson::readPlan),
+            savedPlans = libraryRecords("savedPlans") { record ->
+                require(version >= 11 || record.getJSONArray("stops").length() <= 5) { "20 duraklı rota için yedek sürümü 11 gerekir." }
+                TravelLibraryJson.readPlan(record)
+            },
             importedTracks = libraryRecords("importedTracks") { record ->
                 TravelLibraryJson.readTrack(record).also { track ->
                     libraryPoints += track.segments.sumOf { it.points.size.toLong() }

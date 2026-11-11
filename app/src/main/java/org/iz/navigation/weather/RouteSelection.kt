@@ -37,22 +37,27 @@ internal fun uniqueAlternatives(routes: List<PlannedRoute>, message: String? = n
 
 suspend fun RoutePlanner.revalidateSelection(selected: PlannedRoute, stops: List<RouteStop>, departureAt: Long,
     transport: Transport, travelSpeedKmh: Double?, preferences: RoutePreferences): PlannedRoute {
+    RouteStopLimits.requireEffective(stops.size)
     require(selected.transport == transport && selected.preferences == preferences) { "Rota tercihleri değişti. Yeniden hesaplayıp seç." }
     if (stops.size == selected.stops.size + 1 && stops.drop(1) == selected.stops) {
         // A current-location approach is a separate leg, not a replacement for the selected path.
         // Keeping the suffix request separate also preserves Valhalla's two-location alternatives.
         val approach = plan(stops.take(2), departureAt, transport, travelSpeedKmh, preferences).requireUsablePreferences()
+        if (approach.stops != stops.take(2)) throw RouteServiceException("Yaklaşım durakları korunamadı.")
         val approachDeparture = approach.effectiveDepartureAt ?: departureAt
         val approachMillis = kotlin.math.ceil(approach.durationSeconds * 1000.0).toLong()
         if (approachMillis <= 0L || approachDeparture < 0L || approachDeparture > Long.MAX_VALUE - approachMillis)
             throw RouteServiceException("Başlangıca yaklaşım süresi doğrulanamadı. Rotayı yeniden hesaplayıp seç.")
         val suffix = revalidateSelection(selected, selected.stops, approachDeparture + approachMillis,
             transport, travelSpeedKmh, preferences)
+        if ((suffix.effectiveDepartureAt ?: (approachDeparture + approachMillis)) != approachDeparture + approachMillis)
+            throw RouteServiceException("Yaklaşımın varış saati seçilen rotayla eşleşmiyor.")
         return joinApproachToSelection(approach, suffix, approachDeparture)
     }
     val key = selected.geometryKey()
     val found = alternatives(stops, departureAt, transport, travelSpeedKmh, preferences).routes.firstOrNull {
-        it.transport == transport && it.preferences == preferences && it.stops == stops && it.geometryKey() == key
+        it.transport == transport && it.preferences == preferences && it.stops == stops &&
+            it.avoidAreas == selected.avoidAreas && it.geometryKey() == key
     }
         ?: throw RouteServiceException("Seçilen yol veya başlangıç konumu değişti. Rotayı yeniden hesaplayıp seç; farklı bir yol kendiliğinden başlatılmaz.")
     return found.copy(selectionLocked = true).requireUsablePreferences()
@@ -65,7 +70,9 @@ private fun joinApproachToSelection(approach: PlannedRoute, suffix: PlannedRoute
     }
     verify(approach.provider == suffix.provider && approach.transport == suffix.transport &&
         approach.preferences == suffix.preferences && approach.travelSpeedKmh == suffix.travelSpeedKmh)
-    verify(approach.stops.size == 2 && approach.stops.last() == suffix.stops.first() && suffix.stops.size <= 5)
+    verify(approach.stops.size == 2 && approach.stops.last() == suffix.stops.first() &&
+        suffix.stops.size <= RouteStopLimits.MAX_PLANNED_STOPS)
+    verify(approach.avoidAreas == suffix.avoidAreas)
     verify(approach.vertices.last().coordinate == suffix.vertices.first().coordinate)
     verify(listOf(approach, suffix).all { it.vertices.size >= 2 && it.durationSeconds > 0 &&
         it.vertices.first().elapsedSeconds == 0.0 && kotlin.math.abs(it.vertices.last().elapsedSeconds - it.durationSeconds) <= .001 })
@@ -107,6 +114,29 @@ private fun joinApproachToSelection(approach: PlannedRoute, suffix: PlannedRoute
             approach.hasHighway == false && suffix.hasHighway == false -> false; else -> null },
         providerWarnings = (approach.providerWarnings + suffix.providerWarnings).distinct(), selectionLocked = true,
     ).requireUsablePreferences()
+}
+
+/** A provider request stays within 20 locations; every occurrence in the effective route is retained. */
+internal suspend fun planApproachRoute(stops: List<RouteStop>, departureAt: Long,
+    planLeg: suspend (List<RouteStop>, Long) -> PlannedRoute): PlannedRoute {
+    RouteStopLimits.requireEffective(stops.size)
+    require(stops.size == RouteStopLimits.MAX_EFFECTIVE_STOPS)
+    if (stops[1].plannedBreakSeconds != 0)
+        throw RouteServiceException("Yaklaşım bağlantısındaki mola korunamadı. Rotayı telefonda yeniden planla.")
+    val approachStops = stops.take(2)
+    val suffixStops = stops.drop(1)
+    val approach = planLeg(approachStops, departureAt).requireUsablePreferences()
+    require(approach.stops == approachStops)
+    val at = approach.effectiveDepartureAt ?: departureAt
+    val millis = kotlin.math.ceil(approach.durationSeconds * 1000.0)
+    if (!millis.isFinite() || millis <= 0 || millis >= Long.MAX_VALUE.toDouble() ||
+        at < 0 || at > Long.MAX_VALUE - millis.toLong())
+        throw RouteServiceException("Başlangıca yaklaşım süresi doğrulanamadı.")
+    val suffix = planLeg(suffixStops, at + millis.toLong()).requireUsablePreferences()
+    require(suffix.stops == suffixStops)
+    if ((suffix.effectiveDepartureAt ?: (at + millis.toLong())) != at + millis.toLong())
+        throw RouteServiceException("Yaklaşımın varış saati rota devamıyla eşleşmiyor.")
+    return joinApproachToSelection(approach, suffix, at).copy(selectionLocked = suffix.selectionLocked)
 }
 
 internal fun RoutePreferences.json() = JSONObject().put("avoidHighways", avoidHighways).put("avoidTolls", avoidTolls).put("avoidFerries", avoidFerries).put("avoidUnpaved", avoidUnpaved)

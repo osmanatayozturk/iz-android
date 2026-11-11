@@ -34,6 +34,7 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
@@ -94,6 +95,7 @@ fun WeatherRouteMap(
     navigationControlsReady: Boolean = true,
     preparedRoutes: org.iz.navigation.navigation.PreparedRouteManager? = null,
     navigationHeader: (@Composable (@Composable () -> Unit, @Composable () -> Unit) -> Unit)? = null,
+    layersRequest: Int = 0,
     overlay: @Composable BoxScope.() -> Unit = {},
 ) {
     ExpandableMap(modifier = modifier, title = title, expandable = expandable) { mapModifier ->
@@ -103,7 +105,7 @@ fun WeatherRouteMap(
                     liveCoordinate, recordedPoints, gpsStale, singleStopLabel, cameraIdentity, navigationLayout,
                     members, onLocate, attributionBottomInset, cameraViewportInsets, navigationControlsTopInset,
                     navigationControlsHorizontal, drivingCamera, cameraViewportReady, navigationControlsReady,
-                    preparedRoutes, navigationHeader)
+                    preparedRoutes, navigationHeader, layersRequest)
             }
             overlay()
         }
@@ -134,6 +136,7 @@ private fun ColumnScope.WeatherRouteMapContent(
     navigationControlsReady: Boolean,
     preparedRoutes: org.iz.navigation.navigation.PreparedRouteManager?,
     navigationHeader: (@Composable (@Composable () -> Unit, @Composable () -> Unit) -> Unit)?,
+    layersRequest: Int,
 ) {
     val context = LocalContext.current
     val tileUrl = remember(context) { OsmServiceSettings(context).read().tileUrl }
@@ -171,6 +174,10 @@ private fun ColumnScope.WeatherRouteMapContent(
     var showRoute by remember { mutableStateOf(true) }
     var showMembers by remember { mutableStateOf(true) }
     var layersOpen by remember { mutableStateOf(false) }
+    var seenLayersRequest by remember { mutableIntStateOf(layersRequest) }
+    LaunchedEffect(layersRequest) {
+        if (layersRequest != seenLayersRequest) { seenLayersRequest = layersRequest; layersOpen = true }
+    }
     var projectedMembers by remember { mutableStateOf(emptyList<Offset>()) }
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
     var styleRevision by remember { mutableIntStateOf(0) }
@@ -275,6 +282,15 @@ private fun ColumnScope.WeatherRouteMapContent(
             Offset(point.x, point.y)
         }
     }
+    val preparedDescription = when {
+        preparedStyle == null -> "Hazır rota · Harita paketi kullanılamıyor; rota çizgisi gösteriliyor."
+        preparedCenterCovered -> "Hazır harita · Merkez seçili alanda; ekranın tamamı için kapsam garantisi yok."
+        else -> "Hazır rota · Harita merkezi kayıtlı alanın dışında."
+    }
+    var preparedDetailsOpen by remember(preparedRoutes) { mutableStateOf(false) }
+    if (preparedDetailsOpen && preparedDisplay) AlertDialog(onDismissRequest = { preparedDetailsOpen = false },
+        title = { Text("Hazır harita kapsamı") }, text = { Text(preparedDescription) },
+        confirmButton = { TextButton({ preparedDetailsOpen = false }) { Text("Kapat") } })
     val navigationControls: @Composable () -> Unit = {
         Surface(shape = CircleShape, shadowElevation = 3.dp) {
             IconButton(onClick = {
@@ -285,11 +301,14 @@ private fun ColumnScope.WeatherRouteMapContent(
                 else if (cameraViewportReady) map?.let { focusRouteCoordinate(it, fix, 16.0, cameraPadding) }
             }, modifier = Modifier.size(48.dp).testTag("directions-recenter")) { Icon(Icons.Outlined.GpsFixed, "Konumum") }
         }
-        Surface(shape = CircleShape, shadowElevation = 3.dp) {
-            IconButton(onClick = { layersOpen = true }, modifier = Modifier.size(48.dp).testTag("map-layers")) {
+        if (!navigationLayout || layersOpen) Surface(shape = CircleShape, shadowElevation = 3.dp) {
+            if (!navigationLayout) IconButton(onClick = { layersOpen = true }, modifier = Modifier.size(48.dp).testTag("map-layers")) {
                 Icon(Icons.Outlined.Layers, "Katmanlar")
             }
             DropdownMenu(expanded = layersOpen, onDismissRequest = { layersOpen = false }) {
+                if (preparedDisplay) DropdownMenuItem(text = { Text("Hazır harita kapsamı") }, onClick = {
+                    layersOpen = false; preparedDetailsOpen = true
+                }, modifier = Modifier.testTag("menu-prepared-map-status"))
                 if (route != null) DropdownMenuItem(text = { Text("Rotayı sığdır") }, onClick = {
                     cancelDriveAnimation()
                     layersOpen = false; pendingFitDataset = null; cameraPolicy.userGesture(); driveFollow.userGesture(); following = false
@@ -310,10 +329,12 @@ private fun ColumnScope.WeatherRouteMapContent(
     val preparedNotice: @Composable () -> Unit = {
         if (preparedDisplay) Surface(color = MaterialTheme.colorScheme.surface) {
             Text(when {
-                preparedStyle == null -> "Hazır rota · Harita paketi kullanılamıyor; rota çizgisi gösteriliyor."
-                preparedCenterCovered -> "Hazır harita · Merkez seçili alanda; ekranın tamamı için kapsam garantisi yok."
-                else -> "Hazır rota · Harita merkezi kayıtlı alanın dışında."
-            }, Modifier.padding(8.dp), style = MaterialTheme.typography.labelSmall)
+                preparedStyle == null -> "Hazır rota: harita paketi yok"
+                preparedCenterCovered -> "Hazır harita: kapsamı doğrula"
+                else -> "Hazır haritanın kapsamı dışında"
+            }, Modifier.padding(horizontal = 8.dp, vertical = 2.dp).testTag("prepared-map-status")
+                .semantics { contentDescription = preparedDescription }, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.labelSmall)
         }
     }
     navigationHeader?.invoke(navigationControls, preparedNotice)
@@ -354,7 +375,9 @@ private fun ColumnScope.WeatherRouteMapContent(
             onAttributionClick = if (preparedDisplay) ({ showOfflineNotices = true }) else null,
         )
         if (preparedDisplay && navigationHeader == null) Box(
-            Modifier.align(Alignment.BottomCenter).padding(bottom = attributionBottomInset + 28.dp, start = 12.dp, end = 12.dp)
+            Modifier.align(if (navigationHeader != null) Alignment.TopStart else Alignment.BottomCenter)
+                .padding(top = if (navigationHeader != null) 4.dp else 0.dp,
+                    bottom = if (navigationHeader != null) 0.dp else attributionBottomInset + 28.dp, start = 12.dp, end = 12.dp)
         ) { preparedNotice() }
         // Sprite images can be registered/queryable yet absent from the native GPU atlas.
         // Geographic Compose badges keep endpoint labels visible and accessible above the live fix.

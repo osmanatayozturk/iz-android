@@ -22,6 +22,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import org.iz.navigation.IzApplication
 import org.iz.navigation.car.NavigationTarget
+import org.iz.navigation.car.SharedMapInput
+import org.iz.navigation.car.SharedMapLinks
+import org.iz.navigation.car.SharedMapStop
+import androidx.compose.runtime.saveable.rememberSaveable
 import org.iz.navigation.data.*
 import org.iz.navigation.integration.FullscreenMapDialog
 import org.iz.navigation.integration.WeatherRouteMap
@@ -109,6 +113,18 @@ internal class PhoneNavigationViewModel(application: Application) : AndroidViewM
         suggestOrderWithPreferences = ConfiguredStopOrderPlanner(application)::propose,
         credentialRevision = { TrafficSettingsStore(application).read().revision })
     val ui = directions.state
+    private val appliedSharedPlans = mutableMapOf<Long, SharedMapInput.Itinerary>()
+    fun applySharedPlanOnce(entryId: Long, ready: SharedMapInput.Itinerary) {
+        if (currentUiEntry != entryId || appliedSharedPlans[entryId] == ready) return
+        val dynamic = ready.origin == null || ready.origin.currentLocation
+        val before = directions.workingInput()
+        val origin = ready.origin?.takeUnless { it.currentLocation }?.let { RouteStop(it.name, requireNotNull(it.coordinate)) }
+        directions.restoreUiInput(before.copy(origin = origin, originCurrent = dynamic,
+            via = ready.via.map { RouteStop(it.name, requireNotNull(it.coordinate)) },
+            destination = RouteStop(ready.destination.name, requireNotNull(ready.destination.coordinate))))
+        appliedSharedPlans[entryId] = ready
+        while (appliedSharedPlans.size > 24) appliedSharedPlans.remove(appliedSharedPlans.keys.first())
+    }
     val permissionGate = DirectionsPermissionGate()
 
     val preparedRoutes get() = getApplication<IzApplication>().preparedRoutes
@@ -327,7 +343,7 @@ internal class PhoneNavigationViewModel(application: Application) : AndroidViewM
     }
 }
 
-private class QuickDirectionsEntry(val destination: RouteStop? = null)
+private data class QuickDirectionsEntry(val destination: RouteStop? = null, val shared: Boolean = false)
 
 @Composable
 internal fun NavigationScreen(
@@ -349,6 +365,10 @@ internal fun NavigationScreen(
     continuePreparation: Boolean = false,
     onPlannerOpened: () -> Unit = {},
     onMap: () -> Unit = onClose,
+    incomingShared: SharedMapInput? = null,
+    onSharedMap: ((SharedMapInput) -> Unit)? = null,
+    dashboardRequest: Int = 0,
+    layersRequest: Int = 0,
     onAssignShortcut: (DestinationShortcutKind) -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -394,6 +414,12 @@ internal fun NavigationScreen(
     val assignShortcut by rememberUpdatedState(onAssignShortcut)
     val shortcutScope = rememberCoroutineScope()
     var quickDirections by remember(quickOwner) { mutableStateOf<QuickDirectionsEntry?>(null) }
+    var sharedDialog by rememberSaveable(entryId, incomingShared, stateSaver = SharedMapInputSaver) {
+        mutableStateOf(incomingShared)
+    }
+    var preparedShared by rememberSaveable(entryId, incomingShared, stateSaver = SharedMapInputSaver) {
+        mutableStateOf<SharedMapInput?>(null)
+    }
     var shortcutJob by remember(quickOwner) { mutableStateOf<Job?>(null) }
     fun quickEntryCurrent(): Boolean =
         currentQuickOwner === quickOwner && (uiHistory == null || uiHistory.current.key == dashboardEntry)
@@ -409,6 +435,13 @@ internal fun NavigationScreen(
         }
     }
     var showDashboard by remember(dashboardEntry, nav.sessionId) { mutableStateOf(false) }
+    var seenDashboardRequest by remember { mutableIntStateOf(dashboardRequest) }
+    LaunchedEffect(dashboardRequest) {
+        if (dashboardRequest != seenDashboardRequest) {
+            seenDashboardRequest = dashboardRequest
+            if (quickEntryCurrent()) showDashboard = true
+        }
+    }
     fun openShortcut(kind: DestinationShortcutKind) {
         val before = vm.navigation.state.value
         if (showPlanning || showDashboard || before.guidance || quickDirections != null || shortcutJob != null ||
@@ -593,7 +626,7 @@ internal fun NavigationScreen(
     val openedStartedCount = remember(entryId) { ui.startedCount }
     LaunchedEffect(ui.startedCount) { if (ui.startedCount > openedStartedCount) { showPlanning = false; onStarted() } }
     LaunchedEffect(entryId, incomingTarget, initialPlan) {
-        vm.enter(entryId, initialStops, initialTransport, initialPlan, restoringEntry, continuePreparation)
+        vm.enter(entryId, initialStops, initialTransport, initialPlan, restoringEntry || incomingShared != null, continuePreparation)
         val firstPreview = vm.takeInitialPreview(entryId)
         if (!restoringEntry && initialPlan != null && firstPreview) {
             requestAction(DirectionsAction.PREVIEW)
@@ -607,6 +640,43 @@ internal fun NavigationScreen(
                 showSearch = true
             }
         }
+    }
+    LaunchedEffect(preparedShared) {
+        when (val ready = preparedShared) {
+            is SharedMapInput.Single -> ready.target.coordinate?.let {
+                quickDirections = QuickDirectionsEntry(RouteStop(ready.target.name, it), shared = true)
+                showPlanning = false
+            }
+            is SharedMapInput.Itinerary -> {
+                vm.applySharedPlanOnce(entryId, ready)
+                showPlanning = true
+            }
+            else -> Unit
+        }
+    }
+    sharedDialog?.let { input ->
+        SharedMapEntryDialog(input, onClose = { sharedDialog = null },
+            stillCurrent = ::quickEntryCurrent,
+            configuration = { TrafficSettingsStore(context).read().revision },
+            identity = {
+                val current = vm.navigation.state.value
+                SharedIntakeIdentity(dashboardEntry, TrafficSettingsStore(context).read().revision,
+                    current.routeRevision, NavigationStopSnapshot.from(current))
+            },
+            onSingle = { stop ->
+                if (quickEntryCurrent()) {
+                    sharedDialog = null
+                    preparedShared = SharedMapInput.Single(SharedMapStop(stop.label, stop.coordinate))
+                }
+            },
+            onItinerary = { stops, dynamic ->
+                if (quickEntryCurrent()) {
+                    sharedDialog = null
+                    preparedShared = SharedMapInput.Itinerary(if (dynamic) null else stops.first().let { SharedMapStop(it.label, it.coordinate) },
+                        (if (dynamic) stops.dropLast(1) else stops.drop(1).dropLast(1)).map { SharedMapStop(it.label, it.coordinate) },
+                        stops.last().let { SharedMapStop(it.label, it.coordinate) })
+                }
+            })
     }
 
     val dashboardSpeed = org.iz.navigation.speed.roadSpeedPresentation(nav.roadSpeed)
@@ -719,6 +789,11 @@ internal fun NavigationScreen(
         onMute = { vm.navigation.setMuted(!nav.muted) }, onManageSession = { showPlanning = true; onPlannerOpened() },
         onLocate = { requestAction(DirectionsAction.CURRENT_ORIGIN) }, onPin = onPin,
         onResumePlannedBreak = resumePlannedBreak, plannedBreakResumeEnabled = plannedBreakResumeEnabled,
+        layersRequest = layersRequest,
+        onRecoverRecording = {
+            if (dashboardStillCurrent() && vm.navigation.state.value.recordingPending)
+                requestPermissions(permissionNames(), forAction = false)
+        },
     ) {
     PhoneDirectionsContent(
         ui = ui, nav = nav, points = points, commandBusy = commandBusy, commandErrorVersion = commandErrorVersion, voiceControls = {
@@ -764,11 +839,21 @@ internal fun NavigationScreen(
             plan = vm.directions::planQuick,
             activate = vm.navigation::startQuickGuidance,
             initialDestination = quickEntry.destination,
+            sharedPreview = quickEntry.shared,
+            configuration = { TrafficSettingsStore(context).read().revision },
+            onSharedText = { raw ->
+                SharedMapLinks.parse(raw)?.let { parsed ->
+                    if (quickEntryCurrent()) {
+                        quickDirections = null
+                        if (onSharedMap != null) onSharedMap(parsed) else sharedDialog = parsed
+                    }
+                }
+            },
             commandBusy = commandBusy || ui.starting,
             stillOnEntry = {
                 quickEntryCurrent() && quickDirections === quickEntry && !vm.commandBusy.value && !vm.ui.value.starting
             },
-            onDismiss = { if (quickDirections === quickEntry) quickDirections = null },
+            onDismiss = { if (quickDirections === quickEntry) { quickDirections = null; if (quickEntry.shared) preparedShared = null } },
             onStarted = {
                 if (quickEntryCurrent() && quickDirections === quickEntry) {
                     quickDirections = null

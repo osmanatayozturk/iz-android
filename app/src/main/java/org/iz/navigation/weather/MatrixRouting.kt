@@ -26,8 +26,25 @@ internal data class StopOrderProposal(
     val createdAt: Long,
     val credentialRevision: String,
     val preferences: RoutePreferences = originalRoute.preferences,
+    val heuristic: Boolean = false,
+    val routeSettings: RideWeatherSettings? = null,
 ) {
     val savedSeconds: Double get() = originalRoute.durationSeconds - proposedRoute.durationSeconds
+
+    fun canApplyTo(stops: List<RouteStop>, transport: Transport, preferences: RoutePreferences,
+        revision: String, now: Long, settings: RideWeatherSettings? = null): Boolean =
+        originalStops == stops && this.preferences == preferences && credentialRevision == revision &&
+            now - createdAt in 0L..120_000L && (routeSettings == null || routeSettings == settings) &&
+            orderedStops.firstOrNull() == stops.firstOrNull() && orderedStops.lastOrNull() == stops.lastOrNull() &&
+            orderedStops.groupingBy { it }.eachCount() == stops.groupingBy { it }.eachCount() &&
+            savedSeconds > 0 && originalRoute.stops == stops && proposedRoute.stops == orderedStops &&
+            originalRoute.provider == proposedRoute.provider &&
+            originalRoute.transport == transport && proposedRoute.transport == transport &&
+            originalRoute.preferences == preferences && proposedRoute.preferences == preferences &&
+            originalRoute.avoidAreas == proposedRoute.avoidAreas &&
+            originalRoute.travelSpeedKmh == proposedRoute.travelSpeedKmh &&
+            (originalRoute.effectiveDepartureAt ?: comparisonDepartureAt) == comparisonDepartureAt &&
+            (proposedRoute.effectiveDepartureAt ?: comparisonDepartureAt) == comparisonDepartureAt
 }
 
 /** Exact enumeration of at most six directed orders. Missing edges are never free edges. */
@@ -129,13 +146,29 @@ internal class ConfiguredStopOrderPlanner internal constructor(
     private val route: suspend (String, () -> Unit, List<RouteStop>, Long, Transport, RoutePreferences) -> PlannedRoute = { key, authorize, stops, at, mode, preferences ->
         TomTomRoutePlanner(key, authorize).plan(stops, at, mode, null, preferences)
     },
+    private val largeRoute: (suspend (List<RouteStop>, Long, Transport, RoutePreferences, RouteProvider?) -> PlannedRoute)? = null,
+    private val largeSettings: (Transport) -> RideWeatherSettings? = { null },
 ) {
-    constructor(context: Context) : this(TrafficSettingsStore(context.applicationContext)::credentials)
+    constructor(context: Context) : this(
+        credentials = TrafficSettingsStore(context.applicationContext)::credentials,
+        largeRoute = { stops, at, mode, preferences, provider ->
+            val settings = WeatherSettingsStore(context.applicationContext).read(mode)
+            val planner: RoutePlanner = when (provider) {
+                RouteProvider.TOMTOM -> VerifiedTomTomRoutePlanner(context.applicationContext)
+                RouteProvider.VALHALLA -> ValhallaRoutePlanner(context.applicationContext, settings.routeEndpoint)
+                null -> ConfiguredRoutePlanner(context.applicationContext)
+            }
+            planner.plan(stops, at, mode, settings.travelSpeedKmh, preferences)
+        },
+        largeSettings = { mode -> WeatherSettingsStore(context.applicationContext).read(mode) },
+    )
 
     suspend fun propose(stops: List<RouteStop>, departureAt: Long, transport: Transport): StopOrderProposal? =
         propose(stops, departureAt, transport, RoutePreferences.defaults(transport))
 
     suspend fun propose(stops: List<RouteStop>, departureAt: Long, transport: Transport, preferences: RoutePreferences): StopOrderProposal? {
+        RouteStopLimits.requirePlanned(stops.size)
+        if (stops.size >= 6) return proposeLarge(stops.toList(), departureAt, transport, preferences)
         preferences.matrixUnavailableReason(transport)?.let { throw RouteServiceException(it) }
         require(stops.size in 4..5)
         require(transport in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE))
@@ -169,5 +202,42 @@ internal class ConfiguredStopOrderPlanner internal constructor(
         if (proposedRoute.durationSeconds >= originalRoute.durationSeconds) return null
         return StopOrderProposal(stops.toList(), ordered, originalRoute, proposedRoute, comparisonAt,
             transport == Transport.MOTORCYCLE, clock(), snapshot.revision, preferences)
+    }
+
+    private suspend fun proposeLarge(stops: List<RouteStop>, departureAt: Long, transport: Transport,
+        preferences: RoutePreferences): StopOrderProposal? {
+        require(transport != Transport.UNKNOWN && departureAt >= 0)
+        val context = coroutineContext
+        val snapshot = credentials()
+        val settings = largeSettings(transport)
+        fun checkCurrent() {
+            context.ensureActive()
+            if (credentials().revision != snapshot.revision || largeSettings(transport) != settings)
+                throw CancellationException("Rota ayarları değişti.")
+        }
+        val order = heuristicStopOrder(stops) { context.ensureActive() }
+        if (order == stops.indices.toList()) return null
+        val ordered = order.map(stops::get)
+        val now = clock()
+        require(now in 0..Long.MAX_VALUE - 120_999L && departureAt <= Long.MAX_VALUE - 999L)
+        val compareAt = ((maxOf(departureAt, now + 120_000L) + 999L) / 1000L) * 1000L
+        val calculate = largeRoute ?: throw RouteServiceException("Bu rota için durak sırası hesabı kullanılamıyor.")
+        checkCurrent()
+        val original = calculate(stops, compareAt, transport, preferences, null).requireUsablePreferences()
+        checkCurrent()
+        check(clock() < compareAt) { "Karşılaştırma saati geçti. Yeniden dene." }
+        val proposed = calculate(ordered, compareAt, transport, preferences, original.provider).requireUsablePreferences()
+        checkCurrent()
+        check(clock() < compareAt) { "Karşılaştırma saati geçti. Yeniden dene." }
+        check(original.stops == stops && proposed.stops == ordered &&
+            original.provider == proposed.provider && original.transport == transport && proposed.transport == transport &&
+            original.preferences == preferences && proposed.preferences == preferences &&
+            original.avoidAreas == proposed.avoidAreas &&
+            original.travelSpeedKmh == proposed.travelSpeedKmh &&
+            (original.effectiveDepartureAt ?: compareAt) == compareAt &&
+            (proposed.effectiveDepartureAt ?: compareAt) == compareAt) { "Rotalar aynı sağlayıcı ve ayarlara ait değil." }
+        if (proposed.durationSeconds >= original.durationSeconds) return null
+        return StopOrderProposal(stops, ordered, original, proposed, compareAt, false, clock(), snapshot.revision,
+            preferences, heuristic = true, routeSettings = settings)
     }
 }

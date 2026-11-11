@@ -17,7 +17,8 @@ data class RouteModificationRequest(
     val avoidAreas: List<RouteAvoidArea> = emptyList(),
 ) {
     init {
-        require(stops.size in 2..6 && departureAt >= 0 && avoidAreas.size <= 3)
+        RouteStopLimits.requireEffective(stops.size)
+        require(departureAt >= 0 && avoidAreas.size <= 3)
         routeTravelSpeedKmh(transport, travelSpeedKmh)
     }
 }
@@ -54,7 +55,7 @@ object RouteEditPolicy {
                 remaining.remove(action.index)
             }
             is RouteEditAction.AddStop -> {
-                require(remaining.size + 2 <= 6) { "En fazla altı rota noktası kullanılabilir." }
+                RouteStopLimits.requireEffective(remaining.size + 2)
                 added = action.stop
             }
             is RouteEditAction.AvoidManeuver -> {

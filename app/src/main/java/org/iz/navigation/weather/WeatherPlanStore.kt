@@ -27,7 +27,8 @@ internal object WeatherPlanCodec {
     fun encode(value: SavedWeatherPlan): String {
         routeTravelSpeedKmh(value.transport, value.travelSpeedKmh)
         require(value.transport != Transport.UNKNOWN) { "Yolculuk tarzını seç." }
-        require(value.stops.size in 2..5 && value.departureAt >= 0) { "Başlangıç ve hedef seç." }
+        RouteStopLimits.requirePlanned(value.stops.size)
+        require(value.departureAt >= 0) { "Başlangıç ve hedef seç." }
         require(value.stops.first().plannedBreakSeconds == 0 && value.stops.last().plannedBreakSeconds == 0) { "Mola yalnız ara durağa eklenebilir." }
         val stops = JSONArray()
         value.stops.forEach { stop ->
@@ -37,7 +38,7 @@ internal object WeatherPlanCodec {
                 stop.label.length <= 200) { "Rota noktası geçerli değil." }
             stops.put(JSONObject().put("name", stop.label).put("lat", point.latitude).put("lon", point.longitude).withPlannedBreak(stop))
         }
-        return JSONObject().put("version", 3).put("transport", value.transport.name)
+        return JSONObject().put("version", 4).put("transport", value.transport.name)
             .put("preferences", value.preferences.json()).put("originUsesCurrentLocation", value.originUsesCurrentLocation)
             .put("travelSpeedKmh", value.travelSpeedKmh ?: JSONObject.NULL)
             .put("departureAt", value.departureAt).put("stops", stops).toString()
@@ -47,10 +48,11 @@ internal object WeatherPlanCodec {
         require(raw != null && raw.length <= 16_384)
         val json = JSONObject(raw)
         val version = json.getInt("version")
-        require(version in 1..3)
+        require(version in 1..4)
         val transport = if (version == 1) Transport.MOTORCYCLE else Transport.valueOf(json.getString("transport"))
         val list = json.getJSONArray("stops")
-        require(list.length() in 2..5)
+        RouteStopLimits.requirePlanned(list.length())
+        require(version >= 4 || list.length() <= 5)
         SavedWeatherPlan((0 until list.length()).map {
             val point = list.getJSONObject(it)
             RouteStop(point.getString("name"), WeatherCoordinate(point.getDouble("lat"), point.getDouble("lon")), point.plannedBreakSeconds())

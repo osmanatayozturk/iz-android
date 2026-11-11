@@ -35,6 +35,9 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -59,6 +62,7 @@ import org.iz.navigation.weather.PlannedRoute
 import org.iz.navigation.weather.RoutePreferences
 import org.iz.navigation.weather.RouteStop
 import org.iz.navigation.weather.WeatherCoordinate
+import org.iz.navigation.integration.WeatherRouteMap
 
 internal enum class QuickRoutePreference(val label: String, val icon: ImageVector) {
     HIGHWAYS("Otoyol", Icons.Outlined.Route),
@@ -89,7 +93,10 @@ private data class QuickRouteRequest(
     val choices: Map<QuickRoutePreference, Boolean>,
     val recordJourney: Boolean,
     val navigation: NavigationState,
+    val configuration: String = "",
+    val targetOwner: Any? = null,
 )
+private data class QuickRoutePreview(val route: PlannedRoute, val origin: QuickNavigationOrigin, val request: QuickRouteRequest)
 
 private fun NavigationState.canQuickStart(transport: Transport): Boolean =
     !loading && (!recording || transport == (journey?.transport ?: sessionTransport))
@@ -110,6 +117,12 @@ internal fun QuickDirectionsDialog(
     hasLocationPermission: (() -> Boolean)? = null,
     initialDestination: RouteStop? = null,
     searchOrigin: suspend () -> WeatherCoordinate? = { null },
+    sharedPreview: Boolean = false,
+    configuration: () -> String = { "" },
+    onSharedText: ((String) -> Unit)? = null,
+    previewMap: @Composable (PlannedRoute) -> Unit = { route ->
+        WeatherRouteMap(route, null, Modifier.fillMaxSize(), expandable = false, stops = route.stops)
+    },
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -117,6 +130,7 @@ internal fun QuickDirectionsDialog(
     val currentlyBusy by rememberUpdatedState(commandBusy)
     val entryCurrent by rememberUpdatedState(stillOnEntry)
     val currentSearchOrigin by rememberUpdatedState(searchOrigin)
+    val currentConfiguration by rememberUpdatedState(configuration)
     val search = remember(context, scope, searchPlaces) {
         val service by lazy { OsmPlaces(context) }
         val submit: suspend (String) -> List<SelectedOsmPlace> = searchPlaces ?: { query ->
@@ -128,16 +142,30 @@ internal fun QuickDirectionsDialog(
     val nav by navigationState.collectAsStateWithLifecycle()
     val destinationList = rememberLazyListState()
     var destination by remember(initialDestination) { mutableStateOf(initialDestination) }
+    val targetOwner = remember(initialDestination, sharedPreview) { Any() }
+    val currentTargetOwner by rememberUpdatedState(targetOwner)
+    val currentDestination by rememberUpdatedState(destination)
     var choosingMode by remember(initialDestination) { mutableStateOf(initialDestination != null) }
     var choices by remember { mutableStateOf(emptyMap<QuickRoutePreference, Boolean>()) }
-    var recordJourney by remember { mutableStateOf(true) }
-    var permissionRequest by remember { mutableStateOf<QuickRouteRequest?>(null) }
-    var lastMode by remember { mutableStateOf<Transport?>(null) }
-    var phase by remember { mutableStateOf<QuickRoutePhase?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var recordJourney by rememberSaveable { mutableStateOf(true) }
+    var permissionRequest by remember(targetOwner) { mutableStateOf<QuickRouteRequest?>(null) }
+    var lastMode by rememberSaveable { mutableStateOf<Transport?>(if (sharedPreview) Transport.CAR else null) }
+    var preview by remember(targetOwner) { mutableStateOf<QuickRoutePreview?>(null) }
+    var completed by remember(targetOwner) { mutableStateOf(false) }
+    var phase by remember(targetOwner) { mutableStateOf<QuickRoutePhase?>(null) }
+    var error by remember(targetOwner) { mutableStateOf<String?>(null) }
     var showSettings by remember { mutableStateOf(false) }
-    var routeJob by remember { mutableStateOf<Job?>(null) }
+    var routeJob by remember(targetOwner) { mutableStateOf<Job?>(null) }
     var generation by remember { mutableLongStateOf(0L) }
+    DisposableEffect(targetOwner) {
+        onDispose {
+            generation++
+            // A replacement cancels read/preview work, not an already explicitly dispatched start.
+            if (phase != QuickRoutePhase.START) routeJob?.cancel()
+            permissionRequest = null
+        }
+    }
+    DisposableEffect(search) { onDispose { search.close() } }
 
     fun hasLocation() = hasLocationPermission?.invoke() ?: (
         ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
@@ -152,9 +180,11 @@ internal fun QuickDirectionsDialog(
         val token = ++generation
         fun stillCurrent(): Boolean {
             val current = navigationState.value
-            return token == generation && choosingMode && destination == request.destination && !currentlyBusy && entryCurrent() &&
+            return !completed && token == generation && request.targetOwner === currentTargetOwner &&
+                choosingMode && currentDestination == request.destination && !currentlyBusy && entryCurrent() &&
                 current.routeRevision == request.navigation.routeRevision &&
                 NavigationStopSnapshot.from(current) == NavigationStopSnapshot.from(request.navigation) &&
+                currentConfiguration() == request.configuration &&
                 current.canQuickStart(request.transport)
         }
 
@@ -170,9 +200,12 @@ internal fun QuickDirectionsDialog(
                 val route = plan(origin.fix.coordinate, request.destination, request.transport, request.choices)
                 ensureActive()
                 check(stillCurrent())
-                phase = QuickRoutePhase.START
-                activate(route, origin, request.recordJourney)
-                if (token == generation && isActive) onRouteStarted()
+                if (sharedPreview) preview = QuickRoutePreview(route, origin, request)
+                else {
+                    phase = QuickRoutePhase.START
+                    activate(route, origin, request.recordJourney)
+                    if (token == generation && isActive) { completed = true; onRouteStarted() }
+                }
             } catch (cancelled: CancellationException) {
                 if (token == generation && isActive) fail("Rota isteği kesildi. Yeniden dene.")
                 throw cancelled
@@ -198,20 +231,22 @@ internal fun QuickDirectionsDialog(
     val requestLocation = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         val request = permissionRequest
         permissionRequest = null
-        if (request != null && entryCurrent() && choosingMode && request.destination == destination) {
+        if (request != null && request.targetOwner === currentTargetOwner && entryCurrent() && choosingMode && request.destination == currentDestination) {
             if (hasLocation()) start(request)
             else fail("Rota başlangıcı için konum izni ver. Yaklaşık konum yeterli.", settings = true)
         }
     }
 
-    fun pickMode(mode: Transport) {
+    fun pickMode(mode: Transport, previewRequest: Boolean = false) {
         val target = destination ?: return
         val current = navigationState.value
         if (!entryCurrent() || currentlyBusy || routeJob != null || permissionRequest != null || !current.canQuickStart(mode)) return
         lastMode = mode
         error = null
         showSettings = false
-        val request = QuickRouteRequest(target, mode, choices, current.recording || recordJourney, current)
+        preview = null
+        if (sharedPreview && !previewRequest) return
+        val request = QuickRouteRequest(target, mode, choices, current.recording || recordJourney, current, currentConfiguration(), targetOwner)
         if (hasLocation()) start(request)
         else {
             permissionRequest = request
@@ -226,6 +261,7 @@ internal fun QuickDirectionsDialog(
 
     fun back() {
         if (phase == QuickRoutePhase.START) return
+        if (preview != null) { preview = null; return }
         if (!choosingMode) {
             search.close()
             onDismiss()
@@ -252,17 +288,58 @@ internal fun QuickDirectionsDialog(
                 TextButton(::back, enabled = phase != QuickRoutePhase.START,
                     modifier = Modifier.heightIn(min = 48.dp).testTag("quick-back")) { Text("Geri") }
                 if (choosingMode) {
-                    QuickModePicker(destination = checkNotNull(destination), nav = nav, choices = choices, recordJourney = recordJourney,
+                    val prepared = preview
+                    if (prepared != null) {
+                        val valid = prepared.request.targetOwner === currentTargetOwner &&
+                            currentDestination == prepared.request.destination && entryCurrent() && currentConfiguration() == prepared.request.configuration &&
+                            nav.routeRevision == prepared.request.navigation.routeRevision &&
+                            NavigationStopSnapshot.from(nav) == NavigationStopSnapshot.from(prepared.request.navigation)
+                        SharedRoutePreviewContent(prepared.request.destination.label, prepared.request.recordJourney,
+                            error ?: if (!valid) "Hedef, yapılandırma veya oturum değişti. Geri dönüp yeniden önizle." else null,
+                            startEnabled = valid && !completed && phase == null && !commandBusy,
+                            modifier = Modifier.weight(1f), previewMap = { previewMap(prepared.route) }, onStart = {
+                            if (preview !== prepared || lastMode != prepared.request.transport || !valid ||
+                                prepared.request.targetOwner !== currentTargetOwner || prepared.request.destination != currentDestination ||
+                                completed || routeJob != null || phase != null) return@SharedRoutePreviewContent
+                            val token = ++generation
+                            phase = QuickRoutePhase.START
+                            routeJob = scope.launch(start = CoroutineStart.LAZY) {
+                                try {
+                                    check(prepared.request.targetOwner === currentTargetOwner && prepared.request.destination == currentDestination &&
+                                        entryCurrent() && currentConfiguration() == prepared.request.configuration)
+                                    val live = navigationState.value
+                                    check(live.routeRevision == prepared.request.navigation.routeRevision &&
+                                        NavigationStopSnapshot.from(live) == NavigationStopSnapshot.from(prepared.request.navigation))
+                                    validateOrigin(prepared.origin)
+                                    activate(prepared.route, prepared.origin, prepared.request.recordJourney)
+                                    if (token == generation && isActive) { completed = true; onRouteStarted() }
+                                } catch (cancelled: CancellationException) { throw cancelled }
+                                catch (_: Exception) { if (token == generation) { preview = null; fail("Rota veya oturum değişti. Yeniden önizle.") } }
+                                finally { if (token == generation) { phase = null; routeJob = null } }
+                            }.also { it.start() }
+                        })
+                    } else {
+                    Box(Modifier.weight(1f)) { QuickModePicker(destination = checkNotNull(destination), nav = nav, choices = choices, recordJourney = recordJourney,
                         busy = commandBusy || phase != null || permissionRequest != null, phase = phase?.label, error = error,
-                        onRecord = { recordJourney = it }, onMode = ::pickMode,
-                        retry = lastMode?.takeIf(nav::canQuickStart)?.let { mode -> { pickMode(mode) } },
+                        onRecord = { recordJourney = it }, onMode = { pickMode(it) },
+                        shared = sharedPreview, selectedMode = lastMode,
+                        retry = lastMode?.takeIf(nav::canQuickStart)?.let { mode -> { pickMode(mode, previewRequest = true) } },
                         openSettings = if (showSettings) ({
                             val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
                             runCatching { context.startActivity(intent) }.onFailure { fail("Uygulama ayarları açılamadı.", settings = true) }
                         }) else null,
-                    )
+                    ) }
+                    if (sharedPreview) Button(onClick = {
+                        lastMode?.let { pickMode(it, previewRequest = true) }
+                    }, enabled = lastMode != null && phase == null && !commandBusy && permissionRequest == null,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("shared-preview")) { Text("Rota önizle") }
+                    }
                 } else {
-                    QuickDestinationPicker(results, places, destinationList, choices, search::edit, search::submit, onPreference = { preference ->
+                    QuickDestinationPicker(results, places, destinationList, choices, search::edit, {
+                        val raw = search.state.value.query
+                        if (onSharedText != null && (raw.contains("://") || raw.contains("geo:", true) || raw.contains("google.navigation:", true)))
+                            onSharedText(raw) else search.submit()
+                    }, onPreference = { preference ->
                         choices = when (choices[preference]) {
                             null -> choices + (preference to true)
                             true -> choices + (preference to false)
@@ -288,33 +365,16 @@ private fun QuickDestinationPicker(state: OsmSearchUiState, places: List<Place>,
     val choose: (RouteStop) -> Unit = { focus.clearFocus(); onChoose(it) }
     LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(bottom = 16.dp),
         modifier = Modifier.fillMaxSize().testTag("quick-destinations")) {
-        item { Text("Nereye?", style = MaterialTheme.typography.headlineMedium) }
+        item { Text("Nereye?", Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineMedium) }
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(state.query, onEdit, singleLine = true, label = { Text("Yer adı veya adres") },
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), keyboardActions = KeyboardActions(onSearch = { submit() }),
-                    modifier = Modifier.weight(1f).testTag("quick-search-query"))
-                Button(submit, enabled = canSearch, modifier = Modifier.heightIn(min = 48.dp).testTag("quick-search-submit")) { Text("Ara") }
-            }
+            CommonPlaceQuery(state.query, state.busy, onEdit, onSearch, "quick-search")
         }
         item { QuickPreferenceButtons(choices, onPreference) }
         if (state.busy) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
         state.error?.let { error -> item { Text(error, color = MaterialTheme.colorScheme.error) } }
         if (state.searched && state.results.isEmpty()) item { Text("Yer bulunamadı. Başka bir ad veya adres dene.") }
         items(state.results) { place ->
-            OutlinedCard({ choose(quickStop(place.name, place.latitude, place.longitude)) }, Modifier.fillMaxWidth()) {
-                Column(Modifier.heightIn(min = 48.dp).padding(12.dp)) {
-                    Text(place.name)
-                    val name = place.name.trim()
-                    val display = place.displayName.orEmpty().trim()
-                    val address = when {
-                        display.equals(name, ignoreCase = true) -> ""
-                        display.startsWith("$name,", ignoreCase = true) -> display.drop(name.length + 1).trim()
-                        else -> display
-                    }
-                    Text(address.ifEmpty { "Adres bilgisi yok" }, style = MaterialTheme.typography.bodySmall)
-                }
-            }
+            CommonPlaceResult(place) { choose(quickStop(it.name, it.latitude, it.longitude)) }
         }
         item { Text("Arama Nominatim üzerinden yapılır. Sonuçlar © OpenStreetMap katkıcıları.", style = MaterialTheme.typography.bodySmall) }
         item { Text("Kayıtlı yerler", style = MaterialTheme.typography.titleMedium) }
@@ -365,7 +425,8 @@ private fun QuickPreferenceButtons(choices: Map<QuickRoutePreference, Boolean>, 
 @Composable
 private fun QuickModePicker(destination: RouteStop, nav: NavigationState, choices: Map<QuickRoutePreference, Boolean>,
     recordJourney: Boolean, busy: Boolean, phase: String?, error: String?,
-    onRecord: (Boolean) -> Unit, onMode: (Transport) -> Unit, retry: (() -> Unit)?, openSettings: (() -> Unit)?) {
+    onRecord: (Boolean) -> Unit, onMode: (Transport) -> Unit, retry: (() -> Unit)?, openSettings: (() -> Unit)?,
+    shared: Boolean = false, selectedMode: Transport? = null) {
     LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(bottom = 16.dp),
         modifier = Modifier.fillMaxSize().testTag("quick-route-options")) {
         item { Text(destination.label, style = MaterialTheme.typography.headlineMedium) }
@@ -376,7 +437,7 @@ private fun QuickModePicker(destination: RouteStop, nav: NavigationState, choice
         }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                val recordLabel = "Yolculuğu kaydet"
+                val recordLabel = if (shared) "Bu yolculuğu kaydet" else "Yolculuğu kaydet"
                 Text(recordLabel, Modifier.weight(1f).clearAndSetSemantics {})
                 Switch(checked = nav.recording || recordJourney, onCheckedChange = onRecord, enabled = !nav.recording && !busy,
                     modifier = Modifier.testTag("quick-record").semantics { contentDescription = recordLabel })
@@ -395,12 +456,13 @@ private fun QuickModePicker(destination: RouteStop, nav: NavigationState, choice
                 if (openSettings != null) TextButton(openSettings, enabled = !busy, modifier = Modifier.heightIn(min = 48.dp)) { Text("Ayarları aç") }
             }
         }
-        item { Text("Ulaşım türüne dokun ve rotayı aç", style = MaterialTheme.typography.titleMedium) }
+        item { Text(if (shared) "Ulaşım türünü seç" else "Ulaşım türüne dokun ve rotayı aç", style = MaterialTheme.typography.titleMedium) }
         item {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 transportDisplayOrder.forEach { mode ->
                     OutlinedButton({ onMode(mode) }, enabled = !busy && nav.canQuickStart(mode),
-                        modifier = Modifier.heightIn(min = 48.dp).testTag("quick-mode-${mode.name}")) {
+                        modifier = Modifier.heightIn(min = 48.dp).testTag("quick-mode-${mode.name}")
+                            .semantics { selected = selectedMode == mode }) {
                         Icon(mode.icon(), null, Modifier.size(20.dp))
                         Spacer(Modifier.width(6.dp))
                         Text(mode.label())

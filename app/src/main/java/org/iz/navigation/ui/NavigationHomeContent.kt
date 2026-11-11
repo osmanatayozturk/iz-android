@@ -78,6 +78,8 @@ internal fun NavigationHomeContent(
     editPreview: org.iz.navigation.navigation.RouteEditPreview? = null,
     onResumePlannedBreak: () -> Unit = {},
     plannedBreakResumeEnabled: Boolean = false,
+    layersRequest: Int = 0,
+    onRecoverRecording: (() -> Unit)? = null,
     planner: @Composable () -> Unit,
 ) {
     val plannerPresentation = navigationMapPresentation(ui, nav, points, showPlanner, editPreview)
@@ -95,7 +97,7 @@ internal fun NavigationHomeContent(
     val baseShowBrand = !live && !showPlanner && !dashboardVisible
     val showShortcuts = !nav.guidance && !showPlanner && !dashboardVisible && (!live || shortcuts.isNotEmpty())
     val showDestinationHeader = !nav.guidance && !dashboardVisible
-    val externalHeader = !showPlanner && !dashboardVisible && (nav.guidance || nav.roadSpeed.visible)
+    val externalHeader = !showPlanner && !dashboardVisible && nav.guidance
     var shortcutMeasurement by remember { mutableStateOf<Pair<List<Any?>, androidx.compose.ui.unit.Dp>?>(null) }
     var headerMeasurement by remember { mutableStateOf<Pair<List<Any?>, androidx.compose.ui.unit.Dp>?>(null) }
     var panelsMeasurement by remember { mutableStateOf<Pair<List<Any?>, androidx.compose.ui.unit.Dp>?>(null) }
@@ -111,8 +113,8 @@ internal fun NavigationHomeContent(
         val desiredBottomHeight = (maxHeight * .52f).coerceAtMost((maxHeight - 100.dp).coerceAtLeast(0.dp))
         val dashboardSideWidth = if (dashboardAtSide) measuredDashboard?.let { with(density) { it.width.toDp() } } ?: desiredSideWidth else 0.dp
         val dashboardBottomHeight = if (dashboardVisible && !dashboardAtSide) measuredDashboard?.let { with(density) { it.height.toDp() } } ?: desiredBottomHeight else 0.dp
-        val dashboardButtonVisible = onDashboard != null && !dashboardVisible
-        val dashboardButtonInMap = dashboardButtonVisible && !externalHeader && !shortIdle
+        val dashboardButtonVisible = false
+        val dashboardButtonInMap = false
         val dashboardButtonKey = listOf(maxWidth, maxHeight, density.density, density.fontScale, dashboardEpoch)
         val dashboardButtonHeight = if (dashboardButtonInMap) dashboardButtonMeasurement?.takeIf { it.first == dashboardButtonKey }?.second ?: 48.dp else 0.dp
         val shortLandscape = maxWidth > maxHeight && maxHeight < 480.dp
@@ -192,33 +194,11 @@ internal fun NavigationHomeContent(
             } }
         }
         val navigationHeader: @Composable (@Composable () -> Unit, @Composable () -> Unit) -> Unit = { controls, preparedNotice ->
-            val hasWarning = ui.message != null || live && (nav.guidance && voiceFault != null || nav.gpsStale || nav.recordingPending ||
-                !nav.locationActive && !nav.simulation || visibleSessionMessage(nav) != null)
-            CompactGuidanceHeader(headerBudget, shortLandscape, nav.roadSpeed, controls, hasWarning, primary = { textPane ->
-                if (live) HomeSessionCard(nav, onMute, onManageSession,
-                    plannedBreakResumeEnabled = plannedBreakResumeEnabled, onResumePlannedBreak = onResumePlannedBreak, body = {
-                    Box(Modifier.weight(1f, fill = false)) { textPane() }
-                }) else textPane()
-            }, text = {
-                entryPanels()
-                if (live) {
-                    val activeBreak = nav.plannedBreak
-                    if (activeBreak != null) {
-                        PlannedBreakDetails(activeBreak, nav.tripTiming)
-                    } else {
-                        HomeSessionText(nav)
-                    }
-                }
-                preparedNotice()
-                if (live) HomeSessionWarnings(nav, voiceFault, preciseLocationAllowed)
-                statusMessage()
-            }, accessories = {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    HomeWeatherChip(weatherLabel, onWeather, Modifier.weight(1f, fill = false))
-                    if (dashboardButtonVisible && onDashboard != null) HomeDashboardButton(onDashboard)
-                }
-            })
+            CompactDrivingHud(compactHudData(nav, weatherLabel, ui.message, voiceFault), maxWidth > maxHeight,
+                onMute, onManageSession, onWeather,
+                onRecoverRecording = onRecoverRecording?.takeIf { nav.recordingPending && !preciseLocationAllowed },
+                onResumeBreak = onResumePlannedBreak.takeIf { nav.plannedBreak != null },
+                resumeEnabled = plannedBreakResumeEnabled, disclosure = preparedNotice, controls = controls)
         }
         WeatherRouteMap(route = route, assessment = null, modifier = Modifier.fillMaxSize().padding(end = dashboardSideWidth),
             expandable = false, stops = presentation.stops, liveCoordinate = current,
@@ -237,7 +217,7 @@ internal fun NavigationHomeContent(
                 top = if (externalHeader) 24.dp else if (shortIdle) controlsTopInset else panelsHeight + 24.dp,
                 end = if (externalHeader) 28.dp else if (horizontalMapControls) 124.dp else 84.dp,
                 bottom = if (dashboardBottomHeight > 0.dp) dashboardBottomHeight + 112.dp else if (showPlanner && !dashboardVisible) maxHeight * .64f + 24.dp else 112.dp + dashboardButtonHeight),
-            navigationHeader = if (externalHeader) navigationHeader else null)
+            navigationHeader = if (externalHeader) navigationHeader else null, layersRequest = layersRequest)
         if (!externalHeader) Column(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(end = dashboardSideWidth).padding(12.dp)
             .onSizeChanged { panelsMeasurement = panelsKey to with(density) { it.height.toDp() } }, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             entryPanels()
@@ -245,6 +225,13 @@ internal fun NavigationHomeContent(
                 HomeSessionCard(nav, onMute, onManageSession, Modifier.padding(end = 60.dp),
                     plannedBreakResumeEnabled = plannedBreakResumeEnabled, onResumePlannedBreak = onResumePlannedBreak) {
                     HomeSessionWarnings(nav, voiceFault, preciseLocationAllowed)
+                }
+                if (nav.roadSpeed.visible) {
+                    val speed = compactRoadSpeedReadout(nav.roadSpeed)
+                    Text(if (nav.gpsStale || nav.paused) "—/—" else speed.value,
+                        Modifier.padding(end = 60.dp).testTag("road-speed-panel").semantics {
+                            contentDescription = if (nav.gpsStale || nav.paused) "Güncel hız ve hız sınırı bilinmiyor" else speed.description
+                        }, style = MaterialTheme.typography.titleSmall)
                 }
             }
             if (!shortIdle && !showPlanner && !dashboardVisible && !live && current == null) HomeLocateChip(ui.locating, onLocate)

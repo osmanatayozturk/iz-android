@@ -74,7 +74,12 @@ class TomTomRoutePlanner internal constructor(
 
     private suspend fun request(stops: List<RouteStop>, departureAt: Long, transport: Transport,
         travelSpeedKmh: Double?, preferences: RoutePreferences, alternatives: Boolean, avoidAreas: List<RouteAvoidArea> = emptyList()): RouteAlternatives = withContext(Dispatchers.IO) {
-        require(stops.size in 2..6)
+        RouteStopLimits.requireEffective(stops.size)
+        if (stops.size > RouteStopLimits.MAX_PLANNED_STOPS) {
+            return@withContext RouteAlternatives(listOf(planApproachRoute(stops, departureAt) { leg, at ->
+                request(leg, at, transport, travelSpeedKmh, preferences, false, avoidAreas).routes.first()
+            }))
+        }
         routeTravelSpeedKmh(transport, travelSpeedKmh)
         val mode = when (transport) {
             Transport.CAR, Transport.PASSENGER -> "car"

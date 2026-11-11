@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -59,7 +60,15 @@ internal fun OsmSearchDialog(
     searchPlaces: (suspend (String) -> List<SelectedOsmPlace>)? = null,
 ) {
     val context = LocalContext.current
-    val search = searchPlaces ?: remember(context) { OsmPlaces(context)::search }
+    val search = searchPlaces ?: remember(context) {
+        val service = OsmPlaces(context)
+        val action: suspend (String) -> List<SelectedOsmPlace> = { query ->
+            service.searchForDirections(query) {
+                (context.applicationContext as? org.iz.navigation.IzApplication)?.navigation?.quickSearchCoordinate()
+            }
+        }
+        action
+    }
     val scope = rememberCoroutineScope()
     var query by rememberSaveable(initialQuery) { mutableStateOf(initialQuery) }
     val controller = remember(scope, search, initialQuery) { OsmSearchController(scope, query, search) }
@@ -88,29 +97,21 @@ internal fun OsmSearchDialog(
                 tonalElevation = AlertDialogDefaults.TonalElevation,
             ) {
                 Column(Modifier.padding(24.dp)) {
-                    Text("Yer ara", style = MaterialTheme.typography.headlineSmall,
+                    Text("Nereye?", Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineSmall,
                         color = AlertDialogDefaults.titleContentColor)
                     Spacer(Modifier.height(16.dp))
                     CompositionLocalProvider(LocalContentColor provides AlertDialogDefaults.textContentColor) {
                         ProvideTextStyle(MaterialTheme.typography.bodyMedium) {
                             Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).testTag("osm-search-content"),
                                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                OutlinedTextField(searchState.query, { query = it; controller.edit(it) }, label = { Text("Yer adı veya adres") }, singleLine = true,
-                                    modifier = Modifier.fillMaxWidth().testTag("osm-search-query"))
-                                Button(enabled = searchState.query.isNotBlank() && !busy, onClick = controller::submit,
-                                    modifier = Modifier.testTag("osm-search-submit")) { Text("Ara") }
+                                CommonPlaceQuery(searchState.query, busy, { query = it; controller.edit(it) },
+                                    controller::submit, "osm-search")
                                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().testTag("osm-search-progress"))
                                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("osm-search-error")) }
                                 if (searched && results.isEmpty() && !busy && error == null) Text("Yer bulunamadı. Haritadan bir nokta seçebilirsin.",
                                     modifier = Modifier.testTag("osm-search-empty"))
                                 LazyColumn(Modifier.heightIn(max = 320.dp).testTag("osm-search-results"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    items(results) { place -> OutlinedCard(onClick = { onSelect(place) }, modifier = Modifier.fillMaxWidth()) {
-                                        Column(Modifier.padding(12.dp)) {
-                                            Text(place.name)
-                                            Text(place.displayName?.takeIf { it.isNotBlank() && it.trim() != place.name.trim() } ?: "Adres bilgisi yok",
-                                                style = MaterialTheme.typography.bodySmall)
-                                        }
-                                    } }
+                                    items(results) { place -> CommonPlaceResult(place, onSelect) }
                                 }
                                 Text("Arama Nominatim üzerinden yapılır. Sonuçlar © OpenStreetMap katkıcıları.", style = MaterialTheme.typography.bodySmall,
                                     color = Muted, modifier = Modifier.testTag("osm-search-attribution"))

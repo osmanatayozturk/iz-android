@@ -29,6 +29,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         if (savedInstanceState == null) { incomingIsCold = true; receiveIntent(intent) }
+        else {
+            @Suppress("DEPRECATION")
+            incoming = savedInstanceState.getParcelable("pending-navigation-intent")
+            incomingIsCold = savedInstanceState.getBoolean("pending-navigation-cold", false)
+        }
         lifecycleScope.launch {
             runCatching { TrackingController(this@MainActivity).recoverInterrupted() }
         }
@@ -50,6 +55,11 @@ class MainActivity : ComponentActivity() {
                     .putExtra("requestKey", key))
             }
         }
+    }
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putParcelable("pending-navigation-intent", incoming)
+        outState.putBoolean("pending-navigation-cold", incomingIsCold)
+        super.onSaveInstanceState(outState)
     }
     override fun onStart() {
         super.onStart()

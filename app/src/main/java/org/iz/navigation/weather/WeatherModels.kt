@@ -62,7 +62,7 @@ data class PlannedRoute(
         routeTravelSpeedKmh(transport, travelSpeedKmh)
         require(id.isNotBlank()) { "Rota kimliği boş olamaz." }
         require(avoidAreas.size <= 3) { "En fazla üç bölüm hariç tutulabilir." }
-        require(stops.size in 2..6) { "Rota 2 ile 6 durak içermelidir." }
+        RouteStopLimits.requireEffective(stops.size)
         require(stops.first().plannedBreakSeconds == 0 && stops.last().plannedBreakSeconds == 0) { "Mola yalnız ara durağa eklenebilir." }
         require(vertices.isNotEmpty()) { "Rota geometrisi boş olamaz." }
         require(distanceMeters.isFinite() && distanceMeters >= 0.0) { "Rota mesafesi geçersiz." }

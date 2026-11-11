@@ -141,7 +141,7 @@ class StreamingBackupZipTest {
                     val decoded = ZipFile(destination).use { zip ->
                         val entry = zip.getEntry("manifest.json") ?: error("Missing manifest.json")
                         val json = JSONObject(zip.getInputStream(entry).bufferedReader(Charsets.UTF_8).use { it.readText() })
-                        assertEquals(10, json.getInt("version"))
+        assertEquals(11, json.getInt("version"))
                         val mapEdit = json.getJSONArray("mapEdits").getJSONObject(0)
                         assertTrue(!mapEdit.has("localAttemptId") && !mapEdit.has("localChangesetCreated"))
                         BackupJson.decode(json)

@@ -1,6 +1,7 @@
 @file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 
 package org.iz.navigation.ui
+import org.iz.navigation.weather.RouteStopLimits.MAX_PLANNED_STOPS
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -165,7 +166,7 @@ internal fun WeatherPlannerContent(
                 if (activeMode && preferences.avoidHighways) Text("Otoyolsuz rota servis haritasından doğrulanır; doğrulanamazsa başlatılmaz. Harita verileri eksik olabilir.", style = MaterialTheme.typography.bodySmall)
                 Text(if (activeMode) "Feribottan kaçınma tercihi mümkün olduğunda uygulanır; kesin feribot yasağı değildir."
                     else "Otoyol, ücretli yol ve feribottan kaçınma tercihleri mümkün olduğunda uygulanır; kesin yol yasağı değildir.", style = MaterialTheme.typography.bodySmall)
-                if (canSaveRoute) OutlinedButton(actions.saveRoute, enabled = state.stops.size in 2..5 && !interactionLocked,
+                if (canSaveRoute) OutlinedButton(actions.saveRoute, enabled = state.stops.size in 2..MAX_PLANNED_STOPS && !interactionLocked,
                     modifier = Modifier.testTag("weather_save_route")) { Text("Rotayı kaydet") }
             }
         }
@@ -219,12 +220,12 @@ internal fun WeatherPlannerContent(
         item {
             OutlinedButton(
                 onClick = actions.addVia,
-                enabled = state.stops.size in 2..4 && !interactionLocked,
+                enabled = state.stops.size in 2 until MAX_PLANNED_STOPS && !interactionLocked,
                 modifier = Modifier.fillMaxWidth().testTag("weather_add_via"),
             ) {
                 Icon(Icons.Outlined.Add, null)
                 Spacer(Modifier.width(8.dp))
-                Text(if (state.stops.size >= 5) "En fazla 3 ara durak" else "Ara durak ekle")
+                Text(if (state.stops.size >= MAX_PLANNED_STOPS) "Başlangıç ve varış dahil en fazla $MAX_PLANNED_STOPS durak" else "Ara durak ekle")
             }
         }
         item {
@@ -255,7 +256,7 @@ internal fun WeatherPlannerContent(
         item {
             Button(
                 onClick = actions.calculate,
-                enabled = state.stops.size in 2..5 && !state.busy && !state.ordering && !interactionLocked,
+                enabled = state.stops.size in 2..MAX_PLANNED_STOPS && !state.busy && !state.ordering && !interactionLocked,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("weather_calculate"),
             ) {
                 Icon(Icons.Outlined.Cloud, null)
@@ -263,14 +264,15 @@ internal fun WeatherPlannerContent(
                 Text(if (state.busy) "Rota ve tahmin hesaplanıyor…" else "7 kalkış seçeneğini karşılaştır")
             }
         }
-        if (state.stops.size in 4..5 && state.transport in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE)) item {
-            val matrixReason = state.settings.preferences.matrixUnavailableReason(state.transport)
+        if (state.stops.size in 4..MAX_PLANNED_STOPS &&
+            (if (state.stops.size >= 6) state.transport != Transport.UNKNOWN else state.transport in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE))) item {
+            val matrixReason = if (state.stops.size <= 5) state.settings.preferences.matrixUnavailableReason(state.transport) else null
             OutlinedButton(actions.suggestStopOrder, enabled = matrixReason == null && !state.busy && !state.ordering && !interactionLocked,
                 modifier = Modifier.testTag("weather-matrix-order")) {
                 Text(if (state.ordering) "Durak sırası hesaplanıyor…" else "Daha hızlı durak sırası öner")
             }
             matrixReason?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-            if (state.transport == Transport.MOTORCYCLE) Text("Matrix sıra önerisi otomobil tahminidir; motosiklet rotasıyla doğrulanır.",
+            if (state.stops.size <= 5 && state.transport == Transport.MOTORCYCLE) Text("Matrix sıra önerisi otomobil tahminidir; motosiklet rotasıyla doğrulanır.",
                 style = MaterialTheme.typography.bodySmall)
         }
         state.orderProposal?.let { proposal -> item {
@@ -353,7 +355,7 @@ internal fun WeatherPlannerContent(
         item {
             OutlinedButton(
                 onClick = actions.openDirections,
-                enabled = state.stops.size in 2..5 && !interactionLocked,
+                enabled = state.stops.size in 2..MAX_PLANNED_STOPS && !interactionLocked,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("weather_directions"),
             ) {
                 Icon(Icons.Outlined.Map, null)

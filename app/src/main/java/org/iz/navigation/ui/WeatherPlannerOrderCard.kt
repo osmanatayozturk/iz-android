@@ -20,6 +20,8 @@ internal fun StopOrderProposalCard(proposal: StopOrderProposal, enabled: Boolean
     Card(Modifier.testTag("matrix-order-proposal")) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Daha hızlı durak sırası", style = MaterialTheme.typography.titleMedium)
+            if (proposal.heuristic) Text("Yaklaşık sıra önerisi. En kısa rota garantisi yok; süreler aynı koşullardaki gerçek rotalarla karşılaştırıldı.",
+                modifier = Modifier.testTag("heuristic-order-explanation"), style = MaterialTheme.typography.bodySmall)
             Text("Mevcut: " + proposal.originalStops.joinToString(" → ") { it.label })
             Text("Öneri: " + proposal.orderedStops.joinToString(" → ") { it.label })
             Text("${formatDuration(proposal.originalRoute.durationSeconds)} → ${formatDuration(proposal.proposedRoute.durationSeconds)} · ${proposal.savedSeconds.toInt()} sn daha kısa")
@@ -27,7 +29,7 @@ internal fun StopOrderProposalCard(proposal: StopOrderProposal, enabled: Boolean
                 modifier = Modifier.testTag("matrix-comparison-distances"), style = MaterialTheme.typography.bodySmall)
             Text("Karşılaştırma saati: ${weatherTime(proposal.comparisonDepartureAt)}. Başlangıç ve varış sabit; yalnızca durak sırası uygulanır.",
                 style = MaterialTheme.typography.bodySmall)
-            if (proposal.approximateMotorcycle) Text("Sıra önerisi otomobil Matrix tahmininden üretildi. Yukarıdaki süreler motosiklet rotasıyla yeniden hesaplandı.",
+            if (!proposal.heuristic && proposal.approximateMotorcycle) Text("Sıra önerisi otomobil Matrix tahmininden üretildi. Yukarıdaki süreler motosiklet rotasıyla yeniden hesaplandı.",
                 style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(apply, enabled = enabled, modifier = Modifier.testTag("matrix-apply-order")) { Text("Bu sırayı uygula") }

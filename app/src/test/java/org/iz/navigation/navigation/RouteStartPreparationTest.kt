@@ -14,9 +14,12 @@ class RouteStartPreparationTest {
         assertEquals(listOf(current, a.coordinate, b.coordinate), started.map { it.coordinate })
         assertEquals(listOf(a, b), selected)
     }
-    @Test fun nearbyOriginIsReplacedByFreshFixWithoutBacktracking() {
+    @Test fun nearbyExplicitOriginIsStillPreservedAsTheFirstDestination() {
         val current = WeatherCoordinate(40.0001, 29.0)
-        assertEquals(listOf(current, b.coordinate), prepareRouteStartStops(listOf(a, b), current).map { it.coordinate })
+        assertEquals(listOf(current, a.coordinate, b.coordinate), prepareRouteStartStops(listOf(a, b), current).map { it.coordinate })
+    }
+    @Test fun originAlreadyAtFreshFixNeedsNoAdditionalApproachOccurrence() {
+        assertEquals(listOf(a, b), prepareRouteStartStops(listOf(a, b), a.coordinate))
     }
     @Test fun injectedOriginKeepsAllFiveUserStopsInOrder() {
         val selected = (0..4).map { RouteStop("Stop $it", WeatherCoordinate(40.0 + it * .01, 29.0)) }

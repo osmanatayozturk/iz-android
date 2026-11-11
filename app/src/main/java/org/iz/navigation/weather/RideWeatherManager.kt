@@ -269,7 +269,8 @@ class RideWeatherManager(
                     }
                     return@withLock id
                 }
-                require(route.stops.size in 2..6 && route.vertices.size >= 2 && route.durationSeconds > 0) { "Önce geçerli bir rota hesapla." }
+                RouteStopLimits.requireEffective(route.stops.size)
+                require(route.vertices.size >= 2 && route.durationSeconds > 0) { "Önce geçerli bir rota hesapla." }
                 RouteSchedule.planned(route, clock())
                 // No TrackingCoordinator lock here: startManual owns that non-reentrant lock.
                 val activationGeneration = generation

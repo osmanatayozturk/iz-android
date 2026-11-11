@@ -29,16 +29,17 @@ class NavigationRouteCache(private val directory: File) {
                 output.toByteArray()
             }
             val json = JSONObject(bytes.toString(Charsets.UTF_8))
-            val version = json.getInt("version"); require(version in 1..4)
+            val version = json.getInt("version"); require(version in 1..5)
             val transport = Transport.valueOf(json.optString("transport", Transport.MOTORCYCLE.name))
-            val stops = json.getJSONArray("stops").bounded(6).map { item ->
+            val stops = json.getJSONArray("stops").bounded(RouteStopLimits.MAX_EFFECTIVE_STOPS).map { item ->
                 RouteStop(item.getString("label"), item.coordinate(), item.plannedBreakSeconds())
             }
+            require(version >= 5 || stops.size <= 6)
             val vertices = json.getJSONArray("vertices").bounded(100_000).map { item ->
                 RouteVertex(item.coordinate(), item.getDouble("elapsed"))
             }
             val times = json.optJSONArray("stopTimes") ?: JSONArray()
-            require(times.length() <= 6)
+            require(times.length() <= RouteStopLimits.MAX_EFFECTIVE_STOPS)
             val maneuvers = (json.optJSONArray("maneuvers") ?: JSONArray()).bounded(10_000).map { item ->
                 val streets = item.optJSONArray("streets") ?: JSONArray()
                 require(streets.length() <= 30)
@@ -73,7 +74,7 @@ class NavigationRouteCache(private val directory: File) {
             return
         }
         validate(route)
-        val json = JSONObject().put("version", 4).put("id", route.id).put("distance", route.distanceMeters)
+        val json = JSONObject().put("version", 5).put("id", route.id).put("distance", route.distanceMeters)
             .put("preferences", route.preferences.json()).put("hasHighway", route.hasHighway ?: JSONObject.NULL)
             .put("selectionLocked", route.selectionLocked).put("providerWarnings", JSONArray(route.providerWarnings))
             .put("duration", route.durationSeconds).put("createdAt", route.createdAt).put("transport", route.transport.name)

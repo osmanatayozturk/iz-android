@@ -83,7 +83,7 @@ internal class PhoneDirectionsCoordinator(
         val route = planWithPreferences?.invoke(stops, snapshot.transport, snapshot.travelSpeedKmh, snapshot.preferences)
             ?: plan(stops, snapshot.transport)
         require(route.transport == snapshot.transport && route.preferences == snapshot.preferences) { "Rota seçilen yolculuk türü veya tercihlerle eşleşmiyor." }
-        route.requireMatchingPlannedBreaks(stops)
+        route.requireMatchingStops(stops)
         return route.requireUsablePreferences()
     }
 
@@ -104,6 +104,7 @@ internal class PhoneDirectionsCoordinator(
     }
     fun restoreUiInput(input: PhoneDirectionsInput) {
         if (starting) return
+        require(input.via.size <= RouteStopLimits.MAX_PLANNED_STOPS - 2)
         invalidatePreview(); locationJob?.cancel()
         mutableState.update { it.copy(origin = input.origin, originCurrent = input.originCurrent,
             destination = input.destination, via = input.via, transport = input.transport,
@@ -113,12 +114,18 @@ internal class PhoneDirectionsCoordinator(
     fun enter(entryId: Long, initialStops: List<RouteStop>? = null, initialTransport: Transport? = null,
         locateOnOpen: Boolean = true, initialPlan: SavedWeatherPlan? = null) {
         if (entry == entryId && enteredPlan == initialPlan) return
+        val requested = initialPlan?.stops ?: initialStops
+        if (requested != null && requested.size !in 2..RouteStopLimits.MAX_PLANNED_STOPS) {
+            invalidatePreview()
+            reportMessage("Rota başlangıç ve varış dahil en fazla 20 durak içerebilir.")
+            return
+        }
         entry = entryId
         enteredPlan = initialPlan
         invalidatePreview()
         originRevision++
         locationJob?.cancel()
-        val provided = (initialPlan?.stops ?: initialStops)?.takeIf { it.size in 2..5 }
+        val provided = requested?.toList()
         val mode = initialPlan?.transport ?: initialTransport?.takeIf { it != Transport.UNKNOWN } ?: state.value.transport
         val settings = readSettings(mode)
         mutableState.value = PhoneDirectionsState(
@@ -173,7 +180,7 @@ internal class PhoneDirectionsCoordinator(
                     ?: RouteAlternatives(listOf(before.preview), "Bu servis alternatif rota sunmuyor.")
                 val routes = result.routes.onEach { route ->
                     require(route.transport == before.transport && route.preferences == before.preferences)
-                    route.requireMatchingPlannedBreaks(before.stops)
+                    route.requireMatchingStops(before.stops)
                     route.requireUsablePreferences()
                 }.distinctBy { it.geometryKey() }.take(3)
                 if (token != revision) return@launch
@@ -291,9 +298,10 @@ internal class PhoneDirectionsCoordinator(
     fun suggestStopOrder(): Job? {
         refreshCredentials()
         val before = state.value
-        if (before.busy || before.stops.size !in 4..5 || before.origin == null || before.destination == null ||
-            before.transport !in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE)) return null
-        before.preferences.matrixUnavailableReason(before.transport)?.let { reportMessage(it); return null }
+        if (before.busy || before.stops.size !in 4..RouteStopLimits.MAX_PLANNED_STOPS ||
+            before.origin == null || before.destination == null || before.transport == Transport.UNKNOWN) return null
+        if (before.stops.size <= 5)
+            before.preferences.matrixUnavailableReason(before.transport)?.let { reportMessage(it); return null }
         val token = ++revision
         val auth = credentialRevision()
         mutableState.update { it.copy(ordering = true, orderProposal = null, message = null) }
@@ -315,8 +323,8 @@ internal class PhoneDirectionsCoordinator(
         val before = state.value
         val proposal = before.orderProposal ?: return
         if (before.busy) return
-        if (proposal.preferences != before.preferences || proposal.originalStops != before.stops || proposal.credentialRevision != credentialRevision() ||
-            clock() - proposal.createdAt !in 0L..120_000L) {
+        if (!proposal.canApplyTo(before.stops, before.transport, before.preferences,
+                credentialRevision(), clock(), readSettings(before.transport))) {
             mutableState.update { it.copy(orderProposal = null, message = "Öneri güncel değil. Yeniden hesapla.") }
             return
         }
@@ -328,7 +336,11 @@ internal class PhoneDirectionsCoordinator(
     fun dismissStopOrder() { mutableState.update { it.copy(orderProposal = null) } }
 
     fun addVia(stop: RouteStop) {
-        if (starting || state.value.via.size >= 3) return
+        if (starting) return
+        if (state.value.via.size >= RouteStopLimits.MAX_PLANNED_STOPS - 2) {
+            reportMessage("Rota başlangıç ve varış dahil en fazla 20 durak içerebilir.")
+            return
+        }
         invalidatePreview()
         mutableState.update { it.copy(via = it.via + stop, message = null) }
     }
@@ -363,10 +375,8 @@ internal class PhoneDirectionsCoordinator(
     private fun reportError(error: Exception) = reportMessage(error.message ?: "İşlem tamamlanamadı.")
     private fun currentStop(coordinate: WeatherCoordinate) = RouteStop("Mevcut konum", coordinate)
 
-    private fun PlannedRoute.requireMatchingPlannedBreaks(requested: List<RouteStop>) {
-        if (requested.any { it.plannedBreakSeconds > 0 }) {
-            require(stops == requested) { "Mola durakları doğrulanamadı. Rotayı yeniden hesapla." }
-        }
+    private fun PlannedRoute.requireMatchingStops(requested: List<RouteStop>) {
+        require(stops == requested) { "Rota durakları ve molaları doğrulanamadı. Rotayı yeniden hesapla." }
     }
 }
 

@@ -138,12 +138,17 @@ internal class CarHomeScreen(context: CarContext, private val surface: CarMapSur
     }
 
     fun planStops(destinations: List<RouteStop>) {
+        if (destinations.size !in 1..4) {
+            cancelTargetPlanning()
+            showError("Bu çok duraklı planı telefonda aç. Android Auto en fazla 5 duraklı planları destekliyor.")
+            return
+        }
         planning = true
         error = null
         safeInvalidate()
         targetRequests.submit(work = {
                 val origin = navigation.currentLocation().coordinate
-                navigation.previewRoute(listOf(RouteStop("Konumum", origin)) + destinations.take(4), mode)
+                navigation.previewRoute(listOf(RouteStop("Konumum", origin)) + destinations, mode)
             }, publish = ::showPreview,
             failed = { error = it.message ?: "Rota hazırlanamadı. Telefonda bağlantı ve konum ayarlarını kontrol edin." },
             finished = { planning = false; safeInvalidate() })

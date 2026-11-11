@@ -2,6 +2,7 @@ package org.iz.navigation.data
 
 import org.iz.navigation.gpx.ImportedTrack
 import org.iz.navigation.weather.routeTravelSpeedKmh
+import org.iz.navigation.weather.RouteStopLimits
 
 data class CollectionSummary(val journeyCount: Int, val distanceMeters: Double, val elapsedMillis: Long,
     val movingMillis: Long, val stoppedMillis: Long)
@@ -25,7 +26,7 @@ object TravelLibraryRules {
     fun normalizePlan(plan: SavedRoutePlan): SavedRoutePlan {
         validId(plan.id); validName(plan.name)
         require(plan.createdAt >= 0 && plan.updatedAt >= plan.createdAt) { "Rota kayıt tarihleri geçersiz." }
-        require(plan.stops.size in 2..5) { "Kaydedilen rota 2–5 durak içermeli." }
+        RouteStopLimits.requirePlanned(plan.stops.size)
         plan.stops.forEach { validName(it.label) }
         require(plan.stops.first().plannedBreakSeconds == 0 && plan.stops.last().plannedBreakSeconds == 0) { "Mola yalnız ara durağa eklenebilir." }
         return plan.copy(stops = plan.stops.toList(), travelSpeedKmh = routeTravelSpeedKmh(plan.transport, plan.travelSpeedKmh))

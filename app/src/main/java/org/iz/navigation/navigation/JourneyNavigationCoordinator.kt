@@ -363,7 +363,7 @@ class JourneyNavigationCoordinator(
     }
 
     suspend fun previewRoute(stops: List<RouteStop>, transport: Transport): PlannedRoute {
-        require(stops.size in 2..6)
+        RouteStopLimits.requireEffective(stops.size)
         val token = epoch
         publish(mutableState.value.copy(loading = true, message = null))
         return try {

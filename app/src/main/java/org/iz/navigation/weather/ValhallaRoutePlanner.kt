@@ -61,7 +61,12 @@ class ValhallaRoutePlanner(
         alternatives: Boolean,
         avoidAreas: List<RouteAvoidArea> = emptyList(),
     ): RouteAlternatives = withContext(Dispatchers.IO) {
-        require(stops.size in 2..6) { "Rota 2 ile 6 durak içermelidir." }
+        RouteStopLimits.requireEffective(stops.size)
+        if (stops.size > RouteStopLimits.MAX_PLANNED_STOPS) {
+            return@withContext RouteAlternatives(listOf(planApproachRoute(stops, departureAt) { leg, at ->
+                request(leg, at, transport, travelSpeedKmh, preferences, false, avoidAreas).routes.first()
+            }))
+        }
         val effectiveSpeed = routeTravelSpeedKmh(transport, travelSpeedKmh)
         val costing = when (transport) {
             Transport.CAR, Transport.PASSENGER -> "auto"

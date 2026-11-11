@@ -185,7 +185,7 @@ internal class WeatherPlannerCoordinator(
 
     fun setStops(stops: List<RouteStop>) {
         if (mutableState.value.starting) return
-        require(stops.size <= 5) { "En fazla üç ara durak ekleyebilirsin." }
+        require(stops.size <= RouteStopLimits.MAX_PLANNED_STOPS) { "Başlangıç ve varış dahil en fazla 20 durak ekleyebilirsin." }
         val normalizedStops = stops.mapIndexed { index, stop ->
             if ((index == 0 || index == stops.lastIndex) && stop.plannedBreakSeconds != 0) {
                 stop.copy(plannedBreakSeconds = 0)
@@ -235,7 +235,7 @@ internal class WeatherPlannerCoordinator(
 
     fun addVia(stop: RouteStop) {
         val stops = mutableState.value.stops
-        require(stops.size in 2..4) { "En fazla üç ara durak ekleyebilirsin." }
+        require(stops.size in 2 until RouteStopLimits.MAX_PLANNED_STOPS) { "Başlangıç ve varış dahil en fazla 20 durak ekleyebilirsin." }
         setStops(stops.dropLast(1) + stop + stops.last())
     }
 
@@ -288,9 +288,10 @@ internal class WeatherPlannerCoordinator(
     fun suggestStopOrder(): Job? {
         refreshCredentials()
         val snapshot = mutableState.value
-        if (snapshot.starting || snapshot.busy || snapshot.ordering || snapshot.stops.size !in 4..5 ||
-            snapshot.transport !in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE)) return null
-        snapshot.settings.preferences.matrixUnavailableReason(snapshot.transport)?.let {
+        if (snapshot.starting || snapshot.busy || snapshot.ordering || snapshot.stops.size !in 4..RouteStopLimits.MAX_PLANNED_STOPS ||
+            (if (snapshot.stops.size >= 6) snapshot.transport == Transport.UNKNOWN
+                else snapshot.transport !in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE))) return null
+        (if (snapshot.stops.size <= 5) snapshot.settings.preferences.matrixUnavailableReason(snapshot.transport) else null)?.let {
             mutableState.value = snapshot.copy(error = it, orderProposal = null); return null
         }
         val token = ++generation
@@ -314,8 +315,8 @@ internal class WeatherPlannerCoordinator(
         val snapshot = mutableState.value
         val proposal = snapshot.orderProposal ?: return
         if (snapshot.starting || snapshot.busy || snapshot.ordering) return
-        if (proposal.preferences != snapshot.settings.preferences || proposal.originalStops != snapshot.stops || proposal.credentialRevision != services.credentialRevision() ||
-            services.clock() - proposal.createdAt !in 0L..120_000L) {
+        if (!proposal.canApplyTo(snapshot.stops, snapshot.transport, snapshot.settings.preferences,
+                services.credentialRevision(), services.clock(), services.readSettings(snapshot.transport))) {
             mutableState.value = snapshot.copy(orderProposal = null, error = "Öneri güncel değil. Yeniden hesapla.")
             return
         }
@@ -418,7 +419,7 @@ internal class WeatherPlannerCoordinator(
     fun loadSavedPlan(stops: List<RouteStop>, transport: Transport, preferences: RoutePreferences,
         originUsesCurrentLocation: Boolean = false, travelSpeedKmh: Double? = null) {
         if (mutableState.value.starting) return
-        require(stops.size in 2..5 && transport != Transport.UNKNOWN)
+        require(stops.size in 2..RouteStopLimits.MAX_PLANNED_STOPS && transport != Transport.UNKNOWN)
         routeTravelSpeedKmh(transport, travelSpeedKmh)
         generation++
         invalidateCandidates()
@@ -552,7 +553,7 @@ internal class WeatherPlannerCoordinator(
     fun startFromCurrentLocation(coordinate: WeatherCoordinate): Job? {
         refreshCredentials()
         val snapshot = mutableState.value
-        if (!snapshot.canStart || snapshot.stops.size !in 2..5) {
+        if (!snapshot.canStart || snapshot.stops.size !in 2..RouteStopLimits.MAX_PLANNED_STOPS) {
             mutableState.value = snapshot.copy(error = "Önce geçerli bir rota hesapla.")
             return null
         }
@@ -657,7 +658,7 @@ private fun PlannedRoute.requireRequestedBreakStops(requestedStops: List<RouteSt
 }
 
 internal fun planIssue(stops: List<RouteStop>, departureAt: Long, now: Long): String? = when {
-    stops.size !in 2..5 -> "Başlangıç ve varış noktalarını seç."
+    stops.size !in 2..RouteStopLimits.MAX_PLANNED_STOPS -> "Başlangıç ve varış noktalarını seç; en fazla 20 durak kullanılabilir."
     departureAt < now -> "Kalkış zamanı geçmişte olamaz."
     departureAt > now + WEATHER_PLAN_WINDOW_MS -> "Kalkış en fazla yedi gün sonrası olabilir."
     else -> null

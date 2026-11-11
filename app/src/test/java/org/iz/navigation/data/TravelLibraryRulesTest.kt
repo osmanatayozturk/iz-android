@@ -23,7 +23,7 @@ class TravelLibraryRulesTest {
     }
 
     @Test fun invalidPlansAreRejectedAtTheStorageBoundary() {
-        listOf(plan.copy(stops = plan.stops.take(1)), plan.copy(stops = List(6) { plan.stops.first() }),
+        listOf(plan.copy(stops = plan.stops.take(1)), plan.copy(stops = List(21) { plan.stops.first() }),
             plan.copy(name = " "), plan.copy(id = "bad\nidentity"), plan.copy(transport = Transport.UNKNOWN),
             plan.copy(travelSpeedKmh = Double.NaN), plan.copy(travelSpeedKmh = 100.0),
             plan.copy(transport = Transport.CAR, travelSpeedKmh = 5.0), plan.copy(updatedAt = 9)).forEach {

@@ -11,6 +11,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.text.TextLayoutResult
@@ -46,10 +47,10 @@ class CompactNavigationCardTest {
         render(360.dp)
         assertHomeWidth(360)
         assertCompactTypography()
-        val distance = textBounds("200 m sonra")
+        val distance = bounds("hud-remaining")
         val mute = bounds("compact-card-mute")
         val operations = bounds("home-finish-session")
-        assertTrue("Distance and controls should share the first row at 360dp", distance.overlapsVertically(mute))
+        assertTrue("Maneuver/remaining summary stays above the map-controls row", distance.bottom <= bounds("navigation-map-controls-row").top)
         assertTrue("Operations should share the first row at 360dp", mute.overlapsVertically(operations))
         assertControlsAndMapStaySeparate()
         capture("short-360")
@@ -59,7 +60,7 @@ class CompactNavigationCardTest {
         render(320.dp)
         assertHomeWidth(320)
         assertControlsAndMapStaySeparate()
-        val distance = textBounds("200 m sonra")
+        val distance = bounds("hud-remaining")
         val operations = bounds("home-finish-session")
         assertFalse("Operations must not cover the distance", operations.overlaps(distance))
         capture("short-320")
@@ -81,9 +82,9 @@ class CompactNavigationCardTest {
         val layouts = mutableListOf<TextLayoutResult>()
         node.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
         val layout = layouts.single()
-        assertTrue("Long instructions wrap at system text scale", layout.lineCount > 1)
-        assertFalse("The instruction text is not truncated", layout.hasVisualOverflow)
-        assertEquals(18f, layout.layoutInput.style.fontSize.value, .01f)
+        assertTrue("Long instructions use at most two visible lines", layout.lineCount in 1..2)
+        node.assertContentDescriptionEquals(instruction)
+        assertEquals(15f, layout.layoutInput.style.fontSize.value, .01f)
         assertControlsAndMapStaySeparate()
         capture("long-320")
         compose.onNodeWithTag("home-finish-session").performClick()
@@ -100,12 +101,23 @@ class CompactNavigationCardTest {
         for (message in listOf("Sentetik konum hatası", "Rota dışındasın. Yeni rota hesaplanıyor.",
             "Trafik güncellenemedi. Mevcut rota korunuyor; son trafik bilgisi eski olabilir.")) {
             compose.runOnIdle { state.value = state.value.copy(message = message) }
-            compose.onNodeWithText("GPS konumu bekleniyor", useUnmergedTree = true).assertIsDisplayed()
+            compose.onNodeWithText("GPS bekleniyor", useUnmergedTree = true).assertIsDisplayed()
+            compose.onNodeWithTag("hud-reserved-status", useUnmergedTree = true)
+                .assert(SemanticsMatcher("Full GPS warning remains accessible") {
+                    it.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.ContentDescription)
+                        ?.any { description -> description.contains("GPS konumu bekleniyor") } == true
+                })
             compose.onNodeWithText("Konum bağlantısı kuruluyor", useUnmergedTree = true).assertIsDisplayed()
             compose.onNodeWithText(message, useUnmergedTree = true).assertIsDisplayed()
             assertControlsAndMapStaySeparate()
         }
         capture("warnings-320")
+        val fullWarning = requireNotNull(state.value.message)
+        val beforePanel = state.value
+        compose.onNodeWithTag("home-finish-session").performClick()
+        compose.onNodeWithTag("navigation-screen").performScrollToNode(hasText(fullWarning))
+        compose.onNodeWithText(fullWarning, useUnmergedTree = true).assertIsDisplayed()
+        assertPanelAndReturn(beforePanel, 1)
         compose.runOnIdle {
             state.value = state.value.copy(guidance = false, arrived = true, recording = true,
                 message = "Hedefe vardın. Yolculuk kaydı devam ediyor.")
@@ -152,7 +164,7 @@ class CompactNavigationCardTest {
         val card = bounds("live-guidance-card")
         compose.onNodeWithTag("live-guidance-card").performTouchInput { click(instruction.center - card.topLeft) }
         assertPanelAndReturn(original, 1)
-        compose.onNodeWithTag("home-finish-session").assertTextEquals("İşlemler")
+        compose.onNodeWithTag("home-finish-session").assertHasClickAction()
             .assertContentDescriptionEquals("Yolculuk işlemlerini aç").performTouchInput { click() }
         assertPanelAndReturn(original, 2)
     }
@@ -209,9 +221,9 @@ class CompactNavigationCardTest {
     }
 
     private fun assertCompactTypography() {
-        compose.onAllNodes(hasText("Kalan ·", substring = true), useUnmergedTree = true).assertCountEquals(0)
+        compose.onNodeWithTag("hud-remaining", useUnmergedTree = true).assertTextContains("Kalan")
         compose.onAllNodes(hasText("Tahmini varış", substring = true), useUnmergedTree = true).assertCountEquals(0)
-        compose.onNodeWithText("200 m sonra", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag("hud-remaining", useUnmergedTree = true).assertTextContains("Manevra 200 m")
         compose.onNodeWithText("Sağa dön", useUnmergedTree = true).assertIsDisplayed()
         fun assertSize(text: String, expected: Float) {
             val layouts = mutableListOf<TextLayoutResult>()
@@ -219,8 +231,11 @@ class CompactNavigationCardTest {
                 .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
             assertEquals(expected, layouts.single().layoutInput.style.fontSize.value, .01f)
         }
-        assertSize("Sağa dön", 18f)
-        assertSize("200 m sonra", 16f)
+        assertSize("Sağa dön", 15f)
+        val summaryLayouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithTag("hud-remaining", useUnmergedTree = true)
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(summaryLayouts) }
+        assertEquals(12f, summaryLayouts.single().layoutInput.style.fontSize.value, .01f)
     }
 
     private fun assertControlsAndMapStaySeparate() {
@@ -228,15 +243,18 @@ class CompactNavigationCardTest {
         val actions = listOf("compact-card-mute", "home-finish-session").map { tag ->
             compose.onNodeWithTag(tag).assertIsDisplayed().assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
             bounds(tag).also {
-                assertTrue("$tag must remain inside the card", it.left >= card.left && it.right <= card.right &&
-                    it.top >= card.top && it.bottom <= card.bottom)
+                val header = bounds("compact-guidance-header")
+                assertTrue("$tag must remain inside the fixed guidance header", it.left >= header.left && it.right <= header.right &&
+                    it.top >= header.top && it.bottom <= header.bottom)
             }
         }
         assertFalse("Independent tap targets must not overlap", actions[0].overlaps(actions[1]))
         val map = bounds("navigation-home-map")
         assertTrue("Real map starts below the guidance header", map.top >= bounds("compact-guidance-header").bottom - 1f)
         assertTrue("The card must end before the actual map", card.bottom <= map.top)
-        listOf("directions-recenter", "map-layers").forEach { tag ->
+        compose.onNodeWithTag("map-layers").assertDoesNotExist()
+        compose.onNodeWithTag("open-navigation-dashboard").assertDoesNotExist()
+        listOf("directions-recenter").forEach { tag ->
             compose.onAllNodesWithTag(tag).assertCountEquals(1)
             compose.onNodeWithTag(tag).assertIsDisplayed().assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
             val control = bounds(tag)
@@ -245,7 +263,7 @@ class CompactNavigationCardTest {
         }
     }
 
-    private fun bounds(tag: String) = compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+    private fun bounds(tag: String) = compose.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
     private fun textBounds(text: String) = compose.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
     private fun Rect.overlapsVertically(other: Rect) = top < other.bottom && bottom > other.top
 

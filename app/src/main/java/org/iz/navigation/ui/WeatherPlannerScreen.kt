@@ -1,6 +1,7 @@
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 
 package org.iz.navigation.ui
+import org.iz.navigation.weather.RouteStopLimits.MAX_PLANNED_STOPS
 
 import android.Manifest
 import android.os.Build
@@ -339,7 +340,7 @@ private fun WeatherPlannerScreenContent(
             removeStop = vm::removeStop,
             setPlannedBreakMinutes = vm::setPlannedBreakMinutes,
             addVia = {
-                if (state.stops.size in 2..4) {
+                if (state.stops.size in 2 until MAX_PLANNED_STOPS) {
                     pickerTarget = WEATHER_TARGET_NEW_VIA
                     showStopPicker = true
                 }
@@ -358,7 +359,7 @@ private fun WeatherPlannerScreenContent(
             refreshLive = { vm.refreshWeather() },
             stopLive = vm::stopWeather,
             openDirections = {
-                if (!locationBusy && !state.starting && state.stops.size in 2..5) {
+                if (!locationBusy && !state.starting && state.stops.size in 2..MAX_PLANNED_STOPS) {
                     if (onDirectionsWithPlan != null) onDirectionsWithPlan(SavedWeatherPlan(state.stops, state.departureAt, state.transport,
                         state.settings.preferences, state.originUsesCurrentLocation, state.settings.travelSpeedKmh))
                     else if (onDirectionsWithPreferences != null) onDirectionsWithPreferences(state.stops, state.transport, state.settings.preferences)
