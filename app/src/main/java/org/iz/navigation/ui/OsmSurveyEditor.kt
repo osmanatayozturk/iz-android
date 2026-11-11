@@ -156,7 +156,7 @@ internal fun OsmSurveyEditor(
                         Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineSmall)
                     Text(current?.tags?.get("name:tr") ?: current?.tags?.get("name") ?: initial.preset.label)
                 }
-                (error ?: authError)?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
+                (error ?: authError)?.let { message -> item(key = "survey-error/${initial.id}") { Text(message, color = MaterialTheme.colorScheme.error) } }
                 if (querying) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
                 if (activeReview != null) {
                     item {
@@ -282,7 +282,7 @@ internal fun OsmSurveyEditor(
                                         value = next.expression(), formDraft = privateDraft, fullyObserved = false)))) formWeek = next
                                 }
                             }
-                        } else item {
+                        } else item(key = "survey-hours-advanced/${initial.id}") {
                             OutlinedTextField(observation.hours.value, {
                                 // Repeated accepted text must preserve warning, consent and review state.
                                 val accepted = decodeSurveyObservation(payload)
