@@ -44,6 +44,16 @@ Nominatim özgün sorgu için uygun sonuç bulamazsa ikinci istek aynı yaklaş�
 
 `ae038e7` adayında 1.487 birim testi geçti ve Debug lint hata vermedi. Debug APK üretimi ile AndroidTest Kotlin derlemesi geçti. Ayrı QA uygulama/test paketiyle fiziksel Samsung telefonda kayıtlı sentetik servis yanıtlarına dayanan 2/2 kontrol geçti ve iki QA paketi kaldırıldı.
 
+### OSM’de yerinde bilgi tamamlama — telefon kaynak adayı
+
+**Canlı Overpass kabulü bekliyor.** Yapılandırılmış uç noktadaki son yakın görev sorgusu zaman aşımına uğradı.
+
+Katkı Merkezi’ndeki **Yerinde tamamla**, 1 km içindeki görev haritası/listesi ve seçilen mevcut mekânın ayrıntısı aynı taslak düzenleyicisine ulaşır. Çalışma saatleri ile tekerlekli sandalye erişimi tek mekân kartında ayrı görevler olarak gösterilir.
+
+Saatler haftalık form veya gelişmiş OSM ifadesiyle düzenlenir. OpeningHoursParser 0.29.0 ifadeyi cihazda doğrular. Alan bazında gözlem tarihi, bir takvim yılı sonra yeniden kontrol ve kısmi katkının görevde kalması desteklenir. Yerel Room şeması ve ZIP yedek biçimi v10’a geçti.
+
+`3adea536` adayında 1.536 birim testi geçti, Debug lint 0 hata ve 96 uyarı verdi. Debug APK üretimi ve AndroidTest Kotlin derlemesi geçti. Ayrı çevrimdışı QA paketiyle fiziksel Samsung telefonda 26/26 sentetik kontrol geçti, beş native ekran durumu incelendi ve iki QA paketi kaldırıldı. Canlı harita, gerçek GNSS ve gerçek OSM hesabına yazma test kapsamı dışındaydı.
+
 ## Telefon 0.12.0 numarasıyla tutulan tarihsel aday kayıtları
 
 Bu bölüm, 0.12.0 yayımlanmadan önceki aday doğrulama anlık görüntüsünü ve yayımlanmış 0.12.0’dan sonra 6–7 Kasım’da aynı 0.12.0 numarasıyla yapılan kamera, Molalı rota ve OSM GPS izi paylaşımı kaynak güncellemelerini birlikte kaydeder. Sonraki kaynak güncellemeleri yayımlanmış 0.12.0 sürümünün içeriği değildir. Bu tarihsel doğrulama ve kaynak kayıtları 0.13.0 için kabul veya doğrulama oluşturmaz. Yayımlanmış 0.12.0’ın release notları için [GitHub sürüm kaydı](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.12.0) esas alınır.

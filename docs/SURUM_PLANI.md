@@ -16,7 +16,9 @@ Büyük yedekler sayfalı hazırlanır. ZIP kaydedildiğinde geri okunup doğrul
 | OSM toplu iz (telefon kaynak adayı) | Tamamlanmış yolculuk izlerini birlikte seç, gönderimi inceleyip onayla ve sonucu bağlı hesabın ayrı **Yüklenenler** sayfasında kontrol et. |
 | Ev/İş (telefon kaynak adayı) | Boştaki ana haritada logo ve İz başlığının altında Nereye?, ardından Ev ve İş yer alır. Yer atadıktan sonra kısayol, hızlı hedef ekranını seçili hedefle açar. |
 | OSM Katkı Merkezi (telefon kaynak adayı) | Yerel taslakları ve bağlı hesabın gönderimlerini gör. GPS izini her uçta sabit 1 km eşiğiyle kırpılmış önizlemeden incele ve iki görünürlükten birini seç. |
-| OSM mekân düzeltmeleri ve yedek | Yerinde doğrulanan nokta veya tek kapalı çizgiyle tanımlanan alanın adını, sokağını ve kapı numarasını düzelt. Düzeltme kayıtlarını Room ve ZIP v9 ile sakla. |
+| OSM mekân düzeltmeleri ve yedek | Yerinde doğrulanan nokta veya tek kapalı çizgiyle tanımlanan alanın adını, sokağını ve kapı numarasını düzelt. Düzeltme kayıtlarını Room ve ZIP yedeklerinde sakla. |
+| OSM’de yerinde tamamla (canlı kabul bekliyor) | 1 km içindeki görevleri harita veya listeden aç. Mevcut mekânın çalışma saatlerini ve tekerlekli sandalye erişimini yerinde gözlemle, alanın kontrol tarihini kaydet. |
+| Saat formu ve yedek uyumluluğu | Haftalık form veya gelişmiş OSM ifadesi kullan. Kısmi katkıyı ve yeniden kontrol durumunu Room ve ZIP v10 ile sakla. |
 
 **Nereye? doğrulaması.** Kaynak adayı `ad84d727` üzerinde 193 test grubunda 1.410 birim testi geçti. Başarısızlık, hata ve atlama sayıları sıfırdı. Debug lint 97 uyarı ve 3 ipucu verdi, hata vermedi. Debug uygulama ve AndroidTest APK’ları bilgisayarda derlendi.
 
@@ -33,6 +35,10 @@ Fiziksel Samsung telefonda ağsız QA paketiyle yapılan ilk koşuda üç sentet
 **Nereye? kısmi ad araması.** Canlı Overpass kabulü bekliyor. Yapılandırılmış uç noktada HTTP 502 alındı, önceki denemelerde zaman aşımı da görüldü. Gerekli iki canlı sorgunun kabulü tamamlanmadı.
 
 `ae038e7` üzerinde 1.487/1.487 birim testi geçti. Debug lint 0 hata, 96 uyarı ve 1 ipucu verdi. Debug APK üretimi ve AndroidTest Kotlin derlemesi geçti. Derlenen ayrı QA APK çiftiyle fiziksel Samsung’da kısmi ad ve kısaltma sonuçlarının seçilen koordinatlarla ulaşım türü seçimine ulaştığı iki sentetik kontrol geçti. QA temizliği 2/2 tamamlandı.
+
+**Yerinde bilgi tamamlama doğrulaması.** `3adea536` üzerinde 1.536/1.536 birim testi geçti. Debug lint 0 hata ve 96 uyarı verdi. Debug APK üretimi ve AndroidTest Kotlin derlemesi geçti. Aynı kaynağın ayrı çevrimdışı QA paketiyle fiziksel Samsung’da 26/26 sentetik kontrol geçti. Telefon kapsamı 20 Compose, 5 Room/ZIP/geri yükleme ve 1 native akış kontrolüydü. Beş native ekran görüntüsü incelendi ve QA temizliği 2/2 tamamlandı.
+
+**Canlı kabul bekliyor.** Yapılandırılmış Overpass uç noktasındaki son yakın görev sorgusu zaman aşımına uğradı. Canlı harita, gerçek GNSS, gerçek OSM hesabıyla yazma ve manuel TalkBack bu telefon turunun kapsamı dışındaydı.
 
 Yayımlanmış önceki sürüm Telefon 0.12.0 / code 28’dir. Bu bölüm, 0.12.0 yayımlanmadan önceki aday doğrulama anlık görüntüsünü ve yayımlanmış 0.12.0’dan sonra 6–7 Kasım’da aynı 0.12.0 numarasıyla yapılan kamera, Molalı rota ve OSM GPS izi paylaşımı kaynak güncellemelerini birlikte kaydeder. Sonraki kaynak güncellemeleri yayımlanmış 0.12.0 sürümünün içeriği değildir. Bu tarihsel doğrulama ve kaynak kayıtları 0.13.0 için kabul veya doğrulama oluşturmaz. Yayımlanmış 0.12.0’ın release notları için [GitHub sürüm kaydı](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.12.0) esas alınır.
 
