@@ -19,6 +19,8 @@ object SurveyOpeningHours {
 
     fun isPartial(value: String): Boolean {
         if (!isValid(value)) return true
+        // Simple weekday overrides supersede earlier unknown rules without rewriting their raw text.
+        toWeek(value)?.let { week -> return week.days.any { it.state == SurveyDayState.UNKNOWN } }
         val outsideComments = buildString {
             var quoted = false; var escaped = false
             for (c in value) {

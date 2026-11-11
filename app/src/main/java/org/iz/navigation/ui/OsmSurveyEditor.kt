@@ -103,10 +103,15 @@ internal fun OsmSurveyEditor(
                 value.before.orEmpty() else value.value,
             fullyObserved = action == SurveyAction.VERIFY,
             formDraft = if (action == SurveyAction.EDIT && value.action == SurveyAction.EDIT) value.formDraft else null)
-        update(when (field) {
+        val next = when (field) {
             SurveyField.OPENING_HOURS -> observation.copy(hours = change(observation.hours))
             SurveyField.WHEELCHAIR -> observation.copy(wheelchair = change(observation.wheelchair))
-        })
+        }
+        if (update(next) && field == SurveyField.OPENING_HOURS &&
+            !(action == SurveyAction.EDIT && observation.hours.action == SurveyAction.EDIT)) {
+            simple = false
+            formWeek = null
+        }
     }
     val exit = OsmDraftExitOwner("osm-survey/${initial.id}",
         accountKey = { auth.communitySessionSource.sessions.value?.let { "${it.userId}:${it.generation}" } },

@@ -2,8 +2,34 @@ package org.iz.navigation.integration
 
 import org.junit.Assert.*
 import org.junit.Test
+import org.iz.navigation.data.*
 
 class SurveyOpeningHoursTest {
+    @Test fun completedUnknownDaysUseEffectiveOverridesForFullVerification() {
+        val original = "Mo-Fr 09:00-17:00; Sa-Su unknown"
+        val known = SurveyDayHours(SurveyDayState.OPEN, listOf(SurveyHoursInterval("10:00", "16:00")))
+        val saturday = requireNotNull(SurveyOpeningHours.toWeek(original)).editDay(5, known)
+        assertTrue(SurveyOpeningHours.isPartial(saturday.expression()))
+        val completed = saturday.editDay(6, known)
+        assertTrue(completed.expression().startsWith(original))
+        assertFalse(SurveyOpeningHours.isPartial(completed.expression()))
+        val date = java.time.LocalDate.of(2026, 11, 11)
+        val observation = SurveyObservation(12, date.toString(),
+            hours = SurveyFieldObservation(
+                action = SurveyAction.EDIT, value = completed.expression(),
+                fullyObserved = true, before = original, formDraft = completed.encodeDraft()))
+        assertEquals(date.toString(), observation.publicChanges(mapOf("opening_hours" to original), date)["check_date:opening_hours"])
+        val venue = SurveyVenue(OsmRef(OsmType.NODE, 7), 12, "Sentetik kafe", 0.0, 0.0,
+            mapOf("opening_hours" to original))
+        val receipt = MapEditDraft(latitude = 0.0, longitude = 0.0, targetType = OsmType.NODE, targetId = 7,
+            status = MapEditStatus.SENT, stage = MapEditStage.CLOSE_CHANGESET, submittedBy = 41, submittedAt = 1,
+            reviewedVersion = 12, appliedVersion = 13, localAttemptId = "local-attempt", localChangesetCreated = true,
+            surveyPayload = observation.encode())
+        val updated = applySurveyReceipts(venue, listOf(receipt), 41)
+        assertEquals(date.toString(), updated.tags["check_date:opening_hours"])
+        assertFalse(updated.tasks(date).any { it.field == SurveyField.OPENING_HOURS })
+        assertFalse(updated.copy(version = 14).tasks(date).any { it.field == SurveyField.OPENING_HOURS })
+    }
     @Test fun pinnedParserAcceptsWeeklyMultipleOvernight24hUnknownAndAdvancedRules() {
         for (value in listOf("Mo-Fr 09:00-17:00", "Mo-Fr 09:00-12:00,13:00-17:00", "Fr-Sa 22:00-02:00", "24/7",
             "Mo 09:00-17:00; Tu-Su unknown", "Mo-Fr 09:00-17:00; PH off", "Apr-Sep Mo-Fr 09:00-17:00; Oct-Mar off")) {

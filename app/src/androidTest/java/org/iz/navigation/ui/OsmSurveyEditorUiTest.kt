@@ -66,6 +66,52 @@ class OsmSurveyEditorUiTest {
         return compose.onNodeWithTag(tag)
     }
 
+    @Test fun unknownThenEditCannotResurrectDiscardedWeeklyInput() = assertWeeklyActionReset(SurveyAction.UNKNOWN)
+
+    @Test fun verifyThenEditCannotResurrectDiscardedWeeklyInput() = assertWeeklyActionReset(SurveyAction.VERIFY)
+
+    @Test fun completingUnknownDaysEnablesWholeWeekVerificationAndItsDate() {
+        val target = element("Mo-Fr 09:00-17:00; Sa-Su unknown")
+        var saved: MapEditDraft? = null
+        show(target, onSave = { saved = it })
+        node("osm-survey-opening_hours-EDIT").performClick()
+        node("osm-survey-hours-simple").performClick()
+        node("osm-survey-hours-complete").assertIsNotEnabled()
+        node("osm-survey-hours-day-5-CLOSED").performClick()
+        node("osm-survey-hours-day-6-CLOSED").performClick()
+        node("osm-survey-hours-complete").assertIsEnabled().performClick()
+        node("osm-survey-save").performClick()
+        compose.runOnIdle {
+            val observation = requireNotNull(saved?.surveyObservation())
+            assertTrue(observation.hours.fullyObserved)
+            assertEquals(today.toString(), observation.publicChanges(target.tags, today)["check_date:opening_hours"])
+        }
+    }
+
+    private fun assertWeeklyActionReset(action: SurveyAction) {
+        val original = "Mo-Su 09:00-18:00"
+        val target = element(original)
+        var saved: MapEditDraft? = null
+        show(target, onSave = { saved = it })
+        node("osm-survey-opening_hours-EDIT").performClick()
+        node("osm-survey-hours-simple").performClick()
+        node("osm-survey-hours-day-0-0-from").performTextReplacement("11:00")
+        node("osm-survey-opening_hours-${action.name}").performClick()
+        node("osm-survey-opening_hours-EDIT").performClick()
+        node("osm-survey-hours-advanced").assertTextContains(original)
+        node("osm-survey-hours-simple").performClick()
+        node("osm-survey-hours-day-0-0-from").assertTextContains("09:00")
+        node("osm-survey-hours-day-1-0-from").performTextReplacement("10:00")
+        node("osm-survey-save").performClick()
+        compose.runOnIdle {
+            val hours = requireNotNull(saved?.surveyObservation()).hours
+            val restored = requireNotNull(SurveyOpeningHours.fromDraft(requireNotNull(hours.formDraft)))
+            assertEquals("09:00", restored.days[0].intervals.single().from)
+            assertEquals("10:00", restored.days[1].intervals.single().from)
+            assertFalse(hours.value.contains("11:00"))
+        }
+    }
+
     @Test fun unknownKeepsBothPublicValuesAndVerificationDates() {
         val target = element()
         var saved: MapEditDraft? = null
