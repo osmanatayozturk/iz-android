@@ -7,11 +7,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import org.iz.navigation.BuildConfig
 import org.iz.navigation.data.*
 import org.iz.navigation.integration.SurveyDayState
 import org.iz.navigation.integration.SurveyHoursInterval
@@ -25,6 +29,9 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.time.LocalDate
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
 
 /** Survey editor follows the existing correction editor callback boundary and the shared survey payload. */
 @RunWith(AndroidJUnit4::class)
@@ -307,17 +314,73 @@ class OsmSurveyEditorUiTest {
 
     @Test fun oversizedAdvancedPasteIsExplicitlyRejectedWithoutLosingAcceptedText() {
         val accepted = "Mo-Fr 09:00-18:00; PH off"
+        val warning = "Taslak alanı en fazla 8192 karakter olabilir. Son kabul edilen metin korunuyor."
+        val diagnostics = JSONArray()
+        val args = InstrumentationRegistry.getArguments()
+        val capture = if (args.getString("izSurveyPasteDiagnostic") == "one-capture") {
+            check(BuildConfig.DEBUG && BuildConfig.APPLICATION_ID != "org.iz.navigation")
+            check(args.getString("izExpectedPackage") == BuildConfig.APPLICATION_ID)
+            val commit = args.getString("izCandidateCommit").orEmpty()
+            check(commit.matches(Regex("[0-9a-f]{40}")))
+            val directory = File(InstrumentationRegistry.getInstrumentation().targetContext.noBackupFilesDir,
+                "qa-osm-survey-paste").apply { check(isDirectory || mkdirs()) }
+            File(directory, "$commit.json").apply { check(!exists()) { "Diagnostic capture already exists" } }
+        } else null
+        fun trace(stage: String) {
+            compose.waitForIdle()
+            val fields = compose.onAllNodesWithTag("osm-survey-hours-advanced").fetchSemanticsNodes()
+            val text = fields.singleOrNull()?.config?.getOrNull(SemanticsProperties.EditableText)?.text
+            val range = compose.onNodeWithTag("osm-survey-editor-list").fetchSemanticsNode().config
+                .getOrNull(SemanticsProperties.VerticalScrollAxisRange)
+            diagnostics.put(JSONObject().put("stage", stage).put("fieldNodes", fields.size)
+                .put("editableChars", text?.length ?: JSONObject.NULL)
+                .put("matchesAccepted", text?.let { it == accepted } ?: JSONObject.NULL)
+                .put("warningNodes", compose.onAllNodesWithText(warning, useUnmergedTree = true).fetchSemanticsNodes().size)
+                .put("focusedNodes", compose.onAllNodes(isFocused(), useUnmergedTree = true).fetchSemanticsNodes().size)
+                .put("scroll", range?.value?.invoke() ?: JSONObject.NULL)
+                .put("maxScroll", range?.maxValue?.invoke() ?: JSONObject.NULL))
+        }
         var saved: MapEditDraft? = null
         show(element(accepted), onSave = { saved = it })
         node("osm-survey-opening_hours-EDIT").performClick()
-        node("osm-survey-hours-advanced").performTextReplacement("x".repeat(8193))
-        compose.onNodeWithTag("osm-survey-editor-list").performScrollToNode(
-            hasText("Taslak alanı en fazla 8192 karakter olabilir. Son kabul edilen metin korunuyor."))
-        compose.onNodeWithText("Taslak alanı en fazla 8192 karakter olabilir. Son kabul edilen metin korunuyor.")
-            .assertIsDisplayed()
         node("osm-survey-hours-advanced").assertTextContains(accepted)
-        node("osm-survey-save").assertIsEnabled().performClick()
-        compose.runOnIdle { assertEquals(accepted, saved?.surveyObservation()?.hours?.value) }
+        trace("before-8193-replacement")
+        var originalFailure: AssertionError? = null
+        var outcome = "NOT_COMPLETED"
+        try {
+            compose.onNodeWithTag("osm-survey-hours-advanced").performTextReplacement("x".repeat(8193))
+            trace("after-8193-replacement-before-scroll")
+            compose.onNodeWithTag("osm-survey-editor-list").performScrollToNode(hasText(warning))
+            compose.onNodeWithText(warning).assertIsDisplayed()
+            trace("warning-displayed")
+            node("osm-survey-hours-advanced").assertTextContains(accepted)
+            node("osm-survey-save").assertIsEnabled().performClick()
+            compose.runOnIdle { assertEquals(accepted, saved?.surveyObservation()?.hours?.value) }
+            outcome = "PASS"
+        } catch (failure: AssertionError) {
+            originalFailure = failure
+            outcome = "FAIL"
+            // Failure-only probes never convert the original assertion into a pass or retry input.
+            runCatching { trace("original-assertion-failed") }
+            runCatching {
+                compose.onNodeWithTag("osm-survey-editor-list").performScrollToIndex(0)
+                trace("after-explicit-index-zero-focus-unchanged")
+            }.onFailure { diagnostics.put(JSONObject().put("probeFailure", it.javaClass.simpleName)) }
+            throw AssertionError("${failure.message}\nSURVEY_PASTE_DIAGNOSTICS=$diagnostics", failure)
+        } finally {
+            if (capture != null) runCatching {
+                check(capture.createNewFile()) { "Diagnostic evidence must not be overwritten" }
+                capture.writeText(JSONObject().put("candidateCommit", args.getString("izCandidateCommit"))
+                    .put("package", BuildConfig.APPLICATION_ID)
+                    .put("method", "OsmSurveyEditorUiTest#oversizedAdvancedPasteIsExplicitlyRejectedWithoutLosingAcceptedText")
+                    .put("operation", "COMPOSE_SEMANTICS_SETTEXT_NOT_CLIPBOARD")
+                    .put("requestedUtf16Units", 8193).put("originalAssertionOutcome", outcome)
+                    .put("capturedAt", System.currentTimeMillis()).put("stages", diagnostics).toString())
+            }.onFailure { captureFailure ->
+                if (originalFailure != null) originalFailure.addSuppressed(captureFailure)
+                else throw AssertionError("Diagnostic capture failed", captureFailure)
+            }
+        }
     }
 
     @Test fun manuallyChangedAdvancedTextClearsPrivateWeeklyState() {
