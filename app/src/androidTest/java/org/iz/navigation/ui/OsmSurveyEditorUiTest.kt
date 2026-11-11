@@ -7,8 +7,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.ViewRootForTest
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.junit4.StateRestorationTester
@@ -330,13 +333,20 @@ class OsmSurveyEditorUiTest {
             compose.waitForIdle()
             val fields = compose.onAllNodesWithTag("osm-survey-hours-advanced").fetchSemanticsNodes()
             val text = fields.singleOrNull()?.config?.getOrNull(SemanticsProperties.EditableText)?.text
-            val range = compose.onNodeWithTag("osm-survey-editor-list").fetchSemanticsNode().config
-                .getOrNull(SemanticsProperties.VerticalScrollAxisRange)
+            val editor = compose.onNodeWithTag("osm-survey-editor-list").fetchSemanticsNode()
+            val range = editor.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange)
+            val focused = compose.onAllNodes(isFocused(), useUnmergedTree = true).fetchSemanticsNodes()
+            val dialogRoot = editor.root
+            val dialogFocused = dialogRoot?.let { root -> focused.count { it.root === root } }
+            val dialogView = (dialogRoot as? ViewRootForTest)?.view
+            val dialogViewHasFocus = compose.runOnIdle { dialogView?.hasFocus() }
             diagnostics.put(JSONObject().put("stage", stage).put("fieldNodes", fields.size)
                 .put("editableChars", text?.length ?: JSONObject.NULL)
                 .put("matchesAccepted", text?.let { it == accepted } ?: JSONObject.NULL)
                 .put("warningNodes", compose.onAllNodesWithText(warning, useUnmergedTree = true).fetchSemanticsNodes().size)
-                .put("focusedNodes", compose.onAllNodes(isFocused(), useUnmergedTree = true).fetchSemanticsNodes().size)
+                .put("focusedNodes", focused.size).put("dialogFocusedNodes", dialogFocused ?: JSONObject.NULL)
+                .put("dialogFocusCleared", dialogFocused?.let { it == 0 } ?: JSONObject.NULL)
+                .put("dialogViewHasFocus", dialogViewHasFocus ?: JSONObject.NULL)
                 .put("scroll", range?.value?.invoke() ?: JSONObject.NULL)
                 .put("maxScroll", range?.maxValue?.invoke() ?: JSONObject.NULL))
         }
@@ -348,7 +358,20 @@ class OsmSurveyEditorUiTest {
         var originalFailure: AssertionError? = null
         var outcome = "NOT_COMPLETED"
         try {
-            compose.onNodeWithTag("osm-survey-hours-advanced").performTextReplacement("x".repeat(8193))
+            // Compose ui-test1.8.0 TextActionsKt.getNodeAndFocus + performTextReplacement:
+            // the same checks/focus request and one SetText(AnnotatedString), recording its ignored Boolean.
+            val input = compose.onNodeWithTag("osm-survey-hours-advanced")
+            val beforeFocus = input.fetchSemanticsNode()
+            input.assertIsEnabled().assert(hasRequestFocusAction()).assert(hasSetTextAction())
+                .assert(hasInsertTextAtCursorAction())
+            if (!isFocused().matches(beforeFocus)) input.performSemanticsAction(SemanticsActions.RequestFocus)
+            val proposed = AnnotatedString("x".repeat(8193))
+            input.performSemanticsAction(SemanticsActions.SetText) { action ->
+                diagnostics.put(JSONObject().put("stage", "set-text-invocation")
+                    .put("argumentUtf16Units", proposed.length).put("invocationCount", 1))
+                val result = action(proposed)
+                diagnostics.put(JSONObject().put("stage", "set-text-returned").put("actionBoolean", result))
+            }
             trace("after-8193-replacement-before-scroll")
             compose.onNodeWithTag("osm-survey-editor-list").performScrollToNode(hasText(warning))
             compose.onNodeWithText(warning).assertIsDisplayed()
@@ -366,6 +389,15 @@ class OsmSurveyEditorUiTest {
                 compose.onNodeWithTag("osm-survey-editor-list").performScrollToIndex(0)
                 trace("after-explicit-index-zero-focus-unchanged")
             }.onFailure { diagnostics.put(JSONObject().put("probeFailure", it.javaClass.simpleName)) }
+            runCatching {
+                val dialogRoot = compose.onNodeWithTag("osm-survey-editor-list").fetchSemanticsNode().root
+                val dialogView = requireNotNull((dialogRoot as? ViewRootForTest)?.view)
+                // Use the editor's own Android Compose root, not the parent host's LocalFocusManager.
+                compose.runOnIdle { dialogView.clearFocus() }
+                compose.onNodeWithTag("osm-survey-editor-list").performScrollToIndex(0)
+                check(compose.onNodeWithTag("osm-survey-editor-list").fetchSemanticsNode().root === dialogRoot)
+                trace("after-dialog-clearFocus-attempt-and-explicit-index-zero")
+            }.onFailure { diagnostics.put(JSONObject().put("blurProbeFailure", it.javaClass.simpleName)) }
             throw AssertionError("${failure.message}\nSURVEY_PASTE_DIAGNOSTICS=$diagnostics", failure)
         } finally {
             if (capture != null) runCatching {
