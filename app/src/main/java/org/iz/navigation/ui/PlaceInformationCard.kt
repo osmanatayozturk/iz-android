@@ -11,6 +11,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import org.iz.navigation.placeinfo.*
 import java.net.URI
 import java.time.Instant
@@ -128,6 +130,14 @@ internal fun PlaceInformationContent(state: PlaceInfoState, key: PlaceInfoKey, f
     if (showHours) PlaceInformationHoursDetail(hours, zone, notice = if (historical)
         "${if (unavailable) "Bu OSM nesnesi artık kullanılamıyor. " else ""}Kaydedilmiş eski OSM saatleri · Son alındı: $fetched" else null) { showHours = false }
     if (showZone) PlaceInformationZoneDialog(zone, overrideId, onZoneChange, { showZone = false }, instant)
+}
+
+/** The production map-card window, also rendered by isolated component capture fixtures. */
+@Composable
+internal fun PlaceInformationMapDialog(onDismiss: () -> Unit, content: @Composable () -> Unit) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.fillMaxSize()) { content() }
+    }
 }
 
 @Composable

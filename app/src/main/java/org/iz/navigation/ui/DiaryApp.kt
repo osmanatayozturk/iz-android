@@ -924,8 +924,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     })
     informationMapPlace?.takeIf { informationVisible && uiEntry.key == informationOwner }?.let { selected ->
         informationKey?.let { key ->
-            Dialog(onDismissRequest = { informationSelection = null; informationOwner = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-                Surface(Modifier.fillMaxSize()) {
+            PlaceInformationMapDialog(onDismiss = { informationSelection = null; informationOwner = null }) {
                     PlaceInformationContent(informationSession.state, key, selected.name, informationSession.instant,
                         informationSession.deviceZone, informationSession.overrideZoneId, informationSession.changeZone, informationSession.refresh,
                         onDirections = { informationRoute(selected.name, selected.latitude, selected.longitude, key) },
@@ -942,7 +941,6 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                         onSave = { if (informationIsCurrent(key)) {
                             osmSelection = selected; pin = GeoCoordinate(selected.latitude, selected.longitude); addPlace = true
                         } })
-                }
             }
         }
     }
