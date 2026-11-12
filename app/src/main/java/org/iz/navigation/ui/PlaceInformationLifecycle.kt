@@ -56,11 +56,17 @@ internal val PlaceInformationSelectionSaver = Saver<SelectedOsmPlace?, List<Any>
         SelectedOsmPlace(name, latitude, longitude, ref)
     }.getOrNull() })
 
-internal fun placeInformationContributionRevision(key: PlaceInfoKey?, edits: List<MapEditDraft>): String =
-    if (key == null || key.endpoint != PlaceInfoServices.DEFAULT_ENDPOINT) "" else edits.asSequence().filter {
+private fun matchingPlaceInformationReceipts(key: PlaceInfoKey?, edits: List<MapEditDraft>): Sequence<MapEditDraft> =
+    if (key == null || key.endpoint != PlaceInfoServices.DEFAULT_ENDPOINT) emptySequence() else edits.asSequence().filter {
         it.status == MapEditStatus.SENT && it.targetType == key.ref.type && it.targetId == key.ref.id &&
             (it.appliedVersion ?: 0) > 0
-    }.sortedBy { it.id }.joinToString("|") { "${it.id}:${it.appliedVersion}:${it.submittedAt}" }
+    }
+
+internal fun placeInformationContributionRevision(key: PlaceInfoKey?, edits: List<MapEditDraft>): String =
+    matchingPlaceInformationReceipts(key, edits).sortedBy { it.id }.joinToString("|") { "${it.id}:${it.appliedVersion}:${it.submittedAt}" }
+
+internal fun placeInformationContributionVersion(key: PlaceInfoKey?, edits: List<MapEditDraft>): Long? =
+    matchingPlaceInformationReceipts(key, edits).mapNotNull { it.appliedVersion }.maxOrNull()
 
 /** Public identity remains owned while a contribution child is visible, but hidden reads/timers stop. */
 @Composable
@@ -68,7 +74,8 @@ internal fun rememberPlaceInformationSession(key: PlaceInfoKey?, visible: Boolea
     contributionRevision: String = "",
     repository: PlaceInfoRepository = rememberDefaultPlaceInformationRepository(),
     zoneOverrides: PlaceZoneOverrides = rememberDefaultPlaceInformationOverrides(),
-    clock: Clock = Clock.systemUTC(), contributionReady: Boolean = true): PlaceInformationSession {
+    clock: Clock = Clock.systemUTC(), contributionReady: Boolean = true,
+    knownContributionVersion: Long? = null): PlaceInformationSession {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -80,12 +87,12 @@ internal fun rememberPlaceInformationSession(key: PlaceInfoKey?, visible: Boolea
     var previousContribution by remember(key) { mutableStateOf(contributionRevision.takeIf { contributionReady }) }
     var contributionInvalidation by remember(controller, key) { mutableStateOf<Job?>(null) }
     DisposableEffect(controller) { onDispose { controller.close() } }
-    LaunchedEffect(controller, key, visible, lifecycle) {
+    LaunchedEffect(controller, key, visible, lifecycle, contributionReady, knownContributionVersion) {
         controller.close()
-        if (key != null && visible) lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+        if (key != null && visible && contributionReady) lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             contributionInvalidation?.join()
             ensureActive()
-            controller.open(key)
+            controller.open(key, minimumVersion = knownContributionVersion)
             try { awaitCancellation() } finally { controller.close() }
         }
     }
@@ -94,8 +101,13 @@ internal fun rememberPlaceInformationSession(key: PlaceInfoKey?, visible: Boolea
         if (previousContribution == null) previousContribution = contributionRevision
         else if (key != null && previousContribution != contributionRevision) {
             previousContribution = contributionRevision
-            if (!visible || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) controller.close()
-            contributionInvalidation = controller.contributionSucceeded(key)
+            val hidden = !visible || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+            // A known version already restarts/reconciles the visible open effect. A synthetic
+            // revision without version, or a hidden successful write, still explicitly invalidates.
+            if (knownContributionVersion == null || hidden) {
+                if (hidden) controller.close()
+                contributionInvalidation = controller.contributionSucceeded(key)
+            }
         }
     }
     var instant by remember(clock) { mutableStateOf(clock.instant()) }

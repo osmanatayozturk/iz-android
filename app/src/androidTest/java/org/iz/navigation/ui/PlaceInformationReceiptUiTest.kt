@@ -25,5 +25,9 @@ class PlaceInformationReceiptUiTest {
         assertTrue(revision.isNotBlank())
         assertEquals(revision, placeInformationContributionRevision(key, listOf(applied, pending.copy(targetId = 14))))
         assertNotEquals(revision, placeInformationContributionRevision(key, listOf(applied.copy(appliedVersion = 9))))
+        assertNull(placeInformationContributionVersion(key, listOf(pending)))
+        assertNull(placeInformationContributionVersion(key.copy(endpoint = "https://example.invalid/api/0.6"), listOf(applied)))
+        assertEquals(9L, placeInformationContributionVersion(key, listOf(applied, applied.copy(appliedVersion = 9))))
+        assertEquals(8L, placeInformationContributionVersion(key, listOf(applied, pending.copy(status = MapEditStatus.FAILED, appliedVersion = 10))))
     }
 }

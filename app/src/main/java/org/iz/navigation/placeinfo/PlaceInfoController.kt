@@ -13,10 +13,13 @@ class PlaceInfoController(private val scope: CoroutineScope, private val reposit
     private val lock = Any()
     private var generation = 0L
     private var active: Job? = null
+    private var requiredVersion: Long? = null
 
-    fun open(key: PlaceInfoKey): Job? = synchronized(lock) {
-        if (mutable.value.key == key && active?.isActive == true) return@synchronized active
+    fun open(key: PlaceInfoKey, minimumVersion: Long? = null): Job? = synchronized(lock) {
+        require(minimumVersion == null || minimumVersion > 0)
+        if (mutable.value.key == key && requiredVersion == minimumVersion && active?.isActive == true) return@synchronized active
         retire()
+        requiredVersion = minimumVersion
         mutable.value = PlaceInfoState(key = key,loading = true)
         start(key,false,generation)
     }
@@ -40,12 +43,13 @@ class PlaceInfoController(private val scope: CoroutineScope, private val reposit
         }
     }
 
-    fun close() = synchronized(lock) { retire(); mutable.value = PlaceInfoState() }
+    fun close() = synchronized(lock) { retire(); requiredVersion = null; mutable.value = PlaceInfoState() }
 
     private fun retire() { generation++; active?.cancel(); active = null }
     private fun start(key: PlaceInfoKey, force: Boolean, token: Long): Job {
+        val minimumVersion = requiredVersion
         val job = scope.launch(start = CoroutineStart.LAZY) {
-            repository.load(key,force) { value -> synchronized(lock) {
+            repository.load(key,force,minimumVersion) { value -> synchronized(lock) {
                 if (generation == token && mutable.value.key == key) mutable.value = value
             } }
         }

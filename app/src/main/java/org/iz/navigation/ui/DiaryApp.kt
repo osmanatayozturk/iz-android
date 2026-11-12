@@ -601,7 +601,8 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     val informationVisible = informationKey != null && !mapEditsPage && !contributionPicker && contributionEdit == null && !addPlace &&
         (uiEntry.page == UiPage.PLACE || (informationMapPlace != null && uiEntry.key == informationOwner))
     val informationSession = rememberPlaceInformationSession(informationKey, informationVisible,
-        placeInformationContributionRevision(informationKey, informationEdits.orEmpty()), contributionReady = informationEdits != null)
+        placeInformationContributionRevision(informationKey, informationEdits.orEmpty()), contributionReady = informationEdits != null,
+        knownContributionVersion = placeInformationContributionVersion(informationKey, informationEdits.orEmpty()))
     val currentInformationKey by rememberUpdatedState(informationKey)
     val currentInformationVisible by rememberUpdatedState(informationVisible)
     fun informationIsCurrent(key: PlaceInfoKey) = currentInformationKey == key && currentInformationVisible && history.current.key == uiEntry.key
@@ -1374,7 +1375,7 @@ private fun JourneyDetail(journey: Journey, state: DiaryState, now: Long, onEdit
 }
 
 @Composable
-private fun PlaceDetail(place: Place, state: DiaryState, onEdit: () -> Unit, onMaps: () -> Unit, onContribute: () -> Unit,
+internal fun PlaceDetail(place: Place, state: DiaryState, onEdit: () -> Unit, onMaps: () -> Unit, onContribute: () -> Unit,
     onCorrect: (() -> Unit)?, onAddVisit: () -> Unit, onEditVisit: (Visit) -> Unit, onShare: (Visit) -> Unit, onPhoto: (Visit) -> Unit,
     onDelete: () -> Unit, onDeleteVisit: (Visit) -> Unit, onDeletePhoto: (Photo) -> Unit, onEditPhoto: (Photo) -> Unit,
     onSurvey: (() -> Unit)? = null,

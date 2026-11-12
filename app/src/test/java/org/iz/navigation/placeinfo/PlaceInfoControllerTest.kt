@@ -94,4 +94,33 @@ class PlaceInfoControllerTest {
         controller.close(); release.complete(Unit); job?.join()
         assertEquals(PlaceInfoState(),controller.state.value); assertNull(cache.cached(key()))
     }
+
+    @Test fun existingSuccessfulReceiptReconcilesOlderFreshCacheButDoesNotRefetchMatchingOrNewerVersion() = runTest {
+        for (cachedVersion in listOf(3L,4L,5L)) {
+            val cache=PublicPlaceCache(temp.newFolder(),clock)
+            cache.put(snapshot(version=cachedVersion))
+            var calls=0
+            // A new controller represents reopening/process restart with the already persisted SENT/v4 receipt.
+            val reopened=PlaceInfoController(this,PlaceInfoRepository(PlaceInfoReader {
+                calls++; PlaceInfoRead.Found(snapshot(version=4))
+            },cache,clock))
+            reopened.open(key(),minimumVersion=4)?.join()
+            assertEquals("cachedVersion=$cachedVersion",if(cachedVersion<4) 1 else 0,calls)
+            assertEquals(maxOf(4L,cachedVersion),reopened.state.value.snapshot?.version)
+            assertFalse(reopened.state.value.stale)
+        }
+    }
+
+    @Test fun knownOlderCacheRemainsHistoricalWhenRefreshFailsOrServerHasNotReachedConfirmedVersion() = runTest {
+        for (offline in listOf(true,false)) {
+            val cache=PublicPlaceCache(temp.newFolder(),clock); val old=snapshot(version=3); cache.put(old)
+            val reopened=PlaceInfoController(this,PlaceInfoRepository(PlaceInfoReader {
+                if(offline) error("offline") else PlaceInfoRead.Found(old)
+            },cache,clock))
+            reopened.open(key(),minimumVersion=4)?.join()
+            assertEquals(old,reopened.state.value.snapshot); assertTrue(reopened.state.value.stale)
+            assertTrue(reopened.state.value.failed); assertFalse(reopened.state.value.loading)
+            assertEquals(old,cache.cached(key())?.snapshot)
+        }
+    }
 }

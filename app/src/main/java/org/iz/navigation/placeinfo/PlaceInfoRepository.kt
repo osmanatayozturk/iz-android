@@ -7,11 +7,12 @@ import kotlinx.coroutines.ensureActive
 
 class PlaceInfoRepository(private val reader: PlaceInfoReader, private val cache: PublicPlaceCache,
     private val clock: Clock = Clock.systemUTC()) {
-    internal suspend fun load(key: PlaceInfoKey, force: Boolean, publish: (PlaceInfoState) -> Unit) {
+    internal suspend fun load(key: PlaceInfoKey, force: Boolean, minimumVersion: Long? = null, publish: (PlaceInfoState) -> Unit) {
         val cached = cache.cached(key)
         val snapshot = cached?.snapshot
         val age = snapshot?.let { clock.millis() - it.fetchedAtMillis }
-        val fresh = age != null && age >= 0 && age < FRESH_MILLIS && cached.unavailableStatus == null
+        val fresh = age != null && age >= 0 && age < FRESH_MILLIS && cached.unavailableStatus == null &&
+            (minimumVersion == null || snapshot.version >= minimumVersion)
         val initial = PlaceInfoState(key, snapshot, loading = force || !fresh,
             stale = snapshot != null && !fresh, unavailableStatus = cached?.unavailableStatus)
         publish(initial)
@@ -25,6 +26,7 @@ class PlaceInfoRepository(private val reader: PlaceInfoReader, private val cache
                     val found = response.snapshot
                     require(found.key == key && found.version > 0)
                     require(snapshot == null || found.version >= snapshot.version)
+                    require(minimumVersion == null || found.version >= minimumVersion)
                     cache.put(found)
                     currentCoroutineContext().ensureActive()
                     publish(PlaceInfoState(key, found.copy(tags = found.tags.toMap())))
