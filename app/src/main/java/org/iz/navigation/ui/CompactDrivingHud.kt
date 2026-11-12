@@ -101,7 +101,7 @@ internal fun CompactDrivingHud(data: CompactHudData, landscape: Boolean, onMute:
         Column(Modifier.fillMaxWidth().height((44 * scale).dp).testTag("hud-reserved-status")
             .semantics { contentDescription = data.warnings.joinToString(" · ") }) {
             repeat(3) { index ->
-                Text(visible.getOrNull(index).orEmpty(), color = MaterialTheme.colorScheme.error,
+                Text(visible.getOrNull(index).orEmpty(), Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.error,
                     fontSize = 11.sp, lineHeight = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }

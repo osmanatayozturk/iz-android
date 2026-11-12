@@ -339,9 +339,10 @@ class SharedNavigationVisualCaptureTest {
                 metadata.put(key + "WindowPixels", offsetRect(metadata.getJSONObject(key),
                     window.getJSONArray("composeRootOffsetInWindowPixels")))
             }
+            val nativeMasks = if (state.startsWith("01")) emptyList() else nativeOverlayRects(owned)
             val bitmap = copyWindow(owned)
             try {
-                metadata.put("native", nativeInclusion(owned, bitmap, state.startsWith("01")))
+                metadata.put("native", nativeInclusion(owned, bitmap, state.startsWith("01"), nativeMasks))
                 Files.newOutputStream(png.toPath(), StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE).use { stream ->
                     CappedOutput(stream, MAX_PNG).use { capped -> check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, capped)) }
                 }
@@ -384,7 +385,7 @@ class SharedNavigationVisualCaptureTest {
             args.getString("izSharedNavigationVisual") == "isolated-offline")
         val context = instrumentation.targetContext
         check(QA_PACKAGE != "org.iz.navigation" && QA_PACKAGE in setOf(
-            "org.iz.navigation.placeinfoqa20261112p01", "org.iz.navigation.placeinfoqa20261112p02"))
+            "org.iz.navigation.placeinfoqa20261112p01", "org.iz.navigation.placeinfoqa20261112p02", "org.iz.navigation.placeinfoqa20261112p03"))
         check(BuildConfig.DEBUG && BuildConfig.APPLICATION_ID == QA_PACKAGE && context.packageName == QA_PACKAGE)
         check(instrumentation.context.packageName == QA_PACKAGE + ".test")
         val strings = listOf("izCandidateCommit", "izCandidateTree", "izFixtureSha256", "izQaConfigSha256",
@@ -513,7 +514,49 @@ class SharedNavigationVisualCaptureTest {
         check(bitmap.width in 1..4096 && bitmap.height in 1..4096)
     }
 
-    private fun nativeInclusion(window: Window, image: Bitmap, noMapExpected: Boolean): JSONObject {
+    private data class NativeOverlayRect(val id: String, val rootBounds: FloatRect, val offsetX: Int, val offsetY: Int) {
+        val windowBounds get() = FloatRect(rootBounds.left + offsetX, rootBounds.top + offsetY,
+            rootBounds.right + offsetX, rootBounds.bottom + offsetY)
+    }
+
+    private fun nativeOverlayRects(window: Window): List<NativeOverlayRect> {
+        var ownedRoot: View? = null
+        val offset = IntArray(2)
+        instrumentation.runOnMainSync {
+            ownedRoot = descendants(window.decorView)
+                .filterIsInstance<androidx.compose.ui.platform.ViewRootForTest>().map { it.view }.distinct().single()
+            check(ownedRoot!!.rootView === window.decorView)
+            ownedRoot!!.getLocationInWindow(offset)
+        }
+        val allowed = listOf(
+            "directions-fit-route" to hasTestTag("directions-fit-route"),
+            "directions-map-marker-A" to hasTestTag("directions-map-marker-A"),
+            "directions-map-marker-1" to hasTestTag("directions-map-marker-1"),
+            "directions-map-marker-B" to hasTestTag("directions-map-marker-B"),
+            "osm-attribution-exact" to hasText("© OpenStreetMap contributors", substring = false)
+        )
+        return allowed.mapNotNull { (id, matcher) ->
+            val nodes = compose.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes()
+            var rect: FloatRect? = null
+            instrumentation.runOnMainSync {
+                val owned = nodes.filter { (it.root as? androidx.compose.ui.platform.ViewRootForTest)?.view === ownedRoot }
+                check(owned.size <= 1) { "Duplicate allowed native overlay: $id" }
+                owned.singleOrNull()?.let { node ->
+                    if (id == "osm-attribution-exact") check(node.config.getOrNull(SemanticsProperties.Text)
+                        ?.map { it.text } == listOf("© OpenStreetMap contributors"))
+                    val bounds = node.boundsInRoot
+                    check(listOf(bounds.left, bounds.top, bounds.right, bounds.bottom).all { it.isFinite() })
+                    if (bounds.width > 0 && bounds.height > 0 && ownedRoot!!.isShown) {
+                        rect = bounds
+                    }
+                }
+            }
+            rect?.let { NativeOverlayRect(id, it, offset[0], offset[1]) }
+        }
+    }
+
+    private fun nativeInclusion(window: Window, image: Bitmap, noMapExpected: Boolean,
+        overlayRects: List<NativeOverlayRect>): JSONObject {
         var maps = emptyList<MapView>()
         instrumentation.runOnMainSync { maps = descendants(window.decorView).filterIsInstance<MapView>() }
         if (noMapExpected) { check(maps.isEmpty()); return JSONObject().put("nativeViews", 0).put("windowInclusion", "NOT_APPLICABLE") }
@@ -538,29 +581,68 @@ class SharedNavigationVisualCaptureTest {
         try {
             val location = IntArray(2)
             instrumentation.runOnMainSync { renderView.getLocationInWindow(location) }
+            check(overlayRects == nativeOverlayRects(window)) { "Native overlay geometry changed during capture" }
+            val visibleNative = FloatRect(maxOf(0f, location[0].toFloat()), maxOf(0f, location[1].toFloat()),
+                minOf(image.width.toFloat(), (location[0] + surface.width).toFloat()),
+                minOf(image.height.toFloat(), (location[1] + surface.height).toFloat()))
+            check(visibleNative.width > 0 && visibleNative.height > 0)
+            val masks = overlayRects.mapNotNull { overlay ->
+                val raw = overlay.windowBounds
+                val clipped = FloatRect(maxOf(raw.left, visibleNative.left), maxOf(raw.top, visibleNative.top),
+                    minOf(raw.right, visibleNative.right), minOf(raw.bottom, visibleNative.bottom))
+                if (clipped.width > 0 && clipped.height > 0) overlay to clipped else null
+            }
+            val area = visibleNative.width.toDouble() * visibleNative.height
+            val maskAreaSum = masks.sumOf { (_, rect) -> rect.width.toDouble() * rect.height }
+            val perRectExcluded = IntArray(masks.size)
             var compared = 0; var matches = 0; var visiblePixels = 0
+            var excluded = 0; var inWindow = 0; var transparent = 0; var outOfWindow = 0
             for (iy in 1..20) for (ix in 1..20) {
                 val x = ix * (surface.width - 1) / 21
                 val y = iy * (surface.height - 1) / 21
                 val wx = location[0] + x; val wy = location[1] + y
-                if (wx !in 0 until image.width || wy !in 0 until image.height) continue
+                if (wx !in 0 until image.width || wy !in 0 until image.height) { outOfWindow++; continue }
+                inWindow++
+                // Geometry-only membership is decided before reading either pixel; no dilation.
+                val covered = masks.indices.filter { index ->
+                    val rect = masks[index].second
+                    wx + .5f >= rect.left && wx + .5f < rect.right && wy + .5f >= rect.top && wy + .5f < rect.bottom
+                }
+                if (covered.isNotEmpty()) {
+                    excluded++; covered.forEach { perRectExcluded[it]++ }; continue
+                }
                 val a = surface.getPixel(x, y); val b = image.getPixel(wx, wy)
-                if (Color.alpha(a) == 0) continue
+                if (Color.alpha(a) == 0) { transparent++; continue }
                 compared++
                 if (Color.red(a) > 20 || Color.green(a) > 20 || Color.blue(a) > 20) visiblePixels++
                 if (abs(Color.red(a) - Color.red(b)) <= 12 && abs(Color.green(a) - Color.green(b)) <= 12 &&
                     abs(Color.blue(a) - Color.blue(b)) <= 12) matches++
             }
-            val included = compared >= 100 && visiblePixels >= compared * .8 && matches >= compared * .95
+            check(compared + transparent + excluded + outOfWindow == 400)
+            val maskValid = overlayRects.size <= 5 && masks.size <= 5 && maskAreaSum <= area * .20 && excluded <= inWindow * .20
+            val included = maskValid && compared >= 100 && visiblePixels >= compared * .8 && matches >= compared * .95
+            val exclusions = JSONArray().apply { masks.forEachIndexed { index, (overlay, clipped) ->
+                put(JSONObject().put("id", overlay.id).put("rootRect", rect(overlay.rootBounds))
+                    .put("rootOffsetInWindowPixels", JSONArray(listOf(overlay.offsetX, overlay.offsetY)))
+                    .put("windowRect", rect(overlay.windowBounds))
+                    .put("excludedRect", rect(clipped)).put("excludedGridSamples", perRectExcluded[index]))
+            } }
             return JSONObject().put("nativeViews", 1).put("rendererViewClass", renderView.javaClass.name)
                 .put("nativeViewBoundsWindowPixels", JSONObject().put("left", location[0]).put("top", location[1])
                     .put("right", location[0] + surface.width).put("bottom", location[1] + surface.height))
                 .put("actualRenderedRouteQuery", true).put("ownedNativeSnapshotKeptInMemoryOnly", true)
                 .put("samples", compared).put("matchingSamples", matches).put("visibleNativeSamples", visiblePixels)
+                .put("gridSamples", 400).put("inWindowGridSamples", inWindow).put("outOfWindowGridSamples", outOfWindow)
+                .put("transparentSamples", transparent).put("excludedSamples", excluded).put("excludedRects", exclusions)
+                .put("visibleNativeRect", rect(visibleNative)).put("maskAreaSumPx", maskAreaSum).put("visibleNativeAreaPx", area)
+                .put("maskPolicyValid", maskValid).put("maskRectLimit", 5).put("maskAreaFractionLimit", .20).put("maskSampleFractionLimit", .20)
+                .put("maskRule", "EXACT_ALLOWLIST_OWNED_WINDOW_SEMANTICS_PIXEL_CENTERS_HALF_OPEN_NO_DILATION")
+                .put("overlayGeometryStable", true)
                 .put("windowInclusion", if (included) "MATCHES_OWNED_NATIVE_PIXELS" else "NOT_PROVEN")
-                .put("comparisonLimit", "Separate frame samples and Compose overlays may cause a conservative nonpass; no compositing or global fallback.")
+                .put("comparisonLimit", "Only fixed measured Compose overlays excluded; separate native/window frames may still differ. No resampling, compositing or global fallback.")
         } finally { surface.recycle() }
     }
+
 
     @Suppress("DEPRECATION")
     private fun windowInfo(host: Activity, window: Window): JSONObject {

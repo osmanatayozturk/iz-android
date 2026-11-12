@@ -287,7 +287,7 @@ class PlaceInformationEntrypointUiTest {
         assumeTrue("Root entrypoint allocation after four captures required; missing opt-in is NOT_RUN",
             args.getString("izPlaceInformationEntrypoints") == "isolated-offline")
         check(QA_PACKAGE != "org.iz.navigation" && QA_PACKAGE in setOf(
-            "org.iz.navigation.placeinfoqa20261112p01", "org.iz.navigation.placeinfoqa20261112p02"))
+            "org.iz.navigation.placeinfoqa20261112p01", "org.iz.navigation.placeinfoqa20261112p02", "org.iz.navigation.placeinfoqa20261112p03"))
         check(BuildConfig.DEBUG && BuildConfig.APPLICATION_ID == QA_PACKAGE && context.packageName == QA_PACKAGE)
         check(instrumentation.context.packageName == "$QA_PACKAGE.test" && args.getString("izExpectedPackage") == QA_PACKAGE)
         val pins = PIN_NAMES.associateWith { checkNotNull(args.getString(it)) }
@@ -466,7 +466,7 @@ class PlaceInformationEntrypointUiTest {
 
     companion object {
         private val QA_PACKAGE = BuildConfig.APPLICATION_ID
-        private const val CAPTURE_SHA = "a8fcea8a61a08b65cbc0d6b3494827ca1fcc975d9b129e0b050dd15099255938"
+        private const val CAPTURE_SHA = "8b36e4339e1cb910973e0cf4582239b196eaebe2c3fd77ea3f4b73578f3889af"
         private const val MAX_SEED = 4 * 1024
         private const val MAX_PUBLIC = 16 * 1024
         private const val MAX_JSON = 64 * 1024

@@ -294,7 +294,7 @@ class PlaceInformationVisualCaptureTest {
             args.getString("izPlaceInformationVisual") == "isolated-offline")
         val context = instrumentation.targetContext
         check(QA_PACKAGE != "org.iz.navigation" && QA_PACKAGE in setOf(
-            "org.iz.navigation.placeinfoqa20261112p01", "org.iz.navigation.placeinfoqa20261112p02"))
+            "org.iz.navigation.placeinfoqa20261112p01", "org.iz.navigation.placeinfoqa20261112p02", "org.iz.navigation.placeinfoqa20261112p03"))
         check(BuildConfig.DEBUG && BuildConfig.APPLICATION_ID == QA_PACKAGE && context.packageName == QA_PACKAGE)
         check(instrumentation.context.packageName == "$QA_PACKAGE.test" && args.getString("izExpectedPackage") == QA_PACKAGE)
         val pins = PIN_NAMES.associateWith { checkNotNull(args.getString(it)) }

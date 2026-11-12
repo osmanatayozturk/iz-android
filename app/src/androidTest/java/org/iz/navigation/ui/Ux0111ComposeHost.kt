@@ -41,7 +41,7 @@ internal class Ux0111ComposeHost(private val compose: ComposeTestRule) : AutoClo
             val context = instrumentation.targetContext
             check(BuildConfig.DEBUG && BuildConfig.APPLICATION_ID != "org.iz.navigation" &&
                 BuildConfig.APPLICATION_ID in setOf("org.iz.navigation.batterycheck",
-                    "org.iz.navigation.placeinfoqa20261112p01", "org.iz.navigation.placeinfoqa20261112p02") &&
+                    "org.iz.navigation.placeinfoqa20261112p01", "org.iz.navigation.placeinfoqa20261112p02", "org.iz.navigation.placeinfoqa20261112p03") &&
                 context.packageName == BuildConfig.APPLICATION_ID) { "Dedicated QA package only" }
             check(!TrackingService.isRunning) { "An allocated idle recorder is required" }
             check(!org.iz.navigation.tracking.TrackerSettings(context).enabled) { "QA automatic recording must already be disabled" }
