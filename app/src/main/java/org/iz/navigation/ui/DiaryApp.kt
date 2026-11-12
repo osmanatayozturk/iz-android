@@ -60,6 +60,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import org.iz.navigation.BuildConfig
 import org.iz.navigation.data.*
+import org.iz.navigation.placeinfo.*
 import org.iz.navigation.gpx.ImportedTrack
 import org.iz.navigation.navigation.navigationReplacementKey
 import org.iz.navigation.weather.RoutePreferences
@@ -113,6 +114,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     }
     val featureFactory = remember(context.applicationContext) { ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as android.app.Application) }
     val state by vm.state.collectAsStateWithLifecycle()
+    val informationEdits by vm.repository.mapEdits.collectAsStateWithLifecycle(initialValue = null)
     val snackbar = remember { SnackbarHostState() }
     val media = remember { MediaStoreHelper(context) }
     val settings = remember { TrackerSettings(context) }
@@ -148,6 +150,9 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     var targetJourney by rememberUiEntryState<String?>(history) { null }
     var pin by rememberUiEntryState<GeoCoordinate?>(history) { null }
     var osmSelection by rememberUiEntryState<SelectedOsmPlace?>(history) { null }
+    var informationSelection by rememberSaveable(stateSaver = PlaceInformationSelectionSaver) { mutableStateOf<SelectedOsmPlace?>(null) }
+    var informationOwner by rememberSaveable { mutableStateOf<String?>(null) }
+    val informationScroll = key(informationSelection?.osmRef, informationOwner) { rememberScrollState() }
     val photoTargetState = rememberUiEntryState<PhotoTarget?>(history) { null }
     var photoTarget by photoTargetState
     var editJourney by rememberUiEntryState<Journey?>(history) { null }
@@ -579,6 +584,33 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
             contributionEditId = null
         }
     }
+    LaunchedEffect(entries.map { it.key }, uiEntry.page) {
+        if (entries.none { it.key == informationOwner } ||
+            (uiEntry.key != informationOwner && uiEntry.page != UiPage.MAP_EDITS)) {
+            informationSelection = null; informationOwner = null
+        }
+    }
+    val informationSavedPlace = entries.lastOrNull { it.page == UiPage.PLACE }?.entityId?.let { id -> state.places.firstOrNull { it.id == id } }
+    val informationMapPlace = informationSelection?.takeIf { selected -> selected.osmRef != null &&
+        entries.any { it.key == informationOwner } && (uiEntry.key == informationOwner || mapEditsPage) }
+    val informationRef = informationMapPlace?.osmRef ?: informationSavedPlace?.let { saved ->
+        saved.osmType?.let { type -> saved.osmId?.takeIf { it > 0 }?.let { OsmRef(type, it) } }
+    }
+    val informationKey = informationRef?.let { PlaceInfoKey(PlaceInfoServices.DEFAULT_ENDPOINT, it) }
+    var informationActionError by remember(informationKey) { mutableStateOf<String?>(null) }
+    val informationVisible = informationKey != null && !mapEditsPage && !contributionPicker && contributionEdit == null && !addPlace &&
+        (uiEntry.page == UiPage.PLACE || (informationMapPlace != null && uiEntry.key == informationOwner))
+    val informationSession = rememberPlaceInformationSession(informationKey, informationVisible,
+        placeInformationContributionRevision(informationKey, informationEdits.orEmpty()), contributionReady = informationEdits != null)
+    val currentInformationKey by rememberUpdatedState(informationKey)
+    val currentInformationVisible by rememberUpdatedState(informationVisible)
+    fun informationIsCurrent(key: PlaceInfoKey) = currentInformationKey == key && currentInformationVisible && history.current.key == uiEntry.key
+    fun informationRoute(name: String, latitude: Double?, longitude: Double?, key: PlaceInfoKey) {
+        if (!informationIsCurrent(key) || latitude == null || longitude == null ||
+            !latitude.isFinite() || latitude !in -90.0..90.0 || !longitude.isFinite() || longitude !in -180.0..180.0) return
+        openDirections()
+        navigationTarget = org.iz.navigation.car.NavigationTarget(org.iz.navigation.weather.WeatherCoordinate(latitude, longitude), name)
+    }
     val backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
     val keyboard = LocalSoftwareKeyboardController.current
     val imeVisible = WindowInsets.isImeVisible
@@ -726,6 +758,17 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     onSharePhotos = { photosToShare = state.photos.filter { it.journeyId == journey.id } },
                 )
                 place != null -> PlaceDetail(place, state,
+                    publicInformation = informationKey?.let { key -> @Composable {
+                        PlaceInformationContent(informationSession.state, key, "OSM yer bilgisi", informationSession.instant,
+                            informationSession.deviceZone, informationSession.overrideZoneId, informationSession.changeZone,
+                            informationSession.refresh,
+                            onDirections = if (place.latitude != null && place.longitude != null) ({ informationRoute(place.name, place.latitude, place.longitude, key) }) else null,
+                            onSurvey = if (place.latitude != null && place.longitude != null) ({ if (informationIsCurrent(key)) openCorrection(place, survey = true) }) else null,
+                            onCorrect = if (place.latitude != null && place.longitude != null) ({ if (informationIsCurrent(key)) openCorrection(place) }) else null,
+                            onNote = { if (informationIsCurrent(key)) openPlaceNote(place) },
+                            onExternal = { action, phone -> if (informationIsCurrent(key)) informationActionError = openPlaceInformationAction(context, action, phone) },
+                            externalMessage = informationActionError)
+                    } },
                     listState = rememberUiBrowseListState(browseHolder, uiEntry.key),
                     onEdit = { osmSelection = null; editPlace = place }, onMaps = { vm.execute { MediaShare.openPlace(context, place) } },
                     onContribute = { openPlaceNote(place) },
@@ -758,6 +801,11 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     continuePreparation = continueNavigationPreparation, onMap = ::returnToMap,
                     onPlannerOpened = { if (history.current.page != UiPage.DIRECTIONS) { continueNavigationPreparation = true; navigationStops = null; navigationInitialPlan = null; navigationTarget = null; history.push(UiPage.DIRECTIONS) } },
                     onMenu = { menuOpen = true }, onGroup = { groupPage = true }, onWeather = { weatherPage = true },
+                    onOsmPlaceClick = if (informationVisible || addPlace || contributionPicker) null else { selected ->
+                        if (history.current.key == uiEntry.key && selected.osmRef?.id?.let { it > 0 } == true) {
+                            informationOwner = uiEntry.key; informationSelection = selected
+                        }
+                    },
                     onAssignShortcut = { kind ->
                         if (history.current.key == uiEntry.key && uiEntry.page == UiPage.MAP) {
                             navigator.open(UiPage.PLACES, shortcutAssignmentId(kind))
@@ -873,6 +921,30 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
             openOsmCorrection(selected)
         }
     })
+    informationMapPlace?.takeIf { informationVisible && uiEntry.key == informationOwner }?.let { selected ->
+        informationKey?.let { key ->
+            Dialog(onDismissRequest = { informationSelection = null; informationOwner = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+                Surface(Modifier.fillMaxSize()) {
+                    PlaceInformationContent(informationSession.state, key, selected.name, informationSession.instant,
+                        informationSession.deviceZone, informationSession.overrideZoneId, informationSession.changeZone, informationSession.refresh,
+                        onDirections = { informationRoute(selected.name, selected.latitude, selected.longitude, key) },
+                        onSurvey = { if (informationIsCurrent(key)) {
+                            openCorrection(Place(name = selected.name, latitude = selected.latitude, longitude = selected.longitude,
+                                osmType = key.ref.type, osmId = key.ref.id, source = PlaceSource.OSM), survey = true)
+                        } },
+                        onCorrect = { if (informationIsCurrent(key)) openOsmCorrection(selected) },
+                        onNote = { if (informationIsCurrent(key)) openMapNote(selected) },
+                        onExternal = { action, phone -> if (informationIsCurrent(key)) informationActionError = openPlaceInformationAction(context, action, phone) },
+                        onClose = { informationSelection = null; informationOwner = null },
+                        modifier = Modifier.fillMaxSize().verticalScroll(informationScroll).padding(20.dp),
+                        externalMessage = informationActionError,
+                        onSave = { if (informationIsCurrent(key)) {
+                            osmSelection = selected; pin = GeoCoordinate(selected.latitude, selected.longitude); addPlace = true
+                        } })
+                }
+            }
+        }
+    }
     if (mapEditsPage && (uiEntry.accountKey == null || uiEntry.accountKey == contributionAccountId?.toString()))
         Dialog(onDismissRequest = { mapEditsPage = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         val targetId = uiEntry.entityId?.let {
@@ -1306,17 +1378,20 @@ private fun PlaceDetail(place: Place, state: DiaryState, onEdit: () -> Unit, onM
     onCorrect: (() -> Unit)?, onAddVisit: () -> Unit, onEditVisit: (Visit) -> Unit, onShare: (Visit) -> Unit, onPhoto: (Visit) -> Unit,
     onDelete: () -> Unit, onDeleteVisit: (Visit) -> Unit, onDeletePhoto: (Photo) -> Unit, onEditPhoto: (Photo) -> Unit,
     onSurvey: (() -> Unit)? = null,
+    publicInformation: (@Composable () -> Unit)? = null,
     listState: LazyListState = rememberLazyListState()) {
     val visits = state.visits.filter { it.placeId == place.id }.sortedByDescending { it.visitedAt }
     LazyColumn(state = listState, contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        publicInformation?.let { content -> item(key = "public-osm-information") { content() } }
+        item { HorizontalDivider(); Text("Kişisel yer günlüğü", style = MaterialTheme.typography.titleLarge); Text("Bu yere verdiğin ad", style = MaterialTheme.typography.bodySmall) }
         item { Row(verticalAlignment = Alignment.Top) { Column(Modifier.weight(1f)) { PageHeading(place.name, "${visits.size} ziyaret · Kişisel yer günlüğü") }; IconButton(onClick = onEdit) { Icon(Icons.Outlined.Edit, "Yer adını düzenle") } } }
         if (place.latitude != null && place.longitude != null) item { DiaryMap(emptyList(), listOf(place), Modifier.fillMaxWidth().height(200.dp).clip(RoundedCornerShape(24.dp))) }
         item {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = onMaps) { Text("Başka haritada aç") }
                 OutlinedButton(onClick = onContribute) { Text("Harita notu yaz") }
-                onCorrect?.let { OutlinedButton(onClick = it) { Text("OSM mekânını düzelt") } }
-                onSurvey?.let { OutlinedButton(onClick = it, modifier = Modifier.heightIn(min = 48.dp)
+                onCorrect?.takeIf { publicInformation == null }?.let { OutlinedButton(onClick = it) { Text("OSM mekânını düzelt") } }
+                onSurvey?.takeIf { publicInformation == null }?.let { OutlinedButton(onClick = it, modifier = Modifier.heightIn(min = 48.dp)
                     .testTag("osm-place-survey")) { Text("Yerinde tamamla") } }
                 Button(onClick = onAddVisit) { Text("Yeni ziyaret") }
             }

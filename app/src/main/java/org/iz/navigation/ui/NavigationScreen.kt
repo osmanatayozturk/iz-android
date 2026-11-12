@@ -370,6 +370,7 @@ internal fun NavigationScreen(
     dashboardRequest: Int = 0,
     layersRequest: Int = 0,
     onAssignShortcut: (DestinationShortcutKind) -> Unit = {},
+    onOsmPlaceClick: ((SelectedOsmPlace) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val ui by vm.ui.collectAsStateWithLifecycle()
@@ -788,6 +789,8 @@ internal fun NavigationScreen(
         onGroup = onGroup, onMenu = onMenu, onWeather = onWeather,
         onMute = { vm.navigation.setMuted(!nav.muted) }, onManageSession = { showPlanning = true; onPlannerOpened() },
         onLocate = { requestAction(DirectionsAction.CURRENT_ORIGIN) }, onPin = onPin,
+        onOsmPlaceClick = onOsmPlaceClick,
+        placeInformationIdentity = entryId,
         onResumePlannedBreak = resumePlannedBreak, plannedBreakResumeEnabled = plannedBreakResumeEnabled,
         layersRequest = layersRequest,
         onRecoverRecording = {

@@ -80,6 +80,8 @@ internal fun NavigationHomeContent(
     plannedBreakResumeEnabled: Boolean = false,
     layersRequest: Int = 0,
     onRecoverRecording: (() -> Unit)? = null,
+    onOsmPlaceClick: ((org.iz.navigation.data.SelectedOsmPlace) -> Unit)? = null,
+    placeInformationIdentity: Any? = null,
     planner: @Composable () -> Unit,
 ) {
     val plannerPresentation = navigationMapPresentation(ui, nav, points, showPlanner, editPreview)
@@ -217,7 +219,8 @@ internal fun NavigationHomeContent(
                 top = if (externalHeader) 24.dp else if (shortIdle) controlsTopInset else panelsHeight + 24.dp,
                 end = if (externalHeader) 28.dp else if (horizontalMapControls) 124.dp else 84.dp,
                 bottom = if (dashboardBottomHeight > 0.dp) dashboardBottomHeight + 112.dp else if (showPlanner && !dashboardVisible) maxHeight * .64f + 24.dp else 112.dp + dashboardButtonHeight),
-            navigationHeader = if (externalHeader) navigationHeader else null, layersRequest = layersRequest)
+            navigationHeader = if (externalHeader) navigationHeader else null, layersRequest = layersRequest,
+            onOsmPlaceClick = onOsmPlaceClick, placeInformationIdentity = placeInformationIdentity)
         if (!externalHeader) Column(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(end = dashboardSideWidth).padding(12.dp)
             .onSizeChanged { panelsMeasurement = panelsKey to with(density) { it.height.toDp() } }, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             entryPanels()

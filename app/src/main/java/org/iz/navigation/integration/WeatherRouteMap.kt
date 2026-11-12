@@ -44,6 +44,8 @@ import androidx.compose.ui.unit.sp
 import org.iz.navigation.power.PowerDiagnostics
 import org.iz.navigation.data.GeoCoordinate
 import org.iz.navigation.data.TrackPoint
+import org.iz.navigation.ui.PlaceInformationDiscoveryOwner
+import org.iz.navigation.ui.PlaceInformationDiscoveryContent
 import org.iz.navigation.weather.PlannedRoute
 import org.iz.navigation.weather.RouteStop
 import org.iz.navigation.weather.RouteWeatherSample
@@ -65,6 +67,8 @@ private const val STOP_SOURCE = "weather-planned-stops"
 private const val SAMPLE_SOURCE = "weather-samples"
 private const val SAMPLE_LAYER = "weather-samples-layer"
 private const val FIX_SOURCE = "directions-current-fix"
+private const val PLACE_INFO_SOURCE = "place-information-pois"
+private const val PLACE_INFO_LAYER = "place-information-poi-pins"
 
 data class RouteMapMember(val id: String, val name: String, val latitude: Double, val longitude: Double, val delayed: Boolean)
 
@@ -96,6 +100,8 @@ fun WeatherRouteMap(
     preparedRoutes: org.iz.navigation.navigation.PreparedRouteManager? = null,
     navigationHeader: (@Composable (@Composable () -> Unit, @Composable () -> Unit) -> Unit)? = null,
     layersRequest: Int = 0,
+    onOsmPlaceClick: ((org.iz.navigation.data.SelectedOsmPlace) -> Unit)? = null,
+    placeInformationIdentity: Any? = null,
     overlay: @Composable BoxScope.() -> Unit = {},
 ) {
     ExpandableMap(modifier = modifier, title = title, expandable = expandable) { mapModifier ->
@@ -105,7 +111,7 @@ fun WeatherRouteMap(
                     liveCoordinate, recordedPoints, gpsStale, singleStopLabel, cameraIdentity, navigationLayout,
                     members, onLocate, attributionBottomInset, cameraViewportInsets, navigationControlsTopInset,
                     navigationControlsHorizontal, drivingCamera, cameraViewportReady, navigationControlsReady,
-                    preparedRoutes, navigationHeader, layersRequest)
+                    preparedRoutes, navigationHeader, layersRequest, onOsmPlaceClick, placeInformationIdentity)
             }
             overlay()
         }
@@ -137,13 +143,35 @@ private fun ColumnScope.WeatherRouteMapContent(
     preparedRoutes: org.iz.navigation.navigation.PreparedRouteManager?,
     navigationHeader: (@Composable (@Composable () -> Unit, @Composable () -> Unit) -> Unit)?,
     layersRequest: Int,
+    onOsmPlaceClick: ((org.iz.navigation.data.SelectedOsmPlace) -> Unit)?,
+    placeInformationIdentity: Any?,
 ) {
     val context = LocalContext.current
+    val selectOsmPlace by rememberUpdatedState(onOsmPlaceClick)
+    val currentPlaceInformationIdentity by rememberUpdatedState(placeInformationIdentity)
+    val discoveryScope = rememberCoroutineScope()
+    val places = remember(context.applicationContext) { OsmPlaces(context.applicationContext) }
+    val placeServices = remember(context.applicationContext) { OsmServiceSettings(context.applicationContext) }
+    val discoveryLifecycle = LocalLifecycleOwner.current.lifecycle
+    val discovery = remember(discoveryScope, places, placeInformationIdentity) {
+        PlaceInformationDiscoveryOwner(discoveryScope, places::nearby, { selectOsmPlace?.invoke(it) },
+            identity = { currentPlaceInformationIdentity to placeServices.read().overpass },
+            stillCurrent = { selectOsmPlace != null && currentPlaceInformationIdentity == placeInformationIdentity &&
+                discoveryLifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) })
+    }
+    DisposableEffect(discovery, discoveryLifecycle) {
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_PAUSE) discovery.close() }
+        discoveryLifecycle.addObserver(observer)
+        onDispose { discoveryLifecycle.removeObserver(observer); discovery.close(clearOverlay = true) }
+    }
+    LaunchedEffect(onOsmPlaceClick == null) { if (onOsmPlaceClick == null) discovery.close() }
+    PlaceInformationDiscoveryContent(discovery)
     val tileUrl = remember(context) { OsmServiceSettings(context).read().tileUrl }
     val style = remember(tileUrl) {
-        mapStyle(tileUrl, listOf(ROUTE_SOURCE, STOP_SOURCE, SAMPLE_SOURCE, FIX_SOURCE), """
+        mapStyle(tileUrl, listOf(ROUTE_SOURCE, STOP_SOURCE, SAMPLE_SOURCE, FIX_SOURCE, PLACE_INFO_SOURCE), """
             {"id":"weather-route-casing","type":"line","source":"$ROUTE_SOURCE","paint":{"line-color":"#FFFFFF","line-width":9,"line-opacity":0.9}},
             {"id":"weather-route-layer","type":"line","source":"$ROUTE_SOURCE","paint":{"line-color":"#28604D","line-width":5,"line-opacity":0.95}},
+            {"id":"$PLACE_INFO_LAYER","type":"circle","source":"$PLACE_INFO_SOURCE","paint":{"circle-color":"#3989C9","circle-radius":7,"circle-stroke-color":"#FFFFFF","circle-stroke-width":2}},
             {"id":"$SAMPLE_LAYER","type":"circle","source":"$SAMPLE_SOURCE","paint":{"circle-color":["case",["get","complete"],["case",["get","hazard"],"#AD5D3E","#28604D"],"#6E7C73"],"circle-stroke-color":"#F7F7F2","circle-stroke-width":2,"circle-radius":8}},
             {"id":"weather-stops-layer","type":"circle","source":"$STOP_SOURCE","paint":{"circle-color":"#FFFFFF","circle-stroke-color":"#66746D","circle-stroke-width":1,"circle-radius":4}},
             {"id":"directions-fix-halo","type":"circle","source":"$FIX_SOURCE","paint":{"circle-color":"#1976D2","circle-opacity":0.15,"circle-radius":15}},
@@ -358,6 +386,7 @@ private fun ColumnScope.WeatherRouteMapContent(
             onMapDisposing = { disposing ->
                 gestureRemovals.remove(disposing)?.invoke()
                 if (map === disposing) {
+                    discovery.close(clearOverlay = true)
                     cancelDriveAnimation()
                     map = null
                 }
@@ -366,9 +395,16 @@ private fun ColumnScope.WeatherRouteMapContent(
                 val point = target.projection.toScreenLocation(coordinate.mapCoordinate())
                 val index = target.queryRenderedFeatures(point, SAMPLE_LAYER).firstOrNull()?.getNumberProperty("sampleIndex")?.toInt()
                 val sample = index?.let { assessment?.samples?.getOrNull(it) }
-                if (sample != null) { onSampleClick(sample); true } else false
+                if (sample != null) { discovery.close(); onSampleClick(sample); true }
+                else if (selectOsmPlace != null && map === target) {
+                    val selected = target.queryRenderedFeatures(point, PLACE_INFO_LAYER).asSequence()
+                        .mapNotNull { parseRenderedOsmPlace(it.toJson()) }.firstOrNull()
+                    if (selected == null || !discovery.selectRendered(selected))
+                        discovery.tap(coordinate.latitude, coordinate.longitude, target.cameraPosition.zoom)
+                    true
+                } else false
             },
-            onLongClick = onMapLongClick,
+            onLongClick = { coordinate -> discovery.close(); onMapLongClick(coordinate) },
             attributionBottomInset = attributionBottomInset, attributionAtStart = navigationLayout,
             maxFps = if (drivingCamera != null) 30 else null,
             mapAttribution = if (preparedStyle != null) org.iz.navigation.offline.OfflineCorridorSession.MAP_ATTRIBUTION else "© OpenStreetMap contributors",
@@ -568,6 +604,13 @@ private fun ColumnScope.WeatherRouteMapContent(
     LaunchedEffect(map, styleRevision, stopJson) { map?.updateMeasuredGeoJson(STOP_SOURCE, stopJson, PowerDiagnostics.Metric.MAP_ROUTE) }
     LaunchedEffect(map, styleRevision, samplesJson) { map?.updateMeasuredGeoJson(SAMPLE_SOURCE, samplesJson, PowerDiagnostics.Metric.MAP_ROUTE) }
     LaunchedEffect(map, styleRevision, fixJson) { map?.updateMeasuredGeoJson(FIX_SOURCE, fixJson, PowerDiagnostics.Metric.MAP_POSITION) }
+    val placeInformationJson = remember(discovery.state.overlay) { featureCollection(discovery.state.overlay.map { place ->
+        pointFeature(place.latitude, place.longitude, JSONObject().put("name", place.name)
+            .put("osmType", place.osmRef?.type?.name).put("osmId", place.osmRef?.id))
+    }) }
+    LaunchedEffect(map, styleRevision, placeInformationJson) {
+        map?.updateMeasuredGeoJson(PLACE_INFO_SOURCE, placeInformationJson, PowerDiagnostics.Metric.MAP_ROUTE)
+    }
     LaunchedEffect(map, dataset, routeCoordinates, coordinates.isNotEmpty(), cameraPadding, driveEnabled, cameraViewportReady) {
         if (!cameraViewportReady || driveEnabled) return@LaunchedEffect
         map?.let { target ->
