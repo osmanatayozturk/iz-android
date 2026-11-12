@@ -1,5 +1,7 @@
 package org.iz.navigation.ui
 
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -74,8 +76,38 @@ class SharedMapIntentLifecycleTest {
     }
 
     private fun expectTarget(label: String) {
-        compose.waitUntil(10_000) {
-            compose.onAllNodesWithTag("quick-route-options").fetchSemanticsNodes().size == 1
+        try {
+            compose.waitUntil(10_000) {
+                compose.onAllNodesWithTag("quick-route-options").fetchSemanticsNodes().size == 1
+            }
+        } catch (timeout: ComposeTimeoutException) {
+            // Only the admitted synthetic QA process; omit arbitrary text, URLs and account data.
+            val diagnostic = runCatching {
+                val tags = listOf("quick-route-options", "shared-map-entry", "quick-directions",
+                    "shared-preview", "shared-start", "quick-back")
+                val snapshots = listOf(false, true).map { unmerged ->
+                    unmerged to runCatching { compose.onAllNodes(SemanticsMatcher("all QA nodes") { true },
+                        useUnmergedTree = unmerged).fetchSemanticsNodes(atLeastOneRootRequired = false) }
+                }
+                buildString {
+                    appendLine("expectedSyntheticLabel=$label; snapshots are post-timeout, before fixture close")
+                    for ((unmerged, snapshot) in snapshots) snapshot.fold(onSuccess = { nodes ->
+                        appendLine("unmerged=$unmerged nodes=${nodes.size} roots=${nodes.count { it.parent == null }}")
+                        for (tag in tags) appendLine("$tag=${nodes.count { it.config.getOrNull(SemanticsProperties.TestTag) == tag }}")
+                        appendLine("expectedLabelNodes=${nodes.count { node -> node.config.getOrNull(SemanticsProperties.Text).orEmpty().any { it.text.contains(label) } }}")
+                    }, onFailure = { appendLine("unmerged=$unmerged UNAVAILABLE:${it.javaClass.simpleName}") })
+                    val nodes = snapshots.last().second.getOrNull().orEmpty()
+                    appendLine("unmergedTree: id/parent/tag/bounds only; max96nodes; other tags/text omitted")
+                    for (node in nodes.take(96)) {
+                        val tag = node.config.getOrNull(SemanticsProperties.TestTag)?.takeIf { it in tags } ?: "<omitted>"
+                        appendLine("id=${node.id} parent=${node.parent?.id} tag=$tag bounds=${node.boundsInRoot}")
+                    }
+                    appendLine("treeNodesOmitted=${(nodes.size - 96).coerceAtLeast(0)}")
+                }
+            }.getOrElse { "DIAGNOSTIC_UNAVAILABLE:${it.javaClass.simpleName}" }
+                // At most 3 UTF-8 bytes per UTF-16 code unit, including a cut surrogate replacement.
+                .take(16 * 1024 / 3)
+            throw AssertionError("QA_TIMEOUT_DIAGNOSTIC (<=16KiB UTF-8)\n$diagnostic", timeout)
         }
         compose.onNodeWithTag("quick-route-options").performScrollToNode(hasText(label, substring = true))
         compose.onNodeWithText(label, substring = true).assertIsDisplayed()
