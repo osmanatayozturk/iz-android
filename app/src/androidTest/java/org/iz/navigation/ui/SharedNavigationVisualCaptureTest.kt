@@ -616,7 +616,7 @@ class SharedNavigationVisualCaptureTest {
         }
     }
     private companion object {
-        const val QA_PACKAGE = "org.iz.navigation.sharednavqa20261111p01"
+        const val QA_PACKAGE = "org.iz.navigation.placeinfoqa20261112p01"
         const val MAX_PNG = 16L * 1024 * 1024
         const val MAX_JSON = 64 * 1024
         val STATES = listOf("01-shared-vehicle-portrait-font1", "02-shared-preview-landscape-font2",
