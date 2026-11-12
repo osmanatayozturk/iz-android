@@ -464,7 +464,7 @@ class PlaceInformationEntrypointUiTest {
 
     companion object {
         private const val QA_PACKAGE = "org.iz.navigation.placeinfoqa20261112p01"
-        private const val CAPTURE_SHA = "87a8b74d6f13f5f37dbb9207d2ea32097e945d16fb212d8a73595ea9f6726f33"
+        private const val CAPTURE_SHA = "9031c6b022d904a55fea3d9a1e7fa8ffda673beb954e62f0ec02ae4467c00cb5"
         private const val MAX_SEED = 4 * 1024
         private const val MAX_PUBLIC = 16 * 1024
         private const val MAX_JSON = 64 * 1024

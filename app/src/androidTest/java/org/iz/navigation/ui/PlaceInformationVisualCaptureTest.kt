@@ -226,8 +226,9 @@ class PlaceInformationVisualCaptureTest {
                 geometry.put(probe(day.name, compose.onNodeWithText(label)))
             }
             if (index == 2) metadata.put("weeklyFixture", HOURS).put("weeklyDays", 7)
-            if (index == 3) geometry.put(probe("selected-UTC-offset", compose.onNodeWithText("UTC+03:00",
-                substring = true, useUnmergedTree = true)))
+            if (index == 3) geometry.put(probe("selected-UTC-offset", compose.onNode(
+                hasText("UTC+03:00", substring = true) and
+                    hasAnyAncestor(hasTestTag("place-info-zone-option-Europe/Istanbul")), useUnmergedTree = true)))
             metadata.put("semanticsGeometry", geometry)
             // Required visible content fails closed; offscreen probes remain explicitly recorded.
             when (index) {
@@ -238,7 +239,8 @@ class PlaceInformationVisualCaptureTest {
                     compose.onNodeWithTag("place-info-payments").assertIsDisplayed() }
                 2 -> compose.onNodeWithTag("place-info-hours-close").assertIsDisplayed()
                 3 -> { compose.onNodeWithTag("place-info-zone-option-Europe/Istanbul").assertIsDisplayed()
-                    compose.onNodeWithText("UTC+03:00", substring = true, useUnmergedTree = true).assertIsDisplayed() }
+                    compose.onNode(hasText("UTC+03:00", substring = true) and
+                        hasAnyAncestor(hasTestTag("place-info-zone-option-Europe/Istanbul")), useUnmergedTree = true).assertIsDisplayed() }
             }
             var owned: Window? = null
             active.onActivity { activity ->
