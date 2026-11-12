@@ -656,28 +656,30 @@ internal fun NavigationScreen(
         }
     }
     sharedDialog?.let { input ->
-        SharedMapEntryDialog(input, onClose = { sharedDialog = null },
-            stillCurrent = ::quickEntryCurrent,
-            configuration = { TrafficSettingsStore(context).read().revision },
-            identity = {
-                val current = vm.navigation.state.value
-                SharedIntakeIdentity(dashboardEntry, TrafficSettingsStore(context).read().revision,
-                    current.routeRevision, NavigationStopSnapshot.from(current))
-            },
-            onSingle = { stop ->
-                if (quickEntryCurrent()) {
-                    sharedDialog = null
-                    preparedShared = SharedMapInput.Single(SharedMapStop(stop.label, stop.coordinate))
-                }
-            },
-            onItinerary = { stops, dynamic ->
-                if (quickEntryCurrent()) {
-                    sharedDialog = null
-                    preparedShared = SharedMapInput.Itinerary(if (dynamic) null else stops.first().let { SharedMapStop(it.label, it.coordinate) },
-                        (if (dynamic) stops.dropLast(1) else stops.drop(1).dropLast(1)).map { SharedMapStop(it.label, it.coordinate) },
-                        stops.last().let { SharedMapStop(it.label, it.coordinate) })
-                }
-            })
+        key(dashboardEntry) {
+            SharedMapEntryDialog(input, onClose = { sharedDialog = null },
+                stillCurrent = ::quickEntryCurrent,
+                configuration = { TrafficSettingsStore(context).read().revision },
+                identity = {
+                    val current = vm.navigation.state.value
+                    SharedIntakeIdentity(dashboardEntry, TrafficSettingsStore(context).read().revision,
+                        current.routeRevision, NavigationStopSnapshot.from(current))
+                },
+                onSingle = { stop ->
+                    if (quickEntryCurrent()) {
+                        sharedDialog = null
+                        preparedShared = SharedMapInput.Single(SharedMapStop(stop.label, stop.coordinate))
+                    }
+                },
+                onItinerary = { stops, dynamic ->
+                    if (quickEntryCurrent()) {
+                        sharedDialog = null
+                        preparedShared = SharedMapInput.Itinerary(if (dynamic) null else stops.first().let { SharedMapStop(it.label, it.coordinate) },
+                            (if (dynamic) stops.dropLast(1) else stops.drop(1).dropLast(1)).map { SharedMapStop(it.label, it.coordinate) },
+                            stops.last().let { SharedMapStop(it.label, it.coordinate) })
+                    }
+                })
+        }
     }
 
     val dashboardSpeed = org.iz.navigation.speed.roadSpeedPresentation(nav.roadSpeed)
