@@ -81,6 +81,6 @@ class CompactDrivingHudUiTest {
         for (tag in listOf("compact-card-mute", "home-finish-session", "hud-weather", "directions-recenter")) {
             compose.onNodeWithTag(tag).assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp).assertHasClickAction()
         }
-        compose.onNodeWithTag("hud-remaining", useUnmergedTree = true).assertTextContains("mola dahil")
+        compose.onNodeWithTag("hud-remaining", useUnmergedTree = true).assertTextEquals("Manevra 200 m · Kalan 3 km · 8 dk · 2 dk mola dahil")
     }
 }

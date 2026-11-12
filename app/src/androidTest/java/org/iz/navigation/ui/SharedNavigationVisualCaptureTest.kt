@@ -462,16 +462,41 @@ class SharedNavigationVisualCaptureTest {
     }
 
     private fun ownedWindow(host: Activity, dialog: Boolean): Window {
+        check(Looper.myLooper() != Looper.getMainLooper())
         var result: Window? = null
-        instrumentation.runOnMainSync {
-            val candidates = (listOf(host.window) + WindowInspector.getGlobalWindowViews()
-                .flatMap { descendants(it) }.filterIsInstance<DialogWindowProvider>().map { it.window })
-                .distinctBy { it.decorView }
-                .filter { it.decorView.context.activity() === host && it.decorView.isShown && it.decorView.hasWindowFocus() }
-            val window = candidates.single()
-            check((window !== host.window) == dialog)
-            check(window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE == 0)
-            result = window
+        var mainShown = false
+        var mainFocused = false
+        var mainContextIsHost = false
+        var candidateCount = 0
+        try {
+            compose.waitUntil(5_000) {
+                var snapshot: Result<Window?>? = null
+                instrumentation.runOnMainSync {
+                    // Keep every window-read/guard failure inside this result; rethrow on test thread.
+                    snapshot = runCatching {
+                        val main = host.window
+                        mainShown = main.decorView.isShown
+                        mainFocused = main.decorView.hasWindowFocus()
+                        mainContextIsHost = main.decorView.context.activity() === host
+                        val candidates = (listOf(main) + WindowInspector.getGlobalWindowViews()
+                            .flatMap { descendants(it) }.filterIsInstance<DialogWindowProvider>().map { it.window })
+                            .distinctBy { it.decorView }
+                            .filter { (it === main || it.decorView.context.activity() === host) &&
+                                it.decorView.isShown && it.decorView.hasWindowFocus() }
+                        candidateCount = candidates.size
+                        check(candidateCount <= 1) { "Ambiguous owned focused windows: $candidateCount" }
+                        candidates.singleOrNull()?.also { window ->
+                            check((window !== main) == dialog) { "Owned focused window kind does not match capture" }
+                            check(window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE == 0) { "Owned focused window is secure" }
+                        }
+                    }
+                }
+                result = checkNotNull(snapshot).getOrThrow()
+                result != null
+            }
+        } catch (timeout: ComposeTimeoutException) {
+            throw AssertionError("OWNED_WINDOW_TIMEOUT mainShown=$mainShown mainFocused=$mainFocused " +
+                "mainContextIsHost=$mainContextIsHost candidateCount=$candidateCount", timeout)
         }
         return checkNotNull(result)
     }
