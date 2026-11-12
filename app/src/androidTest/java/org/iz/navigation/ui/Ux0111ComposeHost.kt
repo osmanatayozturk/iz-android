@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.junit4.ComposeTestRule
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
+import org.iz.navigation.BuildConfig
 import org.iz.navigation.IzApplication
 import org.iz.navigation.health.HealthPrivacyActivity
 import org.iz.navigation.tracking.TrackingService
@@ -38,7 +39,10 @@ internal class Ux0111ComposeHost(private val compose: ComposeTestRule) : AutoClo
     fun setContent(content: @Composable () -> Unit) {
         if (scenario == null) {
             val context = instrumentation.targetContext
-            check(context.packageName == "org.iz.navigation.batterycheck") { "Dedicated QA package only" }
+            check(BuildConfig.DEBUG && BuildConfig.APPLICATION_ID != "org.iz.navigation" &&
+                BuildConfig.APPLICATION_ID in setOf("org.iz.navigation.batterycheck",
+                    "org.iz.navigation.placeinfoqa20261112p01", "org.iz.navigation.placeinfoqa20261112p02") &&
+                context.packageName == BuildConfig.APPLICATION_ID) { "Dedicated QA package only" }
             check(!TrackingService.isRunning) { "An allocated idle recorder is required" }
             check(!org.iz.navigation.tracking.TrackerSettings(context).enabled) { "QA automatic recording must already be disabled" }
             val nav = (context.applicationContext as IzApplication).navigation.state.value
@@ -50,7 +54,7 @@ internal class Ux0111ComposeHost(private val compose: ComposeTestRule) : AutoClo
             scenario = ActivityScenario.launch(Intent(context, HealthPrivacyActivity::class.java))
         }
         checkNotNull(scenario).onActivity { activity ->
-            check(activity.javaClass == HealthPrivacyActivity::class.java && activity.packageName == "org.iz.navigation.batterycheck")
+            check(activity.javaClass == HealthPrivacyActivity::class.java && activity.packageName == BuildConfig.APPLICATION_ID)
             check(activity.window.decorView.nativeMapCount() == 0) { "Do not replace an existing map scene" }
             activity.setContent { if (visible.value) content() }
         }

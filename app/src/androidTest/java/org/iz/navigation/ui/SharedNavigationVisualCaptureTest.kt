@@ -198,7 +198,13 @@ class SharedNavigationVisualCaptureTest {
                 val measured = mutableListOf<TextLayoutResult>()
                 compose.onNodeWithText(message, useUnmergedTree = true)
                     .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(measured) }
-                check(!measured.single().hasVisualOverflow)
+                check(!measured.single().hasVisualOverflow) {
+                    val layout = measured.single()
+                    val kind = if (message == "GPS bekleniyor") "gps" else "recording"
+                    "HUD_WARNING_OVERFLOW kind=$kind size=${layout.size} lineCount=${layout.lineCount} " +
+                        "didOverflowWidth=${layout.didOverflowWidth} didOverflowHeight=${layout.didOverflowHeight} " +
+                        "constraints=${layout.layoutInput.constraints}"
+                }
             }
             metadata.put("headerBefore", rect(before)).put("headerAfter", rect(after))
                 .put("instructionBefore", displayedBefore).put("instructionAfter", textInfo("hud-instruction"))
@@ -344,7 +350,7 @@ class SharedNavigationVisualCaptureTest {
                 check(options.outWidth == bitmap.width && options.outHeight == bitmap.height)
                 metadata.put("width", bitmap.width).put("height", bitmap.height)
                     .put("pngBytes", png.length()).put("pngSha256", hash(png))
-                    .put("captureMethod", "PIXELCOPY_EXACT_OWNED_QA_WINDOW_NO_COMPOSITING")
+                    .put("captureMethod", "UIAUTOMATION_TAKESCREENSHOT_EXACT_OWNED_WINDOW_API34_NO_COMPOSITING")
                 val native = metadata.getJSONObject("native")
                 val valid = state.startsWith("01") || native.optString("windowInclusion") == "MATCHES_OWNED_NATIVE_PIXELS"
                 metadata.put("captureStatus", if (valid) "CAPTURED_PENDING_HOST_READBACK_UIUX" else "NONPASS_NATIVE_INCLUSION_NOT_PROVEN")
@@ -377,6 +383,8 @@ class SharedNavigationVisualCaptureTest {
         assumeTrue("Separate Root visual capture allocation required",
             args.getString("izSharedNavigationVisual") == "isolated-offline")
         val context = instrumentation.targetContext
+        check(QA_PACKAGE != "org.iz.navigation" && QA_PACKAGE in setOf(
+            "org.iz.navigation.placeinfoqa20261112p01", "org.iz.navigation.placeinfoqa20261112p02"))
         check(BuildConfig.DEBUG && BuildConfig.APPLICATION_ID == QA_PACKAGE && context.packageName == QA_PACKAGE)
         check(instrumentation.context.packageName == QA_PACKAGE + ".test")
         val strings = listOf("izCandidateCommit", "izCandidateTree", "izFixtureSha256", "izQaConfigSha256",
@@ -468,13 +476,32 @@ class SharedNavigationVisualCaptureTest {
     }
 
     private fun copyWindow(window: Window): Bitmap {
+        check(Looper.myLooper() != Looper.getMainLooper())
+        if (android.os.Build.VERSION.SDK_INT < 34) error("Owned-window capture requires API34")
         val view = window.decorView
         check(view.width in 1..4096 && view.height in 1..4096)
-        val image = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
-        return try {
-            copyPixels(image) { listener -> PixelCopy.request(window, image, listener, Handler(Looper.getMainLooper())) }
-            image
-        } catch (failure: Throwable) { image.recycle(); throw failure }
+        val captured = checkNotNull(instrumentation.getUiAutomation(
+            android.app.UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES
+        ).takeScreenshot(window)) { "Owned-window SurfaceFlinger capture returned null" }
+        var result: Bitmap? = null
+        try {
+            check(captured.width in 1..4096 && captured.height in 1..4096)
+            check(captured.width == view.width && captured.height == view.height) {
+                "Owned-window capture geometry does not match DecorView"
+            }
+            val image = if (captured.config == Bitmap.Config.ARGB_8888) captured
+                else checkNotNull(captured.copy(Bitmap.Config.ARGB_8888, false)) {
+                    "Owned-window software format copy failed"
+                }
+            result = image
+            check(image.config == Bitmap.Config.ARGB_8888 && image.width == view.width && image.height == view.height)
+            return image
+        } catch (failure: Throwable) {
+            result?.recycle()
+            throw failure
+        } finally {
+            if (result !== captured) captured.recycle()
+        }
     }
 
     private fun copyPixels(bitmap: Bitmap, start: (PixelCopy.OnPixelCopyFinishedListener) -> Unit) {
@@ -616,7 +643,7 @@ class SharedNavigationVisualCaptureTest {
         }
     }
     private companion object {
-        const val QA_PACKAGE = "org.iz.navigation.placeinfoqa20261112p01"
+        val QA_PACKAGE = BuildConfig.APPLICATION_ID
         const val MAX_PNG = 16L * 1024 * 1024
         const val MAX_JSON = 64 * 1024
         val STATES = listOf("01-shared-vehicle-portrait-font1", "02-shared-preview-landscape-font2",

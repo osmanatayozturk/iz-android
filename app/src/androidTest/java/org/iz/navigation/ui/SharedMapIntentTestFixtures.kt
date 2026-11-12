@@ -1,12 +1,17 @@
 package org.iz.navigation.ui
 
 import android.Manifest
+import android.app.Activity
+import android.content.ComponentName
+import android.os.SystemClock
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import androidx.compose.ui.test.junit4.ComposeTestRule
-import androidx.test.core.app.ActivityScenario
+import androidx.test.runner.lifecycle.ActivityLifecycleCallback
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
+import androidx.test.runner.lifecycle.Stage
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -28,7 +33,10 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
+import java.util.UUID
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * Real MainActivity/DiaryApp host. It does not replace content, the receiver, navigation or tracking.
@@ -41,7 +49,97 @@ internal class SharedMapIntentTestFixture(private val compose: ComposeTestRule) 
     private val repository: DiaryRepository
     private val observedStates = ConcurrentLinkedQueue<NavigationState>()
     private val observation: CoroutineScope
-    private var scenario: ActivityScenario<MainActivity>? = null
+    private val fixtureToken = UUID.randomUUID().toString()
+    private val tokenExtra = "org.iz.navigation.test.sharedMapFixtureToken"
+    private val component = ComponentName(context, MainActivity::class.java)
+    private val monitor = ActivityLifecycleMonitorRegistry.getInstance()
+    private val lifecycleTimeoutMs = 10_000L
+    private var launched = false
+    // The following ownership fields are accessed only on main.
+    private var registered = false
+    private var owned: MainActivity? = null
+    private var ownedStage: Stage? = null
+    private var ownedTask: Int? = null
+    private var pending: Replacement? = null
+    private var closing: MainActivity? = null
+    private var closeDestroyed: CountDownLatch? = null
+    @Volatile private var lifecycleFailure: AssertionError? = null
+
+    private class Replacement(val previous: MainActivity?) {
+        val destroyed = CountDownLatch(if (previous == null) 0 else 1)
+        val resumed = CountDownLatch(1)
+        var created: MainActivity? = null // Main thread only.
+    }
+
+    private fun failLifecycle(message: String) {
+        if (lifecycleFailure == null) lifecycleFailure = AssertionError(message)
+        pending?.destroyed?.countDown()
+        pending?.resumed?.countDown()
+        closeDestroyed?.countDown()
+    }
+
+    private val lifecycle = ActivityLifecycleCallback { activity: Activity, stage: Stage ->
+        if (activity is MainActivity && activity.componentName == component &&
+            activity.application === app && activity.applicationInfo.uid == context.applicationInfo.uid) {
+            val request = pending
+            val known = activity === owned || activity === request?.previous ||
+                activity === request?.created || activity === closing
+            if (activity.intent.getStringExtra(tokenExtra) != fixtureToken) {
+                if (known) failLifecycle("Owned Activity lost its fixture token")
+            } else if (stage == Stage.DESTROYED) {
+                // A finished Activity may no longer have a live task; trust only known instances.
+                if (!known) {
+                    failLifecycle("Unrecognized fixture Activity destruction")
+                } else {
+                    if (activity === request?.previous) request?.destroyed?.countDown()
+                    if (activity === closing) closeDestroyed?.countDown()
+                    if (activity === owned) { owned = null; ownedStage = null }
+                }
+            } else if (ownedTask != null && activity.taskId != ownedTask) {
+                failLifecycle("Fixture token appeared in an unexpected task")
+            } else when (stage) {
+                Stage.CREATED -> {
+                    if (request == null || request.created != null || activity === request.previous ||
+                        request.destroyed.count != 0L || owned != null) {
+                        failLifecycle("Unexpected or ambiguous owned Activity creation")
+                    } else {
+                        ownedTask = activity.taskId
+                        request.created = activity
+                        owned = activity
+                        ownedStage = stage
+                    }
+                }
+                else -> if (activity === owned) {
+                    ownedStage = stage
+                    if (stage == Stage.RESUMED && activity === request?.created) request?.resumed?.countDown()
+                }
+            }
+        }
+    }
+
+    // Re-throw action failures on the test thread, not the application main thread.
+    private fun onMain(action: () -> Unit) {
+        var failure: Throwable? = null
+        instrumentation.runOnMainSync {
+            try { action() } catch (caught: Throwable) { failure = caught }
+        }
+        failure?.let { throw it }
+    }
+
+    private fun awaitLifecycle(latch: CountDownLatch, deadline: Long, phase: String) {
+        val remaining = (deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0)
+        check(latch.await(remaining, TimeUnit.MILLISECONDS)) { "Owned Activity timeout: $phase" }
+        lifecycleFailure?.let { throw it }
+    }
+
+    private fun currentOwned(): MainActivity {
+        lifecycleFailure?.let { throw it }
+        return checkNotNull(owned) { "No current owned Activity" }.also {
+            check(it.componentName == component && it.application === app &&
+                it.applicationInfo.uid == context.applicationInfo.uid && it.taskId == ownedTask &&
+                it.intent.getStringExtra(tokenExtra) == fixtureToken && !it.isDestroyed)
+        }
+    }
 
     init {
         val arguments = InstrumentationRegistry.getArguments()
@@ -89,25 +187,53 @@ internal class SharedMapIntentTestFixture(private val compose: ComposeTestRule) 
     fun launchIdle() = launch(Intent(context, MainActivity::class.java).setAction(Intent.ACTION_MAIN))
 
     private fun launch(intent: Intent) {
-        check(scenario == null)
-        scenario = ActivityScenario.launch<MainActivity>(intent)
+        check(!launched)
+        launched = true
+        val request = Replacement(null)
+        onMain {
+            pending = request
+            monitor.addLifecycleCallback(lifecycle)
+            registered = true
+        }
+        val actual = instrumentation.startActivitySync(Intent(intent)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra(tokenExtra, fixtureToken))
+        awaitLifecycle(request.resumed, SystemClock.elapsedRealtime() + lifecycleTimeoutMs, "initial RESUMED")
+        onMain {
+            check(currentOwned() === actual && request.created === actual && ownedStage == Stage.RESUMED)
+            pending = null
+        }
         compose.waitForIdle()
         assertNoSessionEffect()
     }
 
     /** Platform Instrumentation invokes the real production override on the Activity main thread. */
     fun deliverWarm(vararg texts: String) {
-        checkNotNull(scenario).onActivity { activity ->
-            texts.forEach { text ->
-                instrumentation.callActivityOnNewIntent(activity, share(text))
-            }
+        onMain {
+            val activity = currentOwned()
+            check(ownedStage == Stage.RESUMED && !activity.isFinishing)
+            // All deliveries stay in this one main runnable, before the next composition.
+            texts.forEach { text -> instrumentation.callActivityOnNewIntent(activity, share(text)) }
         }
         compose.waitForIdle()
         assertNoSessionEffect()
     }
 
     fun recreate() {
-        checkNotNull(scenario).recreate()
+        lateinit var request: Replacement
+        onMain {
+            val previous = currentOwned()
+            check(pending == null && ownedStage == Stage.RESUMED && !previous.isFinishing)
+            request = Replacement(previous)
+            pending = request
+            previous.recreate()
+        }
+        val deadline = SystemClock.elapsedRealtime() + lifecycleTimeoutMs
+        awaitLifecycle(request.destroyed, deadline, "old instance DESTROYED")
+        awaitLifecycle(request.resumed, deadline, "replacement RESUMED")
+        onMain {
+            check(currentOwned() === request.created && owned !== request.previous && ownedStage == Stage.RESUMED)
+            pending = null
+        }
         compose.waitForIdle()
         assertNoSessionEffect()
     }
@@ -130,15 +256,35 @@ internal class SharedMapIntentTestFixture(private val compose: ComposeTestRule) 
 
     private fun share(text: String) = Intent(context, MainActivity::class.java)
         .setAction(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
+        .putExtra(tokenExtra, fixtureToken)
 
     override fun close() {
         try {
-            // Close only this test-owned Activity; never stop/reset a service to hide an effect.
-            scenario?.close()
-            scenario = null
+            // Finish only the latest exact owned instance; never guess or stop/reset a package.
+            var destroyed: CountDownLatch? = null
+            onMain {
+                if (pending != null || lifecycleFailure != null) {
+                    throw AssertionError("Owned lifecycle incomplete: pending=${pending != null}; " +
+                        "priorFailure=${lifecycleFailure != null}; no finish or cleanup performed", lifecycleFailure)
+                }
+                val activity = owned
+                if (activity != null) {
+                    check(currentOwned() === activity)
+                    destroyed = CountDownLatch(1)
+                    closing = activity
+                    closeDestroyed = destroyed
+                    activity.finish()
+                }
+            }
+            destroyed?.let { awaitLifecycle(it, SystemClock.elapsedRealtime() + lifecycleTimeoutMs, "close DESTROYED") }
             assertNoSessionEffect()
         } finally {
-            observation.cancel()
+            try {
+                onMain {
+                    if (registered) { monitor.removeLifecycleCallback(lifecycle); registered = false }
+                    owned = null; ownedStage = null; pending = null; closing = null; closeDestroyed = null
+                }
+            } finally { observation.cancel() }
         }
     }
 }

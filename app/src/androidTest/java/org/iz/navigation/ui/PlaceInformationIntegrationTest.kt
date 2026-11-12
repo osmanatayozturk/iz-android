@@ -156,8 +156,10 @@ class PlaceInformationIntegrationTest {
         show(f)
         awaitSnapshot(f, cached)
         compose.runOnIdle { assertTrue(f.reader.requests.isEmpty()) }
+        android.util.Log.i("IzQaPlacePhase", "offline.refresh.before")
         click("place-info-refresh")
         request(f, 0).fail(IOException("Synthetic offline failure"))
+        android.util.Log.i("IzQaPlacePhase", "offline.response.after")
         compose.waitUntil(10_000) { f.latestSession.get()?.state?.let { it.failed && !it.loading } == true }
         compose.runOnIdle {
             val state = checkNotNull(f.latestSession.get()).state
@@ -167,27 +169,37 @@ class PlaceInformationIntegrationTest {
             assertTrue(state.stale)
             assertNull(state.unavailableStatus)
         }
+        android.util.Log.i("IzQaPlacePhase", "offline.status-scroll.before")
         compose.onNodeWithTag("place-info-status").performScrollTo().assertTextContains("Güncel bilgiler alınamadı.", substring = true)
         compose.onNodeWithTag("place-info-hours").performScrollTo().assertTextContains("Kaydedilmiş OSM saatlerine", substring = true)
+        android.util.Log.i("IzQaPlacePhase", "offline.hours-scroll.after")
         for ((index, status) in listOf(404, 410).withIndex()) {
+            android.util.Log.i("IzQaPlacePhase", if (status == 404) "unavailable404.refresh.before" else "unavailable410.refresh.before")
             click("place-info-refresh")
             request(f, index + 1).unavailable(status)
+            android.util.Log.i("IzQaPlacePhase", if (status == 404) "unavailable404.response.after" else "unavailable410.response.after")
             compose.waitUntil(10_000) { f.latestSession.get()?.state?.let { !it.loading && it.unavailableStatus == status } == true }
+            android.util.Log.i("IzQaPlacePhase", if (status == 404) "unavailable404.status-scroll.before" else "unavailable410.status-scroll.before")
             compose.onNodeWithTag("place-info-status").performScrollTo().assertTextContains("Bu OSM nesnesi artık kullanılamıyor.", substring = true)
             compose.onNodeWithTag("place-info-hours").performScrollTo().assertTextContains("Güncel saat durumu kullanılamıyor", substring = true)
+            android.util.Log.i("IzQaPlacePhase", if (status == 404) "unavailable404.hours-scroll.after" else "unavailable410.hours-scroll.after")
             compose.onNodeWithTag("place-info-survey").performScrollTo().assertIsNotEnabled()
             compose.onNodeWithTag("place-info-correct").performScrollTo().assertIsNotEnabled()
         }
+        android.util.Log.i("IzQaPlacePhase", "recovery.refresh.before")
         click("place-info-refresh")
         val missingHours = PublicPlaceSnapshot(cached.key, 8, mapOf("name" to "Recovered without hours"), f.clock.millis())
         request(f, 3).found(missingHours)
+        android.util.Log.i("IzQaPlacePhase", "recovery.response.after")
         awaitSnapshot(f, missingHours)
         compose.runOnIdle {
             val state = checkNotNull(f.latestSession.get()).state
             assertFalse(state.failed); assertFalse(state.stale); assertNull(state.unavailableStatus)
             assertEquals(4, f.reader.requests.size)
         }
+        android.util.Log.i("IzQaPlacePhase", "recovery.hours-scroll.before")
         compose.onNodeWithTag("place-info-hours").performScrollTo().assertTextContains("Saat bilgisi yok", substring = true)
+        android.util.Log.i("IzQaPlacePhase", "recovery.hours-scroll.after")
         assertPassiveCallbacks(f)
     }
 

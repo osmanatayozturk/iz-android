@@ -293,6 +293,8 @@ class PlaceInformationVisualCaptureTest {
         assumeTrue("Root isolated offline visual allocation required; missing guard is NOT_RUN",
             args.getString("izPlaceInformationVisual") == "isolated-offline")
         val context = instrumentation.targetContext
+        check(QA_PACKAGE != "org.iz.navigation" && QA_PACKAGE in setOf(
+            "org.iz.navigation.placeinfoqa20261112p01", "org.iz.navigation.placeinfoqa20261112p02"))
         check(BuildConfig.DEBUG && BuildConfig.APPLICATION_ID == QA_PACKAGE && context.packageName == QA_PACKAGE)
         check(instrumentation.context.packageName == "$QA_PACKAGE.test" && args.getString("izExpectedPackage") == QA_PACKAGE)
         val pins = PIN_NAMES.associateWith { checkNotNull(args.getString(it)) }
@@ -456,7 +458,7 @@ class PlaceInformationVisualCaptureTest {
     private fun ByteArray.hex() = joinToString("") { "%02x".format(it.toInt() and 255) }
 
     companion object {
-        private const val QA_PACKAGE = "org.iz.navigation.placeinfoqa20261112p01"
+        private val QA_PACKAGE = BuildConfig.APPLICATION_ID
         private const val HOURS = "Mo-Fr 09:00-17:00; Sa 10:00-14:00; Su off"
         private const val PRIVATE_NAME = "Sentetik kişisel ad"
         private const val MAX_PNG = 16L * 1024 * 1024
