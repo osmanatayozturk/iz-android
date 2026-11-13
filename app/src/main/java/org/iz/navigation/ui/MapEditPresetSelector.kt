@@ -17,17 +17,61 @@ import androidx.compose.ui.semantics.*
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import org.iz.navigation.osmcatalog.*
 import org.json.JSONObject
 
+internal data class MapEditCatalogLoad(val result: Result<OsmPresetCatalog>?, val retry: () -> Unit)
+
 @Composable
-internal fun rememberMapEditCatalog(): Result<OsmPresetCatalog>? {
+internal fun rememberMapEditCatalog(): MapEditCatalogLoad {
     val context = LocalContext.current.applicationContext
-    return produceState<Result<OsmPresetCatalog>?>(null, context) {
-        value = withContext(Dispatchers.IO) {
-            runCatching { OsmPresetCatalog.load(context.assets.open(OsmPresetCatalog.BUNDLED_ASSET)) }
+    val loader: suspend () -> OsmPresetCatalog = remember(context) {
+        suspend { withContext(Dispatchers.IO) { OsmPresetCatalog.load(context.assets.open(OsmPresetCatalog.BUNDLED_ASSET)) } }
+    }
+    return rememberMapEditCatalog(loader)
+}
+
+@Composable
+internal fun rememberMapEditCatalog(loader: suspend () -> OsmPresetCatalog): MapEditCatalogLoad {
+    var attempt by remember { mutableIntStateOf(0) }
+    var result by remember { mutableStateOf<Result<OsmPresetCatalog>?>(null) }
+    LaunchedEffect(loader, attempt) {
+        val generation = attempt
+        result = null
+        try {
+            val catalog = loader()
+            currentCoroutineContext().ensureActive()
+            if (generation == attempt) result = Result.success(catalog)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            currentCoroutineContext().ensureActive()
+            if (generation == attempt) result = Result.failure(failure)
         }
-    }.value
+    }
+    return MapEditCatalogLoad(result) { result = null; attempt++ }
+}
+
+@Composable
+internal fun resolveMapEditCatalog(catalog: OsmPresetCatalog?, inherited: MapEditCatalogLoad?): MapEditCatalogLoad =
+    if (catalog != null) MapEditCatalogLoad(Result.success(catalog)) {} else inherited ?: rememberMapEditCatalog()
+
+@Composable
+internal fun MapEditCatalogStatus(load: MapEditCatalogLoad, enabled: Boolean) {
+    when {
+        load.result == null -> {
+            Text("Tür kataloğu hazırlanıyor…")
+            LinearProgressIndicator(Modifier.fillMaxWidth().testTag("osm-map-catalog-loading"))
+        }
+        load.result.isFailure -> {
+            Text("Tür kataloğu yüklenemedi.")
+            TextButton(onClick = load.retry, enabled = enabled,
+                modifier = Modifier.heightIn(min = 48.dp).testTag("osm-map-catalog-retry")) { Text("Yeniden dene") }
+        }
+    }
 }
 
 internal fun mapEditPresetLabel(snapshot: String?): String? = snapshot?.let {

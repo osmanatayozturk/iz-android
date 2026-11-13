@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.PointF
 import android.graphics.Rect
+import android.os.Bundle
 import android.os.Looper
 import android.os.SystemClock
 import android.view.InputDevice
@@ -41,11 +42,14 @@ import org.iz.navigation.data.MapEditDraft
 import org.iz.navigation.data.MapEditFieldAction
 import org.iz.navigation.data.MapEditStage
 import org.iz.navigation.data.MapEditStatus
+import org.iz.navigation.osmcatalog.OsmPresetCatalog
+import org.iz.navigation.osmcatalog.OsmPresetGeometry
 import org.iz.navigation.tracking.TrackingService
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.json.JSONObject
 import org.maplibre.android.MapLibre
 import org.maplibre.android.ModuleProvider
 import org.maplibre.android.http.HttpRequest
@@ -99,6 +103,73 @@ class MainMapOsmEditorEntryTest {
                     .assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("")))
                 compose.onNodeWithText("Cadde / sokak (varsa)").assertDoesNotExist()
                 compose.onNodeWithText("Kapı numarası (varsa)").assertDoesNotExist()
+                compose.waitForIdle()
+                val catalogueLoading = "Tür kataloğu hazırlanıyor…"
+                val catalogueError = "Tür kataloğu yüklenemedi."
+                fun typeEnabled(): Boolean = compose.onAllNodesWithTag("osm-map-type").fetchSemanticsNodes()
+                    .singleOrNull()?.config?.contains(SemanticsProperties.Disabled) == false
+                fun catalogErrorCount(): Int = compose.onAllNodesWithText(catalogueError).fetchSemanticsNodes().size
+                val initialTypeEnabled = typeEnabled()
+                val initialLoadingCount = compose.onAllNodesWithText(catalogueLoading).fetchSemanticsNodes().size
+                val initialErrorCount = catalogErrorCount()
+                val readinessStarted = SystemClock.elapsedRealtime()
+                fun reportReadiness(stage: String, waitedMs: Long, failure: Throwable? = null) {
+                    val args = InstrumentationRegistry.getArguments()
+                    val report = JSONObject().put("stage", stage).put("initialTypeEnabled", initialTypeEnabled)
+                        .put("initialLoadingCount", initialLoadingCount)
+                        .put("initialErrorCount", initialErrorCount)
+                        .put("currentLoadingCount", compose.onAllNodesWithText(catalogueLoading).fetchSemanticsNodes().size)
+                        .put("currentErrorCount", catalogErrorCount())
+                        .put("currentTypeEnabled", typeEnabled()).put("elapsedWaitMs", waitedMs)
+                        .put("waitLimitMs", 15_000).put("presetId", "amenity/pharmacy").put("geometry", "point")
+                        .put("runUUID", args.getString("osmLightEditorAdmissionRunUUID") ?: args.getString("osmLightEditorCaptureRunUUID"))
+                        .put("source", args.getString("osmLightEditorAdmissionSource") ?: args.getString("osmLightEditorCaptureSource"))
+                        .put("failureClass", failure?.javaClass?.name)
+                    val encoded = report.toString()
+                    check(encoded.toByteArray(Charsets.UTF_8).size <= 4096)
+                    instrumentation.addResults(Bundle().apply { putString("osmLightEditorCatalogReadiness_$stage", encoded) })
+                    // Nonterminal progress only: never emit a synthetic test success/status0.
+                    instrumentation.sendStatus(2, Bundle().apply {
+                        putString("class", this@MainMapOsmEditorEntryTest.javaClass.name)
+                        putString("test", "nativeMainMapLongPressOpensBlankRequiredTypeFormAndReturnsWithoutChangingTheSession")
+                        putString("osmLightEditorCatalogReadiness", encoded)
+                    })
+                }
+                reportReadiness("INITIAL_OBSERVATION", 0)
+                try {
+                    compose.waitUntil(15_000) { typeEnabled() || catalogErrorCount() > 0 }
+                } catch (failure: Throwable) {
+                    runCatching { reportReadiness("NOT_READY", SystemClock.elapsedRealtime() - readinessStarted, failure) }
+                        .exceptionOrNull()?.let(failure::addSuppressed)
+                    throw failure
+                }
+                val waitedMs = SystemClock.elapsedRealtime() - readinessStarted
+                if (catalogErrorCount() > 0) {
+                    val failure = AssertionError("Actual catalogue load error is displayed; no automatic retry attempted")
+                    reportReadiness("LOAD_ERROR", waitedMs, failure)
+                    throw failure
+                }
+                reportReadiness("READY", waitedMs)
+                compose.onAllNodesWithText(catalogueLoading).assertCountEquals(0)
+                compose.onAllNodesWithText(catalogueError).assertCountEquals(0)
+                // Resolve only AFTER the real UI is ready; do not warm/preload its asynchronous asset load.
+                val pinnedCatalog = OsmPresetCatalog.load(app.assets.open(OsmPresetCatalog.BUNDLED_ASSET))
+                val pharmacy = requireNotNull(pinnedCatalog.resolve("amenity/pharmacy"))
+                assertTrue(OsmPresetGeometry.POINT in pharmacy.geometry && pharmacy.selectable && !pharmacy.requiresLocationValidation)
+                compose.onNodeWithTag("osm-map-type").performScrollTo().assertIsEnabled().performClick()
+                compose.onNodeWithText("Tür ara").performTextInput("amenity=pharmacy")
+                compose.onNodeWithText(pharmacy.name).assertIsDisplayed().assertIsNotSelected()
+                val cancelPreset = hasText("Kapat") and hasClickAction() and hasAnyAncestor(
+                    isDialog() and hasAnyDescendant(hasText("Tür ara")),
+                )
+                compose.onNode(cancelPreset).assertIsDisplayed().performClick()
+                compose.onNodeWithText("Tür ara").assertDoesNotExist()
+                compose.onNodeWithTag("osm-map-type").assertIsEnabled().assertTextContains("Tür seç")
+                compose.onNodeWithText("Bir tür seç.").assertIsDisplayed()
+                assertEquals(created, repository.getMapEdit(created.id))
+                compose.onAllNodesWithText(catalogueLoading).assertCountEquals(0)
+                compose.onAllNodesWithText(catalogueError).assertCountEquals(0)
+                reportReadiness("SEARCH_CANCELLED_UNSELECTED", waitedMs)
                 compose.waitForIdle()
                 OsmLightEditorNativeCapture.capture("01-main-map-empty-type")
 

@@ -73,7 +73,8 @@ fun MapEditPage(
     val activeSubmitter = session.user?.id?.takeIf { !session.busy && auth.currentCredentials()?.user?.id == it }
     val drafts = allDrafts.filter { it.submittedBy == null || it.submittedBy == activeSubmitter }
     val scope = rememberCoroutineScope()
-    val catalog = rememberMapEditCatalog()?.getOrNull()
+    val catalogLoad = rememberMapEditCatalog()
+    val catalog = catalogLoad.result?.getOrNull()
     val favorites by repository.osmPresetFavorites.collectAsStateWithLifecycle(initialValue = emptyList())
     val favoriteIds = favorites.map { it.presetId }.toSet()
     var picker by rememberSaveable { mutableStateOf(startNew) }
@@ -106,6 +107,7 @@ fun MapEditPage(
         }
     }
     fun openCorrection(place: Place) {
+        if (!startSurvey && catalog == null) return
         action {
             val ref = place.osmType?.let { type -> place.osmId?.takeIf { it > 0 }?.let { OsmRef(type, it) } }
             if (ref == null || place.latitude == null || place.longitude == null) {
@@ -142,7 +144,7 @@ fun MapEditPage(
                     correctionEntryHandled = true
                     return@action "Bu OSM kaydı için İz'de doğrudan düzeltme kullanılamıyor."
                 }
-                val loadedCatalog = catalog ?: return@action "Tür kataloğu henüz hazır değil."
+                val loadedCatalog = requireNotNull(catalog)
                 val prepared = try { target.editorDraft(loadedCatalog, correctionEntryId, place.latitude, place.longitude) }
                     catch (_: OsmUnsupportedCorrection) {
                         unsupportedEntry = true; correctionEntryHandled = true
@@ -252,9 +254,10 @@ fun MapEditPage(
         if (initialCorrection != null && unsupportedEntry) {
             MapEditFallbackActions(initialCorrection, enabled = !busy, onNoteFallback = onNoteFallback)
         } else if (initialCorrection != null && !correctionEntryHandled && !busy) {
-            TextButton(onClick = { openCorrection(initialCorrection) }) { Text("OSM mekânını yeniden kontrol et") }
+            TextButton(onClick = { openCorrection(initialCorrection) }, enabled = startSurvey || catalog != null) { Text("OSM mekânını yeniden kontrol et") }
         }
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (initialCorrection != null && !correctionEntryHandled) MapEditCatalogStatus(catalogLoad, !busy)
         LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
             if (drafts.isEmpty()) item { Text("Henüz bir mekân taslağı yok.") }
             items(drafts, key = { it.id }) { draft ->
@@ -342,7 +345,7 @@ fun MapEditPage(
         onReadTarget = { ref -> osmReady?.await(); controller.readCorrectionTarget(ref) },
         onReview = { draft -> osmReady?.await(); editorMessage = null; controller.previewCorrection(saveEditableDraft(draft)) },
         isReviewCurrent = isCorrectionReviewCurrent,
-        catalog = catalog, favoriteIds = favoriteIds, onFavorite = onFavorite,
+        catalog = catalog, catalogLoad = catalogLoad, favoriteIds = favoriteIds, onFavorite = onFavorite,
         onLogin = ::login,
         onPublish = { review -> action {
             val result = controller.sendCorrection(review)
@@ -358,7 +361,7 @@ fun MapEditPage(
         onClose = { editingId = null },
         onSave = { draft -> action { saveEditableDraft(draft); editingId = null; "Taslak saklandı." } },
         onPreview = { draft -> osmReady?.await(); editorMessage = null; saveEditableDraft(draft) },
-        catalog = catalog, favoriteIds = favoriteIds, onFavorite = onFavorite,
+        catalog = catalog, catalogLoad = catalogLoad, favoriteIds = favoriteIds, onFavorite = onFavorite,
         onLogin = ::login,
         onPublish = { draft ->
             val reviewedAccount = auth.currentCredentials()
@@ -397,24 +400,30 @@ internal fun MapEditEditor(initial: MapEditDraft, busy: Boolean, canWriteMap: Bo
     onPreview: suspend (MapEditDraft) -> MapEditDraft, onLogin: (MapEditDraft) -> Unit,
     onPublish: (MapEditDraft) -> Unit,
     liveBaseline: () -> MapEditDraft = { initial }, liveBusy: () -> Boolean = { busy || authBusy },
-    catalog: org.iz.navigation.osmcatalog.OsmPresetCatalog? = rememberMapEditCatalog()?.getOrNull(),
+    catalog: org.iz.navigation.osmcatalog.OsmPresetCatalog? = null,
     favoriteIds: Set<String> = emptySet(), onFavorite: (String, Boolean) -> Unit = { _, _ -> },
+    catalogLoad: MapEditCatalogLoad? = null,
 ) {
-    val prepared = remember(initial, catalog) {
+    val load = resolveMapEditCatalog(catalog, catalogLoad)
+    val availableCatalog = load.result?.getOrNull()
+    val prepared = remember(initial, availableCatalog) {
         if (initial.editorVersion == 2) Result.success(initial)
-        else catalog?.let { runCatching { initial.upgradeEditorDraft(it) } }
+        else availableCatalog?.let { runCatching { initial.upgradeEditorDraft(it) } }
     }
     val value = prepared?.getOrNull()
     if (value != null) MapEditEditorContent(value, busy, canWriteMap, authBusy, authError,
         onClose, onSave, onPreview, onLogin, onPublish,
         liveBaseline = {
             val saved = liveBaseline()
-            if (saved.editorVersion == 2) saved else saved.upgradeEditorDraft(requireNotNull(catalog))
-        }, liveBusy = liveBusy, catalog = catalog, favoriteIds = favoriteIds, onFavorite = onFavorite)
+            if (saved.editorVersion == 2) saved else saved.upgradeEditorDraft(requireNotNull(availableCatalog))
+        }, liveBusy = liveBusy, catalog = availableCatalog, catalogLoad = load, favoriteIds = favoriteIds, onFavorite = onFavorite)
     else AlertDialog(onDismissRequest = { if (!busy && !authBusy) onClose() },
         title = { Text("Taslağı hazırla") },
-        text = { Text(if (prepared?.isFailure == true) "Eski taslağın türü hazırlanamadı. Daha sonra yeniden dene."
-            else "Tür kataloğu hazırlanıyor…") },
+        text = { Column {
+            MapEditCatalogStatus(load, !busy && !authBusy)
+            if (prepared?.isFailure == true) Text("Eski taslağın türü hazırlanamadı. Daha sonra yeniden dene.")
+            OutlinedButton(onClick = { onSave(initial) }, enabled = !busy && !authBusy) { Text("Taslağı sakla") }
+        } },
         confirmButton = { TextButton(onClick = onClose, enabled = !busy && !authBusy) { Text("Kapat") } })
 }
 
@@ -424,8 +433,9 @@ private fun MapEditEditorContent(initial: MapEditDraft, busy: Boolean, canWriteM
     onPreview: suspend (MapEditDraft) -> MapEditDraft, onLogin: (MapEditDraft) -> Unit,
     onPublish: (MapEditDraft) -> Unit,
     liveBaseline: () -> MapEditDraft = { initial }, liveBusy: () -> Boolean = { busy || authBusy },
-    catalog: org.iz.navigation.osmcatalog.OsmPresetCatalog? = rememberMapEditCatalog()?.getOrNull(),
+    catalog: org.iz.navigation.osmcatalog.OsmPresetCatalog?,
     favoriteIds: Set<String> = emptySet(), onFavorite: (String, Boolean) -> Unit = { _, _ -> },
+    catalogLoad: MapEditCatalogLoad,
 ) {
     var name by rememberSaveable(initial.id) { mutableStateOf(initial.name) }
     var phone by rememberSaveable(initial.id) { mutableStateOf(initial.phone) }
@@ -505,7 +515,7 @@ private fun MapEditEditorContent(initial: MapEditDraft, busy: Boolean, canWriteM
                     Text("Tür (zorunlu)", style = MaterialTheme.typography.labelLarge)
                     MapEditPresetSelector(catalog, org.iz.navigation.osmcatalog.OsmPresetGeometry.POINT, snapshot,
                         favoriteIds, !locked, { snapshot = it.toJson(); survey = false }, onFavorite)
-                    if (catalog == null) Text("Tür kataloğu yüklenemedi veya henüz hazır değil. Taslağını saklayabilirsin.")
+                    MapEditCatalogStatus(catalogLoad, !locked)
                     OutlinedTextField(phone, { phone = it; survey = false }, label = { Text("Telefon (isteğe bağlı)") },
                         isError = phone.codePointCount(0, phone.length) > 255, modifier = Modifier.fillMaxWidth().testTag("osm-map-phone"), enabled = !locked)
                     OutlinedTextField(observationDate, { observationDate = it; survey = false }, label = { Text("Gözlem tarihi") },

@@ -66,9 +66,12 @@ internal fun MapEditCorrectionEditor(
     onReview: suspend (MapEditDraft) -> OsmCorrectionReview,
     isReviewCurrent: (OsmCorrectionReview) -> Boolean, onLogin: (MapEditDraft) -> Unit,
     onPublish: (OsmCorrectionReview) -> Unit, onNoteFallback: (Place) -> Unit,
-    catalog: org.iz.navigation.osmcatalog.OsmPresetCatalog? = rememberMapEditCatalog()?.getOrNull(),
+    catalog: org.iz.navigation.osmcatalog.OsmPresetCatalog? = null,
     favoriteIds: Set<String> = emptySet(), onFavorite: (String, Boolean) -> Unit = { _, _ -> },
+    catalogLoad: MapEditCatalogLoad? = null,
 ) {
+    val load = resolveMapEditCatalog(catalog, catalogLoad)
+    val availableCatalog = load.result?.getOrNull()
     val ref = requireNotNull(initial.correctionRef())
     var base by remember(initial.id) { mutableStateOf(initial) }
     var ready by rememberSaveable(initial.id) { mutableStateOf(initial.editorVersion == 2) }
@@ -104,8 +107,9 @@ internal fun MapEditCorrectionEditor(
     snapshot?.let {
         if (draft.editorVersion == 2) draft = draft.selectPreset(org.iz.navigation.osmcatalog.OsmPresetRuleSnapshot.fromJson(it))
     }
-    val valid = ready && geometry != null && base.editorVersion == 2 && observedAt != null && runCatching { validateMapEdit(draft) }.isSuccess
-    val publishValid = ready && geometry != null && base.editorVersion == 2 && observedAt != null && runCatching { validateMapEditForPublish(draft) }.isSuccess
+    val saveValid = observedAt != null && runCatching { validateMapEdit(draft) }.isSuccess
+    val loginValid = ready && availableCatalog != null && geometry != null && base.editorVersion == 2 && saveValid
+    val publishValid = ready && availableCatalog != null && geometry != null && base.editorVersion == 2 && observedAt != null && runCatching { validateMapEditForPublish(draft) }.isSuccess
     val locked = busy || querying || authBusy || submitted
     fun clearReview() { review = null; reviewed = false }
     LaunchedEffect(busy) { if (!busy) submitted = false }
@@ -132,13 +136,13 @@ internal fun MapEditCorrectionEditor(
         catch (_: Exception) { error = "Güncel OSM bilgileri alınamadı. Taslağını saklayabilir veya yeniden deneyebilirsin." }
         finally { querying = false }
     }
-    LaunchedEffect(current, catalog) {
+    LaunchedEffect(current, availableCatalog) {
         val actual = current ?: return@LaunchedEffect
-        if (catalog != null) {
+        if (availableCatalog != null) {
             try {
-                geometry = actual.editorGeometry(catalog)
+                geometry = actual.editorGeometry(availableCatalog)
                 if (initial.editorVersion != 2 && base.editorVersion != 2) {
-                    val upgraded = actual.upgradeEditorDraft(initial, catalog)
+                    val upgraded = actual.upgradeEditorDraft(initial, availableCatalog)
                     base = upgraded
                     if (!ready) {
                         name = upgraded.name; phone = upgraded.phone
@@ -168,9 +172,9 @@ internal fun MapEditCorrectionEditor(
                 Text("OSM ${ref.type.apiName()}/${ref.id}")
                 (error ?: authError)?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 rebaseNotice?.let { Text(it) }
-                OutlinedButton(enabled = !locked && catalog != null, modifier = Modifier.fillMaxWidth()
+                OutlinedButton(enabled = !locked && availableCatalog != null, modifier = Modifier.fillMaxWidth()
                     .testTag("osm-map-correction-rebase"), onClick = {
-                    val loadedCatalog = catalog
+                    val loadedCatalog = availableCatalog
                     if (!locked && loadedCatalog != null) {
                         val working = draft
                         val owner = auth.currentCredentials()
@@ -240,9 +244,9 @@ internal fun MapEditCorrectionEditor(
                     }
                     if (nameAction == MapEditFieldAction.DELETE) Text("Yayımlanırsa bu bilgi OSM'den silinecek.")
                     Text("Tür", style = MaterialTheme.typography.labelLarge)
-                    geometry?.let { kind -> MapEditPresetSelector(catalog, kind, snapshot, favoriteIds, !locked && ready,
+                    geometry?.let { kind -> MapEditPresetSelector(availableCatalog, kind, snapshot, favoriteIds, !locked && ready,
                         { snapshot = it.toJson(); survey = false }, onFavorite, required = false) }
-                    if (catalog == null) Text("Tür kataloğu yüklenemedi veya henüz hazır değil.")
+                    MapEditCatalogStatus(load, !locked)
                     CorrectionTextField("phone", phone, current?.phoneText(), !locked && ready && geometry != null) {
                         phone = it; phoneAction = fieldAction(it, current?.phoneText().orEmpty()); survey = false
                     }
@@ -263,10 +267,10 @@ internal fun MapEditCorrectionEditor(
                             finally { querying = false }
                         }
                     }) { Text("OSM bilgilerini kontrol et ve incele") }
-                    else Button(onClick = { onLogin(draft) }, enabled = valid && !locked, modifier = Modifier.fillMaxWidth()) { Text("OSM düzenleme iznini etkinleştir") }
+                    else Button(onClick = { onLogin(draft) }, enabled = loginValid && !locked, modifier = Modifier.fillMaxWidth()) { Text("OSM düzenleme iznini etkinleştir") }
                 }
                 if (activeReview == null) {
-                    OutlinedButton(enabled = valid && !locked, onClick = { onSave(draft) }, modifier = Modifier.fillMaxWidth()) { Text("Taslağı sakla") }
+                    OutlinedButton(enabled = saveValid && !locked, onClick = { onSave(draft) }, modifier = Modifier.fillMaxWidth()) { Text("Taslağı sakla") }
                     MapEditFallbackActions(fallbackPlace, !locked) { place -> exit { onNoteFallback(place) } }
                 }
                 if (locked) LinearProgressIndicator(Modifier.fillMaxWidth())
