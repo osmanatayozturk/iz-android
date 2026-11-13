@@ -84,7 +84,7 @@ Altı yolculuk türünde rota havası, kalkış karşılaştırması ve türe ö
 
 ## 0.10 yenilikleri
 
-- **Rotalarım:** İki ile beş duraklı planları adlandırın; ulaşım türü, kişisel hız ve yol tercihleri saklanır. **Konumum** başlangıcı plan açıldığında güncellenir. Kaydedilmiş plan kendi ayarlarıyla açılır, ulaşım türünün diğer rotalarda kullanılacak son ayarlarını değiştirmez ve kayıt başlatmaz.
+- **Rotalarım:** 0.10 sürümünde iki ile beş duraklı planlar adlandırılabilir; güncel telefon kaynak adayında başlangıç ve varış dahil sınır 20 duraktır. Ulaşım türü, kişisel hız ve yol tercihleri saklanır. **Konumum** başlangıcı plan açıldığında güncellenir. Kaydedilmiş plan kendi ayarlarıyla açılır, ulaşım türünün diğer rotalarda kullanılacak son ayarlarını değiştirmez ve kayıt başlatmaz.
 - **Yol tercihleri:** Yürüyüş, koşu ve bisiklette **Otoyola girme** varsayılan açıktır. Son seçiminiz her ulaşım türü için ayrı saklanır; kaydedilen plan kendi tercihlerini korur. Bu üç türde otoyolsuzluğu doğrulanamayan rota kullanılmaz.
 - **Alternatifler:** Desteklenen planlarda en fazla iki ek güzergâh istenir. Hava karşılaştırması seçilen güzergâha bağlıdır; başlangıçta farklı bir yol sessizce seçilmez.
 - **GPX takibi:** GPX 1.0/1.1 izlerini bölüm, yön ve başlangıç seçerek takip edin veya Rotalarım'a kaydedin. GPX takibi günlük kaydından ayrıdır; dönüş talimatı, tahmini varış ve otomatik yeniden rota hesabı sunmaz.

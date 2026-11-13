@@ -62,7 +62,7 @@ Haritadan veya kayıtlı yerden açılan mekân bilgi kartı, mevcut OpenStreetM
 
 Paylaşılan harita girişinin önizleme penceresi navigasyon girişine bağlandı. Kompakt sürüş göstergesinin yatay görünümünde iki satırlı özet ve uyarı yerleşimi düzenlendi; tam açıklamalar erişilebilirlik metninde korunur.
 
-Son kaynak adayı `fa82701f` için beş odaklı fiziksel telefon kontrolü geçti. 1.643 birim testi, lint ve derleme host sonuçları, yalnız AndroidTest düzeltmesinden önceki eşleşen ürün kaynağından açıkça yeniden kullanıldı; son commit’te yeniden çalıştırılmış sonuçlar olarak sayılmaz. İncelenen üç gerçek HUD görüntüsünde kalan ürün engeli görülmedi; normal yazı boyutunda mola ve uyarılar okunabildi.
+Son kaynak adayı `fa82701f` için beş odaklı fiziksel telefon kontrolü geçti. 1.643 birim testi ile uygulama ve test paketi derleme kanıtı, yalnız AndroidTest düzeltmesinden önceki eşleşen ürün kaynağından açıkça yeniden kullanıldı; son commit’te yeniden çalıştırılmış sonuçlar olarak sayılmaz. Lint, başarıyla tamamlanan toplu host çalıştırmasında istendi; ancak eldeki lint raporu tarihsel olduğundan bu çalıştırmanın ayrı lint görev sonucu ve yeni XML raporu doğrulanmış değildir. İncelenen üç gerçek HUD görüntüsünde kalan ürün engeli görülmedi; normal yazı boyutunda mola ve uyarılar okunabildi.
 
 Üç görüntüdeki rota görünürlüğü için piksel tabanlı otomatik denetim başarısız kaldı. Bu yöntem harita üzerindeki gösterge alanı ve pusula örtüşmesini yeterince kapsamıyor; sonucu geçilmiş veya rota görünürlüğü kanıtlanmış sayılmadı. Bu sınırlı kontrol tam native arayüz kabulü değildir. TalkBack ve canlı harita tabanı kabulü tamamlanmadı. Önceki kaynak notlarında açık kalan canlı servis kabulleri ayrıca izlenir.
 
