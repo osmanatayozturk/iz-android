@@ -8,7 +8,6 @@ import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.PointF
 import android.graphics.Rect
-import android.os.Build
 import android.os.Looper
 import android.os.SystemClock
 import android.view.InputDevice
@@ -140,7 +139,7 @@ class MainMapOsmEditorEntryTest {
     private fun requireIsolatedOfflineQa(app: Context) {
         assertEquals("org.iz.navigation.qalighteditor20261113", app.packageName)
         assertEquals(app.packageName, InstrumentationRegistry.getArguments().getString("osmLightEditorZipQaPackage"))
-        assertTrue("Allocated emulator required; never the user phone", Build.HARDWARE in setOf("ranchu", "goldfish"))
+        OsmLightEditorQaTargetAdmission.requireAdmittedTarget()
         assertEquals(Configuration.ORIENTATION_PORTRAIT, app.resources.configuration.orientation)
         assertEquals("Normal font1 must already be configured", 1f, app.resources.configuration.fontScale, .01f)
         @Suppress("DEPRECATION")

@@ -51,7 +51,7 @@ internal object OsmLightEditorNativeCapture {
         check(BuildConfig.DEBUG && BuildConfig.APPLICATION_ID == QA && app.packageName == QA)
         check(instrumentation.context.packageName == "$QA.test")
         check(args.getString("osmLightEditorZipQaPackage") == QA)
-        check(Build.HARDWARE in setOf("ranchu", "goldfish"))
+        OsmLightEditorQaTargetAdmission.requireAdmittedTarget()
         check(kotlin.math.abs(app.resources.configuration.fontScale - 1f) < .01f)
         if (Build.VERSION.SDK_INT < 34) error("Owned-window UiAutomation capture requires API34+")
         @Suppress("DEPRECATION")
