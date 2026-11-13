@@ -17,6 +17,7 @@ import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -263,7 +264,14 @@ class MapEditCorrectionUiTest {
         confirmCheckbox("osm-map-correction-survey", "Düzelttiğim bilgileri yerinde doğruladım.")
         preview.performScrollTo().performClick()
         compose.onNodeWithText("OSM hesabı · Test haritacı").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("Önce: $before").performScrollTo().assertIsDisplayed()
+        if (key == "phone") {
+            compose.onNodeWithText("phone").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("contact:phone").performScrollTo().assertIsDisplayed()
+            compose.onAllNodesWithText("Önce: $before").assertCountEquals(2)
+            compose.onNodeWithText("Sonra: Silinecek").performScrollTo().assertIsDisplayed()
+        } else {
+            compose.onNodeWithText("Önce: $before").performScrollTo().assertIsDisplayed()
+        }
         compose.onNodeWithText("Sonra: $input").performScrollTo().assertIsDisplayed()
         val publish = compose.onNodeWithTag("osm-map-correction-publish")
         publish.performScrollTo().assertIsNotEnabled()
