@@ -449,15 +449,67 @@ class SharedNavigationVisualCaptureTest {
     }
 
     private fun awaitRenderedRoute() {
-        compose.waitUntil(20_000) {
-            var rendered = false
-            instrumentation.runOnMainSync {
-                nativeMap.get()?.let { map ->
-                    val point = map.projection.toScreenLocation(LatLng(41.005, 29.005))
-                    rendered = map.queryRenderedFeatures(point, "weather-route-layer").isNotEmpty()
+        try {
+            compose.waitUntil(20_000) {
+                var rendered = false
+                instrumentation.runOnMainSync {
+                    nativeMap.get()?.let { map ->
+                        val point = map.projection.toScreenLocation(LatLng(41.005, 29.005))
+                        rendered = map.queryRenderedFeatures(point, "weather-route-layer").isNotEmpty()
+                    }
                 }
+                rendered
             }
-            rendered
+        } catch (timeout: ComposeTimeoutException) {
+            val diagnostic = runCatching {
+                var snapshot: Result<JSONObject>? = null
+                instrumentation.runOnMainSync {
+                    snapshot = runCatching {
+                        fun number(value: Double): Any = if (value.isFinite()) value else JSONObject.NULL
+                        val map = nativeMap.get()
+                        val data = JSONObject().put("phase", "POST_TIMEOUT_SYNTHETIC_READ_ONLY")
+                            .put("mapPresent", map != null)
+                        if (map != null) {
+                            val camera = map.cameraPosition
+                            val width = map.width
+                            val height = map.height
+                            val point = map.projection.toScreenLocation(LatLng(41.005, 29.005))
+                            val finitePoint = point.x.isFinite() && point.y.isFinite()
+                            val validViewport = width.isFinite() && height.isFinite() && width > 0 && height > 0
+                            val padding = camera.padding?.takeIf { it.size == 4 }
+                            val validPadding = padding != null && padding.all { it.isFinite() && it >= 0 } &&
+                                validViewport && padding[0] + padding[2] < width && padding[1] + padding[3] < height
+                            val inside = finitePoint && validViewport && point.x >= 0 && point.y >= 0 &&
+                                point.x < width && point.y < height
+                            val insidePadded: Any = if (finitePoint && validPadding) {
+                                point.x >= padding!![0] && point.x < width - padding[2] &&
+                                    point.y >= padding[1] && point.y < height - padding[3]
+                            } else JSONObject.NULL
+                            val style = map.style
+                            val viewportQueryable = validViewport && width <= 4096 && height <= 4096
+                            data.put("cameraLatitude", camera.target?.latitude?.let { number(it) } ?: JSONObject.NULL)
+                                .put("cameraLongitude", camera.target?.longitude?.let { number(it) } ?: JSONObject.NULL)
+                                .put("zoom", number(camera.zoom)).put("tilt", number(camera.tilt))
+                                .put("bearing", number(camera.bearing))
+                                .put("padding", padding?.let { JSONArray(it.map { value -> number(value) }) } ?: JSONObject.NULL)
+                                .put("mapWidth", number(width.toDouble())).put("mapHeight", number(height.toDouble()))
+                                .put("midpointX", number(point.x.toDouble())).put("midpointY", number(point.y.toDouble()))
+                                .put("projectionFinite", finitePoint).put("midpointInsideViewport", inside)
+                                .put("midpointInsidePaddedViewport", insidePadded)
+                                .put("stylePresent", style != null)
+                                .put("routeSourcePresent", style?.getSource("weather-planned-route") != null)
+                                .put("routeLayerPresent", style?.getLayer("weather-route-layer") != null)
+                                .put("postTimeoutPointHits", if (finitePoint) map.queryRenderedFeatures(point, "weather-route-layer").size else JSONObject.NULL)
+                                .put("viewportQueryable", viewportQueryable)
+                                .put("viewportRouteHits", if (viewportQueryable) map.queryRenderedFeatures(
+                                    android.graphics.RectF(0f, 0f, width, height), "weather-route-layer").size else JSONObject.NULL)
+                        }
+                        data
+                    }
+                }
+                checkNotNull(snapshot).getOrThrow().toString()
+            }.getOrElse { "PROBE_UNAVAILABLE:${it.javaClass.simpleName}" }
+            throw AssertionError("SYNTHETIC_ROUTE_TIMEOUT_PROBE ${diagnostic.take(4096)}", timeout)
         }
     }
 
