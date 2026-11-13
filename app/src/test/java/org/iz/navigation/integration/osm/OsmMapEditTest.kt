@@ -6,6 +6,11 @@ import java.util.UUID
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 
 class OsmMapEditTest {
     private val time = 1_800_000_000_000L
@@ -37,15 +42,30 @@ class OsmMapEditTest {
         assertEquals(0, api.creates)
     }
 
-    @Test fun newlyAppearedDuplicateRequiresAnotherPreviewBeforeAnyWrite() = runBlocking {
-        val store = Memory(draft()); val api = Gateway().apply {
-            duplicates = listOf(OsmDuplicateCandidate(OsmRef(OsmType.NODE, 12), "New fountain", 41.01, 29.02))
-        }
-        val publisher = OsmMapEditPublisher(store, { session }, api, { time })
+    @Test fun newPlacePublishesWithoutAnyNearbyObjectLookup() = runBlocking {
+        val store = Memory(draft())
+        val requests = mutableListOf<Request>()
+        val client = OsmMapEditClient(OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            requests += request
+            val response = when (request.method + " " + request.url.encodedPath) {
+                "PUT /api/0.6/changeset/create" -> "7"
+                "POST /api/0.6/changeset/7/upload" -> "<diffResult><node old_id=\"-1\" new_id=\"9\" new_version=\"1\"/></diffResult>"
+                "PUT /api/0.6/changeset/7/close" -> ""
+                else -> error("Unexpected request: ${request.method} ${request.url}")
+            }
+            Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                .body(response.toResponseBody()).build()
+        }.build())
+        val publisher = OsmMapEditPublisher(store, { session }, client, { time })
+        assertTrue(publisher.send(store.value.id).success)
+        assertEquals(listOf("PUT /api/0.6/changeset/create", "POST /api/0.6/changeset/7/upload",
+            "PUT /api/0.6/changeset/7/close"), requests.map { it.method + " " + it.url.encodedPath })
+        assertTrue(requests.all { it.url.isHttps && it.url.host == "api.openstreetmap.org" &&
+            it.header("Authorization") == "Bearer token" && it.body!!.isOneShot() })
+        assertEquals(MapEditStatus.SENT, store.value.status)
         assertFalse(publisher.send(store.value.id).success)
-        assertEquals(MapEditStatus.DRAFT, store.value.status)
-        assertEquals(0, api.creates)
-        assertTrue(publisher.send(store.value.id, setOf(OsmRef(OsmType.NODE, 12))).success)
+        assertEquals(3, requests.size)
     }
 
     @Test fun lostUploadResponseIsDurableUnknownAndCannotBeResent() = runBlocking {
@@ -120,7 +140,35 @@ class OsmMapEditTest {
         assertEquals(0, api.uploads)
     }
 
+    @Test fun aReplacedPublicFormCannotBeSentUsingEarlierReviewConsent() = runBlocking {
+        val reviewed = draft().copy(name = "Reviewed")
+        val store = Memory(reviewed.copy(name = "Replaced"))
+        val api = Gateway()
+        assertFalse(OsmMapEditPublisher(store, { session }, api).send(reviewed.id, reviewed).success)
+        assertEquals(0, api.creates)
+        assertEquals(0, api.uploads)
+    }
+
+    @Test fun sameTokenFromChangedCredentialsCannotAuthorizeTheNodeUpload() = runBlocking {
+        val store = Memory(draft())
+        var current: OsmCredentials? = session
+        val api = Gateway().apply { onCreate = { current = OsmCredentials("token", OsmUser(42, "Other"), null, session.scopes) } }
+        assertFalse(OsmMapEditPublisher(store, { current }, api).send(store.value.id).success)
+        assertEquals(0, api.uploads)
+        assertEquals(MapEditStatus.UNKNOWN, store.value.status)
+    }
+
+    @Test fun logoutAfterClaimCannotCreateAChangesetWithStaleConsent() = runBlocking {
+        var current: OsmCredentials? = session
+        val store = Memory(draft()).apply { onBegin = { current = null } }
+        val api = Gateway()
+        assertFalse(OsmMapEditPublisher(store, { current }, api).send(store.value.id).success)
+        assertEquals(0, api.creates)
+        assertEquals(0, api.uploads)
+    }
+
     private class Memory(var value: MapEditDraft) : OsmMapEditStore {
+        var onBegin: () -> Unit = {}
         override fun isCurrentForDispatch(expected: MapEditDraft) = value == expected
         override suspend fun get(id: String) = value.takeIf { it.id == id }
         override suspend fun begin(id: String, userId: Long, time: Long): MapEditDraft? {
@@ -129,6 +177,7 @@ class OsmMapEditTest {
                 submittedAt = maxOf(time, (value.submittedAt ?: 0) + 1), changesetId = null, remoteNodeId = null,
                 remoteNodeVersion = null, changesetClosed = false, error = null,
                 localAttemptId = UUID.randomUUID().toString(), localChangesetCreated = false)
+            onBegin()
             return value
         }
         override suspend fun recordLocalChangeset(expected: MapEditDraft, changeset: Long): MapEditDraft? {
@@ -144,12 +193,11 @@ class OsmMapEditTest {
     private class Gateway : OsmMapEditGateway {
         var creates = 0; var uploads = 0; var closes = 0
         var onClose: () -> Unit = {}
+        var onCreate: () -> Unit = {}
         var uploadFailure: Exception? = null; var closeFailure: Exception? = null
         var open = false
         var nodes = emptyList<OsmCreatedNode>()
-        var duplicates = emptyList<OsmDuplicateCandidate>()
-        override suspend fun nearby(draft: MapEditDraft) = duplicates
-        override suspend fun createChangeset(token: String, draft: MapEditDraft): Long { creates++; return 7 }
+        override suspend fun createChangeset(token: String, draft: MapEditDraft): Long { creates++; onCreate(); return 7 }
         override suspend fun uploadNode(token: String, draft: MapEditDraft, changesetId: Long): OsmUploadedNode {
             uploads++; uploadFailure?.let { throw it }; return OsmUploadedNode(9, 1)
         }

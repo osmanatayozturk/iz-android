@@ -45,6 +45,7 @@ fun MapEditPage(
     initialDraftId: String? = null,
     startNew: Boolean = false,
     startSurvey: Boolean = false,
+    initialCoordinate: GeoCoordinate? = null,
     onNoteFallback: (Place) -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -52,8 +53,7 @@ fun MapEditPage(
     val osmReady = remember { application?.osmReady }
     val repository = remember { DiaryRepository(context) }
     val auth = remember { OsmAuthManager.get(context) }
-    val settings = remember { OsmServiceSettings(context) }
-    val controller = remember { OsmMapEditController(repository, auth) { settings.read().overpass } }
+    val controller = remember { OsmMapEditController(repository, auth) }
     val surveyReads = LocalOsmSurveyReads.current
     val session by auth.state.collectAsStateWithLifecycle()
     val liveSession by auth.communitySessionSource.sessions.collectAsStateWithLifecycle()
@@ -73,6 +73,9 @@ fun MapEditPage(
     val activeSubmitter = session.user?.id?.takeIf { !session.busy && auth.currentCredentials()?.user?.id == it }
     val drafts = allDrafts.filter { it.submittedBy == null || it.submittedBy == activeSubmitter }
     val scope = rememberCoroutineScope()
+    val catalog = rememberMapEditCatalog()?.getOrNull()
+    val favorites by repository.osmPresetFavorites.collectAsStateWithLifecycle(initialValue = emptyList())
+    val favoriteIds = favorites.map { it.presetId }.toSet()
     var picker by rememberSaveable { mutableStateOf(startNew) }
     var editingId by rememberSaveable { mutableStateOf(initialDraftId) }
     val correctionEntryId = rememberSaveable { UUID.randomUUID().toString() }
@@ -84,6 +87,13 @@ fun MapEditPage(
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var editorMessage by remember { mutableStateOf<String?>(null) }
+    val onFavorite: (String, Boolean) -> Unit = { id, enabled ->
+        scope.launch {
+            try { repository.setOsmPresetFavorite(id, enabled) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { editorMessage = "Favori saklanamadı. Yeniden deneyebilirsin." }
+        }
+    }
     BackHandler(enabled = busy) { }
     fun action(block: suspend () -> String) {
         if (busy) return
@@ -132,8 +142,13 @@ fun MapEditPage(
                     correctionEntryHandled = true
                     return@action "Bu OSM kaydı için İz'de doğrudan düzeltme kullanılamıyor."
                 }
-                repository.saveMapEdit(MapEditDraft(id = correctionEntryId, latitude = place.latitude,
-                    longitude = place.longitude, preset = target.preset(), targetType = ref.type, targetId = ref.id))
+                val loadedCatalog = catalog ?: return@action "Tür kataloğu henüz hazır değil."
+                val prepared = try { target.editorDraft(loadedCatalog, correctionEntryId, place.latitude, place.longitude) }
+                    catch (_: OsmUnsupportedCorrection) {
+                        unsupportedEntry = true; correctionEntryHandled = true
+                        return@action "Bu nesne OSM düzenleyicisinde düzenlenebilir."
+                    }
+                repository.saveMapEdit(prepared)
                 initialTarget = target
             }
             correctionEntryHandled = true
@@ -142,8 +157,18 @@ fun MapEditPage(
             "OSM mekânı doğrulandı."
         }
     }
-    LaunchedEffect(initialCorrection) {
-        if (!correctionEntryHandled && initialCorrection != null) openCorrection(initialCorrection)
+    LaunchedEffect(initialCorrection, catalog) {
+        if (!correctionEntryHandled && initialCorrection != null && (startSurvey || catalog != null)) openCorrection(initialCorrection)
+    }
+    val coordinateEntryId = rememberSaveable { UUID.randomUUID().toString() }
+    var coordinateHandled by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(initialCoordinate) {
+        if (initialCoordinate != null && !coordinateHandled) action {
+            if (repository.getMapEdit(coordinateEntryId) == null) repository.saveMapEdit(
+                newMapEditDraft(initialCoordinate.latitude, initialCoordinate.longitude).copy(id = coordinateEntryId))
+            coordinateHandled = true; editingId = coordinateEntryId
+            "Konum seçildi. Mekân bilgilerini doldur."
+        }
     }
     LaunchedEffect(initialDraftId, drafts) {
         if (!scrolledToDraft && initialDraftId != null) {
@@ -154,12 +179,17 @@ fun MapEditPage(
             }
         }
     }
-    suspend fun saveEditableDraft(draft: MapEditDraft) {
+    suspend fun saveEditableDraft(draft: MapEditDraft): MapEditDraft {
         val session = auth.currentCredentials()
         repository.saveMapEdit(draft) { current ->
             val owner = current?.submittedBy
             owner == null || (session?.user?.id == owner && auth.currentCredentials() === session)
         }
+        val saved = repository.getMapEdit(draft.id)
+        check(auth.currentCredentials() === session && saved == draft.editableCopy()) {
+            "Taslak veya OSM hesabı değişti. Yeniden incele."
+        }
+        return requireNotNull(saved)
     }
     fun deletionOwner() = OsmConfirmationOwner(entryKey, auth.currentCredentials()?.user?.id,
         application?.community?.state?.value?.cacheIdentity, auth.communitySessionSource.sessions.value, history)
@@ -230,7 +260,10 @@ fun MapEditPage(
             items(drafts, key = { it.id }) { draft ->
                 OutlinedCard(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(draft.name.ifBlank { draft.preset.label }, style = MaterialTheme.typography.titleMedium)
+                        Text(draft.name.ifBlank {
+                            if (draft.editorVersion == 2) mapEditPresetLabel(draft.presetSnapshot) ?: "Tür seçilmemiş OSM mekânı"
+                            else draft.preset.label
+                        }, style = MaterialTheme.typography.titleMedium)
                         Text(if (draft.targetType != null) "Düzeltme · ${draft.status.mapEditLabel()}" else draft.status.mapEditLabel())
                         draft.error?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -265,7 +298,7 @@ fun MapEditPage(
     if (picker) MapEditLocationPicker(onClose = { picker = false }) { coordinate ->
         picker = false
         action {
-            val draft = MapEditDraft(latitude = coordinate.latitude, longitude = coordinate.longitude)
+            val draft = newMapEditDraft(latitude = coordinate.latitude, longitude = coordinate.longitude)
             repository.saveMapEdit(draft)
             editorMessage = null
             editingId = draft.id
@@ -289,7 +322,7 @@ fun MapEditPage(
         liveBusy = { busy || auth.state.value.busy }, onClose = { editingId = null },
         onSave = { draft -> action { saveEditableDraft(draft); editingId = null; "Taslak saklandı." } },
         onReadTarget = { ref -> osmReady?.await(); surveyReads?.target?.invoke(ref) ?: controller.readCorrectionTarget(ref) },
-        onReview = { draft -> osmReady?.await(); editorMessage = null; saveEditableDraft(draft); controller.previewCorrection(draft) },
+        onReview = { draft -> osmReady?.await(); editorMessage = null; controller.previewCorrection(saveEditableDraft(draft)) },
         isReviewCurrent = isCorrectionReviewCurrent, onLogin = ::login,
         onPublish = { review -> action {
             val result = controller.sendCorrection(review)
@@ -307,8 +340,9 @@ fun MapEditPage(
         onClose = { editingId = null },
         onSave = { draft -> action { saveEditableDraft(draft); editingId = null; "Taslak saklandı." } },
         onReadTarget = { ref -> osmReady?.await(); controller.readCorrectionTarget(ref) },
-        onReview = { draft -> osmReady?.await(); editorMessage = null; saveEditableDraft(draft); controller.previewCorrection(draft) },
+        onReview = { draft -> osmReady?.await(); editorMessage = null; controller.previewCorrection(saveEditableDraft(draft)) },
         isReviewCurrent = isCorrectionReviewCurrent,
+        catalog = catalog, favoriteIds = favoriteIds, onFavorite = onFavorite,
         onLogin = ::login,
         onPublish = { review -> action {
             val result = controller.sendCorrection(review)
@@ -323,11 +357,15 @@ fun MapEditPage(
         liveBusy = { busy || auth.state.value.busy },
         onClose = { editingId = null },
         onSave = { draft -> action { saveEditableDraft(draft); editingId = null; "Taslak saklandı." } },
-        onPreview = { draft -> osmReady?.await(); editorMessage = null; saveEditableDraft(draft); controller.nearby(draft) },
+        onPreview = { draft -> osmReady?.await(); editorMessage = null; saveEditableDraft(draft) },
+        catalog = catalog, favoriteIds = favoriteIds, onFavorite = onFavorite,
         onLogin = ::login,
-        onPublish = { draft, reviewed -> action {
-            saveEditableDraft(draft)
-            val result = controller.send(draft.id, reviewed)
+        onPublish = { draft ->
+            val reviewedAccount = auth.currentCredentials()
+            action {
+            val saved = repository.getMapEdit(draft.id)
+            check(saved == draft && auth.currentCredentials() === reviewedAccount) { "Taslak veya OSM hesabı değişti. Yeniden incele." }
+            val result = controller.send(requireNotNull(saved))
             editorMessage = result.message.takeUnless { result.success }
             if (result.success || repository.getMapEdit(draft.id)?.status !in setOf(MapEditStatus.DRAFT, MapEditStatus.FAILED)) editingId = null
             result.message
@@ -339,47 +377,67 @@ fun MapEditPage(
 private fun MapEditLocationPicker(onClose: () -> Unit, onChoose: (GeoCoordinate) -> Unit) {
     var latitude by rememberSaveable { mutableStateOf<Double?>(null) }
     var longitude by rememberSaveable { mutableStateOf<Double?>(null) }
-    var existing by rememberSaveable { mutableStateOf(false) }
     val coordinate = latitude?.let { lat -> longitude?.let { GeoCoordinate(lat, it) } }
     FullscreenMapDialog(title = "Yeni mekânın konumunu seç", onDismiss = onClose, bottomBar = {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(if (existing) "Burada bir OSM mekânı zaten var. Eksik mekânın tam konumuna uzun bas." else "Eksik mekânın bulunduğu noktaya uzun bas.")
-            Button(enabled = coordinate != null && !existing, onClick = { coordinate?.let(onChoose) }, modifier = Modifier.fillMaxWidth()) { Text("Bu konuma mekân ekle") }
+            Text("Yeni OSM mekânının bulunduğu noktaya uzun bas.")
+            Button(enabled = coordinate != null, onClick = { coordinate?.let(onChoose) }, modifier = Modifier.fillMaxWidth()) { Text("Bu konuma mekân ekle") }
         }
     }) { modifier ->
         val pin = coordinate?.let { Place(name = "Yeni mekân", latitude = it.latitude, longitude = it.longitude) }
         DiaryMap(emptyList(), listOfNotNull(pin), modifier, focusCurrentLocation = true, expandable = false,
-            onMapLongClick = { latitude = it.latitude; longitude = it.longitude; existing = false },
-            onOsmPlaceClick = { latitude = it.latitude; longitude = it.longitude; existing = it.osmRef != null })
+            onMapLongClick = { latitude = it.latitude; longitude = it.longitude },
+            onOsmPlaceClick = null)
     }
 }
 
 @Composable
 internal fun MapEditEditor(initial: MapEditDraft, busy: Boolean, canWriteMap: Boolean, authBusy: Boolean,
     authError: String?, onClose: () -> Unit, onSave: (MapEditDraft) -> Unit,
-    onPreview: suspend (MapEditDraft) -> List<OsmDuplicateCandidate>, onLogin: (MapEditDraft) -> Unit,
-    onPublish: (MapEditDraft, Set<OsmRef>) -> Unit) {
-    MapEditEditor(initial, busy, canWriteMap, authBusy, authError, onClose, onSave, onPreview, onLogin,
-        onPublish, liveBaseline = { initial }, liveBusy = { busy || authBusy })
+    onPreview: suspend (MapEditDraft) -> MapEditDraft, onLogin: (MapEditDraft) -> Unit,
+    onPublish: (MapEditDraft) -> Unit,
+    liveBaseline: () -> MapEditDraft = { initial }, liveBusy: () -> Boolean = { busy || authBusy },
+    catalog: org.iz.navigation.osmcatalog.OsmPresetCatalog? = rememberMapEditCatalog()?.getOrNull(),
+    favoriteIds: Set<String> = emptySet(), onFavorite: (String, Boolean) -> Unit = { _, _ -> },
+) {
+    val prepared = remember(initial, catalog) {
+        if (initial.editorVersion == 2) Result.success(initial)
+        else catalog?.let { runCatching { initial.upgradeEditorDraft(it) } }
+    }
+    val value = prepared?.getOrNull()
+    if (value != null) MapEditEditorContent(value, busy, canWriteMap, authBusy, authError,
+        onClose, onSave, onPreview, onLogin, onPublish,
+        liveBaseline = {
+            val saved = liveBaseline()
+            if (saved.editorVersion == 2) saved else saved.upgradeEditorDraft(requireNotNull(catalog))
+        }, liveBusy = liveBusy, catalog = catalog, favoriteIds = favoriteIds, onFavorite = onFavorite)
+    else AlertDialog(onDismissRequest = { if (!busy && !authBusy) onClose() },
+        title = { Text("Taslağı hazırla") },
+        text = { Text(if (prepared?.isFailure == true) "Eski taslağın türü hazırlanamadı. Daha sonra yeniden dene."
+            else "Tür kataloğu hazırlanıyor…") },
+        confirmButton = { TextButton(onClick = onClose, enabled = !busy && !authBusy) { Text("Kapat") } })
 }
 
 @Composable
-internal fun MapEditEditor(initial: MapEditDraft, busy: Boolean, canWriteMap: Boolean, authBusy: Boolean,
+private fun MapEditEditorContent(initial: MapEditDraft, busy: Boolean, canWriteMap: Boolean, authBusy: Boolean,
     authError: String?, onClose: () -> Unit, onSave: (MapEditDraft) -> Unit,
-    onPreview: suspend (MapEditDraft) -> List<OsmDuplicateCandidate>, onLogin: (MapEditDraft) -> Unit,
-    onPublish: (MapEditDraft, Set<OsmRef>) -> Unit,
-    liveBaseline: () -> MapEditDraft, liveBusy: () -> Boolean) {
+    onPreview: suspend (MapEditDraft) -> MapEditDraft, onLogin: (MapEditDraft) -> Unit,
+    onPublish: (MapEditDraft) -> Unit,
+    liveBaseline: () -> MapEditDraft = { initial }, liveBusy: () -> Boolean = { busy || authBusy },
+    catalog: org.iz.navigation.osmcatalog.OsmPresetCatalog? = rememberMapEditCatalog()?.getOrNull(),
+    favoriteIds: Set<String> = emptySet(), onFavorite: (String, Boolean) -> Unit = { _, _ -> },
+) {
     var name by rememberSaveable(initial.id) { mutableStateOf(initial.name) }
-    var street by rememberSaveable(initial.id) { mutableStateOf(initial.street) }
-    var number by rememberSaveable(initial.id) { mutableStateOf(initial.houseNumber) }
-    var preset by rememberSaveable(initial.id) { mutableStateOf(initial.preset) }
+    var phone by rememberSaveable(initial.id) { mutableStateOf(initial.phone) }
+    var snapshot by rememberSaveable(initial.id) { mutableStateOf(initial.presetSnapshot) }
     var survey by rememberSaveable(initial.id) { mutableStateOf(initial.surveyConfirmed) }
     val originalDate = remember(initial.id) { Instant.ofEpochMilli(initial.observedAt).atZone(ZoneId.systemDefault()).toLocalDate().toString() }
     var observationDate by rememberSaveable(initial.id) { mutableStateOf(originalDate) }
-    var preview by remember { mutableStateOf(false) }
+    var preview by remember { mutableStateOf<MapEditDraft?>(null) }
+    var previewAccount by remember { mutableStateOf<OsmCredentials?>(null) }
     var querying by remember { mutableStateOf(false) }
-    var candidates by remember { mutableStateOf<List<OsmDuplicateCandidate>>(emptyList()) }
     var reviewed by remember { mutableStateOf(false) }
+    var submitted by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -388,80 +446,90 @@ internal fun MapEditEditor(initial: MapEditDraft, busy: Boolean, canWriteMap: Bo
         require(!date.isAfter(LocalDate.now()))
         if (observationDate == originalDate) initial.observedAt else date.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
     }.getOrNull()
-    val draft = initial.copy(name = name.trim(), street = street.trim(), houseNumber = number.trim(), preset = preset,
+    var draft = initial.copy(name = name.trim(), phone = phone.trim(),
+        nameAction = if (name.isBlank()) MapEditFieldAction.UNTOUCHED else MapEditFieldAction.SET,
+        phoneAction = if (phone.isBlank()) MapEditFieldAction.UNTOUCHED else MapEditFieldAction.SET,
         surveyConfirmed = survey, observedAt = observedAt ?: initial.observedAt)
+    snapshot?.let { draft = draft.selectPreset(org.iz.navigation.osmcatalog.OsmPresetRuleSnapshot.fromJson(it)) }
     val valid = observedAt != null && runCatching { validateMapEditForPublish(draft) }.isSuccess
-    val locked = busy || querying || authBusy
+    val saveValid = observedAt != null && runCatching { validateMapEdit(draft) }.isSuccess
+    val locked = busy || querying || authBusy || submitted
     val auth = remember(context) { OsmAuthManager.get(context) }
+    val account by auth.communitySessionSource.sessions.collectAsStateWithLifecycle()
+    LaunchedEffect(account) { preview = null; reviewed = false }
+    LaunchedEffect(busy) { if (!busy) submitted = false }
     val exit = OsmDraftExitOwner("osm-map-edit/" + initial.id,
-        accountKey = { auth.communitySessionSource.sessions.value?.let { it.userId.toString() + ":" + it.generation } },
-        working = { listOf(name.trim(), street.trim(), number.trim(), preset, survey, observationDate) },
+        accountKey = { auth.communitySessionSource.sessions.value?.let { "${it.userId}:${it.generation}" } },
+        working = { listOf(name, phone, snapshot, survey, observationDate) },
         baseline = { liveBaseline().let { saved ->
-            listOf(saved.name, saved.street, saved.houseNumber, saved.preset, saved.surveyConfirmed,
+            listOf(saved.name, saved.phone, saved.presetSnapshot, saved.surveyConfirmed,
                 Instant.ofEpochMilli(saved.observedAt).atZone(ZoneId.systemDefault()).toLocalDate().toString())
-        } },
-        busy = { liveBusy() || querying },
+        } }, busy = { liveBusy() || querying || submitted },
         discard = { liveBaseline().let { saved ->
-            name = saved.name; street = saved.street; number = saved.houseNumber; preset = saved.preset
-            survey = saved.surveyConfirmed
+            name = saved.name; phone = saved.phone; snapshot = saved.presetSnapshot; survey = saved.surveyConfirmed
             observationDate = Instant.ofEpochMilli(saved.observedAt).atZone(ZoneId.systemDefault()).toLocalDate().toString()
         } })
-    Dialog(onDismissRequest = { if (!locked) { if (preview) { preview = false; reviewed = false } else exit(onClose) } }, properties = DialogProperties(usePlatformDefaultWidth = false,
-        dismissOnBackPress = !locked, dismissOnClickOutside = !locked)) {
+    Dialog(onDismissRequest = { if (!locked) { if (preview != null) { preview = null; reviewed = false } else exit(onClose) } },
+        properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnBackPress = !locked, dismissOnClickOutside = !locked)) {
         Surface(Modifier.padding(16.dp).widthIn(max = 560.dp).fillMaxWidth(), shape = MaterialTheme.shapes.extraLarge, tonalElevation = 6.dp) {
             Column(Modifier.verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(if (preview) "Mekânı yayımlamadan önce" else "Yeni OSM mekânı", style = MaterialTheme.typography.headlineSmall)
+                Text(if (preview != null) "OSM'de yayımlamadan önce" else "Yeni OSM mekânı", style = MaterialTheme.typography.headlineSmall)
                 (error ?: authError)?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                if (preview) {
-                    Text(draft.name.ifBlank { "İsimsiz ${draft.preset.label.lowercase(Locale.forLanguageTag("tr"))}" }, style = MaterialTheme.typography.titleMedium)
-                    Text("Kategori: ${preset.label}\nKonum: ${draft.latitude}, ${draft.longitude}")
-                    if (street.isNotBlank() || number.isNotBlank()) Text("Adres: $street $number")
+                val prepared = preview
+                if (prepared != null) {
+                    Text("OSM hesabı · ${previewAccount?.user?.displayName ?: "Oturum açılmadı"}")
+                    Text("Ad: ${prepared.name.ifBlank { "Adsız" }}")
+                    Text("Tür: ${mapEditPresetLabel(prepared.presetSnapshot) ?: "Tür seçilmemiş"}")
+                    Text("Telefon: ${prepared.phone.ifBlank { "Yok" }}")
+                    Text("Konum: ${prepared.latitude}, ${prepared.longitude}")
+                    Text("OSM etiket ayrıntıları", style = MaterialTheme.typography.titleSmall)
+                    prepared.publicTags().forEach { (key, value) -> Text("$key: $value") }
                     Text("Bu bilgiler ve konum OSM hesabınla herkese açık haritaya eklenecek. Kaynak: yerinde gözlem.")
-                    Text(if (candidates.isEmpty()) "Aynı kategoride yakında bir kayıt bulunmadı." else "Yakında veya bu konumu kapsayan alanlarda mevcut kayıtlar var:")
-                    candidates.forEach { candidate ->
-                        TextButton(onClick = { MediaShare.openUrl(context, "https://www.openstreetmap.org/${candidate.ref.type.name.lowercase(Locale.ROOT)}/${candidate.ref.id}") }) {
-                            Text("${candidate.name} · OSM'de incele")
-                        }
-                    }
-                    Row {
-                        Checkbox(reviewed, { reviewed = it }, enabled = !locked, modifier = Modifier.testTag("osm-map-duplicates-reviewed"))
-                        Text("Mevcut kayıtları kontrol ettim; eklediğim mekân bunlardan farklı.", Modifier.padding(top = 12.dp))
-                    }
-                    if (canWriteMap) Button(onClick = { onPublish(draft, candidates.map { it.ref }.toSet()) },
-                        enabled = !locked && reviewed && valid, modifier = Modifier.fillMaxWidth().testTag("osm-map-publish")) { Text("OSM'de yayımla") }
-                    else Button(onClick = { onLogin(draft) }, enabled = !locked && reviewed && valid,
-                        modifier = Modifier.fillMaxWidth()) { Text("OSM düzenleme iznini etkinleştir") }
-                    TextButton(onClick = { preview = false; reviewed = false }, enabled = !locked) { Text("Düzenlemeye dön") }
+                    CorrectionConfirmationRow("Yayımlanacak bilgileri ve OSM hesabımı kontrol ettim.",
+                        "osm-map-publish-reviewed", reviewed, !locked) { reviewed = it }
+                    if (canWriteMap) Button(onClick = {
+                        if (!submitted && auth.currentCredentials() === previewAccount) {
+                            submitted = true; preview = null; onPublish(prepared)
+                        } else { preview = null; reviewed = false; error = "OSM oturumu değişti. Yeniden incele." }
+                    }, enabled = !locked && reviewed, modifier = Modifier.fillMaxWidth().testTag("osm-map-publish")) { Text("OSM'de yayımla") }
+                    else Button(onClick = { onLogin(prepared) }, enabled = !locked && reviewed, modifier = Modifier.fillMaxWidth()) { Text("OSM düzenleme iznini etkinleştir") }
+                    TextButton(onClick = { preview = null; reviewed = false }, enabled = !locked) { Text("Düzenlemeye dön") }
                 } else {
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        MapPlacePreset.entries.filter { it.canCreate }.forEach { option -> FilterChip(preset == option, { preset = option; survey = false }, { Text(option.label) }, enabled = !locked) }
+                    if (initial.legacyAddressIntent) {
+                        Text("Eski taslaktaki adres değişiklikleri korunuyor ve yayımlamadan önce gösterilecek.")
+                        if (initial.street.isNotBlank()) Text("addr:street: ${initial.street}")
+                        if (initial.houseNumber.isNotBlank()) Text("addr:housenumber: ${initial.houseNumber}")
                     }
-                    OutlinedTextField(name, { name = it; survey = false }, label = { Text("Gerçek adı (varsa)") },
-                        supportingText = { Text("Adı olmayan yer için boş bırak. En fazla 255 karakter.") }, isError = name.codePointCount(0, name.length) > 255,
-                        modifier = Modifier.fillMaxWidth().testTag("osm-map-name"), enabled = !locked)
-                    OutlinedTextField(street, { street = it; survey = false }, label = { Text("Cadde / sokak (varsa)") },
-                        isError = street.codePointCount(0, street.length) > 255, modifier = Modifier.fillMaxWidth(), enabled = !locked)
-                    OutlinedTextField(number, { number = it; survey = false }, label = { Text("Kapı numarası (varsa)") },
-                        isError = number.codePointCount(0, number.length) > 255, modifier = Modifier.fillMaxWidth(), enabled = !locked)
+                    OutlinedTextField(name, { name = it; survey = false }, label = { Text("Ad (isteğe bağlı)") },
+                        isError = name.codePointCount(0, name.length) > 255, modifier = Modifier.fillMaxWidth().testTag("osm-map-name"), enabled = !locked)
+                    Text("Tür (zorunlu)", style = MaterialTheme.typography.labelLarge)
+                    MapEditPresetSelector(catalog, org.iz.navigation.osmcatalog.OsmPresetGeometry.POINT, snapshot,
+                        favoriteIds, !locked, { snapshot = it.toJson(); survey = false }, onFavorite)
+                    if (catalog == null) Text("Tür kataloğu yüklenemedi veya henüz hazır değil. Taslağını saklayabilirsin.")
+                    OutlinedTextField(phone, { phone = it; survey = false }, label = { Text("Telefon (isteğe bağlı)") },
+                        isError = phone.codePointCount(0, phone.length) > 255, modifier = Modifier.fillMaxWidth().testTag("osm-map-phone"), enabled = !locked)
                     OutlinedTextField(observationDate, { observationDate = it; survey = false }, label = { Text("Gözlem tarihi") },
-                        supportingText = { Text("Yıl-ay-gün, örneğin 2026-09-10. Bu tarih cihazında saklanır.") },
-                        isError = observedAt == null, singleLine = true, modifier = Modifier.fillMaxWidth(), enabled = !locked)
-                    Row {
-                        Checkbox(survey, { survey = it }, enabled = !locked, modifier = Modifier.testTag("osm-map-survey"))
-                        Text("Bu konumu ve bilgileri yerinde doğruladım.", Modifier.padding(top = 12.dp))
-                    }
+                        supportingText = { Text("Yıl-ay-gün. Bu tarih cihazında saklanır.") }, isError = observedAt == null,
+                        singleLine = true, modifier = Modifier.fillMaxWidth(), enabled = !locked)
+                    CorrectionConfirmationRow("Bu konumu ve bilgileri yerinde doğruladım.", "osm-map-survey", survey, !locked) { survey = it }
                     Button(enabled = valid && !locked, modifier = Modifier.fillMaxWidth(), onClick = {
                         querying = true; error = null; reviewed = false
+                        val reviewedDraft = draft
+                        val credentials = auth.currentCredentials()
                         scope.launch {
-                            try { candidates = onPreview(draft); preview = true }
-                            catch (cancelled: CancellationException) { throw cancelled }
-                            catch (_: Exception) { error = "Mevcut mekânlar kontrol edilemedi. Taslağı saklayıp daha sonra tekrar deneyebilirsin." }
+                            try {
+                                val normalized = onPreview(reviewedDraft)
+                                check(normalized == reviewedDraft.editableCopy()) { "Taslak değişti." }
+                                if (auth.currentCredentials() === credentials) { previewAccount = credentials; preview = normalized }
+                                else error = "OSM oturumu değişti. Yeniden incele."
+                            } catch (cancelled: CancellationException) { throw cancelled }
+                            catch (_: Exception) { error = "Taslak önizlemeye hazırlanamadı. Taslağını saklayıp yeniden deneyebilirsin." }
                             finally { querying = false }
                         }
-                    }) { Text("Mevcut yerleri kontrol et ve önizle") }
+                    }) { Text("Önizle") }
                 }
-                OutlinedButton(enabled = !locked && observedAt != null && runCatching { validateMapEdit(draft) }.isSuccess, onClick = { onSave(draft) }, modifier = Modifier.fillMaxWidth()) { Text("Taslağı sakla") }
-                if (locked) LinearProgressIndicator(Modifier.fillMaxWidth())
+                if (preview == null) OutlinedButton(enabled = !locked && saveValid, onClick = { onSave(draft) }, modifier = Modifier.fillMaxWidth()) { Text("Taslağı sakla") }
+                if (locked) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("Yayımlanıyor veya işlem hazırlanıyor…") }
                 TextButton(onClick = { exit(onClose) }, enabled = !locked) { Text("Kapat") }
             }
         }

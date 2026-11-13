@@ -5,6 +5,7 @@ import org.iz.navigation.BuildConfig
 import org.iz.navigation.data.OsmRef
 import org.iz.navigation.data.OsmType
 import org.iz.navigation.data.SelectedOsmPlace
+import org.iz.navigation.osmcatalog.OsmPresetCatalog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlin.coroutines.coroutineContext
@@ -36,6 +37,8 @@ class OsmPlaces(context: Context) {
     private val app = context.applicationContext
     private val settings = OsmServiceSettings(app)
     private val preferences = app.getSharedPreferences("osm_read_limits", Context.MODE_PRIVATE)
+    private val editorCatalog by lazy { OsmPresetCatalog.load(app.assets.open(OsmPresetCatalog.BUNDLED_ASSET)) }
+    private val editorMatchKeys by lazy { osmEditorMatchKeys(editorCatalog) }
     private val cacheDirectory = File(app.cacheDir, "osm_place_queries")
     private val surveyCacheDirectory = File(app.cacheDir, "osm_survey_queries")
     private val overpassRead = OverpassRead(
@@ -95,11 +98,11 @@ class OsmPlaces(context: Context) {
             // A ten metre cache cell prevents repeated taps on the same visible POI from re-querying.
             val lat = String.format(Locale.US, "%.4f", latitude)
             val lon = String.format(Locale.US, "%.4f", longitude)
-            val key = "nearby:$endpoint:$lat:$lon"
-            cached(key, 600_000, ::parseOverpassPlaces)?.let { return@withLock it }
-            val query = "[out:json][timeout:15][maxsize:16777216];nwr(around:100,$lat,$lon)[~\"^(amenity|shop|tourism|leisure|office|craft|historic)$\"~\".\"];out center tags qt;"
+            val key = "nearby:editor-v2:${OsmPresetCatalog.BUNDLED_SHA256}:$endpoint:$lat:$lon"
+            cached(key, 600_000) { parseOverpassPlaces(it, editorCatalog) }?.let { return@withLock it }
+            val query = osmEditorNearbyQuery(latitude, longitude, editorMatchKeys)
             val json = performOverpass(query)
-            val result = parseOverpassPlaces(json)
+            val result = parseOverpassPlaces(json, editorCatalog)
             storeCache(key, json)
             result
         }
@@ -233,22 +236,6 @@ internal fun parseNominatimPlaces(json: String): List<SelectedOsmPlace> {
     }
 }
 
-internal fun parseOverpassPlaces(json: String): List<SelectedOsmPlace> {
-    val array = JSONObject(json).optJSONArray("elements") ?: return emptyList()
-    return (0 until array.length()).mapNotNull { index ->
-        val item = array.optJSONObject(index) ?: return@mapNotNull null
-        val ref = osmRef(item.optString("type"), item.optLong("id")) ?: return@mapNotNull null
-        val location = if (ref.type == OsmType.NODE) item else item.optJSONObject("center") ?: return@mapNotNull null
-        val latitude = location.optDouble("lat", Double.NaN)
-        val longitude = location.optDouble("lon", Double.NaN)
-        if (!validCoordinate(latitude, longitude)) return@mapNotNull null
-        val tags = item.optJSONObject("tags") ?: return@mapNotNull null
-        val name = listOf("name:tr", "name", "brand", "amenity", "shop", "tourism", "leisure", "office", "craft", "historic")
-            .firstNotNullOfOrNull { tags.optString(it).takeIf(String::isNotBlank) } ?: return@mapNotNull null
-        SelectedOsmPlace(name.replace('_', ' '), latitude, longitude, ref)
-    }.distinctBy { it.osmRef }
-}
-
 /** Read the identity of the feature actually hit, even while a new source update is still rendering. */
 internal fun parseRenderedOsmPlace(json: String): SelectedOsmPlace? = runCatching {
     val feature = JSONObject(json)
@@ -275,16 +262,6 @@ internal fun readValidCachedPlaces(
 internal fun readValidCachedJson(file: File, now: Long, maxAge: Long): String? = runCatching {
     if (!file.isFile || file.length() > 512_000 || now - file.lastModified() !in 0..maxAge) null else file.readText()
 }.getOrNull()
-
-private fun osmRef(type: String, id: Long): OsmRef? {
-    if (id <= 0) return null
-    val kind = when (type) { "node" -> OsmType.NODE; "way" -> OsmType.WAY; "relation" -> OsmType.RELATION; else -> return null }
-    return OsmRef(kind, id)
-}
-
-internal fun validCoordinate(latitude: Double?, longitude: Double?): Boolean =
-    latitude != null && longitude != null && latitude.isFinite() && longitude.isFinite() &&
-        latitude in -90.0..90.0 && longitude in -180.0..180.0
 
 private fun cacheKey(key: String): String = MessageDigest.getInstance("SHA-256").digest(key.toByteArray()).joinToString("") { "%02x".format(it) }
 

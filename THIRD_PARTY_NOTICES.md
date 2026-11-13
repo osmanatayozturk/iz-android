@@ -65,3 +65,16 @@ OpenStreetMap, routing, weather, TomTom and Supabase services have their own
 terms and usage limits. Publishing the source does not grant service credentials
 or permission to exceed those limits. Optional providers are configured by the
 person building or using the app.
+
+## iD Tagging Schema preset catalogue
+
+The offline OSM editor packages a point/area projection of OpenStreetMap / iD
+contributors' iD Tagging Schema v7.3.0, commit
+`f4cd7759d2ef509ae0360662988208d16a21374c`, under the ISC license.
+The full ISC notice and attribution ship in `assets/licenses/`.
+The pinned English/Turkish inputs, generator and byte/hash provenance are in
+`tools/osm-catalogue/`. No icon, font, image or NSI brand assets are included.
+This catalogue is a preset selection, not a claim of all possible OSM tags.
+
+- [Pinned upstream source](https://github.com/openstreetmap/id-tagging-schema/tree/f4cd7759d2ef509ae0360662988208d16a21374c)
+- [Upstream ISC license](https://github.com/openstreetmap/id-tagging-schema/blob/f4cd7759d2ef509ae0360662988208d16a21374c/LICENSE.md)

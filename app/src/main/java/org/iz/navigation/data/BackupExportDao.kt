@@ -14,6 +14,7 @@ internal data class BackupDraftsRow(override val backupKey: Long, @Embedded over
 internal data class BackupContributionsRow(override val backupKey: Long, @Embedded override val value: ContributionDraft) : BackupRecord<ContributionDraft>
 internal data class BackupHealthSamplesRow(override val backupKey: Long, @Embedded override val value: JourneyHealthSample) : BackupRecord<JourneyHealthSample>
 internal data class BackupMapEditsRow(override val backupKey: Long, @Embedded override val value: MapEditDraft) : BackupRecord<MapEditDraft>
+internal data class BackupOsmPresetFavoritesRow(override val backupKey: Long, @Embedded override val value: OsmPresetFavorite) : BackupRecord<OsmPresetFavorite>
 internal data class BackupWatchHealthSessionsRow(override val backupKey: Long, @Embedded override val value: WatchHealthSession) : BackupRecord<WatchHealthSession>
 internal data class BackupWatchHealthSamplesRow(override val backupKey: Long, @Embedded override val value: WatchHealthSample) : BackupRecord<WatchHealthSample>
 internal data class BackupPlansRow(override val backupKey: Long, @Embedded override val value: SavedRoutePlanEntity) : BackupRecord<SavedRoutePlanEntity>
@@ -51,6 +52,8 @@ internal interface BackupExportDao {
     suspend fun healthSamples(first: Long, limit: Int): List<BackupHealthSamplesRow>
     @Query("SELECT t.rowid AS backupKey, t.* FROM map_edit_drafts t WHERE t.rowid >= :first AND 1 ORDER BY t.rowid LIMIT :limit")
     suspend fun mapEdits(first: Long, limit: Int): List<BackupMapEditsRow>
+    @Query("SELECT t.rowid AS backupKey, t.* FROM osm_preset_favorites t WHERE t.rowid >= :first ORDER BY t.rowid LIMIT :limit")
+    suspend fun osmPresetFavorites(first: Long, limit: Int): List<BackupOsmPresetFavoritesRow>
     @Query("SELECT t.rowid AS backupKey, t.* FROM watch_health_sessions t WHERE t.rowid >= :first AND EXISTS (SELECT 1 FROM journeys j WHERE j.id=t.journeyId AND j.status='CONFIRMED') ORDER BY t.rowid LIMIT :limit")
     suspend fun watchHealthSessions(first: Long, limit: Int): List<BackupWatchHealthSessionsRow>
     @Query("SELECT t.rowid AS backupKey, t.* FROM watch_health_samples t WHERE t.rowid >= :first AND EXISTS (SELECT 1 FROM journeys j WHERE j.id=t.journeyId AND j.status='CONFIRMED') ORDER BY t.rowid LIMIT :limit")

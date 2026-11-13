@@ -116,4 +116,5 @@ data class DiarySnapshot(
     val memberships: List<CollectionMembership> = emptyList(),
     val destinationShortcuts: List<DestinationShortcutRef> = emptyList(),
     val leanSessions: List<org.iz.navigation.lean.LeanBackupSession> = emptyList(),
+    val osmPresetFavorites: List<OsmPresetFavorite> = emptyList(),
 )

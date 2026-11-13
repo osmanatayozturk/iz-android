@@ -73,6 +73,18 @@ class PlaceInformationDiscoveryUiTest {
         compose.runOnIdle { assertEquals(3, reads); owner.close(); lateClosed.complete(Unit) }
         compose.runOnIdle { assertEquals(listOf(second), selected.toList()); assertFalse(owner.state.busy); assertTrue(owner.state.choices.isEmpty()) }
     }
+
+    @Test fun unnamedBuildingKeepsItsRealIdentityAndRequiresChoiceAmongMultipleCandidates() {
+        val building = SelectedOsmPlace("", 41.01, 29.01, OsmRef(OsmType.WAY, 804))
+        show { _, _ -> listOf(building, first) }
+        compose.runOnIdle { owner.tap(41.0, 29.0, 17.0) }
+        compose.onNodeWithTag("place-info-discovery-choice-0").assertIsDisplayed()
+            .assertTextContains("way/804", substring = true)
+        compose.onNodeWithTag("place-info-discovery-choice-1").assertIsDisplayed()
+        compose.runOnIdle { assertTrue(selected.isEmpty()); assertEquals(listOf(building, first), owner.state.choices) }
+        compose.onNodeWithTag("place-info-discovery-choice-0").performClick()
+        compose.runOnIdle { assertEquals(listOf(building), selected.toList()) }
+    }
     @Test fun endpointAndScreenChangesRejectLateResultsAndRetainedChoice() {
         val late = deferred()
         var reads = 0
@@ -91,7 +103,7 @@ class PlaceInformationDiscoveryUiTest {
         compose.runOnIdle { assertEquals(0, reads) }
         compose.onNodeWithTag("place-info-discovery-close").performClick()
         compose.runOnIdle { owner.tap(41.0, 29.0, 17.0) }
-        compose.onNodeWithText("Yakında bir OSM yeri bulunamadı. Uzun basarak özel bir yer ekleyebilirsin.").assertIsDisplayed()
+        compose.onNodeWithText("Yakında bir OSM yeri veya bina bulunamadı. Yeni OSM mekânı için haritaya uzun basabilirsin.").assertIsDisplayed()
         compose.runOnIdle { assertEquals(1, reads); assertTrue(selected.isEmpty()) }
         compose.onNodeWithTag("place-info-discovery-close").performClick()
         compose.runOnIdle { owner.tap(41.0, 29.0, 17.0) }

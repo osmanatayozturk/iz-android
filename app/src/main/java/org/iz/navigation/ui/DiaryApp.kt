@@ -171,6 +171,8 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     var surveyPage by navigator.pageFlag(UiPage.OSM_SURVEY)
     var correctionPicker by rememberUiEntryState<Boolean>(history) { false }
     val correctionTargetState = rememberUiEntryState<Place?>(history) { null }
+    val mapEditCoordinateState = rememberUiEntryState<GeoCoordinate?>(history) { null }
+    val mapEditCoordinate by mapEditCoordinateState
     val correctionTarget by correctionTargetState
     var weatherPage by navigator.pageFlag(UiPage.WEATHER)
     var navigationPage by navigator.pageFlag(UiPage.DIRECTIONS)
@@ -812,7 +814,13 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                             navigator.open(UiPage.PLACES, shortcutAssignmentId(kind))
                         }
                     },
-                    onPin = { openAddPlace(location = it) })
+                    onPin = { coordinate ->
+                        if (history.current.key == uiEntry.key && uiEntry.page == UiPage.MAP) exitGuard.requestExit {
+                            exitGuard.update(null)
+                            val entry = history.push(UiPage.MAP_EDITS, "new-coordinate")
+                            mapEditCoordinateState.setForEntry(entry.key, coordinate)
+                        }
+                    })
                 tab == 1 -> browseHolder.SaveableStateProvider(uiEntry.key) { JourneysScreen(state, now, onJourney = { selectedJourney = it.id }, onStart = { transportAction = TransportAction() }, onConfirm = { transportAction = TransportAction(it.id) }, onReject = { j -> deletion = Deletion("Bu geçici rota silinecek ve açıksa takip duracak.") { vm.tracker.reject(j.id) } }) }
                 shortcutAssignment != null -> DestinationShortcutAssignmentScreen(shortcutAssignment, state.places,
                     busy = resultOwner.formBusy.value, error = shortcutError,
@@ -958,6 +966,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                 initialCorrection = correctionTarget ?: state.places.firstOrNull { it.id == targetId },
                 initialDraftId = uiEntry.entityId?.takeIf { it.startsWith("draft:") }?.removePrefix("draft:"),
                 startNew = uiEntry.entityId == "new",
+                initialCoordinate = mapEditCoordinate.takeIf { uiEntry.entityId == "new-coordinate" },
                 startSurvey = uiEntry.entityId == "survey" || uiEntry.entityId?.startsWith("survey-place:") == true,
                 onNoteFallback = ::openPlaceNote)
         }

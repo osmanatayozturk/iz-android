@@ -7,6 +7,11 @@ import org.iz.navigation.data.OsmType
 import org.iz.navigation.data.validateMapEditForPublish
 import org.iz.navigation.data.publicChanges
 import org.iz.navigation.data.surveyObservation
+import org.iz.navigation.data.editorTags
+import org.iz.navigation.data.MapEditFieldAction
+import org.iz.navigation.osmcatalog.OsmPresetCatalog
+import org.iz.navigation.osmcatalog.OsmPresetGeometry
+import org.iz.navigation.osmcatalog.OsmPresetRuleSnapshot
 import java.util.Locale
 import okio.ByteString.Companion.encodeUtf8
 import org.w3c.dom.Element
@@ -53,6 +58,16 @@ internal data class OsmCorrectionElement(
     fun review(draft: MapEditDraft, credentials: OsmCredentials): OsmCorrectionReview {
         validateMapEditForPublish(draft)
         require(ref == draft.correctionRef())
+        if (draft.editorVersion == 2) {
+            editorGeometry(draft.originalPresetSnapshot?.let(OsmPresetRuleSnapshot::fromJson))
+            require(version < Long.MAX_VALUE)
+            val corrected = copy(tags = draft.editorTags(tags))
+            val fields = (tags.keys + corrected.tags.keys).sorted().mapNotNull { key ->
+                if (tags[key] == corrected.tags[key]) null else OsmCorrectionField(key, tags[key], corrected.tags[key])
+            }
+            require(fields.isNotEmpty()) { "En az bir bilgiyi değiştir." }
+            return OsmCorrectionReview(draft, this, corrected, credentials, fields)
+        }
         if (preset() != draft.preset) throw OsmUnsupportedCorrection()
         require(version < Long.MAX_VALUE)
         val nameFields = listOf("name" to draft.name, "addr:street" to draft.street, "addr:housenumber" to draft.houseNumber)
@@ -88,6 +103,74 @@ internal data class OsmCorrectionElement(
         }
         append("</$kind>")
     }
+}
+
+internal fun OsmCorrectionElement.editorTopology(): OsmPresetGeometry {
+    if (ref.type == OsmType.NODE) return OsmPresetGeometry.POINT
+    if (ref.type != OsmType.WAY || tags["area"] == "no" || nodeRefs.size < 4 ||
+        nodeRefs.first() != nodeRefs.last() || nodeRefs.dropLast(1).toSet().size != nodeRefs.size - 1) {
+        throw OsmUnsupportedCorrection()
+    }
+    return OsmPresetGeometry.AREA
+}
+
+/** Closure is topology only. An area editor additionally needs a matching frozen area recipe. */
+internal fun OsmCorrectionElement.editorGeometry(snapshot: OsmPresetRuleSnapshot? = null): OsmPresetGeometry {
+    val geometry = editorTopology()
+    if (geometry == OsmPresetGeometry.AREA && snapshot?.providesAreaEvidence(tags) != true) throw OsmUnsupportedCorrection()
+    return geometry
+}
+
+internal fun OsmCorrectionElement.editorGeometry(catalog: OsmPresetCatalog): OsmPresetGeometry {
+    val geometry = editorTopology()
+    if (geometry == OsmPresetGeometry.POINT) return geometry
+    val recognized = catalog.identify(tags, geometry).firstOrNull { record ->
+        record.tags.keys.any { it != "area" && it != "name" && !it.startsWith("addr:") }
+    } ?: throw OsmUnsupportedCorrection()
+    val frozen = OsmPresetRuleSnapshot(catalog.commit, catalog.sha256, recognized.id, geometry, recognized.ruleJson)
+    return editorGeometry(frozen)
+}
+
+internal fun OsmCorrectionElement.phoneText(): String = listOfNotNull(tags["phone"], tags["contact:phone"])
+    .filter(String::isNotBlank).distinct().joinToString("; ")
+
+internal fun OsmCorrectionElement.editorDraft(catalog: OsmPresetCatalog, id: String, latitude: Double, longitude: Double): MapEditDraft {
+    val geometry = editorGeometry(catalog)
+    val recognized = catalog.identify(tags, geometry).firstOrNull { record ->
+        geometry == OsmPresetGeometry.POINT || record.tags.keys.any { it != "area" && it != "name" && !it.startsWith("addr:") }
+    }
+    val frozen = recognized?.let { OsmPresetRuleSnapshot(catalog.commit, catalog.sha256, it.id, geometry, it.ruleJson).toJson() }
+    return MapEditDraft(id = id, latitude = latitude, longitude = longitude, editorVersion = 2,
+        targetType = ref.type, targetId = ref.id, name = tags["name"].orEmpty(), phone = phoneText(),
+        presetId = recognized?.id, presetSnapshot = frozen, originalPresetSnapshot = frozen)
+}
+
+internal fun OsmCorrectionElement.upgradeEditorDraft(draft: MapEditDraft, catalog: OsmPresetCatalog): MapEditDraft {
+    if (draft.editorVersion == 2) return draft
+    val upgraded = editorDraft(catalog, draft.id, draft.latitude, draft.longitude)
+    return draft.copy(editorVersion = 2, presetId = upgraded.presetId, presetSnapshot = upgraded.presetSnapshot,
+        originalPresetSnapshot = upgraded.originalPresetSnapshot, phone = upgraded.phone,
+        name = draft.name.ifBlank { upgraded.name },
+        nameAction = if (draft.name.isBlank()) MapEditFieldAction.UNTOUCHED else MapEditFieldAction.SET,
+        legacyAddressIntent = draft.street.isNotBlank() || draft.houseNumber.isNotBlank())
+}
+
+/** Explicit user refresh only: preserve edited fields, replace origin evidence, and require new consent. */
+internal fun OsmCorrectionElement.rebaseEditorDraft(draft: MapEditDraft, catalog: OsmPresetCatalog): MapEditDraft {
+    require(ref == draft.correctionRef())
+    require(draft.surveyPayload == null) { "Yerinde gözlem taslağını kendi formunda incele." }
+    val upgraded = if (draft.editorVersion == 2) draft else upgradeEditorDraft(draft, catalog)
+    val editable = upgraded.editableCopy()
+    val fresh = editorDraft(catalog, draft.id, draft.latitude, draft.longitude)
+    val selected = if (editable.typeChanged) editable.presetSnapshot else fresh.presetSnapshot
+    return editable.copy(
+        presetId = if (editable.typeChanged) editable.presetId else fresh.presetId,
+        presetSnapshot = selected, originalPresetSnapshot = fresh.originalPresetSnapshot,
+        typeChanged = editable.typeChanged && selected != fresh.originalPresetSnapshot,
+        name = if (editable.nameAction == MapEditFieldAction.UNTOUCHED) fresh.name else editable.name,
+        phone = if (editable.phoneAction == MapEditFieldAction.UNTOUCHED) fresh.phone else editable.phone,
+        surveyConfirmed = false,
+    )
 }
 
 private fun xmlAttribute(value: String) = OsmMapEditXml.escape(value)

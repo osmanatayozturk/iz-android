@@ -147,7 +147,7 @@ class DiaryBackup(context: Context, private val repository: DiaryRepository) {
     }
 }
 internal object BackupJson {
-    private const val VERSION = 11
+    private const val VERSION = 12
     private const val FORMAT = "org.iz.navigation.backup"
     // Read compatibility for user-created backups from the former application identity.
     private const val LEGACY_FORMAT = "com.atay.iz.backup"
@@ -196,7 +196,13 @@ internal object BackupJson {
             "changesetClosed" to value.changesetClosed, "error" to value.error,
             "targetType" to value.targetType?.name, "targetId" to value.targetId,
             "reviewedVersion" to value.reviewedVersion, "reviewedFingerprint" to value.reviewedFingerprint,
-            "appliedVersion" to value.appliedVersion, "surveyPayload" to value.surveyPayload)
+            "appliedVersion" to value.appliedVersion, "surveyPayload" to value.surveyPayload,
+            "editorVersion" to value.editorVersion, "presetId" to value.presetId,
+            "presetSnapshot" to value.presetSnapshot, "originalPresetSnapshot" to value.originalPresetSnapshot,
+            "phone" to value.phone, "nameAction" to value.nameAction.name, "phoneAction" to value.phoneAction.name,
+            "typeChanged" to value.typeChanged, "legacyAddressIntent" to value.legacyAddressIntent)
+
+    internal fun recordOsmPresetFavorite(value: OsmPresetFavorite): JSONObject = json("presetId" to value.presetId)
 
     internal fun recordWatchHealthSessions(value: WatchHealthSession): JSONObject = json("id" to value.id, "journeyId" to value.journeyId, "watchId" to value.watchId,
                 "deviceName" to value.deviceName, "createdAt" to value.createdAt)
@@ -217,6 +223,7 @@ internal object BackupJson {
         "contributions" to array(value.contributions, ::recordContributions),
         "healthSamples" to array(if (includeHealth) value.healthSamples else emptyList(), ::recordHealthSamples),
         "mapEdits" to array(value.mapEdits, ::recordMapEdits),
+        "osmPresetFavorites" to array(value.osmPresetFavorites.sortedBy { it.presetId }, ::recordOsmPresetFavorite),
         "watchHealthSessions" to array(if (includeHealth) value.watchHealthSessions else emptyList(), ::recordWatchHealthSessions),
         "watchHealthSamples" to array(if (includeHealth) value.watchHealthSamples else emptyList(), ::recordWatchHealthSamples),
         "savedPlans" to array(value.savedPlans, TravelLibraryJson::plan),
@@ -231,6 +238,7 @@ internal object BackupJson {
         PlaceOrderRules.validate(value.places)
         validateMapSnapshot(value)
         value.mapEdits.forEach(::validateMapEdit)
+        validateOsmPresetFavorites(value.osmPresetFavorites)
         if (includeHealth) {
             HealthRules.validateSnapshot(value)
             WatchHealthRules.validateSnapshot(value.journeys, value.watchHealthSessions, value.watchHealthSamples)
@@ -308,8 +316,20 @@ internal object BackupJson {
                     remoteNodeVersion = it.strictNullLong("remoteNodeVersion"), changesetClosed = it.strictBoolean("changesetClosed"),
                     error = it.nullString("error"), targetType = targetType, targetId = targetId,
                     reviewedVersion = reviewedVersion, reviewedFingerprint = reviewedFingerprint, appliedVersion = appliedVersion,
-                    localAttemptId = null, localChangesetCreated = false, surveyPayload = surveyPayload)
+                    localAttemptId = null, localChangesetCreated = false, surveyPayload = surveyPayload,
+                    editorVersion = if (version < 12) 1 else it.strictLong("editorVersion").also { value -> require(value in 1..2) }.toInt(),
+                    presetId = if (version < 12) null else it.nullString("presetId"),
+                    presetSnapshot = if (version < 12) null else it.nullString("presetSnapshot"),
+                    originalPresetSnapshot = if (version < 12) null else it.nullString("originalPresetSnapshot"),
+                    phone = if (version < 12) "" else it.strictString("phone"),
+                    nameAction = if (version < 12) MapEditFieldAction.UNTOUCHED else MapEditFieldAction.valueOf(it.strictString("nameAction")),
+                    phoneAction = if (version < 12) MapEditFieldAction.UNTOUCHED else MapEditFieldAction.valueOf(it.strictString("phoneAction")),
+                    typeChanged = version >= 12 && it.strictBoolean("typeChanged"),
+                    legacyAddressIntent = version >= 12 && it.strictBoolean("legacyAddressIntent"))
             },
+            osmPresetFavorites = if (version < 12) emptyList() else records("osmPresetFavorites") {
+                OsmPresetFavorite(it.strictString("presetId"))
+            }.sortedBy { it.presetId },
             watchHealthSessions = if (version < 5) emptyList() else records("watchHealthSessions") {
                 WatchHealthSession(it.strictString("id"), it.strictString("journeyId"), it.strictString("watchId"),
                     it.strictString("deviceName"), it.strictLong("createdAt"), acceptsUploads = false)

@@ -206,10 +206,10 @@ internal class PlaceInformationDiscoveryOwner(private val scope: CoroutineScope,
                 ensureActive()
                 if (!accepts(token, expected)) return@launch
                 val valid = found.filter { it.osmRef?.id?.let { id -> id > 0 } == true &&
-                    it.name.isNotBlank() && validCoordinate(it.latitude, it.longitude) }.distinctBy { it.osmRef }
+                    validCoordinate(it.latitude, it.longitude) }.distinctBy { it.osmRef }
                 val bounded = valid.take(50)
                 state = PlaceInformationDiscoveryState(choices = if (bounded.size > 1) bounded else emptyList(), overlay = bounded,
-                    message = when { bounded.isEmpty() -> "Yakında bir OSM yeri bulunamadı. Uzun basarak özel bir yer ekleyebilirsin."
+                    message = when { bounded.isEmpty() -> "Yakında bir OSM yeri veya bina bulunamadı. Yeni OSM mekânı için haritaya uzun basabilirsin."
                         valid.size > 50 -> "İlk 50 yer gösteriliyor. Daha belirgin bir noktaya dokunarak daraltabilirsin."
                         else -> null }, generation = token, identity = expected)
                 if (bounded.size == 1) selectRendered(bounded.single())
@@ -256,7 +256,10 @@ internal fun PlaceInformationDiscoveryContent(owner: PlaceInformationDiscoveryOw
             discovery.message?.let { Text(it) }
             discovery.choices.forEachIndexed { index, place ->
                 TextButton({ owner.choose(place, discovery.generation) }, Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                    .testTag("place-info-discovery-choice-$index")) { Text("${index + 1}. ${place.name}") }
+                    .testTag("place-info-discovery-choice-$index")) {
+                    val ref = place.osmRef
+                    Text("${index + 1}. ${place.name.ifBlank { "Adsız OSM nesnesi" }} · ${ref?.type?.name?.lowercase()}/${ref?.id}")
+                }
             }
             Text("© OpenStreetMap katkıcıları", style = MaterialTheme.typography.bodySmall)
         }

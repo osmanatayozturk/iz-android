@@ -17,7 +17,7 @@ internal class OsmMapCorrectionPublisher(
     private val clock: () -> Long = System::currentTimeMillis,
     private val onUnauthorized: (OsmCredentials) -> Unit = {},
 ) {
-    suspend fun readSupported(ref: OsmRef): OsmCorrectionElement = api.readElement(ref).also { it.preset() }
+    suspend fun readSupported(ref: OsmRef): OsmCorrectionElement = api.readElement(ref).also { it.editorTopology() }
 
     suspend fun preview(draft: MapEditDraft): OsmCorrectionReview {
         val session = account()?.takeIf { "write_api" in it.scopes }

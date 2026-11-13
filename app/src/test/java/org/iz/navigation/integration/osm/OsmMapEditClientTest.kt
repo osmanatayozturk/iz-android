@@ -47,27 +47,6 @@ class OsmMapEditClientTest {
         assertThrows(IllegalArgumentException::class.java) { OsmMapEditXml.parse("<!DOCTYPE osm [<!ENTITY x SYSTEM 'file:///private'>]><osm>&x;</osm>") }
     }
 
-    @Test fun duplicateQueryIncludesAreasAndFreshApiAndNeverHasBearerToken() = runBlocking {
-        val requests = mutableListOf<Request>()
-        val api = client { request ->
-            requests += request
-            if (request.url.host == "api.openstreetmap.org")
-                """{"elements":[{"type":"node","id":99,"lat":41,"lon":29,"tags":{"amenity":"cafe","name":"Yeni kayıt"}}]}"""
-            else """{"elements":[{"type":"way","id":77,"center":{"lat":41,"lon":29},"tags":{"amenity":"cafe","name":"Mevcut alan"}}]}"""
-        }
-        assertEquals(setOf(OsmRef(OsmType.WAY, 77), OsmRef(OsmType.NODE, 99)), api.nearby(draft).map { it.ref }.toSet())
-        assertTrue(requests.all { it.header("Authorization") == null })
-        val query = Buffer().also { requests.first().body!!.writeTo(it) }.readUtf8()
-        assertTrue(query.contains("pivot.containing"))
-        assertTrue(requests.last().url.toString().contains("/map.json?bbox="))
-    }
-
-    @Test fun incompleteOverpassResultCannotMeanNoDuplicates() {
-        assertThrows(IllegalArgumentException::class.java) {
-            parseDuplicateCandidates("""{"elements":[],"remark":"runtime error: timeout"}""", MapPlacePreset.CAFE)
-        }
-    }
-
     @Test fun networkFailureNeverRetriesMapWrite() = runBlocking {
         var calls = 0
         val api = OsmMapEditClient(OkHttpClient.Builder().addInterceptor { calls++; throw IOException("lost reply") }.build())

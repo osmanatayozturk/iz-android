@@ -116,6 +116,7 @@ object DiaryRules {
         HealthRules.validateSnapshot(snapshot)
         require(snapshot.mapEdits.map { it.id }.toSet().size == snapshot.mapEdits.size)
         snapshot.mapEdits.forEach(::validateMapEdit)
+        validateOsmPresetFavorites(snapshot.osmPresetFavorites)
         WatchHealthRules.validateSnapshot(snapshot.journeys, snapshot.watchHealthSessions, snapshot.watchHealthSamples)
         TravelLibraryRules.validate(snapshot)
         org.iz.navigation.lean.LeanBackupCodec.validateSnapshot(snapshot)

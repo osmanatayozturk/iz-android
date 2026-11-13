@@ -133,6 +133,9 @@ internal class PagedBackupExporter(
             BackupJson.recordHealthSamples(it)
         }
         array("mapEdits", load = dao::mapEdits) { validateMapEdit(it); BackupJson.recordMapEdits(it) }
+        array("osmPresetFavorites", MAX_OSM_PRESET_FAVORITES, dao::osmPresetFavorites) {
+            validateOsmPresetFavoriteId(it.presetId); BackupJson.recordOsmPresetFavorite(it)
+        }
         array("watchHealthSessions", load = { first, count -> if (includeHealth) dao.watchHealthSessions(first, count) else emptyList() }) {
             WatchHealthRules.validateSnapshot(listOfNotNull(journey(it.journeyId)), listOf(it), emptyList())
             BackupJson.recordWatchHealthSessions(it)

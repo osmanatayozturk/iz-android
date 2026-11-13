@@ -18,6 +18,7 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
     internal val leanStore = LeanStore(appContext, db)
     private val dao = db.diaryDao()
     private val mapDao = db.mapEditDao()
+    private val favoriteDao = db.osmPresetFavoriteDao()
     private val watchDao = db.watchHealthDao()
     private val libraryDao = db.travelLibraryDao()
     /** Invalidate CPU work before waiting; all raw mutations order Raw lease -> privacy -> Room. */
@@ -41,6 +42,15 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
     val drafts: Flow<List<ShareDraft>> = dao.drafts()
     val contributions: Flow<List<ContributionDraft>> = dao.contributions()
     val mapEdits: Flow<List<MapEditDraft>> = mapDao.observeAll()
+    val osmPresetFavorites: Flow<List<OsmPresetFavorite>> = favoriteDao.observeAll().distinctUntilChanged()
+
+    suspend fun setOsmPresetFavorite(presetId: String, favorite: Boolean) = db.withTransaction {
+        validateOsmPresetFavoriteId(presetId)
+        if (favorite) {
+            if (favoriteDao.get(presetId) == null) require(favoriteDao.count() < MAX_OSM_PRESET_FAVORITES)
+            favoriteDao.save(OsmPresetFavorite(presetId))
+        } else favoriteDao.delete(presetId)
+    }
     val healthSamples: Flow<List<JourneyHealthSample>> = combine(dao.healthSamples(), journeys) { values, trips ->
         val ids = trips.map { it.id }.toSet()
         values.filter { it.journeyId in ids }
@@ -488,7 +498,7 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
             savedPlans = libraryDao.allPlans().map { it.model() }, importedTracks = libraryDao.allTracks().map { it.model() },
             collections = libraryDao.allCollections().map { it.model() }, memberships = libraryDao.allMemberships().map { it.model() },
             destinationShortcuts = libraryDao.allShortcuts().map { DestinationShortcutRef(DestinationShortcutKind.valueOf(it.kind), it.placeId) },
-            leanSessions = leanStore.snapshot())
+            leanSessions = leanStore.snapshot(), osmPresetFavorites = favoriteDao.all())
     }
 
     suspend fun restore(snapshot: DiarySnapshot, leanRaw: Map<String, List<File>> = emptyMap()) {
@@ -515,7 +525,7 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
         deleteWithFiles(replaceAll = true) {
             libraryDao.clearShortcuts(); libraryDao.clearCollections(); libraryDao.clearTracks(); libraryDao.clearPlans()
             dao.clearHealthSamples(); dao.clearHealthSyncs()
-            watchDao.clearSamples(); watchDao.clearSessions(); mapDao.clear()
+            watchDao.clearSamples(); watchDao.clearSessions(); mapDao.clear(); favoriteDao.clear()
             dao.clearContributions(); dao.clearDrafts(); dao.clearPhotos(); dao.clearVisits(); dao.clearPoints(); dao.clearJourneys(); dao.clearPlaces()
             restoredJourneys.forEach { dao.save(it) }
             restoredPlaces.forEach { dao.save(it) }
@@ -531,6 +541,7 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
                 mapDao.save(it.copy(status = if (it.status == MapEditStatus.SENDING) MapEditStatus.UNKNOWN else it.status,
                     localAttemptId = null, localChangesetCreated = false))
             }
+            snapshot.osmPresetFavorites.forEach { favoriteDao.save(it) }
             snapshot.savedPlans.forEach { libraryDao.save(SavedRoutePlanEntity.from(TravelLibraryRules.normalizePlan(it))) }
             snapshot.importedTracks.forEach { libraryDao.storeTrack(TravelLibraryRules.normalizeTrack(it)) }
             snapshot.collections.forEach { libraryDao.save(JourneyCollectionEntity.from(it)) }

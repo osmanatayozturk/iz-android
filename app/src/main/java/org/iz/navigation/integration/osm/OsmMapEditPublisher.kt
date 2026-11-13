@@ -23,34 +23,38 @@ internal class OsmMapEditPublisher(
     private val clock: () -> Long = System::currentTimeMillis,
     private val onUnauthorized: (OsmCredentials) -> Unit = {},
 ) {
-    suspend fun send(id: String, reviewedCandidates: Set<OsmRef> = emptySet()): OsmContributionResult {
+    suspend fun send(id: String, reviewedDraft: MapEditDraft? = null): OsmContributionResult {
         val session = account()?.takeIf { "write_api" in it.scopes }
             ?: return failure("Mekân yayımlamak için OSM harita düzenleme iznini etkinleştir.")
         val draft = store.get(id) ?: return failure("Taslak bulunamadı.")
+        if ((reviewedDraft != null && reviewedDraft != draft) || (draft.editorVersion == 2 && reviewedDraft == null))
+            return failure("Taslak değişti. Yayımlanacak bilgileri yeniden incele.")
         if (draft.targetType != null) return failure("Düzeltmeyi güncel OSM bilgileriyle incele.")
         if (draft.status !in setOf(MapEditStatus.DRAFT, MapEditStatus.FAILED))
             return failure("Bu kayıt yeniden gönderilemez. Önce OSM sonucunu kontrol et.")
         try {
             validateMapEditForPublish(draft)
-            if (api.nearby(draft).map { it.ref }.toSet() != reviewedCandidates)
-                return failure("Yakındaki yerler değişti. Gönderimi yeniden önizleyip mevcut mekânları kontrol et.")
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { return failure("Yakındaki mekânlar doğrulanamadı. Taslağın saklı; bağlantını kontrol edip yeniden önizle.") }
-        if (account()?.token != session.token) return failure("OSM oturumu değişti. Hesabı kontrol edip yeniden önizle.")
+        catch (_: Exception) { return failure("Mekân bilgileri doğrulanamadı. Taslağın saklı; bilgileri kontrol edip yeniden önizle.") }
+        if (account() !== session) return failure("OSM oturumu değişti. Hesabı kontrol edip yeniden önizle.")
         var current = store.begin(id, session.user.id, clock()) ?: return failure("Taslak zaten gönderiliyor veya sonucu kontrol edilmeli.")
         try {
-            // The claim must be the same form whose duplicate list was reviewed before the suspending query.
+            // The durable claim must still be the exact form validated above.
             check(current.copy(status = draft.status, stage = draft.stage, submittedAt = draft.submittedAt,
                 submittedBy = draft.submittedBy, changesetId = draft.changesetId, remoteNodeId = draft.remoteNodeId,
                 remoteNodeVersion = draft.remoteNodeVersion, changesetClosed = draft.changesetClosed, error = draft.error,
                 localAttemptId = draft.localAttemptId, localChangesetCreated = draft.localChangesetCreated) == draft) {
-                "Draft changed during duplicate check"
+                "Draft changed before publication"
             }
-            val changesetId = api.createChangeset(session.token, current)
+            val changesetId = api.createChangeset(session.token, current) {
+                account() === session && store.isCurrentForDispatch(current)
+            }
             current = checkNotNull(store.recordLocalChangeset(current, changesetId)) { "Changeset could not be persisted" }
             // A disconnect/account change after creation must not publish with stale authorization.
-            check(account()?.token == session.token) { "OSM account changed" }
-            val node = api.uploadNode(session.token, current, changesetId)
+            check(account() === session) { "OSM account changed" }
+            val node = api.uploadNode(session.token, current, changesetId) {
+                account() === session && store.isCurrentForDispatch(current)
+            }
             require(node.id > 0 && node.version == 1L)
             val published = current.copy(status = MapEditStatus.SENT, stage = MapEditStage.CLOSE_CHANGESET,
                 remoteNodeId = node.id, remoteNodeVersion = node.version, error = null)
@@ -205,7 +209,7 @@ class OsmMapEditController internal constructor(
     private val api: OsmMapCorrectionGateway,
     onUnauthorized: (OsmCredentials) -> Unit = {},
 ) {
-    constructor(repository: DiaryRepository, auth: OsmAuthManager, overpassEndpoint: () -> String) : this(
+    constructor(repository: DiaryRepository, auth: OsmAuthManager) : this(
         object : OsmMapEditStore {
             override suspend fun get(id: String) = repository.getMapEdit(id)
             override fun isCurrentForDispatch(expected: MapEditDraft) = repository.isMapEditCurrentForDispatch(expected)
@@ -215,14 +219,13 @@ class OsmMapEditController internal constructor(
             override suspend fun compareAndSet(expected: MapEditDraft, updated: MapEditDraft) = repository.compareAndSetMapEdit(expected, updated)
         },
         auth::currentCredentials,
-        OsmMapEditClient(overpassEndpoint = overpassEndpoint),
+        OsmMapEditClient(),
         auth::rejectExpiredSession,
     )
 
     private val publisher = OsmMapEditPublisher(store, account, api, onUnauthorized = onUnauthorized)
     private val correction = OsmMapCorrectionPublisher(store, account, api, onUnauthorized = onUnauthorized)
-    suspend fun nearby(draft: MapEditDraft): List<OsmDuplicateCandidate> = api.nearby(draft)
-    suspend fun send(id: String, reviewedCandidates: Set<OsmRef>) = publisher.send(id, reviewedCandidates)
+    suspend fun send(draft: MapEditDraft) = publisher.send(draft.id, draft)
     internal suspend fun readCorrectionTarget(ref: OsmRef) = correction.readSupported(ref)
     internal suspend fun previewCorrection(draft: MapEditDraft) = correction.preview(draft)
     internal suspend fun sendCorrection(review: OsmCorrectionReview) = correction.send(review)

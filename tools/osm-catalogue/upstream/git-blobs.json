@@ -1,0 +1,9 @@
+{
+  "dist/presets.min.json": "a4e0d863ade745ac5c744cea4ff687ccfd30709c",
+  "dist/translations/tr.min.json": "e0638562c6813b12a2180a7d5629b1363d979535",
+  "dist/translations/en.min.json": "48ffc8e161f7522dbb20d421ea7ad825b20c3e26",
+  "package.json": "1bf394ea7f4fccd2c93178373485afac2bca8261",
+  "LICENSE.md": "5a0792d014a9198d6aa07f902f7df3d7b93b5e13",
+  "SCHEMA.md": "a9eb430d9e58ae503c10143f331ecaef90c2647c",
+  "README.md": "270c1e9cad87fe917e701fdfcf748553ff5071d6"
+}

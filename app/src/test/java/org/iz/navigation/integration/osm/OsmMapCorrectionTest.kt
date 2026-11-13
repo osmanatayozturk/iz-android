@@ -388,9 +388,7 @@ class OsmMapCorrectionTest {
             val result = if (legacy) {
                 store.value = store.value.copy(targetType = null, targetId = null,
                     latitude = 41.12345674, longitude = -29.23456784)
-                controller(object : OsmMapCorrectionGateway by client {
-                    override suspend fun nearby(draft: MapEditDraft) = emptyList<OsmDuplicateCandidate>()
-                }).send(store.value.id, emptySet())
+                controller().send(store.value)
             } else publisher().send(review())
             assertTrue(result.success)
             assertEquals(1, closeRequests.size)

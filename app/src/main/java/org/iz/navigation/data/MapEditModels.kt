@@ -8,6 +8,7 @@ import java.util.UUID
 
 enum class MapEditStatus { DRAFT, SENDING, SENT, FAILED, UNKNOWN }
 enum class MapEditStage { NONE, CREATE_CHANGESET, UPLOAD_NODE, UPDATE_ELEMENT, CLOSE_CHANGESET }
+enum class MapEditFieldAction { UNTOUCHED, SET, DELETE }
 enum class MapPlacePreset(val label: String, val key: String, val value: String) {
     CAFE("Kafe", "amenity", "cafe"),
     RESTAURANT("Restoran", "amenity", "restaurant"),
@@ -57,8 +58,17 @@ data class MapEditDraft(
     val localAttemptId: String? = null,
     @ColumnInfo(defaultValue = "0") val localChangesetCreated: Boolean = false,
     val surveyPayload: String? = null,
+    @ColumnInfo(defaultValue = "1") val editorVersion: Int = 1,
+    val presetId: String? = null,
+    val presetSnapshot: String? = null,
+    val originalPresetSnapshot: String? = null,
+    @ColumnInfo(defaultValue = "''") val phone: String = "",
+    @ColumnInfo(defaultValue = "'UNTOUCHED'") val nameAction: MapEditFieldAction = MapEditFieldAction.UNTOUCHED,
+    @ColumnInfo(defaultValue = "'UNTOUCHED'") val phoneAction: MapEditFieldAction = MapEditFieldAction.UNTOUCHED,
+    @ColumnInfo(defaultValue = "0") val typeChanged: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val legacyAddressIntent: Boolean = false,
 ) {
-    fun publicTags(): Map<String, String> = linkedMapOf<String, String>().apply {
+    fun publicTags(): Map<String, String> = if (editorVersion == 2) editorPublicTags() else linkedMapOf<String, String>().apply {
         if (targetType == null) put(preset.key, preset.value)
         if (name.isNotBlank()) put("name", name.trim())
         if (street.isNotBlank()) put("addr:street", street.trim())
@@ -83,7 +93,8 @@ internal fun MapEditDraft.withLocalChangeset(changeset: Long): MapEditDraft {
 }
 
 fun validateMapEdit(value: MapEditDraft) {
-    require(value.targetType != null || value.preset.canCreate) { "Bu tür yalnızca mevcut OSM mekânlarında düzenlenebilir." }
+    value.validateEditorDraft()
+    require(value.editorVersion == 2 || value.targetType != null || value.preset.canCreate) { "Bu tür yalnızca mevcut OSM mekânlarında düzenlenebilir." }
     value.surveyObservation()?.let { require(value.targetType != null); it.validateDraft() }
     require(runCatching { UUID.fromString(value.id).toString().equals(value.id, true) }.getOrDefault(false))
     require(value.placeId == null || (value.placeId.isNotBlank() && value.placeId.length <= 200 && value.placeId.none { it.code < 32 }))
@@ -131,13 +142,17 @@ private fun validateMapEditTarget(value: MapEditDraft) {
     val hasSurveyIntent = value.surveyObservation()?.let { observation ->
         listOf(observation.hours, observation.wheelchair).any { it.action in setOf(SurveyAction.EDIT, SurveyAction.VERIFY) }
     } == true
-    require(value.publicTags().isNotEmpty() || hasSurveyIntent)
+    require(value.hasEditorIntent() || value.publicTags().isNotEmpty() || hasSurveyIntent)
     require(value.appliedVersion == if (value.status == MapEditStatus.SENT) reviewed + 1 else null)
 }
 
 fun validateMapEditForPublish(value: MapEditDraft) {
     validateMapEdit(value)
     require(value.surveyConfirmed) { "Yalnızca yerinde doğruladığın bilgileri yayımla." }
+    if (value.editorVersion == 2) {
+        if (value.targetType == null) requireNotNull(value.selectedPresetSnapshot()) { "Bir tür seç." }
+        else require(value.hasEditorIntent()) { "En az bir bilgiyi değiştir." }
+    }
     value.surveyObservation()?.let { observation ->
         val before = buildMap {
             for ((field, input) in listOf(SurveyField.OPENING_HOURS to observation.hours, SurveyField.WHEELCHAIR to observation.wheelchair)) {

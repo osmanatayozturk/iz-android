@@ -13,6 +13,8 @@ class DiaryConverters {
     @TypeConverter fun mapEditStatus(value: MapEditStatus): String = value.name
     @TypeConverter fun mapEditStage(value: String): MapEditStage = MapEditStage.valueOf(value)
     @TypeConverter fun mapEditStage(value: MapEditStage): String = value.name
+    @TypeConverter fun mapEditFieldAction(value: String): MapEditFieldAction = MapEditFieldAction.valueOf(value)
+    @TypeConverter fun mapEditFieldAction(value: MapEditFieldAction): String = value.name
     @TypeConverter fun transport(value: String): Transport = Transport.valueOf(value)
     @TypeConverter fun transport(value: Transport): String = value.name
     @TypeConverter fun status(value: String): JourneyStatus = JourneyStatus.valueOf(value)
@@ -98,19 +100,35 @@ internal interface DiaryDao {
 }
 
 @Database(entities = [Journey::class, TrackPoint::class, Place::class, Visit::class, Photo::class, ShareDraft::class, ContributionDraft::class,
-    JourneyHealthSample::class, JourneyHealthSync::class, MapEditDraft::class,
+    JourneyHealthSample::class, JourneyHealthSync::class, MapEditDraft::class, OsmPresetFavorite::class,
     WatchHealthSession::class, WatchHealthSample::class, SavedRoutePlanEntity::class, ImportedTrackEntity::class,
-    ImportedSegmentEntity::class, ImportedCoordinateEntity::class, JourneyCollectionEntity::class, CollectionMembershipEntity::class, DestinationShortcutEntity::class, LeanSessionEntity::class, LeanChunkEntity::class, LeanResultEntity::class], version = 10, exportSchema = true)
+    ImportedSegmentEntity::class, ImportedCoordinateEntity::class, JourneyCollectionEntity::class, CollectionMembershipEntity::class, DestinationShortcutEntity::class, LeanSessionEntity::class, LeanChunkEntity::class, LeanResultEntity::class], version = 11, exportSchema = true)
 @TypeConverters(DiaryConverters::class)
 internal abstract class DiaryDatabase : RoomDatabase() {
     abstract fun diaryDao(): DiaryDao
     abstract fun backupExportDao(): BackupExportDao
     abstract fun mapEditDao(): MapEditDao
+    abstract fun osmPresetFavoriteDao(): OsmPresetFavoriteDao
     abstract fun watchHealthDao(): WatchHealthDao
     abstract fun travelLibraryDao(): TravelLibraryDao
     abstract fun leanDao(): LeanDao
 
     companion object {
+        // https://developer.android.com/training/data-storage/room/migrating-db-versions
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE map_edit_drafts ADD COLUMN editorVersion INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE map_edit_drafts ADD COLUMN presetId TEXT")
+                db.execSQL("ALTER TABLE map_edit_drafts ADD COLUMN presetSnapshot TEXT")
+                db.execSQL("ALTER TABLE map_edit_drafts ADD COLUMN originalPresetSnapshot TEXT")
+                db.execSQL("ALTER TABLE map_edit_drafts ADD COLUMN phone TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE map_edit_drafts ADD COLUMN nameAction TEXT NOT NULL DEFAULT 'UNTOUCHED'")
+                db.execSQL("ALTER TABLE map_edit_drafts ADD COLUMN phoneAction TEXT NOT NULL DEFAULT 'UNTOUCHED'")
+                db.execSQL("ALTER TABLE map_edit_drafts ADD COLUMN typeChanged INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE map_edit_drafts ADD COLUMN legacyAddressIntent INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("CREATE TABLE IF NOT EXISTS osm_preset_favorites (presetId TEXT NOT NULL, PRIMARY KEY(presetId))")
+            }
+        }
         val MIGRATION_9_10 = object : Migration(9, 10) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE map_edit_drafts ADD COLUMN surveyPayload TEXT")
@@ -209,7 +227,7 @@ internal abstract class DiaryDatabase : RoomDatabase() {
         @Volatile private var instance: DiaryDatabase? = null
         fun get(context: Context): DiaryDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, DiaryDatabase::class.java, "iz-diary.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
                 .build().also { instance = it }
         }
     }

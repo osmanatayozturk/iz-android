@@ -1,5 +1,15 @@
 # Değişiklik geçmişi
 
+## Telefon 0.13.2 / code 31 — haritadan OSM düzenleme (yayımlanmamış kaynak adayı)
+
+Ana haritaya uzun basarak yeni OSM mekânı ekle. Ad, tür ve telefon bilgilerini gir; türü aranabilir listeden seç ve sık kullandıklarını yıldızla favorilerine ekle. Yeni formda tür seçimi boş başlar. Mevcut desteklenen nokta ve basit kapalı alanların bilgileri aynı sade düzenleyiciden değiştirilebilir.
+
+Tür listesi uygulamayla birlikte gelen iD Tagging Schema kataloğunu kullanır; ek arama servisi veya API anahtarı gerekmez. Seçilebilir türler nesnenin geometrisine göre süzülür. Bina içindeki yeni işletmeler ayrı nokta olarak eklenir; bina çizimi ve geometri taşıma bu sürümün kapsamı dışındadır.
+
+Yeni yer eklemedeki çevre/mükerrer nesne taraması kullanıcının tercihiyle kaldırıldı. Mevcut nesnelerde güncel sürüm denetimi, gönderim önizlemesi ve belirsiz sonuçta otomatik yeniden göndermeme korunur. Ad veya telefonu bilerek boşaltmak silme olarak önizlenir; diğer etiketler ve geometri korunur. Favoriler ile yeni taslak alanları yedeklenir; eski kayıtlar okunmaya devam eder.
+
+**Doğrulama: BEKLİYOR.** Birim/lint/derleme, izole QA, bağımsız Test/UIUX ve güvenlik sonuçları aynı son adaydan alınacak. Kısmi JVM sonuçları bu paragrafta Android veya cihaz kabulü gibi sunulmayacak.
+
 ## Telefon 0.13.0 / code 29
 
 Büyük yedekler sayfalı hazırlanır. ZIP kaydedildiğinde geri okunup doğrulanır. Geri yüklemede arşiv ve ilişkiler denetlenir. Kamera kadrajı iyileştirmeleri, Molalı rota ve isteğe bağlı OSM GPS izi paylaşımı da sürüm kapsamındadır. Wear OS 0.7.0 / code 12 ve iletişim protokolü değişmiyor. [Telefon 0.13.0 sürüm sayfası](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.13.0).

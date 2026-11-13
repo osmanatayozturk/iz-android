@@ -2,8 +2,6 @@ package org.iz.navigation.integration.osm
 
 import org.iz.navigation.BuildConfig
 import org.iz.navigation.data.*
-import org.iz.navigation.integration.OsmServiceEndpoints
-import org.iz.navigation.integration.isAllowedOsmEndpoint
 import java.io.IOException
 import java.io.StringReader
 import java.util.Locale
@@ -12,7 +10,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 import javax.xml.parsers.DocumentBuilderFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.FormBody
 import okhttp3.Authenticator
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -20,12 +17,9 @@ import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okio.BufferedSink
-import org.json.JSONObject
 import org.w3c.dom.Element
 import org.xml.sax.InputSource
-import kotlin.math.cos
 
-data class OsmDuplicateCandidate(val ref: OsmRef, val name: String, val latitude: Double?, val longitude: Double?)
 internal data class OsmUploadedNode(val id: Long, val version: Long)
 internal data class OsmCreatedNode(val id: Long, val version: Long, val changesetId: Long, val userId: Long,
     val latitude: Double, val longitude: Double, val tags: Map<String, String>)
@@ -33,19 +27,21 @@ internal data class OsmChangesetInfo(val id: Long, val userId: Long, val open: B
 internal class OsmMapEditNotDispatched : IOException("OSM map edit authorization changed before dispatch")
 
 internal interface OsmMapEditGateway {
-    suspend fun nearby(draft: MapEditDraft): List<OsmDuplicateCandidate> = emptyList()
     suspend fun createChangeset(token: String, draft: MapEditDraft): Long
     suspend fun createChangeset(token: String, draft: MapEditDraft, canDispatch: () -> Boolean): Long {
         if (!canDispatch()) throw OsmMapEditNotDispatched()
         return createChangeset(token, draft)
     }
     suspend fun uploadNode(token: String, draft: MapEditDraft, changesetId: Long): OsmUploadedNode
+    suspend fun uploadNode(token: String, draft: MapEditDraft, changesetId: Long, canDispatch: () -> Boolean): OsmUploadedNode {
+        if (!canDispatch()) throw OsmMapEditNotDispatched()
+        return uploadNode(token, draft, changesetId)
+    }
     suspend fun closeChangeset(token: String, id: Long, canDispatch: () -> Boolean)
     suspend fun downloadChangeset(id: Long): List<OsmCreatedNode>
     suspend fun downloadSingleCreatedNode(id: Long): OsmCreatedNode?
     suspend fun readChangeset(id: Long): OsmChangesetInfo
 }
-
 internal interface OsmMapCorrectionGateway : OsmMapEditGateway {
     suspend fun readElement(ref: OsmRef): OsmCorrectionElement
     suspend fun updateElement(token: String, element: OsmCorrectionElement, changeset: Long, canDispatch: () -> Boolean): Long
@@ -58,9 +54,11 @@ internal object OsmMapEditXml {
     private fun tag(key: String, value: String) = "<tag k=\"${escape(key)}\" v=\"${escape(value)}\"/>"
     fun changeset(draft: MapEditDraft): String = "<osm><changeset>" +
         tag("created_by", "Iz ${BuildConfig.VERSION_NAME}") +
-        tag("comment", if (draft.targetType == null)
-            "Yerinde gözlemlenen ${draft.preset.label.lowercase(Locale.forLanguageTag("tr"))} eklendi"
-        else "Yerinde doğrulanan mekân bilgileri güncellendi") +
+        tag("comment", when {
+            draft.targetType != null -> "Yerinde doğrulanan mekân bilgileri güncellendi"
+            draft.editorVersion == 2 -> "Yerinde gözlemlenen OSM noktası eklendi"
+            else -> "Yerinde gözlemlenen ${draft.preset.label.lowercase(Locale.forLanguageTag("tr"))} eklendi"
+        }) +
         tag("source", "survey") + "</changeset></osm>"
     fun nodeUpload(draft: MapEditDraft, changeset: Long): String {
         validateMapEditForPublish(draft); require(changeset > 0)
@@ -87,7 +85,6 @@ internal object OsmMapEditXml {
 /** Every write is one-shot, HTTPS-only and never redirects the bearer token to another host. */
 internal class OsmMapEditClient(
     client: OkHttpClient = OkHttpClient(),
-    private val overpassEndpoint: () -> String = { OsmServiceEndpoints().overpass },
 ) : OsmMapCorrectionGateway {
     private class DispatchGuard(val canDispatch: () -> Boolean) {
         val started = AtomicBoolean()
@@ -115,9 +112,12 @@ internal class OsmMapEditClient(
             val request = api("changeset/create", token).put(body(OsmMapEditXml.changeset(draft))).build()
             execute(request, canDispatch).trim().toLong().also { require(it > 0) }
         }
-    override suspend fun uploadNode(token: String, draft: MapEditDraft, changesetId: Long): OsmUploadedNode = withContext(Dispatchers.IO) {
+    override suspend fun uploadNode(token: String, draft: MapEditDraft, changesetId: Long): OsmUploadedNode =
+        uploadNode(token, draft, changesetId) { true }
+
+    override suspend fun uploadNode(token: String, draft: MapEditDraft, changesetId: Long, canDispatch: () -> Boolean): OsmUploadedNode = withContext(Dispatchers.IO) {
         val root = OsmMapEditXml.parse(execute(api("changeset/$changesetId/upload", token)
-            .post(body(OsmMapEditXml.nodeUpload(draft, changesetId))).build()))
+            .post(body(OsmMapEditXml.nodeUpload(draft, changesetId))).build(), canDispatch))
         require(root.tagName == "diffResult")
         val nodes = OsmMapEditXml.children(root, "node")
         require(nodes.size == 1 && nodes.single().getAttribute("old_id") == "-1")
@@ -193,41 +193,6 @@ internal class OsmMapEditClient(
         }
     }
 
-    /** Explicit form preview/send only. No cache; includes containing mapped areas, not just their centres. */
-    override suspend fun nearby(draft: MapEditDraft): List<OsmDuplicateCandidate> = withContext(Dispatchers.IO) {
-        validateMapEdit(draft)
-        val endpoint = overpassEndpoint(); require(isAllowedOsmEndpoint(endpoint))
-        val lat = draft.latitude; val lon = draft.longitude
-        val filter = "[\"${draft.preset.key}\"=\"${draft.preset.value}\"]"
-        val query = "[out:json][timeout:20][maxsize:2097152];is_in($lat,$lon)->.containing;" +
-            "(nwr(around:250,$lat,$lon)$filter;way(pivot.containing)$filter;rel(pivot.containing)$filter;);out center tags;"
-        val request = Request.Builder().url(endpoint).header("User-Agent", userAgent)
-            .post(oneShot(FormBody.Builder().add("data", query).build())).build()
-        val areaCandidates = parseDuplicateCandidates(execute(request), draft.preset)
-        // Overpass is replicated. The editing API additionally catches very recent nearby nodes/ways.
-        val deltaLat = 250.0 / 111_320.0
-        val deltaLon = (deltaLat / cos(Math.toRadians(lat)).coerceAtLeast(0.01)).coerceAtMost(0.1)
-        val west = lon - deltaLon; val east = lon + deltaLon
-        val spans = when {
-            west < -180 -> listOf(-180.0 to east, west + 360 to 180.0)
-            east > 180 -> listOf(west to 180.0, -180.0 to east - 360)
-            else -> listOf(west to east)
-        }
-        val currentCandidates = spans.flatMap { (left, right) ->
-            val bbox = "$left,${(lat - deltaLat).coerceAtLeast(-90.0)},$right,${(lat + deltaLat).coerceAtMost(90.0)}"
-            val root = JSONObject(execute(api("map.json?bbox=$bbox").header("Accept", "application/json").get().build()))
-            val elements = root.getJSONArray("elements")
-            val filtered = org.json.JSONArray()
-            for (index in 0 until elements.length()) {
-                val element = elements.getJSONObject(index)
-                require(!element.has("error")) { "OSM map response was incomplete" }
-                if (element.optJSONObject("tags")?.optString(draft.preset.key) == draft.preset.value) filtered.put(element)
-            }
-            parseDuplicateCandidates(JSONObject().put("elements", filtered).toString(), draft.preset)
-        }
-        (areaCandidates + currentCandidates).distinctBy { it.ref }
-    }
-
     private fun api(path: String, token: String? = null) = Request.Builder().url("${OsmNotesClient.API_BASE}/$path")
         .header("User-Agent", userAgent).header("Accept", "application/xml").apply {
             if (token != null) { require(token.isNotBlank()); header("Authorization", "Bearer $token") }
@@ -258,20 +223,4 @@ internal class OsmMapEditClient(
         private const val MAX_BYTES = 4L * 1024 * 1024
         private val userAgent get() = "Iz/${BuildConfig.VERSION_NAME} (org.iz.navigation; OSM editor)"
     }
-}
-
-internal fun parseDuplicateCandidates(json: String, preset: MapPlacePreset): List<OsmDuplicateCandidate> {
-    val root = JSONObject(json)
-    require(!root.has("remark")) { "Yakındaki yer sorgusu tamamlanmadı." }
-    val values = root.getJSONArray("elements")
-    require(values.length() < 1000) { "Bu bölgede çok fazla eşleşme var; daha sonra yeniden kontrol et." }
-    return (0 until values.length()).map { index ->
-        val value = values.getJSONObject(index)
-        val type = when (value.getString("type")) { "node" -> OsmType.NODE; "way" -> OsmType.WAY; "relation" -> OsmType.RELATION; else -> error("Invalid OSM element") }
-        val id = value.getLong("id"); require(id > 0)
-        val tags = value.getJSONObject("tags"); require(tags.optString(preset.key) == preset.value)
-        val point = if (type == OsmType.NODE) value else value.optJSONObject("center")
-        OsmDuplicateCandidate(OsmRef(type, id), tags.optString("name").ifBlank { preset.label },
-            point?.optDouble("lat")?.takeIf(Double::isFinite), point?.optDouble("lon")?.takeIf(Double::isFinite))
-    }.distinctBy { it.ref }
 }
