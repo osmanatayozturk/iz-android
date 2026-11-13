@@ -19,6 +19,12 @@ Büyük yedekler sayfalı hazırlanır. ZIP kaydedildiğinde geri okunup doğrul
 | OSM mekân düzeltmeleri ve yedek | Yerinde doğrulanan nokta veya tek kapalı çizgiyle tanımlanan alanın adını, sokağını ve kapı numarasını düzelt. Düzeltme kayıtlarını Room ve ZIP yedeklerinde sakla. |
 | OSM’de yerinde tamamla (canlı kabul bekliyor) | 1 km içindeki görevleri harita veya listeden aç. Mevcut mekânın çalışma saatlerini ve tekerlekli sandalye erişimini yerinde gözlemle, alanın kontrol tarihini kaydet. |
 | Saat formu ve yedek uyumluluğu | Haftalık form veya gelişmiş OSM ifadesi kullan. Kısmi katkıyı ve yeniden kontrol durumunu Room ve ZIP v10 ile sakla. |
+| Ortak arama ve paylaşılan harita girişi (telefon kaynak adayı) | Yer seçme ekranlarında ortak aramayı kullan. Desteklenen harita bağlantılarını hedef/rota önizlemesinde incele ve ulaşım türünü seç. |
+| Çok duraklı rota (telefon kaynak adayı) | Başlangıç ve varış dahil en fazla 20 durak planla; gerektiğinde mevcut konumdan yaklaşımı etkin rotaya ekle. |
+| Mekân bilgi kartı (telefon kaynak adayı) | Harita veya kayıtlı yerden OSM bilgilerini, güncellik ve eksik bilgi durumunu gör; yol tarifine ve uygun iletişim işlemlerine geç. |
+| Paylaşım girişi ve sürüş göstergesi düzeltmeleri (telefon kaynak adayı) | Paylaşım önizlemesini navigasyon girişinde göster; yatay kompakt göstergede iki satırlı özeti, mola ve uyarı metinlerini düzenle. |
+
+**Ortak arama ve mekân bilgileri kaynak adayının sınırlı doğrulaması:** `fa82701f` için beş odaklı fiziksel telefon kontrolü geçti. 1.643 birim testi, lint ve derleme host sonuçları, yalnız AndroidTest düzeltmesinden önceki eşleşen ürün kaynağından açıkça yeniden kullanıldı. İncelenen üç HUD görüntüsünde kalan ürün engeli görülmedi; normal yazı boyutunda mola ve uyarılar okunabildi. Üç piksel tabanlı rota görünürlüğü denetimi başarısız kaldı ve geçilmiş sayılmadı; yöntem gösterge/pusula örtüşmesini yeterince kapsamıyor. Tam native arayüz, TalkBack ve canlı harita tabanı kabulü tamamlanmadı. Ayrıntılı kapsam [değişiklik geçmişinde](../CHANGELOG.md) yer alır.
 
 **Nereye? doğrulaması.** Kaynak adayı `ad84d727` üzerinde 193 test grubunda 1.410 birim testi geçti. Başarısızlık, hata ve atlama sayıları sıfırdı. Debug lint 97 uyarı ve 3 ipucu verdi, hata vermedi. Debug uygulama ve AndroidTest APK’ları bilgisayarda derlendi.
 

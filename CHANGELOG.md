@@ -54,6 +54,18 @@ Saatler haftalık form veya gelişmiş OSM ifadesiyle düzenlenir. OpeningHoursP
 
 `3adea536` adayında 1.536 birim testi geçti, Debug lint 0 hata ve 96 uyarı verdi. Debug APK üretimi ve AndroidTest Kotlin derlemesi geçti. Ayrı çevrimdışı QA paketiyle fiziksel Samsung telefonda 26/26 sentetik kontrol geçti, beş native ekran durumu incelendi ve iki QA paketi kaldırıldı. Canlı harita, gerçek GNSS ve gerçek OSM hesabına yazma test kapsamı dışındaydı.
 
+### Ortak arama, paylaşılan hedefler ve mekân bilgileri — telefon kaynak adayı
+
+Yer seçme ekranları ortak arama bileşenini kullanır. Desteklenen harita bağlantıları İz’de hedef veya rota önizlemesine alınabilir; rota başlatmadan önce ulaşım türü seçilir. Planlanan rota başlangıç ve varış dahil en fazla 20 durak içerebilir. Mevcut konumdan hesaplanan yaklaşım gerektiğinde etkin rotaya ayrı bir başlangıç ekleyebilir.
+
+Haritadan veya kayıtlı yerden açılan mekân bilgi kartı, mevcut OpenStreetMap bilgilerini ve son alınma zamanını gösterir. Eksik bilgi, yükleme hatası ve eski kayıt durumu ayrıca belirtilir. Karttan yol tarifine geçilebilir; uygun iletişim bilgileri ilgili uygulamada açılabilir.
+
+Paylaşılan harita girişinin önizleme penceresi navigasyon girişine bağlandı. Kompakt sürüş göstergesinin yatay görünümünde iki satırlı özet ve uyarı yerleşimi düzenlendi; tam açıklamalar erişilebilirlik metninde korunur.
+
+Son kaynak adayı `fa82701f` için beş odaklı fiziksel telefon kontrolü geçti. 1.643 birim testi, lint ve derleme host sonuçları, yalnız AndroidTest düzeltmesinden önceki eşleşen ürün kaynağından açıkça yeniden kullanıldı; son commit’te yeniden çalıştırılmış sonuçlar olarak sayılmaz. İncelenen üç gerçek HUD görüntüsünde kalan ürün engeli görülmedi; normal yazı boyutunda mola ve uyarılar okunabildi.
+
+Üç görüntüdeki rota görünürlüğü için piksel tabanlı otomatik denetim başarısız kaldı. Bu yöntem harita üzerindeki gösterge alanı ve pusula örtüşmesini yeterince kapsamıyor; sonucu geçilmiş veya rota görünürlüğü kanıtlanmış sayılmadı. Bu sınırlı kontrol tam native arayüz kabulü değildir. TalkBack ve canlı harita tabanı kabulü tamamlanmadı. Önceki kaynak notlarında açık kalan canlı servis kabulleri ayrıca izlenir.
+
 ## Telefon 0.12.0 numarasıyla tutulan tarihsel aday kayıtları
 
 Bu bölüm, 0.12.0 yayımlanmadan önceki aday doğrulama anlık görüntüsünü ve yayımlanmış 0.12.0’dan sonra 6–7 Kasım’da aynı 0.12.0 numarasıyla yapılan kamera, Molalı rota ve OSM GPS izi paylaşımı kaynak güncellemelerini birlikte kaydeder. Sonraki kaynak güncellemeleri yayımlanmış 0.12.0 sürümünün içeriği değildir. Bu tarihsel doğrulama ve kaynak kayıtları 0.13.0 için kabul veya doğrulama oluşturmaz. Yayımlanmış 0.12.0’ın release notları için [GitHub sürüm kaydı](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.12.0) esas alınır.
