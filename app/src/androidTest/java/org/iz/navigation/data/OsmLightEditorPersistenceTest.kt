@@ -127,7 +127,7 @@ class OsmLightEditorPersistenceTest {
         assertEquals(drafts.map { it.id }.toSet(), reopened.mapEdits.first().map { it.id }.toSet())
     }
 
-    @Test fun savingAndReopeningAnUnselectedNewDraftNeverSelectsTheLegacyCafeDefault() = runBlocking {
+    @Test fun savingAndReopeningAnUnselectedNewDraftNeverSelectsTheLegacyCafeDefault() = runBlocking<Unit> {
         val draft = newMapEditDraft(39.93, 32.85).copy(observedAt = 1_000)
         DiaryRepository(isolatedContext, open()).saveMapEdit(draft)
         val restored = requireNotNull(DiaryRepository(isolatedContext, reopen()).getMapEdit(draft.id))
