@@ -51,7 +51,30 @@ class CompactDrivingHudUiTest {
         val statusLayouts = mutableListOf<TextLayoutResult>()
         compose.onNodeWithTag("prepared-map-status", useUnmergedTree = true)
             .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(statusLayouts) }
-        assertFalse(textLayoutDetails("prepared disclosure", statusLayouts.single()), statusLayouts.single().hasVisualOverflow)
+        // Paragraph constraint width can exceed this shrink-wrapped Text; check its actual line bounds.
+        val statusLayout = statusLayouts.single()
+        val statusLines = (0 until statusLayout.lineCount).joinToString { line ->
+            "line[$line]: left=${statusLayout.getLineLeft(line)}; right=${statusLayout.getLineRight(line)}; " +
+                "top=${statusLayout.getLineTop(line)}; bottom=${statusLayout.getLineBottom(line)}; " +
+                "ellipsized=${statusLayout.isLineEllipsized(line)}"
+        }
+        val statusDetails = textLayoutDetails("prepared disclosure", statusLayout) + "; " + statusLines
+        println("HUD_PREPARED_DISCLOSURE_FIT $statusDetails")
+        assertEquals(statusDetails, 1, statusLayout.layoutInput.maxLines)
+        assertEquals(statusDetails, 1, statusLayout.lineCount)
+        assertFalse(statusDetails, statusLayout.multiParagraph.didExceedMaxLines)
+        assertFalse(statusDetails, statusLayout.didOverflowHeight)
+        assertTrue(statusDetails, statusLayout.size.width > 0 && statusLayout.size.height > 0)
+        for (line in 0 until statusLayout.lineCount) {
+            val left = statusLayout.getLineLeft(line)
+            val right = statusLayout.getLineRight(line)
+            val top = statusLayout.getLineTop(line)
+            val bottom = statusLayout.getLineBottom(line)
+            assertTrue(statusDetails, left.isFinite() && right.isFinite() && top.isFinite() && bottom.isFinite())
+            assertTrue(statusDetails, left >= 0f && right >= left && right <= statusLayout.size.width.toFloat())
+            assertTrue(statusDetails, top >= 0f && bottom >= top && bottom <= statusLayout.size.height.toFloat())
+            assertFalse(statusDetails, statusLayout.isLineEllipsized(line))
+        }
         val warningSlot = compose.onNodeWithTag("hud-reserved-status").fetchSemanticsNode().boundsInRoot
         for (copy in listOf("GPS bekleniyor", "Kayıt bekleniyor", "Duraklatıldı")) {
             val node = compose.onNodeWithText(copy, useUnmergedTree = true).assertIsDisplayed()

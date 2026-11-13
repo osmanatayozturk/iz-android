@@ -43,6 +43,7 @@ import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -156,6 +157,9 @@ class SharedNavigationVisualCaptureTest {
     @Test fun integratedHudLandscapeFontTwoWarnings() =
         hudFrame("04-integrated-hud-landscape-font2", "integratedHudLandscapeFontTwoWarnings", true, 2f)
 
+    @Test fun integratedHudLandscapeFontOneWarnings() =
+        hudFrame("05-integrated-hud-landscape-font1", "integratedHudLandscapeFontOneWarnings", true, 1f)
+
     private fun hudFrame(state: String, method: String, landscape: Boolean, font: Float) =
         frame(state, method, landscape, font) { host, metadata ->
             val initial = guided()
@@ -182,6 +186,24 @@ class SharedNavigationVisualCaptureTest {
             compose.onNodeWithTag("hud-instruction", useUnmergedTree = true)
                 .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(longLayout) }
             check(longLayout.single().lineCount <= 2)
+            if (state == "05-integrated-hud-landscape-font1") {
+                val home = bounds("navigation-home")
+                check(home.width > home.height) { "Font1 capture requires a real landscape Compose root" }
+                val maneuver = longLayout.single()
+                val summary = knownSummary.single()
+                check(maneuver.layoutInput.density.fontScale == 1f && summary.layoutInput.density.fontScale == 1f)
+                check(maneuver.layoutInput.style.fontSize == 11.sp && maneuver.layoutInput.style.lineHeight == 13.5.sp)
+                check(summary.layoutInput.style.fontSize == 12.sp && summary.layoutInput.style.lineHeight == 14.5.sp)
+                check(maneuver.layoutInput.maxLines == 2 && summary.layoutInput.maxLines == 2)
+                metadata.put("normalLandscapeFontOne", JSONObject()
+                    .put("effectiveComposeFontScale", maneuver.layoutInput.density.fontScale)
+                    .put("instructionFontSizeSp", maneuver.layoutInput.style.fontSize.value)
+                    .put("instructionLineHeightSp", maneuver.layoutInput.style.lineHeight.value)
+                    .put("summaryFontSizeSp", summary.layoutInput.style.fontSize.value)
+                    .put("summaryLineHeightSp", summary.layoutInput.style.lineHeight.value)
+                    .put("knownSummaryHasVisualOverflow", summary.hasVisualOverflow)
+                    .put("readabilityAcceptance", "PENDING_INDEPENDENT_UIUX_PIXEL_INSPECTION"))
+            }
             assertEquals(instruction, descriptions("hud-instruction"))
             compose.runOnIdle {
                 nav.value = initial.copy(gpsStale = true, recordingPending = true,
@@ -301,6 +323,10 @@ class SharedNavigationVisualCaptureTest {
 
     private fun frame(state: String, method: String, landscape: Boolean, font: Float,
         setup: (HealthPrivacyActivity, JSONObject) -> JSONObject) {
+        check(state in STATES) { "Unknown visual capture state" }
+        if (state == "05-integrated-hud-landscape-font1") {
+            check(method == "integratedHudLandscapeFontOneWarnings" && landscape && font == 1f)
+        }
         val pins = admission() // All guards precede Activity launch and output directory creation.
         val directory = namespace(pins.getString("runUuid"))
         val png = File(directory, state + ".png")
@@ -345,7 +371,8 @@ class SharedNavigationVisualCaptureTest {
                 .put("counters", JSONObject().put("plans", plans.get()).put("locations", locations.get()).put("activations", activations.get()))
             check(activations.get() == 0)
             if (!state.startsWith("01")) awaitRenderedRoute(integratedHud =
-                state == "03-integrated-hud-portrait-font1" || state == "04-integrated-hud-landscape-font2")
+                state == "03-integrated-hud-portrait-font1" || state == "04-integrated-hud-landscape-font2" ||
+                    state == "05-integrated-hud-landscape-font1")
             val owned = ownedWindow(activity, dialog = state.startsWith("01") || state.startsWith("02"))
             val window = windowInfo(activity, owned)
             metadata.put("window", window)
@@ -459,7 +486,7 @@ class SharedNavigationVisualCaptureTest {
         check(directory.isDirectory || directory.mkdir())
         val allowed = STATES.flatMap { listOf(it + ".png", it + ".json") }.toSet()
         check(directory.listFiles().orEmpty().all { it.isFile && it.name in allowed })
-        check(directory.listFiles().orEmpty().size <= 8)
+        check(directory.listFiles().orEmpty().size <= STATES.size * 2)
         return directory
     }
 
@@ -838,7 +865,8 @@ class SharedNavigationVisualCaptureTest {
         const val MAX_PNG = 16L * 1024 * 1024
         const val MAX_JSON = 64 * 1024
         val STATES = listOf("01-shared-vehicle-portrait-font1", "02-shared-preview-landscape-font2",
-            "03-integrated-hud-portrait-font1", "04-integrated-hud-landscape-font2")
+            "03-integrated-hud-portrait-font1", "04-integrated-hud-landscape-font2",
+            "05-integrated-hud-landscape-font1")
     }
 }
 
