@@ -37,6 +37,7 @@ import org.iz.navigation.data.ContributionStatus
 import org.iz.navigation.data.DiaryRepository
 import org.iz.navigation.data.MapEditDraft
 import org.iz.navigation.data.MapEditStatus
+import org.iz.navigation.data.displayLabel
 import org.iz.navigation.integration.osm.OsmAuthManager
 import org.iz.navigation.integration.osm.OsmGpxHistoryClient
 
@@ -177,7 +178,7 @@ private fun ContributionHubRow(row: OsmContributionHubRow, onClick: () -> Unit) 
             enabled = row.draft.status != ContributionStatus.SENDING
         }
         is OsmContributionHubRow.Place -> {
-            title = row.draft.name.ifBlank { row.draft.preset.label }
+            title = row.draft.displayLabel()
             type = if (row.draft.targetType == null) "Yeni mekân" else "Mekân düzeltmesi"
             status = when (row.draft.status) {
                 MapEditStatus.DRAFT -> "Taslak"

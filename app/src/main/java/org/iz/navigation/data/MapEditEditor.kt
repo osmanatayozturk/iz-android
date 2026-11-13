@@ -6,6 +6,15 @@ import org.iz.navigation.osmcatalog.OsmPresetTagTransition
 import org.iz.navigation.osmcatalog.OsmPresetCatalog
 import org.json.JSONObject
 
+/** Local UI/saved-place label only; never substitute this for the public OSM name tag. */
+fun MapEditDraft.displayLabel(): String = name.ifBlank {
+    if (editorVersion == 2) {
+        runCatching {
+            selectedPresetSnapshot()?.let { JSONObject(it.ruleJson).getString("name") }
+        }.getOrNull()?.takeIf(String::isNotBlank) ?: "Tür seçilmemiş OSM mekânı"
+    } else preset.label
+}
+
 fun newMapEditDraft(latitude: Double, longitude: Double, name: String = "") = MapEditDraft(
     latitude = latitude, longitude = longitude, editorVersion = 2, name = name.trim(),
     nameAction = if (name.isBlank()) MapEditFieldAction.UNTOUCHED else MapEditFieldAction.SET,

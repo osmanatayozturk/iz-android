@@ -12,8 +12,10 @@ import java.util.UUID
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import org.iz.navigation.osmcatalog.OsmPresetCatalog
 import org.iz.navigation.osmcatalog.OsmPresetGeometry
 import org.iz.navigation.osmcatalog.OsmPresetRuleSnapshot
+import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Rule
@@ -160,6 +162,57 @@ class OsmLightEditorPersistenceTest {
         assertEquals(unknownOnly, actual)
         assertEquals(actual.size, actual.toSet().size)
         assertTrue(again.mapEdits.first().isEmpty())
+    }
+
+    @Test fun confirmedUnnamedTreeWithLegacyCafeCarryoverCreatesFrozenLabelPlaceAndSurvivesReopen() = runBlocking {
+        val catalog = OsmPresetCatalog.load(app.assets.open(OsmPresetCatalog.BUNDLED_ASSET))
+        val tree = catalog.snapshot("natural/tree", OsmPresetGeometry.POINT)
+        val frozenName = "Frozen synthetic tree"
+        val frozen = tree.copy(ruleJson = JSONObject(tree.ruleJson).put("name", frozenName).toString())
+        val draft = newMapEditDraft(39.9301234, 32.8505678).selectPreset(frozen)
+            .copy(observedAt = 1_000, surveyConfirmed = true)
+        assertEquals(MapPlacePreset.CAFE, draft.preset) // Legacy enum column must not label this v2 object.
+        assertEquals("", draft.name)
+        assertEquals(mapOf("natural" to "tree"), draft.publicTags())
+        assertNotEquals(catalog.resolve("natural/tree")!!.name, frozenName)
+        val repository = DiaryRepository(isolatedContext, open())
+        repository.saveMapEdit(draft)
+        val claim = requireNotNull(repository.beginMapEditSend(draft.id, 41, 2_000))
+        assertEquals(MapEditStage.CREATE_CHANGESET, claim.stage)
+        assertNotNull(claim.localAttemptId)
+        assertFalse(claim.localChangesetCreated)
+        val receipt = requireNotNull(repository.recordLocalMapEditChangeset(claim, 700))
+        assertEquals(MapEditStage.UPLOAD_NODE, receipt.stage)
+        assertTrue(receipt.localChangesetCreated)
+        assertEquals(claim.localAttemptId, receipt.localAttemptId)
+
+        // Reopen before the simulated remote success: the real Room claim/receipt must be durable.
+        val resumed = DiaryRepository(isolatedContext, reopen())
+        assertEquals(receipt, resumed.getMapEdit(draft.id))
+        val sent = receipt.copy(status = MapEditStatus.SENT, stage = MapEditStage.CLOSE_CHANGESET,
+            remoteNodeId = 770031, remoteNodeVersion = 1)
+        assertTrue(resumed.compareAndSetMapEdit(receipt, sent))
+        assertFalse(resumed.compareAndSetMapEdit(receipt, sent))
+        val place = resumed.snapshot().places.single()
+        assertEquals(frozenName, place.name) // Independent literal, never displayLabel() as the oracle.
+        assertNotEquals(MapPlacePreset.CAFE.label, place.name)
+        assertEquals(OsmType.NODE, place.osmType)
+        assertEquals(770031L, place.osmId)
+        assertEquals(draft.latitude, requireNotNull(place.latitude), 0.0)
+        assertEquals(draft.longitude, requireNotNull(place.longitude), 0.0)
+        assertEquals(PlaceSource.OSM, place.source)
+        assertEquals("", sent.name)
+        assertEquals(mapOf("natural" to "tree"), sent.publicTags())
+
+        val reopened = DiaryRepository(isolatedContext, reopen())
+        val restoredDraft = requireNotNull(reopened.getMapEdit(draft.id))
+        assertEquals(sent, restoredDraft)
+        assertEquals(draft.presetSnapshot, restoredDraft.presetSnapshot)
+        assertEquals(MapPlacePreset.CAFE, restoredDraft.preset)
+        assertEquals("", restoredDraft.name)
+        assertEquals(MapEditFieldAction.UNTOUCHED, restoredDraft.nameAction)
+        assertEquals(mapOf("natural" to "tree"), restoredDraft.publicTags())
+        assertEquals(listOf(place), reopened.snapshot().places)
     }
 
     private fun open(): DiaryDatabase = Room.databaseBuilder(app, DiaryDatabase::class.java, name)

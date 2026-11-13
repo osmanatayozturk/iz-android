@@ -393,7 +393,7 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
         if (expected.targetType == null && expected.remoteNodeId == null && updated.remoteNodeId != null) {
             val place = expected.placeId?.let { id -> dao.allPlaces().firstOrNull { it.id == id } }
             if (place != null) dao.save(place.copy(osmType = OsmType.NODE, osmId = updated.remoteNodeId, source = PlaceSource.OSM))
-            else if (expected.placeId == null) savePlace(Place(name = updated.name.ifBlank { updated.preset.label },
+            else if (expected.placeId == null) savePlace(Place(name = updated.displayLabel(),
                 latitude = updated.latitude, longitude = updated.longitude, osmType = OsmType.NODE,
                 osmId = updated.remoteNodeId, source = PlaceSource.OSM))
         }
