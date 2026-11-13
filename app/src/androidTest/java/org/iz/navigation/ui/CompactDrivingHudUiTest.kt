@@ -75,7 +75,7 @@ class CompactDrivingHudUiTest {
             assertTrue(statusDetails, top >= 0f && bottom >= top && bottom <= statusLayout.size.height.toFloat())
             assertFalse(statusDetails, statusLayout.isLineEllipsized(line))
         }
-        val warningSlot = compose.onNodeWithTag("hud-reserved-status").fetchSemanticsNode().boundsInRoot
+        val warningSlot = compose.onNodeWithTag("hud-reserved-status", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         for (copy in listOf("GPS bekleniyor", "Kayıt bekleniyor", "Duraklatıldı")) {
             val node = compose.onNodeWithText(copy, useUnmergedTree = true).assertIsDisplayed()
             val measured = mutableListOf<TextLayoutResult>()
