@@ -101,3 +101,11 @@ Kullanıcı İz güncellemelerinin sürüm planıyla birlikte GitHub'a gönderil
 - Gerekli özel kanıtlar yalnız yerel teslimde, ilgili üst sorumluya gerektiği ölçüde sunulur. Kamuya açık notlar güvenli özet ve doğrulanmış genel bağlantılarla hazırlanır.
 
 Sürüm planı bir uygulama yol haritasıdır; zamanlanmış veya bağımsız bir arka plan görevi değildir.
+
+## Windows derleme araçları
+
+Onaylı Windows derleme işlerinde [tools/build_workflow/README.md](tools/build_workflow/README.md) akışını kullan. `launcher.py`, değişmemiş `gradle-run` aracının `create/run/status/finish` yaşam döngüsünü korur; her çağrı tek başına çalışır. Tek ağır derleme sahibi Derleme ve APK rolüdür. Sabit son adayın gerekli modül kontrolleri tek birleşik çağrıda yürütülür; ön kontrol hatası veya belirsiz sonuç kör tekrara dönüşmez.
+
+`reuse.py` için ilgili kaynak, yapılandırma, araç zinciri ve tam görev/argüman girdilerini açıkça seç; kapsamın eksiksizliği ve bağlı raporların anlamsal kabulü teknik sahibin sorumluluğundadır. Eksik, başarısız, planlama amaçlı veya eşleşmeyen kayıt PASS sayılmaz. Roller aynı tek kanıt kaydını referans gösterir. `signatures.py` yalnız mevcut derlenmiş JUnit yöntemlerini denetler; gerçek runner keşfi ve cihaz kabulü ayrı kalır.
+
+QA profili yalnız açık `-I` seçimiyle etkinleşir; gerçek paket kimliği, ağ izni, servis alanları, imza ve hedef/veri koruma denetimleri kaldırılmaz. Sonraki gerekli Gradle koşusu görev sürelerini kaydeder; sırf ölçüm için koşu başlatılmaz. Mevcut in-process/no-daemon geçici çözümü korunur; yapılandırma önbelleği veya daemon değişikliği kendiliğinden açılmaz. Salt araç/belge değişikliğinde önceki uygulama kontrollerini tekrarlama; yeni araçları küçük sahte/temp fixture testleriyle doğrula.

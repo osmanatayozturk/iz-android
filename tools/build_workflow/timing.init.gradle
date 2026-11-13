@@ -1,0 +1,49 @@
+// Bounded structured timing only. No task output, failures, arguments or credentials.
+// Gradle 8.11.1 TaskExecutionListener is not configuration-cache compatible.
+import groovy.json.JsonOutput
+import org.gradle.api.execution.TaskExecutionListener
+import org.gradle.api.tasks.TaskState
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
+
+if (gradle.startParameter.configurationCacheRequested) {
+    throw new GradleException('Task timing requires --no-configuration-cache')
+}
+def configured = gradle.startParameter.projectProperties['izTaskTimingFile']
+def outputRoot = System.getenv('IZ_BUILD_WORKFLOW_OUTPUT')
+if (!configured || !outputRoot) throw new GradleException('Explicit task timing file and launcher output root required')
+def root = new File(outputRoot).canonicalFile
+def target = new File(configured).canonicalFile
+if (!root.path.matches('(?i)^D:[\\/].+') || !target.toPath().startsWith(root.toPath()) || target == root || target.exists()) {
+    throw new GradleException('New task timing file must remain in configured D output')
+}
+def started = new ConcurrentHashMap<String, Long>()
+def rows = Collections.synchronizedList(new ArrayList())
+def total = new AtomicInteger()
+def invocationStart = System.nanoTime()
+gradle.taskGraph.addTaskExecutionListener(new TaskExecutionListener() {
+    void beforeExecute(Task task) { started.put(task.path, System.nanoTime()) }
+    void afterExecute(Task task, TaskState state) {
+        def begin = started.remove(task.path)
+        total.incrementAndGet()
+        if (begin == null) return
+        def outcome = state.failure != null ? 'FAILED' : state.skipMessage == 'FROM-CACHE' ? 'FROM-CACHE' : state.upToDate ? 'UP-TO-DATE' : state.noSource ? 'NO-SOURCE' : state.skipped ? 'SKIPPED' : 'EXECUTED'
+        synchronized (rows) {
+            if (rows.size() < 256) rows.add([task: task.path.take(160), duration_ms: (System.nanoTime() - begin) / 1000000L, outcome: outcome])
+        }
+    }
+})
+gradle.buildFinished { result ->
+    def copy
+    synchronized (rows) { copy = new ArrayList(rows) }
+    def receipt = [schema_version: 1, failed: result.failure != null, elapsed_ms: (System.nanoTime() - invocationStart) / 1000000L, observed_tasks: total.get(), truncated: total.get() > copy.size(), tasks: copy]
+    def encoded = JsonOutput.toJson(receipt).getBytes('UTF-8')
+    while (encoded.length > 65536 && !copy.isEmpty()) {
+        copy.remove(copy.size() - 1); receipt.truncated = true
+        encoded = JsonOutput.toJson(receipt).getBytes('UTF-8')
+    }
+    if (!target.parentFile.isDirectory() && !target.parentFile.mkdirs()) throw new GradleException('Cannot create owned timing directory')
+    if (target.parentFile.canonicalFile.toPath().startsWith(root.toPath()) && target.createNewFile()) {
+        target.bytes = encoded
+    } else throw new GradleException('Task timing target already exists or escaped output')
+}
