@@ -169,6 +169,13 @@ class SharedNavigationVisualCaptureTest {
             }
             compose.onNodeWithTag("compact-guidance-header").assertIsDisplayed()
             compose.onNodeWithTag("navigation-home-map").assertIsDisplayed()
+            compose.onNodeWithTag("hud-remaining", useUnmergedTree = true)
+                .assertTextEquals("200 m · 1,3 km / 4 dk · 2 dk mola dahil")
+                .assertContentDescriptionEquals("Manevra 200 m · Kalan 1.3 km · 4 dk · 2 dk mola dahil")
+            val knownSummary = mutableListOf<TextLayoutResult>()
+            compose.onNodeWithTag("hud-remaining", useUnmergedTree = true)
+                .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(knownSummary) }
+            check(!knownSummary.single().hasVisualOverflow) { "Known HUD summary must fit without ellipsis" }
             val before = bounds("compact-guidance-header")
             val displayedBefore = textInfo("hud-instruction")
             val longLayout = mutableListOf<TextLayoutResult>()
@@ -182,6 +189,13 @@ class SharedNavigationVisualCaptureTest {
             }
             compose.onNodeWithText("GPS bekleniyor", useUnmergedTree = true).assertIsDisplayed()
             compose.onNodeWithText("Kayıt bekleniyor", useUnmergedTree = true).assertIsDisplayed()
+            compose.onNodeWithTag("hud-remaining", useUnmergedTree = true)
+                .assertTextEquals("— · — / — · 2 dk mola dahil")
+                .assertContentDescriptionEquals("Manevra — · Kalan — · — · 2 dk mola dahil")
+            val unknownSummary = mutableListOf<TextLayoutResult>()
+            compose.onNodeWithTag("hud-remaining", useUnmergedTree = true)
+                .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(unknownSummary) }
+            check(!unknownSummary.single().hasVisualOverflow) { "Unknown HUD summary must fit without ellipsis" }
             compose.onNodeWithTag("navigation-home-map").assertIsDisplayed()
             val after = bounds("compact-guidance-header")
             assertEquals(before.height, after.height, 1f)

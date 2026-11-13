@@ -25,7 +25,11 @@ import kotlin.math.ceil
 
 internal data class CompactHudData(val instruction: String, val next: String, val remaining: String,
     val speed: String, val speedDescription: String, val weather: String, val warnings: List<String>,
-    val muted: Boolean, val guidance: Boolean, val gpsWarning: Boolean = false, val recordingWarning: Boolean = false)
+    val muted: Boolean, val guidance: Boolean, val gpsWarning: Boolean = false, val recordingWarning: Boolean = false) {
+    val summaryText: String get() =
+        "${next.removePrefix("Manevra ")} · ${remaining.removePrefix("Kalan ").replaceFirst(" · ", " / ")}".replace('.', ',')
+    val summaryDescription: String get() = "$next · $remaining"
+}
 
 internal fun compactHudData(nav: NavigationState, weather: String, message: String?, voiceFault: String?): CompactHudData {
     val current = nav.guidance && !nav.gpsStale && !nav.paused && nav.approximateOrigin == null
@@ -72,7 +76,7 @@ internal fun CompactDrivingHud(data: CompactHudData, landscape: Boolean, onMute:
             fontSize = 15.sp, lineHeight = 20.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
     val summary: @Composable () -> Unit = {
-        Text("${data.next} · ${data.remaining}", Modifier.testTag("hud-remaining"),
+        Text(data.summaryText, Modifier.testTag("hud-remaining").semantics { contentDescription = data.summaryDescription },
             fontSize = 12.sp, lineHeight = 16.sp, maxLines = if (landscape) 1 else 2, overflow = TextOverflow.Ellipsis)
     }
     val commands: @Composable () -> Unit = {

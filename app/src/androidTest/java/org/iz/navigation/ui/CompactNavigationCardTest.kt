@@ -221,9 +221,10 @@ class CompactNavigationCardTest {
     }
 
     private fun assertCompactTypography() {
-        compose.onNodeWithTag("hud-remaining", useUnmergedTree = true).assertTextContains("Kalan")
+        compose.onNodeWithTag("hud-remaining", useUnmergedTree = true).assertTextEquals("200 m · 1,5 km / 10 dk")
         compose.onAllNodes(hasText("Tahmini varış", substring = true), useUnmergedTree = true).assertCountEquals(0)
-        compose.onNodeWithTag("hud-remaining", useUnmergedTree = true).assertTextContains("Manevra 200 m")
+        compose.onNodeWithTag("hud-remaining", useUnmergedTree = true)
+            .assertContentDescriptionEquals("Manevra 200 m · Kalan 1.5 km · 10 dk")
         compose.onNodeWithText("Sağa dön", useUnmergedTree = true).assertIsDisplayed()
         fun assertSize(text: String, expected: Float) {
             val layouts = mutableListOf<TextLayoutResult>()
