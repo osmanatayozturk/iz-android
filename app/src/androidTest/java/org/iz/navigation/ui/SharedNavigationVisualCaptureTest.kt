@@ -330,7 +330,8 @@ class SharedNavigationVisualCaptureTest {
                 .put("capturedAt", System.currentTimeMillis())
                 .put("counters", JSONObject().put("plans", plans.get()).put("locations", locations.get()).put("activations", activations.get()))
             check(activations.get() == 0)
-            if (!state.startsWith("01")) awaitRenderedRoute()
+            if (!state.startsWith("01")) awaitRenderedRoute(integratedHud =
+                state == "03-integrated-hud-portrait-font1" || state == "04-integrated-hud-landscape-font2")
             val owned = ownedWindow(activity, dialog = state.startsWith("01") || state.startsWith("02"))
             val window = windowInfo(activity, owned)
             metadata.put("window", window)
@@ -448,17 +449,34 @@ class SharedNavigationVisualCaptureTest {
         return directory
     }
 
-    private fun awaitRenderedRoute() {
+    private fun awaitRenderedRoute(integratedHud: Boolean) {
         try {
             compose.waitUntil(20_000) {
-                var rendered = false
+                var rendered: Result<Boolean>? = null
                 instrumentation.runOnMainSync {
-                    nativeMap.get()?.let { map ->
-                        val point = map.projection.toScreenLocation(LatLng(41.005, 29.005))
-                        rendered = map.queryRenderedFeatures(point, "weather-route-layer").isNotEmpty()
+                    rendered = runCatching {
+                        nativeMap.get()?.let { map ->
+                            if (integratedHud) {
+                                val width = map.width
+                                val height = map.height
+                                val padding = map.cameraPosition.padding
+                                if (!width.isFinite() || !height.isFinite() || width !in 1f..4096f || height !in 1f..4096f ||
+                                    padding == null || padding.size != 4 || padding.any { !it.isFinite() || it < 0 } ||
+                                    padding[0] + padding[2] >= width || padding[1] + padding[3] >= height) false
+                                else {
+                                    val viewport = android.graphics.RectF(padding[0].toFloat(), padding[1].toFloat(),
+                                        (width - padding[2]).toFloat(), (height - padding[3]).toFloat())
+                                    viewport.width() > 0 && viewport.height() > 0 &&
+                                        map.queryRenderedFeatures(viewport, "weather-route-layer").isNotEmpty()
+                                }
+                            } else {
+                                val point = map.projection.toScreenLocation(LatLng(41.005, 29.005))
+                                map.queryRenderedFeatures(point, "weather-route-layer").isNotEmpty()
+                            }
+                        } ?: false
                     }
                 }
-                rendered
+                checkNotNull(rendered).getOrThrow()
             }
         } catch (timeout: ComposeTimeoutException) {
             val diagnostic = runCatching {
