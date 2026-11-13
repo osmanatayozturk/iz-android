@@ -125,6 +125,10 @@ class CompactDrivingHudUiTest {
         assertEquals(16f, layout.layoutInput.style.lineHeight.value, .01f)
         assertEquals(maxLines, layout.layoutInput.maxLines)
         assertTrue(layout.lineCount <= maxLines)
-        assertFalse("Summary overflow: $expected; size=${layout.size}; constraints=${layout.layoutInput.constraints}", layout.hasVisualOverflow)
+        assertFalse("Summary overflow: $expected; size=${layout.size}; constraints=${layout.layoutInput.constraints}; " +
+            "multiParagraph=${layout.multiParagraph.width}x${layout.multiParagraph.height}; " +
+            "didOverflowWidth=${layout.didOverflowWidth}; didOverflowHeight=${layout.didOverflowHeight}; " +
+            "didExceedMaxLines=${layout.multiParagraph.didExceedMaxLines}; " +
+            "isLineEllipsized(0)=${layout.lineCount > 0 && layout.isLineEllipsized(0)}", layout.hasVisualOverflow)
     }
 }

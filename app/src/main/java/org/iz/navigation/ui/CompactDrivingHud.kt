@@ -76,7 +76,7 @@ internal fun CompactDrivingHud(data: CompactHudData, landscape: Boolean, onMute:
             fontSize = 15.sp, lineHeight = 20.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
     val summary: @Composable () -> Unit = {
-        Text(data.summaryText, Modifier.testTag("hud-remaining").semantics { contentDescription = data.summaryDescription },
+        Text(data.summaryText, Modifier.fillMaxWidth().testTag("hud-remaining").semantics { contentDescription = data.summaryDescription },
             fontSize = 12.sp, lineHeight = 16.sp, maxLines = if (landscape) 1 else 2, overflow = TextOverflow.Ellipsis)
     }
     val commands: @Composable () -> Unit = {
