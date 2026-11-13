@@ -123,7 +123,7 @@ internal fun CompactDrivingHud(data: CompactHudData, landscape: Boolean, onMute:
             if (landscape) Row(Modifier.weight(1f).testTag("live-guidance-card")
                 .clickable(onClickLabel = "Yolculuk işlemlerini aç", onClick = onManage),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Column(Modifier.weight(1f)) { instruction(); summary() }
+                Column(Modifier.weight(2f)) { instruction(); summary() }
                 Column(Modifier.weight(1f)) { warnings(); preparedDisclosure() }
             } else {
                 Row(Modifier.testTag("live-guidance-card").clickable(onClickLabel = "Yolculuk işlemlerini aç", onClick = onManage),

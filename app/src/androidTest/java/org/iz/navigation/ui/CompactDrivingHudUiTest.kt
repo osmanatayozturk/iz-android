@@ -51,14 +51,14 @@ class CompactDrivingHudUiTest {
         val statusLayouts = mutableListOf<TextLayoutResult>()
         compose.onNodeWithTag("prepared-map-status", useUnmergedTree = true)
             .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(statusLayouts) }
-        assertFalse("Prepared disclosure must fit its actual slot", statusLayouts.single().hasVisualOverflow)
+        assertFalse(textLayoutDetails("prepared disclosure", statusLayouts.single()), statusLayouts.single().hasVisualOverflow)
         val warningSlot = compose.onNodeWithTag("hud-reserved-status").fetchSemanticsNode().boundsInRoot
         for (copy in listOf("GPS bekleniyor", "Kayıt bekleniyor", "Duraklatıldı")) {
             val node = compose.onNodeWithText(copy, useUnmergedTree = true).assertIsDisplayed()
             val measured = mutableListOf<TextLayoutResult>()
             node.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(measured) }
-            assertEquals(1, measured.single().lineCount)
-            assertFalse("Warning must fit the reserved column: $copy", measured.single().hasVisualOverflow)
+            assertEquals(textLayoutDetails("warning: $copy", measured.single()), 1, measured.single().lineCount)
+            assertFalse(textLayoutDetails("warning: $copy", measured.single()), measured.single().hasVisualOverflow)
             val bounds = node.fetchSemanticsNode().boundsInRoot
             assertTrue(bounds.left >= warningSlot.left && bounds.right <= warningSlot.right)
             assertTrue(bounds.top >= warningSlot.top && bounds.bottom <= warningSlot.bottom)
@@ -67,6 +67,7 @@ class CompactDrivingHudUiTest {
             "Manevra 200 m · Kalan 3.0 km · 8 dk · 2 dk mola dahil", 1)
     }
     private fun verify(landscape: Boolean, fontScale: Float) {
+        val summaryLayouts = mutableListOf<Pair<Boolean, String>>()
         var data by mutableStateOf(initial.copy(next = "Manevra —", remaining = "Kalan — · — · 2 dk mola dahil"))
         compose.setContent { CompositionLocalProvider(LocalDensity provides Density(1f, fontScale)) { IzTheme {
             Box(Modifier.requiredSize(if (landscape) 640.dp else 360.dp, if (landscape) 360.dp else 640.dp)) {
@@ -75,7 +76,8 @@ class CompactDrivingHudUiTest {
                 }
             }
         } } }
-        assertSummary("— · — / — · 2 dk mola dahil", "Manevra — · Kalan — · — · 2 dk mola dahil", if (landscape) 1 else 2)
+        assertSummary("— · — / — · 2 dk mola dahil", "Manevra — · Kalan — · — · 2 dk mola dahil",
+            if (landscape) 1 else 2, summaryLayouts)
         val originalHeight = compose.onNodeWithTag("compact-guidance-header").fetchSemanticsNode().boundsInRoot.height
         val full = "Sentetik kavşaktan sağa dön ve uzun sahil caddesini izleyerek ikinci yol ayrımından şehir merkezi yönünde devam et"
         val warning = "GPS konumu bekleniyor · Kayıt: hassas ve güvenilir konum bekleniyor"
@@ -93,8 +95,8 @@ class CompactDrivingHudUiTest {
             val node = compose.onNodeWithText(copy, useUnmergedTree = true).assertIsDisplayed()
             val measured = mutableListOf<TextLayoutResult>()
             node.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(measured) }
-            assertEquals(1, measured.single().lineCount)
-            assertFalse(measured.single().hasVisualOverflow)
+            assertEquals(textLayoutDetails("warning: $copy", measured.single()), 1, measured.single().lineCount)
+            assertFalse(textLayoutDetails("warning: $copy", measured.single()), measured.single().hasVisualOverflow)
             val bounds = node.fetchSemanticsNode().boundsInRoot
             assertTrue(bounds.top >= header.top && bounds.bottom <= header.bottom)
         }
@@ -110,12 +112,15 @@ class CompactDrivingHudUiTest {
                 "12,3 km · 999,9 km / 206 dk · 3 dk mola dahil", "Manevra 12.3 km · Kalan 999.9 km · 206 dk · 3 dk mola dahil"))
         for ((next, remaining, expected, description) in summaries) {
             compose.runOnIdle { data = data.copy(next = next, remaining = remaining) }
-            assertSummary(expected, description, if (landscape) 1 else 2)
+            assertSummary(expected, description, if (landscape) 1 else 2, summaryLayouts)
             assertEquals(originalHeight, compose.onNodeWithTag("compact-guidance-header").fetchSemanticsNode().boundsInRoot.height, 1f)
         }
+        assertTrue("HUD_SUMMARY_LAYOUTS\n" + summaryLayouts.joinToString("\n") { "fits=${it.first}; ${it.second}" },
+            summaryLayouts.all { it.first })
     }
 
-    private fun assertSummary(expected: String, description: String, maxLines: Int) {
+    private fun assertSummary(expected: String, description: String, maxLines: Int,
+        collectedLayouts: MutableList<Pair<Boolean, String>>? = null) {
         val node = compose.onNodeWithTag("hud-remaining", useUnmergedTree = true)
             .assertTextEquals(expected).assertContentDescriptionEquals(description).assertIsDisplayed()
         val measured = mutableListOf<TextLayoutResult>()
@@ -124,11 +129,18 @@ class CompactDrivingHudUiTest {
         assertEquals(12f, layout.layoutInput.style.fontSize.value, .01f)
         assertEquals(16f, layout.layoutInput.style.lineHeight.value, .01f)
         assertEquals(maxLines, layout.layoutInput.maxLines)
-        assertTrue(layout.lineCount <= maxLines)
-        assertFalse("Summary overflow: $expected; size=${layout.size}; constraints=${layout.layoutInput.constraints}; " +
+        val details = textLayoutDetails("summary: $expected", layout)
+        if (collectedLayouts == null) {
+            assertTrue(details, layout.lineCount <= maxLines)
+            assertFalse(details, layout.hasVisualOverflow)
+        } else collectedLayouts += (layout.lineCount <= maxLines && !layout.hasVisualOverflow) to details
+    }
+
+    private fun textLayoutDetails(copy: String, layout: TextLayoutResult) =
+        "$copy; size=${layout.size}; constraints=${layout.layoutInput.constraints}; " +
             "multiParagraph=${layout.multiParagraph.width}x${layout.multiParagraph.height}; " +
+            "maxIntrinsicWidth=${layout.multiParagraph.maxIntrinsicWidth}; lineCount=${layout.lineCount}; " +
             "didOverflowWidth=${layout.didOverflowWidth}; didOverflowHeight=${layout.didOverflowHeight}; " +
             "didExceedMaxLines=${layout.multiParagraph.didExceedMaxLines}; " +
-            "isLineEllipsized(0)=${layout.lineCount > 0 && layout.isLineEllipsized(0)}", layout.hasVisualOverflow)
-    }
+            "isLineEllipsized(0)=${layout.lineCount > 0 && layout.isLineEllipsized(0)}"
 }
