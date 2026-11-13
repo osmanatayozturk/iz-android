@@ -1,16 +1,18 @@
 package org.iz.navigation.ui
 
+import android.app.Activity
+import android.app.Instrumentation
 import android.content.Context
-import android.content.ContextWrapper
 import android.content.Intent
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import java.util.UUID
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.launch
 import org.iz.navigation.data.MapEditDraft
 import org.iz.navigation.data.MapEditFieldAction
@@ -28,11 +30,13 @@ import org.iz.navigation.integration.osm.editorDraft
 import org.iz.navigation.osmcatalog.OsmPresetCatalog
 import org.iz.navigation.osmcatalog.OsmPresetGeometry
 import org.junit.Assert.*
+import org.junit.After
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Real parser/catalog/owner/factory/editor/review; injected discovery/target IO and URL sink only.
+/** Real parser/catalog/owner/factory/editor/review; injected discovery/target IO and blocking VIEW monitor only.
  * This is not native-map hit testing, live Overpass/API validation, or a public write.
  */
 @RunWith(AndroidJUnit4::class)
@@ -49,8 +53,27 @@ class OsmLightEditorDiscoveryFlowTest {
     private val factoryDrafts = mutableListOf<MapEditDraft>()
     private val rejectedFactories = mutableListOf<OsmRef>()
     private val reviews = mutableListOf<OsmCorrectionReview>()
-    private val externalIntents = mutableListOf<Intent>()
+    private val externalIntents = CopyOnWriteArrayList<Intent>()
     private var nearbyReads = 0
+    private val instrumentation = InstrumentationRegistry.getInstrumentation()
+    // ActivityMonitor() invokes this API26+ callback before platform dispatch. Block every VIEW,
+    // including a wrong URI, so the unchanged assertions can reject it without opening a browser.
+    // https://developer.android.com/reference/android/app/Instrumentation.ActivityMonitor#onStartActivity(android.content.Intent)
+    private val externalViewMonitor = object : Instrumentation.ActivityMonitor() {
+        override fun onStartActivity(intent: Intent): Instrumentation.ActivityResult? {
+            if (intent.action != Intent.ACTION_VIEW) return null
+            externalIntents += Intent(intent)
+            return Instrumentation.ActivityResult(Activity.RESULT_CANCELED, null)
+        }
+    }
+
+    @Before fun interceptExternalViews() {
+        instrumentation.addMonitor(externalViewMonitor)
+    }
+
+    @After fun removeExternalViewMonitor() {
+        instrumentation.removeMonitor(externalViewMonitor)
+    }
 
     @Test fun unnamedBuildingWayRequiresExplicitChoiceAndReviewsNamePhoneWithoutChangingItsArea() {
         val building = building()
@@ -113,13 +136,7 @@ class OsmLightEditorDiscoveryFlowTest {
         val actualCatalog = catalog
         val targets = elements.associateBy { it.ref }
         compose.setContent {
-            val baseContext = LocalContext.current
-            val urlSink = remember(baseContext) {
-                object : ContextWrapper(baseContext) {
-                    override fun startActivity(intent: Intent) { externalIntents += Intent(intent) }
-                }
-            }
-            CompositionLocalProvider(LocalContext provides urlSink) { MaterialTheme {
+            MaterialTheme {
                 val scope = rememberCoroutineScope()
                 owner = remember {
                     PlaceInformationDiscoveryOwner(scope,
@@ -165,7 +182,7 @@ class OsmLightEditorDiscoveryFlowTest {
                         onNoteFallback = { error("No note action expected") }, catalog = actualCatalog,
                     )
                 }
-            } }
+            }
         }
     }
 
