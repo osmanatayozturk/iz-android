@@ -13,7 +13,7 @@ class BackupSurveyTest {
         for (action in SurveyAction.entries) {
             val row = draft.copy(surveyPayload=observation.copy(hours=observation.hours.copy(action=action)).encode())
             val json = BackupJson.encode(DiarySnapshot(mapEdits=listOf(row)))
-            assertEquals(11,json.getInt("version"))
+            assertEquals(12,json.getInt("version"))
             val restored = BackupJson.decode(json).mapEdits.single()
             assertEquals(row,restored)
             assertFalse(restored.localChangesetCreated); assertNull(restored.localAttemptId)

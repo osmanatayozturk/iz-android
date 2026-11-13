@@ -22,7 +22,7 @@ class LeanBackupTest {
             destinationShortcuts = listOf(DestinationShortcutRef(DestinationShortcutKind.HOME, "home")),
             leanSessions = listOf(pending, complete))
         val json = BackupJson.encode(snapshot)
-        assertEquals(11, json.getInt("version"))
+        assertEquals(12, json.getInt("version"))
         assertTrue(json.getJSONArray("leanSessions").getJSONObject(0).get("input") is JSONObject)
         assertFalse(json.toString().contains("base64", ignoreCase = true))
         assertEquals(snapshot, BackupJson.decode(json))

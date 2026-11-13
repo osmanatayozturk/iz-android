@@ -11,7 +11,7 @@ class BackupV4Test {
 
     @Test fun backupsOmitSensitiveHealthUnlessExplicitlyIncluded() {
         val encoded = BackupJson.encode(original)
-        assertEquals(11, encoded.getInt("version"))
+        assertEquals(12, encoded.getInt("version"))
         assertTrue(BackupJson.decode(encoded).healthSamples.isEmpty())
         assertEquals(trip, BackupJson.decode(encoded).journeys.single())
         assertEquals(original, BackupJson.decode(BackupJson.encode(original, includeHealth = true)))

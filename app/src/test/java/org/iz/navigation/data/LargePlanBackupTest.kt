@@ -11,7 +11,7 @@ class LargePlanBackupTest {
     @Test fun twentyStopBackupRoundTripsDuplicatesBreaksAndDynamicOrigin() {
         val saved = plan(20).copy(originUsesCurrentLocation=true)
         val value = BackupJson.encode(DiarySnapshot(savedPlans=listOf(saved)))
-        assertEquals(11, value.getInt("version"))
+        assertEquals(12, value.getInt("version"))
         assertEquals(saved, BackupJson.decode(value).savedPlans.single())
     }
     @Test fun twentyOnePlannedStopsAreRejectedRatherThanTruncated() {
