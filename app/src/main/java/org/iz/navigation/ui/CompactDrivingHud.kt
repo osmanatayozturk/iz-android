@@ -73,11 +73,12 @@ internal fun CompactDrivingHud(data: CompactHudData, landscape: Boolean, onMute:
     val height = if (landscape) (76 + 52 * scale).dp else (144 + 96 * scale).dp
     val instruction: @Composable () -> Unit = {
         Text(data.instruction, Modifier.testTag("hud-instruction").semantics { contentDescription = data.instruction },
-            fontSize = 15.sp, lineHeight = 20.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            fontSize = if (landscape) 11.sp else 15.sp, lineHeight = if (landscape) 13.5.sp else 20.sp,
+            maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
     val summary: @Composable () -> Unit = {
         Text(data.summaryText, Modifier.fillMaxWidth().testTag("hud-remaining").semantics { contentDescription = data.summaryDescription },
-            fontSize = 12.sp, lineHeight = 16.sp, maxLines = if (landscape) 1 else 2, overflow = TextOverflow.Ellipsis)
+            fontSize = 12.sp, lineHeight = if (landscape) 14.5.sp else 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
     val commands: @Composable () -> Unit = {
         Row {
@@ -123,7 +124,7 @@ internal fun CompactDrivingHud(data: CompactHudData, landscape: Boolean, onMute:
             if (landscape) Row(Modifier.weight(1f).testTag("live-guidance-card")
                 .clickable(onClickLabel = "Yolculuk işlemlerini aç", onClick = onManage),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Column(Modifier.weight(2f)) { instruction(); summary() }
+                Column(Modifier.weight(1f)) { instruction(); summary() }
                 Column(Modifier.weight(1f)) { warnings(); preparedDisclosure() }
             } else {
                 Row(Modifier.testTag("live-guidance-card").clickable(onClickLabel = "Yolculuk işlemlerini aç", onClick = onManage),

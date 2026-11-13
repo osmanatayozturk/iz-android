@@ -64,7 +64,7 @@ class CompactDrivingHudUiTest {
             assertTrue(bounds.top >= warningSlot.top && bounds.bottom <= warningSlot.bottom)
         }
         assertSummary("200 m · 3,0 km / 8 dk · 2 dk mola dahil",
-            "Manevra 200 m · Kalan 3.0 km · 8 dk · 2 dk mola dahil", 1)
+            "Manevra 200 m · Kalan 3.0 km · 8 dk · 2 dk mola dahil", true)
     }
     private fun verify(landscape: Boolean, fontScale: Float) {
         val summaryLayouts = mutableListOf<Pair<Boolean, String>>()
@@ -77,7 +77,7 @@ class CompactDrivingHudUiTest {
             }
         } } }
         assertSummary("— · — / — · 2 dk mola dahil", "Manevra — · Kalan — · — · 2 dk mola dahil",
-            if (landscape) 1 else 2, summaryLayouts)
+            landscape, summaryLayouts)
         val originalHeight = compose.onNodeWithTag("compact-guidance-header").fetchSemanticsNode().boundsInRoot.height
         val full = "Sentetik kavşaktan sağa dön ve uzun sahil caddesini izleyerek ikinci yol ayrımından şehir merkezi yönünde devam et"
         val warning = "GPS konumu bekleniyor · Kayıt: hassas ve güvenilir konum bekleniyor"
@@ -88,6 +88,9 @@ class CompactDrivingHudUiTest {
         compose.onNodeWithContentDescription(full).assertIsDisplayed()
         val layouts = mutableListOf<TextLayoutResult>()
         compose.onNodeWithTag("hud-instruction", useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        assertEquals(if (landscape) 11f else 15f, layouts.single().layoutInput.style.fontSize.value, .01f)
+        assertEquals(if (landscape) 13.5f else 20f, layouts.single().layoutInput.style.lineHeight.value, .01f)
+        assertEquals(2, layouts.single().layoutInput.maxLines)
         assertTrue(layouts.single().lineCount <= 2)
         compose.onNodeWithContentDescription(warning, useUnmergedTree = true).assertIsDisplayed()
         val header = compose.onNodeWithTag("compact-guidance-header").fetchSemanticsNode().boundsInRoot
@@ -112,14 +115,14 @@ class CompactDrivingHudUiTest {
                 "12,3 km · 999,9 km / 206 dk · 3 dk mola dahil", "Manevra 12.3 km · Kalan 999.9 km · 206 dk · 3 dk mola dahil"))
         for ((next, remaining, expected, description) in summaries) {
             compose.runOnIdle { data = data.copy(next = next, remaining = remaining) }
-            assertSummary(expected, description, if (landscape) 1 else 2, summaryLayouts)
+            assertSummary(expected, description, landscape, summaryLayouts)
             assertEquals(originalHeight, compose.onNodeWithTag("compact-guidance-header").fetchSemanticsNode().boundsInRoot.height, 1f)
         }
         assertTrue("HUD_SUMMARY_LAYOUTS\n" + summaryLayouts.joinToString("\n") { "fits=${it.first}; ${it.second}" },
             summaryLayouts.all { it.first })
     }
 
-    private fun assertSummary(expected: String, description: String, maxLines: Int,
+    private fun assertSummary(expected: String, description: String, landscape: Boolean,
         collectedLayouts: MutableList<Pair<Boolean, String>>? = null) {
         val node = compose.onNodeWithTag("hud-remaining", useUnmergedTree = true)
             .assertTextEquals(expected).assertContentDescriptionEquals(description).assertIsDisplayed()
@@ -127,13 +130,13 @@ class CompactDrivingHudUiTest {
         node.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(measured) }
         val layout = measured.single()
         assertEquals(12f, layout.layoutInput.style.fontSize.value, .01f)
-        assertEquals(16f, layout.layoutInput.style.lineHeight.value, .01f)
-        assertEquals(maxLines, layout.layoutInput.maxLines)
+        assertEquals(if (landscape) 14.5f else 16f, layout.layoutInput.style.lineHeight.value, .01f)
+        assertEquals(2, layout.layoutInput.maxLines)
         val details = textLayoutDetails("summary: $expected", layout)
         if (collectedLayouts == null) {
-            assertTrue(details, layout.lineCount <= maxLines)
+            assertTrue(details, layout.lineCount <= 2)
             assertFalse(details, layout.hasVisualOverflow)
-        } else collectedLayouts += (layout.lineCount <= maxLines && !layout.hasVisualOverflow) to details
+        } else collectedLayouts += (layout.lineCount <= 2 && !layout.hasVisualOverflow) to details
     }
 
     private fun textLayoutDetails(copy: String, layout: TextLayoutResult) =

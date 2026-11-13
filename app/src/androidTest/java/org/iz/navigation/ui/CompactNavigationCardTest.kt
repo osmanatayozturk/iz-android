@@ -1,6 +1,7 @@
 package org.iz.navigation.ui
 
 import android.graphics.Bitmap
+import android.content.ContextWrapper
 import android.os.SystemClock
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -10,7 +11,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsNode
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -20,6 +24,8 @@ import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.iz.navigation.data.Transport
+import org.iz.navigation.BuildConfig
+import org.iz.navigation.health.HealthPrivacyActivity
 import org.iz.navigation.navigation.NavigationProgress
 import org.iz.navigation.navigation.NavigationState
 import org.iz.navigation.weather.*
@@ -221,22 +227,27 @@ class CompactNavigationCardTest {
     }
 
     private fun assertCompactTypography() {
+        val landscape = bounds("navigation-home").let { it.width > it.height }
         compose.onNodeWithTag("hud-remaining", useUnmergedTree = true).assertTextEquals("200 m · 1,5 km / 10 dk")
         compose.onAllNodes(hasText("Tahmini varış", substring = true), useUnmergedTree = true).assertCountEquals(0)
         compose.onNodeWithTag("hud-remaining", useUnmergedTree = true)
             .assertContentDescriptionEquals("Manevra 200 m · Kalan 1.5 km · 10 dk")
         compose.onNodeWithText("Sağa dön", useUnmergedTree = true).assertIsDisplayed()
-        fun assertSize(text: String, expected: Float) {
+        fun assertSize(text: String, expected: Float, lineHeight: Float) {
             val layouts = mutableListOf<TextLayoutResult>()
             compose.onNodeWithText(text, useUnmergedTree = true)
                 .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
             assertEquals(expected, layouts.single().layoutInput.style.fontSize.value, .01f)
+            assertEquals(lineHeight, layouts.single().layoutInput.style.lineHeight.value, .01f)
+            assertEquals(2, layouts.single().layoutInput.maxLines)
         }
-        assertSize("Sağa dön", 15f)
+        assertSize("Sağa dön", if (landscape) 11f else 15f, if (landscape) 13.5f else 20f)
         val summaryLayouts = mutableListOf<TextLayoutResult>()
         compose.onNodeWithTag("hud-remaining", useUnmergedTree = true)
             .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(summaryLayouts) }
         assertEquals(12f, summaryLayouts.single().layoutInput.style.fontSize.value, .01f)
+        assertEquals(if (landscape) 14.5f else 16f, summaryLayouts.single().layoutInput.style.lineHeight.value, .01f)
+        assertEquals(2, summaryLayouts.single().layoutInput.maxLines)
     }
 
     private fun assertControlsAndMapStaySeparate() {
@@ -275,33 +286,63 @@ class CompactNavigationCardTest {
             check(compose.onNodeWithTag("navigation-home").captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it))
         }
 
-        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
-        val root = checkNotNull(automation.rootInActiveWindow) { "No native UI tree for compact card evidence" }
-        try {
-            File(directory, "ui.xml").outputStream().use { output ->
-                val xml = android.util.Xml.newSerializer().apply { setOutput(output, "UTF-8"); startDocument("UTF-8", true) }
-                var visited = 0
-                fun writeNode(node: android.view.accessibility.AccessibilityNodeInfo, depth: Int) {
-                    check(++visited <= 400 && depth <= 24) { "UI evidence tree exceeds the bounded synthetic fixture" }
-                    val rect = android.graphics.Rect().also(node::getBoundsInScreen)
-                    xml.startTag(null, "node")
-                    mapOf("class" to node.className, "text" to node.text, "description" to node.contentDescription,
-                        "bounds" to rect.flattenToString(), "clickable" to node.isClickable.toString()).forEach { (key, value) ->
-                        xml.attribute(null, key, value?.toString().orEmpty())
+        val evidenceType = "OWNED_COMPOSE_SEMANTICS_NOT_PLATFORM_TALKBACK"
+        val home = compose.onNodeWithTag("navigation-home", useUnmergedTree = true).assertIsDisplayed().fetchSemanticsNode()
+        val nodes = compose.runOnIdle {
+            runCatching {
+                check(home.config.getOrNull(SemanticsProperties.TestTag) == "navigation-home")
+                val rootView = checkNotNull((home.root as? ViewRootForTest)?.view)
+                var ownerContext = rootView.context
+                repeat(24) {
+                    val wrapper = ownerContext as? ContextWrapper
+                    if (ownerContext !is HealthPrivacyActivity && wrapper != null) {
+                        val base = wrapper.baseContext
+                        check(base !== ownerContext)
+                        ownerContext = base
                     }
-                    for (index in 0 until node.childCount) {
-                        val child = node.getChild(index) ?: continue
-                        try { writeNode(child, depth + 1) } finally { child.recycle() }
-                    }
-                    xml.endTag(null, "node")
                 }
-                writeNode(root, 0)
-                xml.endDocument()
+                val owner = checkNotNull(ownerContext as? HealthPrivacyActivity)
+                val target = InstrumentationRegistry.getInstrumentation().targetContext
+                check(BuildConfig.DEBUG && BuildConfig.APPLICATION_ID != "org.iz.navigation" &&
+                    owner.packageName == BuildConfig.APPLICATION_ID && owner.packageName == target.packageName)
+                check(owner.applicationContext === target.applicationContext && !owner.isDestroyed && !owner.isFinishing)
+                check(rootView.isAttachedToWindow && rootView.isShown && rootView.rootView === owner.window.decorView.rootView)
+                val result = mutableListOf<Pair<Int, Map<String, String>>>()
+                fun readNode(node: SemanticsNode, depth: Int) {
+                    check(result.size < 400 && depth <= 24) { "Owned Compose evidence exceeds400nodes/depth24" }
+                    check((node.root as? ViewRootForTest)?.view === rootView)
+                    result += depth to mapOf("class" to "androidx.compose.ui.semantics.SemanticsNode",
+                        "semanticsId" to node.id.toString(), "testTag" to node.config.getOrNull(SemanticsProperties.TestTag).orEmpty(),
+                        "text" to node.config.getOrNull(SemanticsProperties.Text).orEmpty().joinToString { it.text },
+                        "description" to node.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty().joinToString(),
+                        "bounds" to node.boundsInRoot.toString(),
+                        "hasClickAction" to (node.config.getOrNull(SemanticsActions.OnClick) != null).toString())
+                    node.children.forEach { readNode(it, depth + 1) }
+                }
+                readNode(home, 0)
+                result.toList()
             }
-        } finally { root.recycle() }
+        }.getOrThrow()
+        File(directory, "ui.xml").outputStream().use { output ->
+            val xml = android.util.Xml.newSerializer().apply { setOutput(output, "UTF-8"); startDocument("UTF-8", true) }
+            xml.startTag(null, "owned-compose-semantics")
+            xml.attribute(null, "evidenceType", evidenceType)
+            xml.attribute(null, "coordinateSpace", "COMPOSE_ROOT_PIXELS")
+            var openDepth = -1
+            for ((depth, attributes) in nodes) {
+                while (openDepth >= depth) { xml.endTag(null, "node"); openDepth-- }
+                xml.startTag(null, "node")
+                attributes.forEach { (key, value) -> xml.attribute(null, key, value) }
+                openDepth = depth
+            }
+            while (openDepth >= 0) { xml.endTag(null, "node"); openDepth-- }
+            xml.endTag(null, "owned-compose-semantics")
+            xml.endDocument()
+        }
         val map = bounds("navigation-home-map")
         val card = bounds("live-guidance-card")
         File(directory, "geometry.json").writeText(JSONObject().put("density", density).put("fontScale", fontScale)
+            .put("treeEvidenceType", evidenceType)
             .put("homeWidthDp", bounds("navigation-home").width / density).put("cardWidthDp", card.width / density)
             .put("cardHeightDp", card.height / density).put("cardBoundsPx", card.toString())
             .put("mapBoundsPx", map.toString()).put("cardOverlapsRealMap", card.overlaps(map))
