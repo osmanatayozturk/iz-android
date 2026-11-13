@@ -1,14 +1,24 @@
 # Değişiklik geçmişi
 
-## Telefon 0.13.2 / code 31 — haritadan OSM düzenleme (yayımlanmamış kaynak adayı)
+## Telefon 0.13.2 / code 31 — haritadan OSM düzenleme
 
 Ana haritaya uzun basarak yeni OSM mekânı ekle. Ad, tür ve telefon bilgilerini gir; türü aranabilir listeden seç ve sık kullandıklarını yıldızla favorilerine ekle. Yeni formda tür seçimi boş başlar. Mevcut desteklenen nokta ve basit kapalı alanların bilgileri aynı sade düzenleyiciden değiştirilebilir.
 
 Tür listesi uygulamayla birlikte gelen iD Tagging Schema kataloğunu kullanır; ek arama servisi veya API anahtarı gerekmez. Seçilebilir türler nesnenin geometrisine göre süzülür. Bina içindeki yeni işletmeler ayrı nokta olarak eklenir; bina çizimi ve geometri taşıma bu sürümün kapsamı dışındadır.
 
-Yeni yer eklemedeki çevre/mükerrer nesne taraması kullanıcının tercihiyle kaldırıldı. Mevcut nesnelerde güncel sürüm denetimi, gönderim önizlemesi ve belirsiz sonuçta otomatik yeniden göndermeme korunur. Ad veya telefonu bilerek boşaltmak silme olarak önizlenir; diğer etiketler ve geometri korunur. Favoriler ile yeni taslak alanları yedeklenir; eski kayıtlar okunmaya devam eder.
+Tür kataloğunun yüklenmesi, hazır olması ve yüklenememesi ayrı durumlarla gösterilir. Yükleme ve yeniden deneme sırasında yazılan alanlar ile gözlem onayı korunur; tür hazır olmadan kendiliğinden seçilmez.
 
-**Doğrulama: BEKLİYOR.** Birim/lint/derleme, izole QA, bağımsız Test/UIUX ve güvenlik sonuçları aynı son adaydan alınacak. Kısmi JVM sonuçları bu paragrafta Android veya cihaz kabulü gibi sunulmayacak.
+Yeni yer eklemedeki çevre/mükerrer nesne taraması kullanıcının tercihiyle kaldırıldı. Mevcut nesnelerde güncel sürüm denetimi, gönderim önizlemesi ve belirsiz sonuçta otomatik yeniden göndermeme korunur. Ad veya telefonu bilerek boşaltmak silme olarak önizlenir. Alan değişiklikleri gönderimden önce gösterilir; geometri düzenlemesi yapılmaz. Favoriler ile yeni taslak alanları yedeklenir; eski kayıtlar okunmaya devam eder.
+
+**Doğrulama — `9201ad8` kaynak adayı:** 1.688 birim testi yeni XML sonuçlarıyla geçti. Debug APK üretimi ve AndroidTest Kotlin derlemesi aynı başarılı birleşik koşuda tamamlandı. Derlenmiş 42 test ve üç lifecycle metodunun imzaları doğrulandı. Lint çağrısı bu başarılı koşuya dahildi ve güncel analiz çıktısı oluştu; rapor XML’i önceki koşudan kaldı. Ayrı görevin yürütme/önbellek durumu doğrulanmadığından rapordaki 102 uyarı ve bir ipucu yeni XML sonucu olarak sunulmaz.
+
+Fiziksel Android telefonda ayrı çevrimdışı QA paketleri ve sentetik verilerle 34 UI kontrolü yeni çift üzerinde geçti. Önceki sekiz backend sonucu ilgili kaynak, derlenmiş sınıflar, şema, yapılandırma ve çalışma koşulları eşleşmesiyle yeniden kabul edildi. Bu 34 yeni ve sekiz yeniden kabul edilmiş sonuç, başarısızlık bulunmayan 42 kontrollük kapsamı oluşturur.
+
+Beş yeni native görüntü sınırlı UI/UX incelemesinden geçti: gerçek ana harita girişi ve dört sentetik ürün penceresi. Ana haritada yüklemeden hazır duruma geçiş, tür araması ve iptal davranışı gözlendi. Elle TalkBack, sayısal kontrast, dokunma hedefi ölçümü, ayrı yükleme/hata görüntüleri ve canlı OSM yazması çalıştırılmadı.
+
+Odaklı aday ve paket güvenlik incelemesi olumlu sonuçlandı; doğrulanmış engelleyici güvenlik bulgusu yok. Değiştirilmiş yedeklerdeki dondurulmuş tür kurallarının katalog kökenine ilişkin çalışma zamanı doğrulaması yapılmadı.
+
+Bu teslim yalnız kaynak ve belgelerdir; APK veya Release içermez.
 
 ## Telefon 0.13.0 / code 29
 

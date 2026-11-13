@@ -61,13 +61,13 @@ Telefon sürümü **0.8.1 / code 13**'tür. Günlük şeması **5**, ZIP veri bi
 
 Uygulama katmanları `osmcommunity` altında HTTP istemcisi, modeller, ayrı Room deposu, repository ve bildirim worker'ıdır; `ui/OsmCommunity*` ekran ve ViewModel katmanıdır. Yazma testleri sahte sunucu/gateway kullanır; gerçek kişilere test mesajı gönderilmez.
 
-## Telefon 0.13.2 kaynak adayı — hafif mekân düzenleyici
+## Telefon 0.13.2 kaynak güncellemesi — hafif mekân düzenleyici
 
-Bu bölüm yayımlanmamış kaynak adayını anlatır; Android derleme, izole QA, bağımsız Test/UIUX ve güvenlik kabulü bekleniyor. Yukarıdaki 0.8.1 sürüm ve uyumluluk bilgileri tarihsel kayıttır.
+Bu bölüm 0.13.2 kaynak güncellemesindeki akışı anlatır. Sınırlı doğrulama sonuçları ve çalıştırılmayan kontroller [değişiklik geçmişinde](../CHANGELOG.md) açıklanır. Yukarıdaki 0.8.1 sürüm ve uyumluluk bilgileri tarihsel kayıttır.
 
 1. Ana haritada yeni mekânın konumuna uzun basın. Yeni formda tür boş başlar; adı, türü ve isteğe bağlı telefonu girin.
-2. Türü uygulamadaki aranabilir iD Tagging Schema listesinden seçin. Liste geometriye göre süzülür; yıldızla favori ekleyebilirsiniz. Katalog uygulamayla gelir ve tür seçimi için ek arama servisi veya API anahtarı istemez. Bina içindeki işletmeyi ayrı nokta olarak ekleyin; bina çizimi ve geometri taşıma desteklenmez.
-3. Desteklenen mevcut nokta veya basit kapalı alanın bilgilerini aynı sade düzenleyiciden değiştirin. Adı ya da telefonu bilerek boşaltmak silme olarak önizlenir; diğer etiketler ve geometri korunur.
+2. Türü uygulamadaki aranabilir iD Tagging Schema listesinden seçin. Katalog yüklenirken bekleyin; hata durumunda **Yeniden dene** ile tekrar yükleyin. Bu sırada yazılan alanlar ve gözlem onayı korunur. Liste geometriye göre süzülür; yıldızla favori ekleyebilirsiniz. Katalog uygulamayla gelir ve tür seçimi için ek arama servisi veya API anahtarı istemez. Bina içindeki işletmeyi ayrı nokta olarak ekleyin; bina çizimi ve geometri taşıma desteklenmez.
+3. Desteklenen mevcut nokta veya basit kapalı alanın bilgilerini aynı sade düzenleyiciden değiştirin. Adı ya da telefonu bilerek boşaltmak silme olarak önizlenir; alan değişikliklerini gönderimden önce inceleyin. Geometri düzenlemesi yapılmaz.
 4. Gönderim önizlemesini inceleyin. Yeni yer gönderiminde otomatik çevre/mükerrer nesne taraması yoktur. Mevcut nesnede güncel sürüm denetimi sürer. Gönderim sonucu belirsizse otomatik yeniden gönderilmez; sonucu OSM üzerinden kontrol edin.
 
-Favoriler ve yeni taslak alanları yedek kapsamındadır; eski kayıtların okunması korunur. Bu kaynak davranışı, son adayda yedek/geri yükleme veya canlı OSM kabulünün tamamlandığı anlamına gelmez.
+Favoriler ve yeni taslak alanları yedek kapsamındadır; eski kayıtların okunması korunur. Yedek ve geri yükleme kontrolleri sentetik QA kapsamındadır. Canlı OSM yazması çalıştırılmadı; değiştirilmiş yedeklerin tür kurallarına ilişkin çalışma zamanı doğrulaması açık kalır.
