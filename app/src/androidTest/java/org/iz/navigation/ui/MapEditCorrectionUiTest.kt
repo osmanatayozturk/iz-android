@@ -132,6 +132,8 @@ class MapEditCorrectionUiTest {
 
     @Test fun closedHighwayUsesExternalEditorInsteadOfEditableForm() {
         assertUnsupportedArea(mapOf("highway" to "residential", "name" to "Kapalı yol"))
+        compose.waitForIdle()
+        OsmLightEditorNativeCapture.capture("05-unsupported-fallback")
     }
 
     @Test fun closedDualGeometryTrackWithoutAreaEvidenceUsesExternalEditor() {
@@ -207,6 +209,8 @@ class MapEditCorrectionUiTest {
         compose.onNodeWithText("Telefon: 0312 555 01 23 → +90 312 555 45 67").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("contact:phone").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Sonra: Silinecek").performScrollTo().assertIsDisplayed()
+        compose.waitForIdle()
+        OsmLightEditorNativeCapture.capture("04-alias-delete-preview")
     }
 
     private fun assertUnsupportedArea(tags: Map<String, String>) {

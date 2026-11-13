@@ -37,6 +37,8 @@ class MapEditPresetSelectorTest {
         compose.onNodeWithContentDescription("${cafe.name} favorilere ekle").performClick()
         compose.runOnIdle { assertNull(selected); assertEquals(setOf("amenity/cafe"), favorites); assertEquals(1, toggles) }
         compose.onNodeWithText("Favoriler").assertIsDisplayed()
+        compose.waitForIdle()
+        OsmLightEditorNativeCapture.capture("02-search-favorites")
         compose.onNodeWithText(cafe.name).performClick()
         compose.runOnIdle { assertEquals("amenity/cafe", selected?.presetId); assertEquals(1, toggles) }
     }

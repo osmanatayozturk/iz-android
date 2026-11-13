@@ -110,6 +110,8 @@ class MapEditEditorTest {
         compose.onNodeWithText("Tür: Taslakta sabit çeşme türü").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Telefon: +90 312 555 01 23").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("amenity: drinking_water").performScrollTo().assertIsDisplayed()
+        compose.waitForIdle()
+        OsmLightEditorNativeCapture.capture("03-new-readable-preview")
     }
 
     @Test fun retryPreviewPublishesTheNormalizedSavedRowInsteadOfFailedAttemptMetadata() {

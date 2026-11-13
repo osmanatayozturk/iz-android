@@ -50,7 +50,7 @@ class BackupIdentityCompatibilityTest {
 
     @Test fun neitherMarkerBypassesUnsupportedVersionValidation() {
         for (marker in listOf(LegacyBackupFixture.manifest().getString("format"), "org.iz.navigation.backup")) {
-            for (version in listOf(0, 12)) {
+            for (version in listOf(0, 13)) {
                 assertThrows(IllegalArgumentException::class.java) {
                     BackupJson.decode(LegacyBackupFixture.manifest().put("format", marker).put("version", version))
                 }

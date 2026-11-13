@@ -100,6 +100,8 @@ class MainMapOsmEditorEntryTest {
                     .assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("")))
                 compose.onNodeWithText("Cadde / sokak (varsa)").assertDoesNotExist()
                 compose.onNodeWithText("Kapı numarası (varsa)").assertDoesNotExist()
+                compose.waitForIdle()
+                OsmLightEditorNativeCapture.capture("01-main-map-empty-type")
 
                 assertEquals(2, created.editorVersion)
                 assertNull(created.presetId)
