@@ -38,6 +38,12 @@ internal object OsmLightEditorNativeCapture {
         "03-new-readable-preview" to "MapEditEditorTest#previewShowsReadableFieldsAndTheFrozenTypeNameRatherThanCurrentCatalogName",
         "04-alias-delete-preview" to "MapEditCorrectionUiTest#existingPreviewShowsReadableBeforeAfterFieldsUsingFrozenTypeNamesAndExactAliasDeletion",
         "05-unsupported-fallback" to "MapEditCorrectionUiTest#closedHighwayUsesExternalEditorInsteadOfEditableForm",
+        "map-01-many" to "MainMapOsmEditorEntryTest#nativeMultiSelectionKeepsInformationBackAndMapInteraction",
+        "map-02-point" to "MainMapOsmEditorEntryTest#nativeMultiSelectionKeepsInformationBackAndMapInteraction",
+        "map-03-details" to "MainMapOsmEditorEntryTest#nativeMultiSelectionKeepsInformationBackAndMapInteraction",
+        "map-04-back" to "MainMapOsmEditorEntryTest#nativeMultiSelectionKeepsInformationBackAndMapInteraction",
+        "map-05-area" to "MainMapOsmEditorEntryTest#nativeSelectedAreaDrawsRealRingAndMarkerLongPressKeepsEntry",
+        "map-06-landscape" to "MainMapOsmEditorEntryTest#nativeSelectionPanelRemainsNonmodalInLandscape",
     )
 
     fun capture(state: String) {
@@ -51,7 +57,7 @@ internal object OsmLightEditorNativeCapture {
         check(BuildConfig.DEBUG && BuildConfig.APPLICATION_ID == QA && app.packageName == QA)
         check(instrumentation.context.packageName == "$QA.test")
         check(args.getString("osmLightEditorZipQaPackage") == QA)
-        OsmLightEditorQaTargetAdmission.requireAdmittedTarget()
+        OsmLightEditorQaTargetAdmission.requireAdmittedTarget(allowLandscape = state == "map-06-landscape")
         check(kotlin.math.abs(app.resources.configuration.fontScale - 1f) < .01f)
         if (Build.VERSION.SDK_INT < 34) error("Owned-window UiAutomation capture requires API34+")
         @Suppress("DEPRECATION")
@@ -75,9 +81,11 @@ internal object OsmLightEditorNativeCapture {
                     it.decorView.context.activity() === host && it.decorView.isShown && it.decorView.hasWindowFocus()
                 }
             val window = windows.single()
-            check(window !== host.window) // All five allocated states are the actual owned dialog.
+            val mapWindow = state.startsWith("map-") && state != "map-03-details"
+            check(if (mapWindow) window === host.window else window !== host.window)
             check(window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE == 0)
             if (state == "01-main-map-empty-type") check(host.javaClass.name == "org.iz.navigation.MainActivity")
+            if (state.startsWith("map-")) check(host.javaClass.name == "org.iz.navigation.MainActivity")
             host to window
         } }
         val (host, window) = requireNotNull(owned).getOrThrow()
@@ -118,7 +126,9 @@ internal object OsmLightEditorNativeCapture {
                 .put("appPackage", QA).put("testPackage", instrumentation.context.packageName)
                 .put("versionName", packageInfo.versionName).put("versionCode", packageInfo.longVersionCode)
                 .put("ownerActivity", host.javaClass.name).put("fontScale", app.resources.configuration.fontScale)
-                .put("api", Build.VERSION.SDK_INT).put("captureMethod", "UIAUTOMATION_OWNED_DIALOG_WINDOW_NO_COMPOSITING")
+                .put("api", Build.VERSION.SDK_INT).put("orientation", app.resources.configuration.orientation)
+                .put("captureMethod", if (window === host.window) "UIAUTOMATION_OWNED_ACTIVITY_WINDOW_NO_COMPOSITING"
+                    else "UIAUTOMATION_OWNED_DIALOG_WINDOW_NO_COMPOSITING")
                 .put("png", png.name).put("bytes", png.length()).put("sha256", sha)
                 .put("width", bitmap.width).put("height", bitmap.height)
                 .put("capturedAt", System.currentTimeMillis()).put("elapsedRealtime", SystemClock.elapsedRealtime())

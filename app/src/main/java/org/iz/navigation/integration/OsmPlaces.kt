@@ -47,6 +47,18 @@ class OsmPlaces(context: Context) {
         execute = { client.newCall(it).execute() },
     )
 
+    private val outlineRead = OverpassRead(
+        readBudget = { OsmReadBudget.fromJson(preferences.getString("overpass_budget", null)) },
+        writeBudget = { preferences.edit().putString("overpass_budget", it.toJson()).commit() },
+        execute = { request -> client.newCall(request).apply { timeout().timeout(20, TimeUnit.SECONDS) }.execute() },
+    )
+    private val outlineReader = MapPlaceOutlineReader(overpassLock, { settings.read().overpass }, ::cachedJson,
+        ::storeCache, { query, endpoint -> outlineRead.query(query, endpoint) }, { editorCatalog })
+
+    internal suspend fun selectedOutline(ref: OsmRef): MapOutlineReadResult = withContext(Dispatchers.IO) {
+        outlineReader.read(ref)
+    }
+
     private val nominatimSearch = NominatimSearch(
         mutex = nominatimLock,
         endpoint = { settings.read().nominatim },
@@ -91,7 +103,10 @@ class OsmPlaces(context: Context) {
         location: suspend () -> WeatherCoordinate?,
     ): List<SelectedOsmPlace> = directionsSearch.search(query, location)
 
-    suspend fun nearby(latitude: Double, longitude: Double): List<SelectedOsmPlace> = withContext(Dispatchers.IO) {
+    suspend fun nearby(latitude: Double, longitude: Double): List<SelectedOsmPlace> =
+        nearbyCandidates(latitude, longitude).map { it.place }
+
+    internal suspend fun nearbyCandidates(latitude: Double, longitude: Double): List<MapPlaceCandidate> = withContext(Dispatchers.IO) {
         require(validCoordinate(latitude, longitude)) { "Geçersiz harita koordinatı." }
         overpassLock.withLock {
             val endpoint = settings.read().overpass
@@ -99,10 +114,17 @@ class OsmPlaces(context: Context) {
             val lat = String.format(Locale.US, "%.4f", latitude)
             val lon = String.format(Locale.US, "%.4f", longitude)
             val key = "nearby:editor-v2:${OsmPresetCatalog.BUNDLED_SHA256}:$endpoint:$lat:$lon"
-            cached(key, 600_000) { parseOverpassPlaces(it, editorCatalog) }?.let { return@withLock it }
+            val cached = cachedJson(key, 600_000)?.let { runCatching { parseOverpassMapCandidates(it, editorCatalog) }.getOrNull() }
+            coroutineContext.ensureActive()
+            if (settings.read().overpass != endpoint) throw kotlinx.coroutines.CancellationException("Harita servisi değişti.")
+            cached?.let { return@withLock it }
             val query = osmEditorNearbyQuery(latitude, longitude, editorMatchKeys)
-            val json = performOverpass(query)
-            val result = parseOverpassPlaces(json, editorCatalog)
+            val json = performOverpass(query, endpoint)
+            coroutineContext.ensureActive()
+            if (settings.read().overpass != endpoint) throw kotlinx.coroutines.CancellationException("Harita servisi değişti.")
+            val result = parseOverpassMapCandidates(json, editorCatalog)
+            coroutineContext.ensureActive()
+            if (settings.read().overpass != endpoint) throw kotlinx.coroutines.CancellationException("Harita servisi değişti.")
             storeCache(key, json)
             result
         }

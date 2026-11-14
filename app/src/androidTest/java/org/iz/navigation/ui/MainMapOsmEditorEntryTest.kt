@@ -5,9 +5,11 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.graphics.PointF
 import android.graphics.Rect
+import android.graphics.RectF
 import android.os.Bundle
 import android.os.Looper
 import android.os.SystemClock
@@ -33,6 +35,13 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
+import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardOpenOption.CREATE_NEW
+import java.nio.file.StandardOpenOption.WRITE
+import java.security.MessageDigest
+import java.util.Locale
+import java.util.UUID
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.iz.navigation.IzApplication
@@ -45,11 +54,15 @@ import org.iz.navigation.data.MapEditStatus
 import org.iz.navigation.osmcatalog.OsmPresetCatalog
 import org.iz.navigation.osmcatalog.OsmPresetGeometry
 import org.iz.navigation.tracking.TrackingService
+import org.iz.navigation.integration.OsmServiceSettings
+import org.maplibre.android.camera.CameraUpdateFactory
+import org.maplibre.android.geometry.LatLng
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.json.JSONObject
+import org.json.JSONArray
 import org.maplibre.android.MapLibre
 import org.maplibre.android.ModuleProvider
 import org.maplibre.android.http.HttpRequest
@@ -64,6 +77,192 @@ import org.maplibre.android.maps.MapView
 class MainMapOsmEditorEntryTest {
     @get:Rule val compose = createEmptyComposeRule()
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+    /** Real MainActivity, production cache/parser/owner and native map. All geographic data is
+     * synthetic; these fixtures do not establish live Overpass or public-map correctness. */
+    @Test(timeout = 90_000)
+    fun nativeMultiSelectionKeepsInformationBackAndMapInteraction() = runBlocking {
+        val app = readySelectionApp()
+        val repository = DiaryRepository(app)
+        val baseline = repository.snapshot()
+        val baselineSession = session(app)
+        withOfflineMainActivity(app) { host ->
+            val (view, map) = readyMap(host)
+            val fixture = discoverSynthetic(app, view, map)
+            compose.onNodeWithTag("place-info-open-information").assertIsNotEnabled()
+            compose.onNodeWithTag("place-info-discovery-choice-0").assertIsNotSelected()
+            compose.onNodeWithTag("place-info-discovery-choice-1").assertIsNotSelected()
+            OsmLightEditorNativeCapture.capture("map-01-many")
+            compose.onNodeWithTag("place-info-discovery-choice-0").performClick().assertIsSelected()
+            compose.onNodeWithTag("place-info-map-candidate-0").assertIsSelected()
+            compose.onNodeWithTag("place-info-open-information").assertIsEnabled()
+            OsmLightEditorNativeCapture.capture("map-02-point")
+            compose.onNodeWithTag("place-info-open-information").performClick()
+            compose.onNodeWithTag("place-information-card").assertExists()
+            compose.onNodeWithText(fixture.nodeName).assertExists()
+            OsmLightEditorNativeCapture.capture("map-03-details")
+            Espresso.pressBack()
+            compose.onNodeWithTag("place-info-discovery-choice-0").assertIsSelected()
+            compose.onNodeWithTag("place-info-open-information").assertIsEnabled()
+            OsmLightEditorNativeCapture.capture("map-04-back")
+            assertExposedMapPans(app, view, map)
+            // New geographic tap replaces the old list. No query is required on back or pan.
+            val next = discoverSynthetic(app, view, map, count = 0)
+            compose.onAllNodesWithTag("place-info-discovery-choice-0").assertCountEquals(0)
+            compose.onNodeWithTag("place-info-open-information").assertIsNotEnabled()
+            compose.onNodeWithTag("place-info-discovery-close").performClick()
+            compose.onAllNodesWithTag("place-info-map-candidate-0").assertCountEquals(0)
+            assertNotEquals(fixture.wayId, next.wayId)
+            // A single way goes straight to the existing information window, without an outline.
+            val single = discoverSynthetic(app, view, map, count = 1)
+            compose.waitUntil(10_000) { compose.onAllNodesWithTag("place-information-card").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText(single.wayName).assertExists()
+            compose.onNodeWithTag("place-info-discovery").assertDoesNotExist()
+            Espresso.pressBack()
+            assertEquals(baselineSession, session(app))
+        }
+        assertEquals(baseline, repository.snapshot())
+    }
+
+    @Test(timeout = 90_000)
+    fun nativeSelectedAreaDrawsRealRingAndMarkerLongPressKeepsEntry() = runBlocking {
+        val app = readySelectionApp()
+        val repository = DiaryRepository(app)
+        val before = repository.snapshot()
+        val baselineSession = session(app)
+        var owned: MapEditDraft? = null
+        try {
+            withOfflineMainActivity(app) { host ->
+                val (view, map) = readyMap(host)
+                val fixture = discoverSynthetic(app, view, map, area = true)
+                compose.onNodeWithTag("place-info-discovery-choice-1").performClick().assertIsSelected()
+                compose.waitUntil(10_000) { onMain {
+                    map.queryRenderedFeatures(RectF(0f, 0f, view.width.toFloat(), view.height.toFloat()), "selected-place-area-fill")
+                        .any { it.getNumberProperty("osmId")?.toLong() == fixture.wayId && it.geometry()?.type() == "Polygon" }
+                } }
+                compose.onNodeWithTag("place-info-map-candidate-1").assertIsSelected().assertIsDisplayed()
+                OsmLightEditorNativeCapture.capture("map-05-area")
+                compose.onNodeWithTag("place-info-map-candidate-1").performTouchInput { longClick() }
+                compose.waitUntil(10_000) { compose.onAllNodesWithTag("osm-map-name").fetchSemanticsNodes().size == 1 }
+                owned = repository.snapshot().mapEdits.filterNot { draft -> before.mapEdits.any { it.id == draft.id } }.single()
+                compose.onNodeWithTag("osm-map-name").performScrollTo()
+                    .assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("")))
+                compose.onNodeWithTag("osm-map-phone").performScrollTo()
+                    .assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("")))
+                assertNull(requireNotNull(owned).presetId)
+                assertEquals(baselineSession, session(app))
+                Espresso.pressBack()
+                Espresso.pressBack()
+            }
+            val after = repository.snapshot()
+            assertEquals(before, after.copy(mapEdits = after.mapEdits.filterNot { it.id == owned?.id }))
+        } finally { owned?.let { repository.deleteMapEditIfUnchanged(it) } }
+    }
+
+    @Test(timeout = 90_000)
+    fun nativeSelectionPanelRemainsNonmodalInLandscape() = runBlocking {
+        val app = readySelectionApp()
+        check(InstrumentationRegistry.getArguments().getString("osmMapSelectionAllowLandscape") == "true") {
+            "Owned QA Activity orientation change must be explicitly admitted"
+        }
+        val before = DiaryRepository(app).snapshot()
+        val baselineSession = session(app)
+        withOfflineMainActivity(app) { host ->
+            var original = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            host.onActivity { original = it.requestedOrientation; it.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE }
+            try {
+                compose.waitUntil(10_000) { app.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE }
+                OsmLightEditorQaTargetAdmission.requireAdmittedTarget(allowLandscape = true)
+                val (view, map) = readyMap(host)
+                discoverSynthetic(app, view, map)
+                compose.onNodeWithTag("place-info-discovery-choice-0").performClick().assertIsSelected()
+                compose.onNodeWithTag("place-info-open-information").assertIsEnabled().assertIsDisplayed()
+                compose.onNodeWithTag("place-info-discovery-collapse").assertHeightIsAtLeast(androidx.compose.ui.unit.Dp(48f))
+                OsmLightEditorNativeCapture.capture("map-06-landscape")
+                assertExposedMapPans(app, view, map)
+                compose.onNodeWithTag("place-info-discovery-collapse").performClick()
+                compose.onNodeWithTag("place-info-open-information").assertIsDisplayed()
+                compose.onNodeWithTag("place-info-discovery-close").performClick()
+                assertEquals(baselineSession, session(app))
+            } finally { host.onActivity { it.requestedOrientation = original } }
+        }
+        assertEquals(before, DiaryRepository(app).snapshot())
+    }
+
+    private suspend fun readySelectionApp(): IzApplication {
+        val app = instrumentation.targetContext.applicationContext as IzApplication
+        requireIsolatedOfflineQa(app)
+        withTimeout(10_000) { app.osmReady.await() }
+        check(!TrackingService.isRunning && !app.navigation.state.value.recording && !app.navigation.state.value.guidance)
+        return app
+    }
+
+    private data class SyntheticSelection(val wayId: Long, val nodeName: String, val wayName: String)
+
+    private fun discoverSynthetic(app: Context, view: MapView, map: MapLibreMap, count: Int = 2, area: Boolean = false): SyntheticSelection {
+        val nonce = UUID.randomUUID().mostSignificantBits and 0x7fffffff
+        val id = 8_000_000_000_000L + nonce * 10
+        val fixture = SyntheticSelection(id + 2, "Synthetic QA point $nonce", "Synthetic QA area $nonce")
+        // Fresh, deliberately synthetic origin for each tap; never a device fix or recorded route.
+        onMain { map.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(35.0 + nonce % 10000 / 100000.0, 25.0 + nonce % 7000 / 100000.0), 18.0)) }
+        compose.waitForIdle()
+        val point = PointF(view.width * .35f, view.height * .36f)
+        val tapped = onMain { map.projection.fromScreenLocation(point) }
+        val wayCenter = LatLng(tapped.latitude, tapped.longitude + .00030)
+        fun tags(name: String, way: Boolean) = JSONObject().put("name", name).put(if (way) "building" else "amenity", if (way) "yes" else "bench")
+        val elements = JSONArray()
+        if (count == 2) elements.put(JSONObject().put("type", "node").put("id", id + 1)
+            .put("lat", tapped.latitude).put("lon", tapped.longitude).put("tags", tags(fixture.nodeName, false)))
+        if (count > 0) elements.put(JSONObject().put("type", "way").put("id", fixture.wayId)
+            .put("center", JSONObject().put("lat", wayCenter.latitude).put("lon", wayCenter.longitude)).put("tags", tags(fixture.wayName, true)))
+        val endpoint = OsmServiceSettings(app).read().overpass
+        val key = "nearby:editor-v2:${OsmPresetCatalog.BUNDLED_SHA256}:$endpoint:${String.format(Locale.US, "%.4f", tapped.latitude)}:${String.format(Locale.US, "%.4f", tapped.longitude)}"
+        MapSelectionCacheFixture.store(app, key, JSONObject().put("elements", elements).toString())
+        if (area) {
+            val vertices = listOf(-.00010 to -.00010, -.00010 to .00010, .00010 to .00010, .00010 to -.00010, -.00010 to -.00010)
+            val geometry = JSONArray().also { a -> vertices.forEach { (lat, lon) -> a.put(JSONObject().put("lat", wayCenter.latitude + lat).put("lon", wayCenter.longitude + lon)) } }
+            val body = JSONObject().put("elements", JSONArray().put(JSONObject().put("type", "way").put("id", fixture.wayId)
+                .put("tags", tags(fixture.wayName, true)).put("nodes", JSONArray(listOf(id + 3, id + 4, id + 5, id + 6, id + 3))).put("geometry", geometry)))
+            MapSelectionCacheFixture.store(app, "map-outline:simple-area-v1:${OsmPresetCatalog.BUNDLED_SHA256}:$endpoint:WAY/${fixture.wayId}", body.toString())
+        }
+        val screen = onMain { IntArray(2).also(view::getLocationOnScreen) }
+        tapNative(screen[0] + point.x, screen[1] + point.y)
+        compose.waitUntil(10_000) { compose.onAllNodesWithTag(if (count == 1) "place-information-card" else "place-info-discovery").fetchSemanticsNodes().isNotEmpty() }
+        if (count == 2) compose.waitUntil(10_000) { compose.onAllNodesWithTag("place-info-discovery-choice-1").fetchSemanticsNodes().isNotEmpty() }
+        if (count == 0) compose.waitUntil(10_000) { compose.onAllNodesWithTag("place-info-discovery-choice-0").fetchSemanticsNodes().isEmpty() &&
+            compose.onAllNodesWithText("Yakında bir OSM yeri veya bina bulunamadı. Yeni OSM mekânı için haritaya uzun basabilirsin.").fetchSemanticsNodes().isNotEmpty() }
+        return fixture
+    }
+
+    private fun assertExposedMapPans(app: Context, view: MapView, map: MapLibreMap) {
+        val budget = app.getSharedPreferences("osm_read_limits", Context.MODE_PRIVATE).all.toMap()
+        val old = onMain { map.cameraPosition.target }
+        // A swipe is a native pan above the measured panel; it must not issue a discovery query.
+        compose.onNodeWithTag("place-info-discovery-collapse").performClick()
+        val screen = onMain { IntArray(2).also(view::getLocationOnScreen) }
+        val x = screen[0] + view.width * .52f
+        val y = screen[1] + view.height * .48f
+        val down = SystemClock.uptimeMillis()
+        for (step in 0..12) {
+            val event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), when (step) { 0 -> MotionEvent.ACTION_DOWN; 12 -> MotionEvent.ACTION_UP; else -> MotionEvent.ACTION_MOVE },
+                x + step * 8, y, 0).apply { source = InputDevice.SOURCE_TOUCHSCREEN }
+            try { assertTrue(instrumentation.uiAutomation.injectInputEvent(event, true)) } finally { event.recycle() }
+            SystemClock.sleep(16)
+        }
+        compose.waitUntil(5_000) { onMain { map.cameraPosition.target != old } }
+        compose.onNodeWithTag("place-info-discovery-choice-0").assertDoesNotExist()
+        assertEquals(budget, app.getSharedPreferences("osm_read_limits", Context.MODE_PRIVATE).all.toMap())
+        compose.onNodeWithTag("place-info-discovery-collapse").performClick()
+        compose.onNodeWithTag("place-info-discovery-choice-0").assertExists()
+    }
+
+    private fun tapNative(x: Float, y: Float) {
+        val down = SystemClock.uptimeMillis()
+        for (action in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) {
+            val event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), action, x, y, 0).apply { source = InputDevice.SOURCE_TOUCHSCREEN }
+            try { assertTrue(instrumentation.uiAutomation.injectInputEvent(event, true)) } finally { event.recycle() }
+        }
+    }
 
     @Test(timeout = 60_000)
     fun nativeMainMapLongPressOpensBlankRequiredTypeFormAndReturnsWithoutChangingTheSession() = runBlocking {
@@ -287,7 +486,7 @@ class MainMapOsmEditorEntryTest {
     }
 
     /** Same bounded, failure-only transport pattern as PlannedBreakScenarioTest; never delegates HTTP. */
-    private class NoNetworkMaps(private val previous: ModuleProvider) : ModuleProvider {
+    internal class NoNetworkMaps(private val previous: ModuleProvider) : ModuleProvider {
         private val closing = AtomicBoolean(false)
         private val gate = Any()
         private val callbacks = AtomicInteger()
@@ -332,5 +531,19 @@ class MainMapOsmEditorEntryTest {
                 "Map transport must drain before restoring the original provider"
             }
         }
+    }
+}
+
+/** Additive, bounded synthetic cache admission. Existing cache files are never overwritten/deleted. */
+internal object MapSelectionCacheFixture {
+    fun store(app: Context, key: String, body: String) {
+        val root = app.cacheDir.canonicalFile
+        val directory = File(root, "osm_place_queries")
+        check(!Files.isSymbolicLink(directory.toPath()) && directory.canonicalFile.parentFile == root)
+        check(directory.isDirectory || directory.mkdir())
+        val name = MessageDigest.getInstance("SHA-256").digest(key.toByteArray()).joinToString("") { "%02x".format(it) }
+        val target = File(directory, name)
+        check(body.toByteArray().size <= 512_000 && !target.exists())
+        Files.newOutputStream(target.toPath(), CREATE_NEW, WRITE).use { it.write(body.toByteArray()) }
     }
 }

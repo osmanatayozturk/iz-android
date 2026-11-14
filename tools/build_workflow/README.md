@@ -2,6 +2,30 @@
 
 These small tools replace task-specific launch scripts. They do not authorize a build, device action, publication, cleanup, or a new acceptance scope. Keep one heavy Build owner; independent source review may proceed in parallel. Product/API/version/dependencies are unchanged by adopting this tooling.
 
+## Development loop
+
+Use the existing task record for the approved scope. These steps are implementation milestones, not additional user approvals or separate reports.
+
+1. Select one implementation owner and the existing base/checkout. Keep small work with that owner. Split only independently writable work that can progress concurrently; retain Technical Lead file allocation and specialist UI/UX/Test acceptance. Use one focused review when needed, rather than routing every intermediate edit through all roles.
+2. Before parallel work, agree on the smallest shared contract: inputs/results, state ownership, error/cancellation behavior and affected data invariants. Read the relevant existing definitions; avoid a competing abstraction or restating the entire architecture. Escalate an interface change only to its affected consumers.
+3. Complete one narrow end-to-end path through the real entry, state/model and result or persisted draft before broadening it. For asynchronous UI, include applicable loading, ready, empty, failure/retry, cancellation and back-navigation behavior. UI/UX reviews those states early. Policy-only work uses its actual documentation entry point; it requires no artificial product path or UI review.
+4. Expand within the approved scope. Reuse the existing model helpers for display labels, legacy conversion and field intent. Keep current-writer version expectations in one test helper where useful, while preserving literal historical backup fixtures and independent unsupported-version checks. Extract shared code only when the current change exposes real duplication; do not launch a general refactor.
+5. After a correction, run only the affected new/changed checks. Record a concrete defect, changed input or missing acceptance before reopening completed work. Reference successful matching evidence; never rerun merely to produce a new role receipt. Freeze the candidate and use the existing combined final host/QA flow when required. Documentation-only work does not require application suites or rerunning the tooling fixtures.
+6. Finish the existing record with measured milestones and evidence references. Preserve required independent acceptance and publication/device authorization. Do not open a follow-up preparation cycle once the agreed delivery is complete.
+
+Use this compact block **inside the existing task record**, adapting or omitting inapplicable fields:
+
+```text
+owner / base / checkout / scope:
+first path and completion condition:
+shared contract and affected invariants:
+observed milestones (timestamp + event): preparation, first path, integration, correction, delivery
+reopened work (only if needed): concrete reason -> affected files/checks
+acceptance: existing evidence reused / new checks / remaining NOT_RUN
+```
+
+Record events when observed. A role's start-to-finish interval includes reading, implementation and communication; do not call it pure coding time. Overlapping role intervals are not additive. Unknown intervals stay unknown. Do not add another timer service, report generator or acceptance gate for this bookkeeping.
+
 ## Start with existing evidence
 
 The technical owner selects the relevant source, configuration, toolchain, tasks and artifacts. Reuse is explicit; a role/worktree/commit label change alone is not a reason to rebuild. Changed product inputs require the affected checks. Failed, incomplete, uncertain, mismatched or planning-only results never become PASS.

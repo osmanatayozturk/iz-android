@@ -13,6 +13,7 @@ import kotlinx.coroutines.withContext
 import org.iz.navigation.data.OsmRef
 import org.iz.navigation.data.OsmType
 import org.iz.navigation.data.SelectedOsmPlace
+import org.iz.navigation.integration.MapPlaceCandidate
 import org.junit.Assert.*
 import org.junit.After
 import org.junit.Rule
@@ -35,7 +36,9 @@ class PlaceInformationDiscoveryUiTest {
     private fun show(nearby: suspend (Double, Double) -> List<SelectedOsmPlace>) {
         compose.setContent { IzTheme {
             val scope = rememberCoroutineScope()
-            owner = remember { PlaceInformationDiscoveryOwner(scope, nearby, { selected += it },
+            owner = remember { PlaceInformationDiscoveryOwner(scope, { lat, lon -> nearby(lat, lon).map {
+                MapPlaceCandidate(it, if (it.osmRef?.type == OsmType.NODE) "OSM yeri" else "Bina")
+            } }, { selected += it },
                 identity = { screen.value to endpoint.value }) }
             Text("Synthetic discovery host")
             PlaceInformationDiscoveryContent(owner)
@@ -52,6 +55,8 @@ class PlaceInformationDiscoveryUiTest {
         compose.runOnIdle { assertEquals(1, reads); assertTrue(selected.isEmpty()); assertEquals(listOf(first, second), owner.state.overlay) }
         val oldClick = requireNotNull(compose.onNodeWithTag("place-info-discovery-choice-1").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
         compose.onNodeWithTag("place-info-discovery-choice-1").performClick()
+        compose.runOnIdle { assertTrue(selected.isEmpty()); assertEquals(second.osmRef, owner.state.selectedRef) }
+        compose.onNodeWithTag("place-info-open-information").assertIsEnabled().performClick()
         compose.runOnIdle { oldClick(); assertEquals(1, selected.size); assertSame(second, selected.single()); assertEquals(1, reads) }
     }
     @Test fun replacementAndCloseRejectIgnoredCancellationLateDiscovery() {
@@ -79,10 +84,12 @@ class PlaceInformationDiscoveryUiTest {
         show { _, _ -> listOf(building, first) }
         compose.runOnIdle { owner.tap(41.0, 29.0, 17.0) }
         compose.onNodeWithTag("place-info-discovery-choice-0").assertIsDisplayed()
-            .assertTextContains("way/804", substring = true)
+            .assertTextContains("Adsız OSM nesnesi", substring = true)
         compose.onNodeWithTag("place-info-discovery-choice-1").assertIsDisplayed()
         compose.runOnIdle { assertTrue(selected.isEmpty()); assertEquals(listOf(building, first), owner.state.choices) }
         compose.onNodeWithTag("place-info-discovery-choice-0").performClick()
+        compose.runOnIdle { assertTrue(selected.isEmpty()); assertEquals(building.osmRef, owner.state.selectedRef) }
+        compose.onNodeWithTag("place-info-open-information").performClick()
         compose.runOnIdle { assertEquals(listOf(building), selected.toList()) }
     }
     @Test fun endpointAndScreenChangesRejectLateResultsAndRetainedChoice() {

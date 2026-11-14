@@ -45,7 +45,6 @@ import org.iz.navigation.power.PowerDiagnostics
 import org.iz.navigation.data.GeoCoordinate
 import org.iz.navigation.data.TrackPoint
 import org.iz.navigation.ui.PlaceInformationDiscoveryOwner
-import org.iz.navigation.ui.PlaceInformationDiscoveryContent
 import org.iz.navigation.weather.PlannedRoute
 import org.iz.navigation.weather.RouteStop
 import org.iz.navigation.weather.RouteWeatherSample
@@ -154,21 +153,21 @@ private fun ColumnScope.WeatherRouteMapContent(
     val placeServices = remember(context.applicationContext) { OsmServiceSettings(context.applicationContext) }
     val discoveryLifecycle = LocalLifecycleOwner.current.lifecycle
     val discovery = remember(discoveryScope, places, placeInformationIdentity) {
-        PlaceInformationDiscoveryOwner(discoveryScope, places::nearby, { selectOsmPlace?.invoke(it) },
+        PlaceInformationDiscoveryOwner(discoveryScope, places::nearbyCandidates, { selectOsmPlace?.invoke(it) },
             identity = { currentPlaceInformationIdentity to placeServices.read().overpass },
-            stillCurrent = { selectOsmPlace != null && currentPlaceInformationIdentity == placeInformationIdentity &&
-                discoveryLifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) })
+            stillCurrent = { currentPlaceInformationIdentity == placeInformationIdentity &&
+                discoveryLifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) },
+            outline = { places.selectedOutline(requireNotNull(it.place.osmRef)) })
     }
     DisposableEffect(discovery, discoveryLifecycle) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_PAUSE) discovery.close() }
         discoveryLifecycle.addObserver(observer)
-        onDispose { discoveryLifecycle.removeObserver(observer); discovery.close(clearOverlay = true) }
+        onDispose { discoveryLifecycle.removeObserver(observer); discovery.close() }
     }
-    LaunchedEffect(onOsmPlaceClick == null) { if (onOsmPlaceClick == null) discovery.close() }
-    PlaceInformationDiscoveryContent(discovery)
+    // A temporarily disabled callback while information is open must not erase map/list selection.
     val tileUrl = remember(context) { OsmServiceSettings(context).read().tileUrl }
     val style = remember(tileUrl) {
-        mapStyle(tileUrl, listOf(ROUTE_SOURCE, STOP_SOURCE, SAMPLE_SOURCE, FIX_SOURCE, PLACE_INFO_SOURCE), """
+        mapPlaceOutlineStyle(mapStyle(tileUrl, listOf(ROUTE_SOURCE, STOP_SOURCE, SAMPLE_SOURCE, FIX_SOURCE, PLACE_INFO_SOURCE), """
             {"id":"weather-route-casing","type":"line","source":"$ROUTE_SOURCE","paint":{"line-color":"#FFFFFF","line-width":9,"line-opacity":0.9}},
             {"id":"weather-route-layer","type":"line","source":"$ROUTE_SOURCE","paint":{"line-color":"#28604D","line-width":5,"line-opacity":0.95}},
             {"id":"$PLACE_INFO_LAYER","type":"circle","source":"$PLACE_INFO_SOURCE","paint":{"circle-color":"#3989C9","circle-radius":7,"circle-stroke-color":"#FFFFFF","circle-stroke-width":2}},
@@ -176,7 +175,7 @@ private fun ColumnScope.WeatherRouteMapContent(
             {"id":"weather-stops-layer","type":"circle","source":"$STOP_SOURCE","paint":{"circle-color":"#FFFFFF","circle-stroke-color":"#66746D","circle-stroke-width":1,"circle-radius":4}},
             {"id":"directions-fix-halo","type":"circle","source":"$FIX_SOURCE","paint":{"circle-color":"#1976D2","circle-opacity":0.15,"circle-radius":15}},
             {"id":"directions-fix-layer","type":"circle","source":"$FIX_SOURCE","paint":{"circle-color":["case",["get","stale"],"#78828A","#1976D2"],"circle-stroke-color":"#FFFFFF","circle-stroke-width":3,"circle-radius":7}}
-        """.trimIndent())
+        """.trimIndent()))
     }
     val preparedState = preparedRoutes?.state?.collectAsState()?.value
     val preparedDisplay = preparedRoutes != null
@@ -386,7 +385,7 @@ private fun ColumnScope.WeatherRouteMapContent(
             onMapDisposing = { disposing ->
                 gestureRemovals.remove(disposing)?.invoke()
                 if (map === disposing) {
-                    discovery.close(clearOverlay = true)
+                    discovery.close()
                     cancelDriveAnimation()
                     map = null
                 }
@@ -397,9 +396,10 @@ private fun ColumnScope.WeatherRouteMapContent(
                 val sample = index?.let { assessment?.samples?.getOrNull(it) }
                 if (sample != null) { discovery.close(); onSampleClick(sample); true }
                 else if (selectOsmPlace != null && map === target) {
-                    val selected = target.queryRenderedFeatures(point, PLACE_INFO_LAYER).asSequence()
-                        .mapNotNull { parseRenderedOsmPlace(it.toJson()) }.firstOrNull()
-                    if (selected == null || !discovery.selectRendered(selected))
+                    val radius = with(density) { 24.dp.toPx() }
+                    val selected = target.queryRenderedFeatures(android.graphics.RectF(point.x - radius, point.y - radius,
+                        point.x + radius, point.y + radius), PLACE_INFO_LAYER).mapNotNull { parseRenderedOsmPlace(it.toJson()) }
+                    if (!discovery.selectRendered(selected))
                         discovery.tap(coordinate.latitude, coordinate.longitude, target.cameraPosition.zoom)
                     true
                 } else false
@@ -438,13 +438,24 @@ private fun ColumnScope.WeatherRouteMapContent(
                 }
             }
         }
+        PlaceSelectionMapOverlay(map, discovery, cameraViewportInsets, styleRevision = styleRevision, onSelected = {
+            cancelDriveAnimation(); pendingFitDataset = null
+            cameraPolicy.userGesture(); driveFollow.userGesture(); following = false
+        }, onPriorityHit = { point ->
+            val index = map?.queryRenderedFeatures(android.graphics.PointF(point.x, point.y), SAMPLE_LAYER)
+                ?.firstOrNull()?.getNumberProperty("sampleIndex")?.toInt()
+            val sample = index?.let { assessment?.samples?.getOrNull(it) }
+            if (sample != null) { discovery.close(); onSampleClick(sample); true } else false
+        }, onLongPress = { point -> map?.projection?.fromScreenLocation(android.graphics.PointF(point.x, point.y))?.let {
+            discovery.close(); onMapLongClick(GeoCoordinate(it.latitude, it.longitude))
+        } })
         if (navigationLayout) {
             if (navigationHeader == null && navigationControlsReady) {
                 val controlsModifier = Modifier.align(Alignment.TopEnd).padding(top = navigationControlsTopInset, end = 12.dp)
                 if (navigationControlsHorizontal) Row(controlsModifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) { navigationControls() }
                 else Column(controlsModifier, verticalArrangement = Arrangement.spacedBy(8.dp)) { navigationControls() }
             }
-        } else Column(Modifier.align(Alignment.BottomStart).padding(start = 8.dp, bottom = 30.dp),
+        } else if (!discovery.state.open) Column(Modifier.align(Alignment.BottomStart).padding(start = 8.dp, bottom = 30.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surface.copy(alpha = .95f)) {
                 Row {

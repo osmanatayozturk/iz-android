@@ -30,7 +30,7 @@ internal object OsmLightEditorQaTargetAdmission {
     private var admittedApks: Pair<String, String>? = null
 
     @Synchronized
-    fun requireAdmittedTarget() {
+    fun requireAdmittedTarget(allowLandscape: Boolean = false) {
         val args = InstrumentationRegistry.getArguments()
         when (args.getString("osmLightEditorQaTarget") ?: "emulator") {
             "emulator" -> {
@@ -53,7 +53,9 @@ internal object OsmLightEditorQaTargetAdmission {
             check(Manifest.permission.INTERNET !in info.requestedPermissions.orEmpty())
             check(context.applicationInfo.splitSourceDirs.isNullOrEmpty()) { "Only the sealed standalone APK is admitted" }
         }
-        check(app.resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT)
+        val landscapeCapability = args.getString("osmMapSelectionAllowLandscape") == "true"
+        check(app.resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT ||
+            allowLandscape && landscapeCapability && app.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE)
         check(kotlin.math.abs(app.resources.configuration.fontScale - 1f) < .01f)
         for (permission in listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)) {
             check(ContextCompat.checkSelfPermission(app, permission) == PackageManager.PERMISSION_DENIED)
@@ -83,7 +85,7 @@ internal object OsmLightEditorQaTargetAdmission {
         val now = System.currentTimeMillis()
         check(now >= issued && now < expires)
         val proof = listOf(run, source, appSha, testSha, configSha, serialSha, fingerprint, api,
-            model, hardware, manufacturer, abi, issued.toString(), expires.toString())
+            model, hardware, manufacturer, abi, issued.toString(), expires.toString(), landscapeCapability.toString())
         if (admittedProof == null) check(now - issued <= MAX_AGE_MS) { "Fresh per-invocation admission required" }
         else check(admittedProof == proof) { "Admission cannot change within an instrumentation invocation" }
         check(Build.HARDWARE !in setOf("ranchu", "goldfish"))

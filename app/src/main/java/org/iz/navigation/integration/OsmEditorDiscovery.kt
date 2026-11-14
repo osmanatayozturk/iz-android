@@ -28,7 +28,11 @@ internal fun osmEditorNearbyQuery(latitude: Double, longitude: Double, matchKeys
 
 internal fun parseOverpassPlaces(json: String): List<SelectedOsmPlace> = parseOverpassPlaces(json, null)
 
-internal fun parseOverpassPlaces(json: String, catalog: OsmPresetCatalog?): List<SelectedOsmPlace> {
+internal fun parseOverpassPlaces(json: String, catalog: OsmPresetCatalog?): List<SelectedOsmPlace> =
+    parseOverpassMapCandidates(json, catalog).map { it.place }
+
+internal fun parseOverpassMapCandidates(json: String, catalog: OsmPresetCatalog? = null): List<MapPlaceCandidate> {
+    require(json.toByteArray(Charsets.UTF_8).size <= 512_000) { "OSM yanıtı boyut sınırını aştı." }
     val root = JSONObject(json)
     require(!root.has("remark")) { "OSM yer sorgusu tamamlanmadı." }
     val array = root.optJSONArray("elements") ?: return emptyList()
@@ -45,13 +49,16 @@ internal fun parseOverpassPlaces(json: String, catalog: OsmPresetCatalog?): List
             requireNotNull(jsonTags.opt(key) as? String) { "OSM etiketi doğrulanamadı." }
         }
         val geometry = if (ref.type == OsmType.NODE) OsmPresetGeometry.POINT else OsmPresetGeometry.AREA
+        val definition = catalog?.identify(tags, geometry)?.firstOrNull()
+        val typeLabel = definition?.name
+            ?: if (!tags["building"].isNullOrBlank()) "Bina" else "OSM yeri"
         val name = listOf("name:tr", "name", "brand").firstNotNullOfOrNull { tags[it]?.takeIf(String::isNotBlank) }
-            ?: catalog?.identify(tags, geometry)?.firstOrNull()?.name
+            ?: definition?.name
             ?: listOf("amenity", "shop", "tourism", "leisure", "office", "craft", "historic")
                 .firstNotNullOfOrNull { tags[it]?.takeIf(String::isNotBlank) }
             ?: if (!tags["building"].isNullOrBlank()) "Bina" else "OSM ${ref.type.name.lowercase(Locale.ROOT)}/${ref.id}"
-        SelectedOsmPlace(name.replace('_', ' '), latitude, longitude, ref)
-    }.distinctBy { it.osmRef }
+        MapPlaceCandidate(SelectedOsmPlace(name.replace('_', ' '), latitude, longitude, ref), typeLabel)
+    }.distinctBy { it.place.osmRef }
 }
 
 internal fun osmRef(type: String, id: Long): OsmRef? {

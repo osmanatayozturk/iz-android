@@ -112,7 +112,7 @@ private fun DiaryMapContent(
     val context = LocalContext.current
     val service = remember(context) { OsmPlaces(context) }
     val tileUrl = OsmServiceSettings(context).read().tileUrl
-    val styleJson = remember(tileUrl) { mapStyle(tileUrl, listOf("routes", "places", "current", "osm-pois"), diaryLayers) }
+    val styleJson = remember(tileUrl) { mapPlaceOutlineStyle(mapStyle(tileUrl, listOf("routes", "places", "current", "osm-pois"), diaryLayers)) }
     val recorded = if (previewMode) preview ?: RecordedTrailRender() else rememberRecordedTrail(journeyId, analysis)
     val routes = recorded.trail.paths
     val pins = remember(places) { places.filter { validCoordinate(it.latitude, it.longitude) } }
@@ -121,24 +121,35 @@ private fun DiaryMapContent(
     var map by remember(tileUrl) { mutableStateOf<MapLibreMap?>(null) }
     var styleRevision by remember { mutableIntStateOf(0) }
     var framedDataset by remember(map) { mutableStateOf<String?>(null) }
-    var overlayPlaces by remember { mutableStateOf(emptyList<SelectedOsmPlace>()) }
-    var choices by remember { mutableStateOf(emptyList<SelectedOsmPlace>()) }
-    var loading by remember { mutableStateOf(false) }
-    var message by remember { mutableStateOf<String?>(null) }
     val chooseOsmPlace by rememberUpdatedState(onOsmPlaceClick)
     val scope = rememberCoroutineScope()
+    val settings = remember(context.applicationContext) { OsmServiceSettings(context.applicationContext) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val currentJourneyId by rememberUpdatedState(journeyId)
+    val discovery = remember(scope, service, journeyId) {
+        org.iz.navigation.ui.PlaceInformationDiscoveryOwner(scope, service::nearbyCandidates,
+            { chooseOsmPlace?.invoke(it) }, identity = { currentJourneyId to settings.read().overpass },
+            stillCurrent = { !previewMode && currentJourneyId == journeyId && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) },
+            outline = { service.selectedOutline(requireNotNull(it.place.osmRef)) })
+    }
+    DisposableEffect(discovery, lifecycle) {
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_PAUSE) discovery.close() }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer); discovery.close() }
+    }
+    val hitRadius = with(androidx.compose.ui.platform.LocalDensity.current) { 24.dp.toPx() }
     val location = rememberOpeningLocation(focusCurrentLocation)
     val latestRoutePoint = routes.lastOrNull()?.lastOrNull()
     var centeredOnLocation by remember { mutableStateOf(false) }
     LaunchedEffect(map, location.coordinate) {
         val target = location.coordinate
-        if (map != null && !centeredOnLocation && target != null && !(followRecordedLocation && latestRoutePoint != null)) {
+        if (map != null && discovery.state.selectedRef == null && !centeredOnLocation && target != null && !(followRecordedLocation && latestRoutePoint != null)) {
             map?.moveCamera(CameraUpdateFactory.newLatLngZoom(target.mapCoordinate(), 16.0))
             centeredOnLocation = true
         }
     }
     LaunchedEffect(map, followRecordedLocation, latestRoutePoint) {
-        if (followRecordedLocation && latestRoutePoint != null) map?.let { current ->
+        if (discovery.state.selectedRef == null && followRecordedLocation && latestRoutePoint != null) map?.let { current ->
             current.moveCamera(CameraUpdateFactory.newLatLngZoom(latestRoutePoint.mapCoordinate(), current.cameraPosition.zoom.coerceAtLeast(15.0)))
         }
     }
@@ -158,7 +169,7 @@ private fun DiaryMapContent(
     val placeJson = remember(pins) { featureCollection(pins.map { place ->
         pointFeature(place.latitude!!, place.longitude!!, JSONObject().put("placeId", place.id))
     }) }
-    val poiJson = remember(overlayPlaces) { featureCollection(overlayPlaces.map { place ->
+    val poiJson = remember(discovery.state.overlay) { featureCollection(discovery.state.overlay.map { place ->
         pointFeature(place.latitude, place.longitude, JSONObject().put("name", place.name)
             .put("osmType", place.osmRef?.type?.name).put("osmId", place.osmRef?.id))
     }) }
@@ -170,73 +181,37 @@ private fun DiaryMapContent(
             pointFeature(it.latitude, it.longitude)
         })), PowerDiagnostics.Metric.MAP_POSITION)
     }
-    LaunchedEffect(message) { if (message != null) { delay(5_000); message = null } }
     Box(modifier) {
         OsmMapView(
             styleJson = styleJson,
             modifier = Modifier.fillMaxSize(),
             onReady = { map = it; styleRevision++ },
-            onLongClick = onMapLongClick,
+            onLongClick = { discovery.close(); onMapLongClick(it) },
+            onMapDisposing = { if (map === it) { discovery.close(); map = null } },
             onClick = { current, coordinate ->
                 val screenPoint = current.projection.toScreenLocation(coordinate.mapCoordinate())
                 val privateFeature = current.queryRenderedFeatures(screenPoint, "private-place-pins").firstOrNull()
                 val privatePlace = privateFeature?.getStringProperty("placeId")?.let { id -> pins.firstOrNull { it.id == id } }
-                val osmFeature = current.queryRenderedFeatures(screenPoint, "osm-poi-pins").firstOrNull()
-                val osmPlace = osmFeature?.toJson()?.let(::parseRenderedOsmPlace)
+                val osmHits = current.queryRenderedFeatures(android.graphics.RectF(screenPoint.x - hitRadius,
+                    screenPoint.y - hitRadius, screenPoint.x + hitRadius, screenPoint.y + hitRadius), "osm-poi-pins")
+                    .mapNotNull { parseRenderedOsmPlace(it.toJson()) }
                 when {
-                    privatePlace != null -> onPlaceClick(privatePlace)
+                    privatePlace != null -> { discovery.close(); onPlaceClick(privatePlace) }
                     chooseOsmPlace == null -> Unit
-                    osmPlace != null -> chooseOsmPlace?.invoke(osmPlace)
-                    current.cameraPosition.zoom < 16 -> message = "Yakındaki yerleri seçmek için haritayı yakınlaştır."
-                    !loading -> {
-                        loading = true
-                        message = null
-                        scope.launch {
-                            try {
-                                val result = service.nearby(coordinate.latitude, coordinate.longitude)
-                                overlayPlaces = result
-                                when (result.size) {
-                                    0 -> message = "Yakında bir OSM yeri bulunamadı. Uzun basarak özel bir yer ekleyebilirsin."
-                                    1 -> chooseOsmPlace?.invoke(result.single())
-                                    else -> choices = result
-                                }
-                            } catch (cancelled: CancellationException) {
-                                throw cancelled
-                            } catch (error: Exception) {
-                                message = (error as? OsmServiceException)?.message ?: "Yakındaki yerler alınamadı. Bağlantını kontrol edip yeniden dokun."
-                            } finally { loading = false }
-                        }
-                    }
+                    !discovery.selectRendered(osmHits) -> discovery.tap(coordinate.latitude, coordinate.longitude, current.cameraPosition.zoom)
                 }
                 true
             },
         )
         RecordedSpeedLegend(recorded.trail, Modifier.align(Alignment.BottomStart).padding(start = 10.dp, bottom = 24.dp))
-        if (loading) Surface(Modifier.align(Alignment.TopStart).padding(start = 12.dp, top = 64.dp), shape = MaterialTheme.shapes.small) {
-            CircularProgressIndicator(Modifier.padding(10.dp).size(22.dp), strokeWidth = 2.dp)
-        }
-        message?.let { text ->
-            Surface(Modifier.align(Alignment.TopCenter).padding(start = 12.dp, end = 12.dp, top = 64.dp).clickable { message = null }, shape = MaterialTheme.shapes.small) {
-                Text(text, Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
-            }
-        }
+        PlaceSelectionMapOverlay(map, discovery, styleRevision = styleRevision, onSelected = { centeredOnLocation = true }, onPriorityHit = { point ->
+            val hit = map?.queryRenderedFeatures(android.graphics.PointF(point.x, point.y), "private-place-pins")
+                ?.firstOrNull()?.getStringProperty("placeId")?.let { id -> pins.firstOrNull { it.id == id } }
+            if (hit != null) { discovery.close(); onPlaceClick(hit); true } else false
+        }, onLongPress = { point -> map?.projection?.fromScreenLocation(android.graphics.PointF(point.x, point.y))?.let {
+            discovery.close(); onMapLongClick(GeoCoordinate(it.latitude, it.longitude))
+        } })
     }
-    if (choices.isNotEmpty()) AlertDialog(
-        onDismissRequest = { choices = emptyList() },
-        title = { Text("Yakındaki yerler") },
-        text = {
-            Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
-                choices.forEach { place ->
-                    TextButton(onClick = { choices = emptyList(); chooseOsmPlace?.invoke(place) }, modifier = Modifier.fillMaxWidth()) {
-                        Text(place.name, modifier = Modifier.fillMaxWidth())
-                    }
-                }
-                Text("© OpenStreetMap contributors", style = MaterialTheme.typography.labelSmall)
-            }
-        },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = { choices = emptyList() }) { Text("Vazgeç") } },
-    )
 }
 
 private const val diaryLayers = """
