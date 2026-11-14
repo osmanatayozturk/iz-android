@@ -2,7 +2,7 @@
 
 > **Telefon 0.13.0 / code 29.** Büyük yedekler sayfalı hazırlanır. ZIP kaydedildiğinde geri okunup doğrulanır. Geri yüklemede arşiv ve ilişkiler denetlenir. Sürüm ayrıca kamera kadrajı, Molalı rota ve isteğe bağlı OSM GPS izi paylaşımını içerir. Wear OS 0.7.0 / code 12 ve iletişim protokolü değişmiyor. [Telefon 0.13.0 sürüm sayfası](https://github.com/osmanatayozturk/iz-android/releases/tag/v0.13.0).
 
-**Yayımlanmamış kaynak adayı: Telefon 0.13.3 / code 32.** Haritadan yer seçimi, numaralı alt liste ve **Bilgileri aç** akışı eklendi. Host kapsamında 1.698 birim testi geçti; lint 0 hata / 119 uyarı verdi. 20 test ve üç lifecycle metodunun yalnız derlenmiş imzaları doğrulandı. Native, son UI/UX ve odaklı güvenlik kabulü bekliyor; ayrı canlı Overpass okuması engelli. [Ayrıntılar ve kabul sınırları](docs/SURUM_PLANI.md).
+**Yayımlanmamış kaynak adayı: Telefon 0.13.4 / code 33.** Motosiklet rotaları ve durak sıralama önerileri mevcut Valhalla ile, **Trafik hariç** sürelerle hesaplanır. Günlük sürüş profili betadır; yol tercihleri kesin dışlama garantisi değildir. Yeni host çağrısında 1.722 birim testi geçti; lint 0 hata / 120 uyarı verdi. 24 test ve dört lifecycle metodunun yalnız derlenmiş imzaları doğrulandı. Cihaz, UI/UX görüntü ve odaklı güvenlik kabulü ile önceki harita seçiminin 20 kontrol/altı görüntü kabulü bekliyor; ayrı canlı Valhalla okuması TLS aşamasında engelli. [Ayrıntılar ve kabul sınırları](docs/SURUM_PLANI.md).
 
 ## Tarihsel telefon 0.11.5 / code 27 — sesli yönlendirme ve interkom kontrolü
 

@@ -1,5 +1,24 @@
 # İz sürüm değişikliği planı
 
+## Telefon 0.13.4 / code 33 — motosiklette Valhalla (yayımlanmamış kaynak adayı)
+
+Motosikletin tüm rota, alternatif, rota değişikliği, sapma sonrası yeniden hesaplama ve hava durumuna göre kalkış doğrulaması yolları mevcut Valhalla sağlayıcısını kullanır. Süre/sağlayıcı bağlamı **Valhalla · Trafik hariç** olarak gösterilir; kalkış saatinde hava durumu yeniden örneklenir, canlı trafik süresi vaat edilmez. Dönemsel trafik yenilemesi kaldırılır; sapma sonrası hesaplama korunur. Hata mevcut rota ve seçimleri silmez; elle yeniden denenir, TomTom'a otomatik dönüş yapılmaz.
+
+4–20 planlı durakta mevcut deterministik yakın komşu ve en çok 20 geçişli 2-opt yaklaşımı kullanılır. Başlangıç/bitiş, kimlikler, yinelenen duraklar ve molalar korunur. Değişmeyen sıra istek üretmez. Değişen öneri ile mevcut sıra aynı Valhalla uç noktası, tercihler ve karşılaştırma zamanıyla hesaplanır; yalnız gerçek hesaplanan süre iyileşmesi sunulur ve kullanıcı açıkça uygular. Kesin optimum veya trafik kazancı iddiası yoktur.
+
+TomTom rota/Matrix yolu otomobil ve yolcu için korunur. TomTom ayarları ve hız sınırı yardımcılarının erişim koşulları değişmez; yeni motosiklet Valhalla rotalarında TomTom rota kesimlerinin hız sınırları kaybolur. Mevcut OSM desteği aynı kapsama sahipmiş gibi sunulmaz; yönlendirme sırasında yeni ters sorgu eklenmez.
+
+Günlük motosiklet kullanımı mevcut beta profiline dayanır. Otoyol/ücretli yol/feribot/kaplamasız yol tercihleri, tüm yollar için yüzey veya kesin otoyol dışlama güvencesi değildir. Yeni macera modu, çevrimdışı yeni rota motoru, Wear OS, protokol, şema, yedek veya bağımlılık değişikliği yoktur.
+
+| Aşama | Durum ve kabul sınırı |
+|---|---|
+| Host — `e670a7b` | Yeni birleşik çağrıda 1.722 birim testi geçti; güncel Debug lint raporu 0 hata / 120 uyarı. Uygulama/test APK üretimi ve AndroidTest derlemesi tamamlandı. Önceki adayın PASS sonucu aktarılmadı. |
+| Derlenmiş test imzaları | 24 test ve dört lifecycle metodu doğrulandı; bir eski Main testi açıkça dışlandı. Bu, cihazda çalıştırma kanıtı değildir. |
+| Cihaz ve görsel kabul | Motosiklet kontrolleri, son UI/UX görüntü kabulü ve önceki harita seçiminin 20 kontrol/altı görüntü kapsamı bekliyor. |
+| Güvenlik | Son adaya yönelik odaklı inceleme bekliyor. |
+| Canlı Valhalla | Ayrı şehir içi okuması HTTP öncesi TLS aşamasında engelli; şehirler arası okuma çalıştırılmadı. Canlı servis kabulü yok. Önceki engelli Overpass okuması tekrarlanmadı. |
+| Dağıtım | Yayımlanmamış kaynak adayı; yayın ve cihaz kabulü yok. |
+
 ## Telefon 0.13.3 / code 32 — haritadan yer seçimi (yayımlanmamış kaynak adayı)
 
 Haritaya açıkça dokunma, yakındaki OSM yerlerini getirir. Birden fazla sonuç numaralı işaretçiler ve alttaki listede gösterilir. Listenin yüksekliği sürükleyerek değiştirilebilir veya liste daraltılabilir; açıkta kalan harita kullanılabilir. Satır veya işaretçi seçimi ayrıntıları kendiliğinden açmaz: seçilen yer için **Bilgileri aç** kullanılır. Bilgilerden geri dönüş listeyi, kaydırma konumunu ve seçimi yeni sorgu yapmadan korur. Tek sonuç doğrudan bilgi kartını açar.
@@ -116,7 +135,7 @@ Bu dosya telefon ve uyumlu bileşenlerin sürüm kapsamını kaydeder. Dağıtı
 
 | Bileşen | versionName | versionCode | Dağıtım ve doğrulama kaydı |
 |---|---|---|---|
-| Telefon kaynak adayı | 0.13.3 | 32 | Yayımlanmadı; host kanıtı ve bekleyen kabuller yukarıdaki 0.13.3 bölümünde |
+| Telefon kaynak adayı | 0.13.4 | 33 | Yayımlanmadı; host kanıtı ve bekleyen kabuller yukarıdaki 0.13.4 bölümünde |
 | Yayımlanmış telefon | 0.13.0 | 29 | Doğrulama ve dağıtım sonuçları sürüm sayfasında |
 | Wear OS | 0.7.0 | 12 | Telefon 0.13.0 ile değişmiyor |
 | Ortak iletişim | v6 | — | Bu telefon kaynak sürümünde korunur |

@@ -1,5 +1,19 @@
 # Değişiklik geçmişi
 
+## Telefon 0.13.4 / code 33 — motosiklette Valhalla (yayımlanmamış kaynak adayı)
+
+Motosiklette hedef seçimi, rota planlama, alternatifler, rota değişikliği, sapma sonrası yeniden hesaplama ve hava durumuna göre kalkış doğrulaması mevcut Valhalla sağlayıcısını kullanır. Sağlayıcı ve süre bağlamı **Valhalla · Trafik hariç** olarak gösterilir. Motosikletin dönemsel trafik yenilemesi kaldırılır; sapma sonrası yeniden yönlendirme korunur. Hata durumunda seçimler ve varsa mevcut rota korunur; yeniden deneme kullanıcı tarafından başlatılır, TomTom'a otomatik geçilmez.
+
+4–20 planlı durakta sıralama önerisi aynı girdilerle aynı sonucu veren yakın komşu ve sınırlı 2-opt yaklaşımını kullanır. Başlangıç, bitiş, durak kimlikleri, tekrarlar ve molalar korunur. Sıra değişmiyorsa rota isteği yapılmaz; değişiyorsa mevcut ve önerilen sıra aynı Valhalla uç noktası, tercihler ve karşılaştırma zamanı ile hesaplanır. Yalnız hesaplanan rota süresi gerçekten kısalıyorsa öneri sunulur; uygulamak için açık kullanıcı seçimi gerekir. Kesin en iyi sıra veya canlı trafik kazancı iddiası yoktur.
+
+TomTom rota ve Matrix kullanımı otomobil/yolcu kapsamındadır. Mevcut TomTom ayarları ve hız sınırı yardımcılarının erişim koşulları korunur; ancak yeni motosiklet Valhalla rotalarında TomTom rota kesimlerinden gelen hız sınırları bulunmaz. OSM desteği aynı kapsamı garanti etmez; yönlendirme sırasında yeni ters sorgular eklenmez.
+
+Günlük sürüş için mevcut Valhalla motosiklet profili beta niteliğindedir. Otoyol, ücretli yol, feribot ve kaplamasız yol tercihleri korunur; bu tercihler tüm yolların yüzeyini veya otoyol dışlamasını garanti etmez. Yeni kıvrımlı/macera modu veya çevrimdışı yeni rota hesaplama eklenmez. Wear OS, protokol, Room şeması, yedek biçimi ve bağımlılıklar değişmez.
+
+**Host doğrulaması — `e670a7b` kaynak adayı:** 1.722 birim testi başarısızlık, hata veya atlama olmadan geçti. Güncel Debug lint raporu 0 hata ve 120 uyarı içeriyor. Uygulama ve test APK üretimi ile AndroidTest derlemesi tek birleşik çağrıda tamamlandı. Derlenmiş 24 test ve dört lifecycle metodunun JUnit imzaları doğrulandı; bir eski Main testi bu imza kapsamından açıkça dışlandı. Önceki adayın PASS sonucu aktarılmadı; bu sonuçlar cihazda çalıştırma kanıtı değildir.
+
+**Bekleyen kabul:** Cihaz testleri, son UI/UX görüntü kabulü ve odaklı güvenlik incelemesi bekliyor. 0.13.3'ün 20 harita kontrolü ve altı görüntülük kabulü de beklemeye devam ediyor. Ayrı canlı Valhalla şehir içi okuması HTTP yanıtından önce TLS aşamasında engellendi; şehirler arası okuma çalıştırılmadı. Önceki engelli Overpass okuması tekrarlanmadı. Bu kayıt yayın veya cihaz kabulü değildir.
+
 ## Telefon 0.13.3 / code 32 — haritadan yer seçimi (yayımlanmamış kaynak adayı)
 
 Haritaya açıkça dokunulduğunda birden fazla OSM yeri bulunursa numaralı işaretçiler ve altta bir seçim listesi gösterilir. Listenin yüksekliği sürükleyerek değiştirilebilir veya liste daraltılabilir; açıkta kalan harita kullanılabilir. Satıra veya işaretçiye dokunmak yeri seçer; ayrıntılar **Bilgileri aç** ile açılır. Bilgilerden geri dönüldüğünde liste, kaydırma konumu ve seçim yeni sorgu yapılmadan korunur. Tek sonuç doğrudan bilgi kartını açar.

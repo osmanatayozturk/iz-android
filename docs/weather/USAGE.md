@@ -1,10 +1,12 @@
 # İz 0.9.0 · Yolculuk havası
 
+Motosiklet sağlayıcısı ve durak sırası açıklamaları yayımlanmamış 0.13.4 kaynak adayına göre güncellenmiştir; [kabul durumu sürüm planındadır](../SURUM_PLANI.md). Sürüm bazlı 0.9.0 kayıtları tarihsel bilgi olarak korunur.
+
 Harita ekranındaki **Yolculuk havası** düğmesi rota planını ve rota üzerindeki tahmini hava koşullarını açar. Araba, motosiklet, bisiklet, yürüyüş, koşu ve yolcu için kullanılabilir. Açık bir yolculuk varsa ekran ilk açılışta onun türünü seçer; başka bir türün planını da hazırlayabilirsin.
 
 1. **Yolculuk türü** bölümünden altı türden birini seç. Türü değiştirince başlangıç, hedef ve kalkış zamanı korunur; rota ve hava sonuçları yeniden hesaplanmalıdır.
-2. Başlangıç ve hedef seç. İstersen üç ara durak ekle; arama, kayıtlı yerler veya haritadan seçim kullanılabilir.
-3. Kalkış saatini seç ve rotanın havasını hesapla. Trafik açıksa uygun araç türlerinde TomTom kullanılır. Bir temel rotadan yedi yaklaşık hava seçeneği çıkarılır; dokunduğun başka kalkış için rota ve hava birlikte yeniden hesaplanır. Hava önerisi otomatik seçilmez. [Matrix durak sırası ve yeni planlama kuralları](../IZ_090_YENILIKLER.md).
+2. Başlangıç ve hedef seç; bunlar dahil en çok 20 planlı durak kullanılabilir. Arama, kayıtlı yerler veya haritadan seçim yapılabilir. Motosiklette 4–20 durak için deterministik sıralama önerisi mevcut ve önerilen sırayı aynı Valhalla sağlayıcısı/tercihleri/zamanıyla karşılaştırır. Sıra değişmiyorsa istek yapılmaz; yalnız hesaplanan süre kısalırsa öneri sunulur ve açık seçiminle uygulanır. Kesin en iyi sıra iddiası yoktur; başlangıç/bitiş, kimlikler, tekrarlar ve molalar korunur.
+3. Kalkış saatini seç ve rotanın havasını hesapla. Trafik açıksa otomobil/yolcuda TomTom kullanılır. Motosikletin rota, alternatif, yeniden hesaplama, kalkış doğrulaması ve durak sırası mevcut Valhalla ile çalışır; **Valhalla · Trafik hariç** gösterilir, kısa planlarda Matrix kullanılmaz. Bir temel rotadan yedi yaklaşık hava seçeneği çıkarılır; dokunduğun başka kalkış için rota ve hava birlikte yeniden hesaplanır. Motosiklet için canlı trafik süresi vaat edilmez. Hava önerisi otomatik seçilmez. [0.9.0'ın tarihsel Matrix ve planlama kuralları](../IZ_090_YENILIKLER.md).
 4. Haritadaki hava noktaları, o noktaya tahmini varış saatindeki tahmini gösterir. Yağış yüzdesi, rota örneklerindeki en yüksek olasılıktır. Haritaya dokunarak tam ekran açabilir, haritayı kapatmadan kaydırıp yakınlaştırabilirsin; nokta bilgileri ve seçimler açılır pencerelerde gösterilir.
 5. **[Seçilen tür] yolculuğunu şimdi başlat**, güncel konumunu alır ve şimdi başlayacağın yolculuk için rotayı yeniden hesaplar. Aynı türde mevcut ve onaylanmış bir kayda bağlanır; açık kayıt yoksa seçtiğin türde yeni kayıt başlatır. Başka türde açık bir kayıt varsa ona farklı türün planını bağlamaz.
 6. Canlı kartta yolculuk türü, kalan mesafe, varış saati ve hava durumu görünür. Hava takibini durdurmak, yolculuk günlüğünün GPS kaydını bitirmez. Başka tür için plan hazırlarken o türün rota önizlemesi gösterilir; açık yolculuğun canlı kartında kendi türü yazmaya devam eder.
@@ -37,6 +39,8 @@ Yürüyüş, koşu ve bisiklette **Planlama hızı (km/sa)** tahmini rota sürel
 
 Koşu ve yürüyüş yaya yollarını, bisiklet bisiklet rotasını, motosiklet motosiklet rotasını kullanır. Araba ve yolcu otomobil için karayolu rotası kullanır; süreyi rota servisi hesaplar. **Yolcu** seçimi toplu taşıma tarifesi, tren veya uçuş planlaması yapmaz; başkasının aracında yapılan karayolu yolculuğunu ayrı kaydetmek içindir.
 
+Valhalla motosiklet profili günlük kullanım için betadır; yol tercihleri kesin yüzey/otoyol dışlama garantisi değildir. Hata seçimleri ve varsa mevcut rotayı korur; elle yeniden denenir, TomTom'a geçilmez. Dönemsel motosiklet trafik yenilemesi yoktur; sapma sonrası yeniden hesaplama korunur. TomTom hız sınırı yardımcılarının ayarları/erişim koşulları korunur; yeni Valhalla motosiklet rotalarında TomTom rota kesimi hız sınırları bulunmaz, OSM aynı kapsamı garanti etmez. Yönlendirme sırasında yeni ters sorgular eklenmez.
+
 Planlama hızını değiştirmek sonraki rota hesaplamalarını etkiler. Devam eden hava oturumu, rota oluşturulurken kullanılan hızını korur; rota dışına çıkıldığında yeniden hesaplama da bu hızla yapılır.
 
 ## Canlı takip ve saat
@@ -49,7 +53,7 @@ Telefonla bağlantılı Wear OS kartı bütün desteklenen yolculuk türlerinde 
 
 Plan, türe özel tercihler ve hava önbelleği telefonda ayrı saklanır. Hesaplanan rota çizgisi günlüğe GPS noktası olarak yazılmaz. Günlüğün Room 6 ve yedek 6 biçimleri kalıcı yer sırasını içerir; hava planı mevcut günlük yedeğine eklenmez.
 
-Rota hesaplanırken seçilen duraklar etkin sağlayıcıya (uygun araçlarda TomTom veya [Valhalla](https://valhalla.github.io/valhalla/api/route/api-reference/)), hava alınırken örnek konumlar [Open-Meteo](https://open-meteo.com/en/docs) servisine gönderilir. Yol verisi © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright). Varsayılan servisler kişisel kullanım için seçilmiştir; ileri ayarlarda her türün HTTPS servis adresleri değiştirilebilir. [Open-Meteo kullanım koşulları](https://open-meteo.com/en/pricing) ticari kullanım için farklıdır.
+Rota hesaplanırken seçilen duraklar etkin sağlayıcıya (otomobil/yolcuda koşullara göre TomTom veya Valhalla; motosiklette [Valhalla](https://valhalla.github.io/valhalla/api/route/api-reference/)), hava alınırken örnek konumlar [Open-Meteo](https://open-meteo.com/en/docs) servisine gönderilir. Yol verisi © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright). Varsayılan servisler kişisel kullanım için seçilmiştir; ileri ayarlarda her türün HTTPS servis adresleri değiştirilebilir. [Open-Meteo kullanım koşulları](https://open-meteo.com/en/pricing) ticari kullanım için farklıdır.
 
 Rota süreleri tahmindir. Yağış ve rüzgâr hamlesinin saatlik aralık anlamı korunur; eksik hava alanları sıfır kabul edilmez. Kalkış önerisi, verisi tam olan seçeneklerde eşik aşılan tahmini süreyi karşılaştırır.
 
