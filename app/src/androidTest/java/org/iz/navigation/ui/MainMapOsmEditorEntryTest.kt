@@ -212,7 +212,8 @@ class MainMapOsmEditorEntryTest {
         // Fresh, deliberately synthetic origin for each tap; never a device fix or recorded route.
         onMain { map.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(35.0 + nonce % 10000 / 100000.0, 25.0 + nonce % 7000 / 100000.0), 18.0)) }
         compose.waitForIdle()
-        val point = PointF(view.width * .35f, view.height * .36f)
+        val exposed = exposedMainMapArea(view)
+        val point = PointF(exposed.centerX(), exposed.centerY())
         onMain { observedTapDownTime = Long.MIN_VALUE; observedWindowTouches = JSONArray(); unconsumedMapClicks.set(0) }
         val touchSetup = mainMapTouchDiagnostics(view, map, point)
         val tapped = onMain { map.projection.fromScreenLocation(point) }
@@ -360,14 +361,62 @@ class MainMapOsmEditorEntryTest {
     private fun View.allMapViews(): List<MapView> = if (this is MapView) listOf(this)
         else if (this is ViewGroup) (0 until childCount).flatMap { getChildAt(it).allMapViews() } else emptyList()
 
+    /** Keep native gestures out of actual cards, including non-clickable permission/status surfaces. */
+    private fun exposedMainMapArea(view: MapView, horizontalSpan: Float = 0f): RectF {
+        compose.waitForIdle()
+        val mapNode = compose.onNodeWithTag("navigation-home-map").assertIsDisplayed().fetchSemanticsNode()
+        fun ancestors(node: SemanticsNode) = generateSequence(node) { it.parent }
+        val mapAncestors = ancestors(mapNode).map { it.id }.toSet()
+        val mainRoot = ancestors(mapNode).last().layoutInfo
+        val origin = onMain {
+            check(view.isShown && view.hasWindowFocus()) { "Actual Main map must be visible and focused" }
+            IntArray(2).also(view::getLocationInWindow)
+        }
+        val mapBounds = mapNode.boundsInWindow
+        assertEquals(mapBounds.left, origin[0].toFloat(), 2f)
+        assertEquals(mapBounds.top, origin[1].toFloat(), 2f)
+        assertEquals(mapBounds.width, view.width.toFloat(), 2f)
+        assertEquals(mapBounds.height, view.height.toFloat(), 2f)
+        val margin = 12f * view.resources.displayMetrics.density
+        val inside = RectF(origin[0] + margin, origin[1] + margin,
+            origin[0] + view.width - margin, origin[1] + view.height - margin)
+        val blockers = compose.onAllNodes(SemanticsMatcher("Owned Main overlay geometry") { true }, useUnmergedTree = true)
+            .fetchSemanticsNodes().filter { node ->
+                ancestors(node).last().layoutInfo === mainRoot && node.id !in mapAncestors &&
+                    (ancestors(node).none { it.id == mapNode.id } || node.config.contains(SemanticsActions.OnClick))
+            }.map { it.boundsInWindow }.filter { it.width > 0f && it.height > 0f }
+            .map { RectF(it.left - margin, it.top - margin, it.right + margin, it.bottom + margin) }
+            .filter { RectF.intersects(inside, it) }
+        val ys = (listOf(inside.top, inside.bottom) + blockers.flatMap { listOf(it.top, it.bottom) })
+            .map { it.coerceIn(inside.top, inside.bottom) }.distinct().sorted()
+        val candidates = mutableListOf<RectF>()
+        for ((top, bottom) in ys.zipWithNext()) {
+            var left = inside.left
+            for (blocked in blockers.filter { it.top < bottom && it.bottom > top }.sortedBy { it.left }) {
+                val next = blocked.left.coerceIn(inside.left, inside.right)
+                if (next - left > horizontalSpan) candidates += RectF(left, top, next, bottom)
+                left = maxOf(left, blocked.right.coerceIn(inside.left, inside.right))
+            }
+            if (inside.right - left > horizontalSpan) candidates += RectF(left, top, inside.right, bottom)
+        }
+        val chosen = checkNotNull(candidates.maxByOrNull { it.width() * it.height() }) {
+            "No measured exposed Main map area for native gesture; map=$inside blockers=$blockers"
+        }
+        check(chosen.width() > horizontalSpan && chosen.height() > 0f &&
+            inside.contains(chosen.left, chosen.top, chosen.right, chosen.bottom) && blockers.none { RectF.intersects(it, chosen) })
+        return RectF(chosen).apply { offset(-origin[0].toFloat(), -origin[1].toFloat()) }
+    }
+
     private fun assertExposedMapPans(app: Context, view: MapView, map: MapLibreMap) {
         val budget = app.getSharedPreferences("osm_read_limits", Context.MODE_PRIVATE).all.toMap()
-        val old = onMain { map.cameraPosition.target }
         // A swipe is a native pan above the measured panel; it must not issue a discovery query.
         compose.onNodeWithTag("place-info-discovery-collapse").performClick()
+        val exposed = exposedMainMapArea(view, horizontalSpan = 96f)
+        val old = onMain { map.cameraPosition.target }
         val screen = onMain { IntArray(2).also(view::getLocationOnScreen) }
-        val x = screen[0] + view.width * .52f
-        val y = screen[1] + view.height * .48f
+        val x = screen[0] + exposed.centerX() - 48f
+        val y = screen[1] + exposed.centerY()
+        check(exposed.contains(x - screen[0], y - screen[1]) && exposed.contains(x - screen[0] + 96f, y - screen[1]))
         val down = SystemClock.uptimeMillis()
         for (step in 0..12) {
             val event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), when (step) { 0 -> MotionEvent.ACTION_DOWN; 12 -> MotionEvent.ACTION_UP; else -> MotionEvent.ACTION_MOVE },
