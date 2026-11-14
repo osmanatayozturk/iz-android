@@ -6,6 +6,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.unit.dp
@@ -44,7 +45,9 @@ class MapSelectionPanelTest {
         } }
         compose.runOnIdle { owner.tap(35.0, 25.0, 18.0) }
         compose.onNodeWithTag("place-info-open-information").assertIsNotEnabled()
-        compose.onNodeWithTag("place-info-discovery-choice-36").performScrollTo().performClick().assertIsSelected()
+        compose.onNode(SemanticsMatcher.keyIsDefined(SemanticsActions.ScrollToIndex))
+            .performScrollToNode(hasTestTag("place-info-discovery-choice-36"))
+        compose.onNodeWithTag("place-info-discovery-choice-36").performClick().assertIsSelected()
         compose.onNodeWithTag("place-info-open-information").performClick()
         compose.onNodeWithTag("synthetic-detail").assertIsDisplayed()
         Espresso.pressBack()

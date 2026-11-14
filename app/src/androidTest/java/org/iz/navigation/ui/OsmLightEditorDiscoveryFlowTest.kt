@@ -20,7 +20,7 @@ import org.iz.navigation.data.OsmRef
 import org.iz.navigation.data.OsmType
 import org.iz.navigation.data.SelectedOsmPlace
 import org.iz.navigation.data.selectedPresetSnapshot
-import org.iz.navigation.integration.parseOverpassPlaces
+import org.iz.navigation.integration.parseOverpassMapCandidates
 import org.iz.navigation.integration.osm.OsmCorrectionElement
 import org.iz.navigation.integration.osm.OsmCorrectionReview
 import org.iz.navigation.integration.osm.OsmCredentials
@@ -78,7 +78,7 @@ class OsmLightEditorDiscoveryFlowTest {
     @Test fun unnamedBuildingWayRequiresExplicitChoiceAndReviewsNamePhoneWithoutChangingItsArea() {
         val building = building()
         show(SUPPORTED_DISCOVERY, listOf(tree(), building))
-        choose(OsmRef(OsmType.WAY, 804), expectedIndex = 1)
+        choose(OsmRef(OsmType.WAY, 804), expectedIndex = 0)
         compose.runOnIdle {
             val selected = selections.single()
             assertEquals(catalog.resolve("building")!!.name, selected.name)
@@ -97,7 +97,7 @@ class OsmLightEditorDiscoveryFlowTest {
     @Test fun nonLegacyNaturalTreePointKeepsItsActualRefCoordinatesAndUnrelatedTagsThroughReview() {
         val tree = tree()
         show(SUPPORTED_DISCOVERY, listOf(tree, building()))
-        choose(OsmRef(OsmType.NODE, 804), expectedIndex = 0)
+        choose(OsmRef(OsmType.NODE, 804), expectedIndex = 1)
         compose.runOnIdle {
             assertEquals(catalog.resolve("natural/tree")!!.name, selections.single().name)
             val draft = factoryDrafts.single()
@@ -114,7 +114,7 @@ class OsmLightEditorDiscoveryFlowTest {
         val highway = OsmCorrectionElement(OsmRef(OsmType.WAY, 909), 8, 90, 41,
             null, null, listOf(70L, 12L, 33L, 70L), mapOf("highway" to "residential", "name" to "Closed highway"))
         show(UNSUPPORTED_DISCOVERY, listOf(tree(), highway))
-        choose(highway.ref, expectedIndex = 1)
+        choose(highway.ref, expectedIndex = 0)
         compose.onNodeWithText("Bu OSM nesnesinin geometrisi İz'de düzenlenemiyor. OSM düzenleyicisini kullan.")
             .performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("osm-map-correction-name").assertDoesNotExist()
@@ -144,7 +144,7 @@ class OsmLightEditorDiscoveryFlowTest {
                             assertEquals(39.93, latitude, 0.0)
                             assertEquals(32.85, longitude, 0.0)
                             nearbyReads++
-                            parseOverpassPlaces(json, actualCatalog)
+                            parseOverpassMapCandidates(json, actualCatalog)
                         },
                         onSelect = { selected ->
                             selections += selected
@@ -193,8 +193,7 @@ class OsmLightEditorDiscoveryFlowTest {
             assertTrue(targetReads.isEmpty())
             owner.tap(39.93, 32.85, 17.0)
         }
-        compose.onNodeWithTag("place-info-discovery-choice-$expectedIndex").assertIsDisplayed()
-            .assertTextContains("${ref.type.name.lowercase()}/${ref.id}", substring = true)
+        compose.onNodeWithTag("place-info-discovery-choice-$expectedIndex").assertIsDisplayed().assertIsNotSelected()
         compose.onNodeWithTag("osm-map-correction-name").assertDoesNotExist()
         compose.runOnIdle {
             assertEquals(1, nearbyReads)
@@ -203,11 +202,17 @@ class OsmLightEditorDiscoveryFlowTest {
             assertTrue(selections.isEmpty()) // Multiple candidates never auto-select the first.
             assertTrue(targetReads.isEmpty())
         }
-        compose.onNodeWithTag("place-info-discovery-choice-$expectedIndex").performClick()
+        compose.onNodeWithTag("place-info-discovery-choice-$expectedIndex").performClick().assertIsSelected()
+        compose.runOnIdle {
+            assertEquals(ref, owner.state.selectedRef)
+            assertTrue(selections.isEmpty())
+            assertTrue(targetReads.isEmpty())
+        }
+        compose.onNodeWithTag("place-info-open-information").assertIsEnabled().performClick()
         compose.runOnIdle {
             assertEquals(listOf(ref), selections.map { it.osmRef })
             assertEquals(listOf(ref), targetReads)
-            assertTrue(owner.state.choices.isEmpty())
+            assertEquals(2, owner.state.choices.size)
         }
     }
 
