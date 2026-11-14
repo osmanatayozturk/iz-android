@@ -20,6 +20,8 @@ import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.Window
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.text.AnnotatedString
@@ -291,6 +293,21 @@ class MainMapOsmEditorEntryTest {
         val origin = onMain { IntArray(2).also(view::getLocationInWindow) }
         val x = origin[0] + point.x
         val y = origin[1] + point.y
+        val mapNodes = compose.onAllNodesWithTag("navigation-home-map").fetchSemanticsNodes()
+        fun rootOf(node: SemanticsNode): SemanticsNode = generateSequence(node) { it.parent }.last()
+        val mainRoot = mapNodes.singleOrNull()?.let { rootOf(it).layoutInfo }
+        val covering = compose.onAllNodes(SemanticsMatcher("Owned Main semantic geometry") { true }, useUnmergedTree = true)
+            .fetchSemanticsNodes().filter { node ->
+                val b = node.boundsInWindow
+                mainRoot != null && rootOf(node).layoutInfo === mainRoot && x >= b.left && x < b.right && y >= b.top && y < b.bottom
+            }
+        val coveringFlags = covering.take(16).map { node -> JSONObject()
+            .put("id", node.id).put("parentId", node.parent?.id)
+            .put("tag", if (node.config.contains(SemanticsProperties.TestTag)) node.config[SemanticsProperties.TestTag] else "untagged")
+            .put("boundsInWindow", node.boundsInWindow.toString())
+            .put("hasClick", node.config.contains(SemanticsActions.OnClick))
+            .put("hasText", node.config.contains(SemanticsProperties.Text))
+            .put("hasTraversalGroupKey", node.config.contains(SemanticsProperties.IsTraversalGroup)) }
         val blockers = compose.onAllNodes(hasClickAction() or hasTestTag("home-brand") or hasTestTag("place-info-discovery"),
             useUnmergedTree = true).fetchSemanticsNodes().mapNotNull { node ->
             val b = node.boundsInWindow
@@ -300,7 +317,19 @@ class MainMapOsmEditorEntryTest {
         }.take(8)
         val native = onMain {
             val camera = map.cameraPosition
-            val standard = map.gesturesManager.standardGestureDetector
+            val gestures = map.gesturesManager
+            val standard = gestures.standardGestureDetector
+            val shownMaps = view.rootView.allMapViews().filter { it.isShown }
+            val mapIdentities = shownMaps.take(4).map { candidate ->
+                val position = IntArray(2).also(candidate::getLocationInWindow)
+                var immediate: MapLibreMap? = null
+                candidate.getMapAsync { immediate = it }
+                JSONObject().put("viewIdentity", System.identityHashCode(candidate)).put("isProbedView", candidate === view)
+                    .put("boundsInWindow", Rect(position[0], position[1], position[0] + candidate.width, position[1] + candidate.height).toShortString())
+                    .put("enabled", candidate.isEnabled).put("focusedWindow", candidate.hasWindowFocus())
+                    .put("mapCallbackImmediate", immediate != null).put("isProbedMap", immediate === map)
+                    .put("mapIdentity", immediate?.let { System.identityHashCode(it) })
+            }
             fun event(value: MotionEvent?): Any = value?.let {
                 JSONObject().put("action", it.actionMasked).put("downTime", it.downTime).put("eventTime", it.eventTime)
                     .put("x", it.x.toDouble()).put("y", it.y.toDouble()).put("source", it.source)
@@ -314,14 +343,22 @@ class MainMapOsmEditorEntryTest {
                 .put("injectedDownTime", observedTapDownTime).put("windowTouches", JSONArray(observedWindowTouches.toString()))
                 .put("sdkStandardEnabled", standard.isEnabled).put("sdkCurrentEvent", event(standard.currentEvent))
                 .put("sdkPreviousEvent", event(standard.previousEvent)).put("unconsumedMapClickCount", unconsumedMapClicks.get())
+                .put("viewIdentity", System.identityHashCode(view)).put("mapIdentity", System.identityHashCode(map))
+                .put("gesturesIdentity", System.identityHashCode(gestures)).put("standardIdentity", System.identityHashCode(standard))
+                .put("standardInDetectorList", gestures.detectors.any { it === standard })
+                .put("shownMapViewCount", shownMaps.size).put("shownMapViews", JSONArray(mapIdentities))
         }
         return JSONObject().put("windowKind", "OWNED_MAIN_ACTIVITY").put("native", native)
             .put("nativeLocalX", point.x.toDouble()).put("nativeLocalY", point.y.toDouble())
-            .put("mainMapBoundsInWindow", JSONArray(compose.onAllNodesWithTag("navigation-home-map").fetchSemanticsNodes().map { it.boundsInWindow.toString() }))
+            .put("mainMapBoundsInWindow", JSONArray(mapNodes.map { it.boundsInWindow.toString() }))
             .put("selectionPanelCount", compose.onAllNodesWithTag("place-info-discovery").fetchSemanticsNodes().size)
             .put("fullscreenCount", compose.onAllNodesWithTag("fullscreen_map").fetchSemanticsNodes().size)
             .put("coveringSemanticRegions", JSONArray(blockers))
+            .put("coveringMainSemanticBoundsAndFlags", JSONArray(coveringFlags)).put("coveringMainSemanticsTruncated", covering.size > 16)
     }
+
+    private fun View.allMapViews(): List<MapView> = if (this is MapView) listOf(this)
+        else if (this is ViewGroup) (0 until childCount).flatMap { getChildAt(it).allMapViews() } else emptyList()
 
     private fun assertExposedMapPans(app: Context, view: MapView, map: MapLibreMap) {
         val budget = app.getSharedPreferences("osm_read_limits", Context.MODE_PRIVATE).all.toMap()

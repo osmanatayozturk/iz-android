@@ -80,7 +80,8 @@ internal object OsmLightEditorNativeCapture {
             val windows = (listOf(host.window) + WindowInspector.getGlobalWindowViews()
                 .flatMap { descendants(it) }.filterIsInstance<DialogWindowProvider>().map { it.window })
                 .distinctBy { it.decorView }.filter {
-                    it.decorView.context.activity() === host && it.decorView.isShown && it.decorView.hasWindowFocus()
+                    (it === host.window || it.decorView.context.activity() === host) &&
+                        it.decorView.isShown && it.decorView.hasWindowFocus()
                 }
             val window = windows.single()
             val mapWindow = (state.startsWith("map-") && state != "map-03-details") || state == "diagnostic-main-map-touch-failure"
@@ -137,6 +138,8 @@ internal object OsmLightEditorNativeCapture {
                 .put("captureStatus", "CAPTURED_PENDING_HOST_READBACK_UIUX").put("uiuxVerdict", "NOT_RUN")
             if (state == "diagnostic-main-map-touch-failure") metadata
                 .put("evidencePurpose", "DIAGNOSTIC_ONLY_NOT_MAP_ACCEPTANCE")
+                .put("windowOwnershipProof", "EXACT_RESUMED_HOST_WINDOW_IDENTITY")
+                .put("decorContextClass", window.decorView.context.javaClass.name)
                 .put("captureStatus", "CAPTURED_DIAGNOSTIC_ONLY_PENDING_HOST_READBACK")
                 .put("uiuxVerdict", "NOT_REQUESTED_DIAGNOSTIC_ONLY")
             val bytes = metadata.toString(2).toByteArray(Charsets.UTF_8)
