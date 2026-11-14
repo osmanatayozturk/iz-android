@@ -25,8 +25,6 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.core.content.ContextCompat
 import androidx.test.core.app.ActivityScenario
 import androidx.test.espresso.Espresso
-import androidx.test.espresso.matcher.RootMatchers.isDialog
-import androidx.test.espresso.matcher.ViewMatchers.isAssignableFrom
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import java.util.concurrent.ArrayBlockingQueue
@@ -88,8 +86,8 @@ class MainMapOsmEditorEntryTest {
         val repository = DiaryRepository(app)
         val baseline = repository.snapshot()
         val baselineSession = session(app)
-        withOfflineMainActivity(app) {
-            val (view, map) = readyFullscreenMap()
+        withOfflineMainActivity(app) { host ->
+            val (view, map) = readyMap(host)
             val fixture = discoverSynthetic(app, view, map)
             compose.onNodeWithTag("place-info-open-information").assertIsNotEnabled()
             compose.onNodeWithTag("place-info-discovery-choice-0").assertIsNotSelected()
@@ -134,8 +132,8 @@ class MainMapOsmEditorEntryTest {
         val baselineSession = session(app)
         var owned: MapEditDraft? = null
         try {
-            withOfflineMainActivity(app) {
-                val (view, map) = readyFullscreenMap()
+            withOfflineMainActivity(app) { host ->
+                val (view, map) = readyMap(host)
                 val fixture = discoverSynthetic(app, view, map, area = true)
                 compose.onNodeWithTag("place-info-discovery-choice-1").performClick().assertIsSelected()
                 compose.waitUntil(10_000) { onMain {
@@ -175,7 +173,7 @@ class MainMapOsmEditorEntryTest {
             try {
                 compose.waitUntil(10_000) { app.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE }
                 OsmLightEditorQaTargetAdmission.requireAdmittedTarget(allowLandscape = true)
-                val (view, map) = readyFullscreenMap()
+                val (view, map) = readyMap(host)
                 discoverSynthetic(app, view, map)
                 compose.onNodeWithTag("place-info-discovery-choice-0").performClick().assertIsSelected()
                 compose.onNodeWithTag("place-info-open-information").assertIsEnabled().assertIsDisplayed()
@@ -424,22 +422,6 @@ class MainMapOsmEditorEntryTest {
 
     private fun session(app: IzApplication): List<Any?> = app.navigation.state.value.let {
         listOf(it.sessionId, it.recording, it.guidance, it.journey?.id, it.route?.id)
-    }
-
-    private fun readyFullscreenMap(): Pair<MapView, MapLibreMap> {
-        // The preview's touch layer opens fullscreen; discovery belongs to the dialog map.
-        compose.onNodeWithContentDescription("Haritayı tam ekran aç").assertIsDisplayed().performClick()
-        compose.onNodeWithTag("fullscreen_map").assertIsDisplayed()
-        var view: MapView? = null
-        Espresso.onView(isAssignableFrom(MapView::class.java)).inRoot(isDialog()).check { candidate, failure ->
-            if (failure != null) throw failure
-            view = (candidate as MapView).also { check(it.isShown && it.width > 0 && it.height > 0) }
-        }
-        val actual = requireNotNull(view)
-        val loaded = AtomicReference<MapLibreMap?>()
-        onMain { actual.getMapAsync { loaded.set(it) } }
-        compose.waitUntil(10_000) { onMain { loaded.get()?.style?.isFullyLoaded == true } }
-        return actual to requireNotNull(loaded.get())
     }
 
     private fun readyMap(host: ActivityScenario<MainActivity>): Pair<MapView, MapLibreMap> {
