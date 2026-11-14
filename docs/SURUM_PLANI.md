@@ -1,5 +1,20 @@
 # İz sürüm değişikliği planı
 
+## Telefon 0.13.3 / code 32 — haritadan yer seçimi (yayımlanmamış kaynak adayı)
+
+Haritaya açıkça dokunma, yakındaki OSM yerlerini getirir. Birden fazla sonuç numaralı işaretçiler ve alttaki listede gösterilir. Listenin yüksekliği sürükleyerek değiştirilebilir veya liste daraltılabilir; açıkta kalan harita kullanılabilir. Satır veya işaretçi seçimi ayrıntıları kendiliğinden açmaz: seçilen yer için **Bilgileri aç** kullanılır. Bilgilerden geri dönüş listeyi, kaydırma konumunu ve seçimi yeni sorgu yapmadan korur. Tek sonuç doğrudan bilgi kartını açar.
+
+Yalnız seçilen basit kapalı OSM alanının gösterim sınırı alınır. Geometri düzenlenmez; sınır yoksa veya alınamazsa konum noktası ve bilgi kartı kullanılabilir. Başarısızlık/zaman aşımı sonrası yeniden deneme elle başlatılır; yeni seçim eski sınırı temizler. Room şeması, yedek biçimi, Wear OS, protokol ve bağımlılıklar değişmez.
+
+| Aşama | Durum ve kabul sınırı |
+|---|---|
+| Host — `feb2ba7` | 1.698 birim testi geçti; güncel Debug lint raporu 0 hata / 119 uyarı. AndroidTest derlemesi ve test APK üretimi tamamlandı. Test dosyası değişikliklerinden etkilenmeyen uygulama APK'sı ürün/yapılandırma eşleşmesiyle yeniden kullanıldı. |
+| Derlenmiş test imzaları | 20 test ve üç lifecycle metodu doğrulandı; bir eski Main testi açıkça dışlandı. Bu kontrol cihazda çalıştırma veya runtime kabulü değildir. |
+| Cihaz ve görsel kabul | Seçili 20 cihaz testi ve altı görüntülük inceleme ile son UI/UX kabulü bekliyor. |
+| Güvenlik | Son adaya yönelik odaklı inceleme bekliyor; önceki sürümün sonucu bu adayın kabulü sayılmaz. |
+| Canlı Overpass | Bilgisayardan yapılan ayrı yapılandırılmış uç nokta okuması engelli; canlı servis kabulü tamamlanmadı. |
+| Dağıtım | Yayımlanmamış kaynak adayı; APK dağıtımı ve cihaz kabulü yok. |
+
 ## Telefon 0.13.2 / code 31 — haritadan OSM düzenleme
 
 Ana haritaya uzun basarak yeni OSM mekânı ekle. Ad, tür ve telefon bilgilerini gir; türü aranabilir listeden seç ve sık kullandıklarını yıldızla favorilerine ekle. Yeni formda tür seçimi boş başlar. Mevcut desteklenen nokta ve basit kapalı alanların bilgileri aynı sade düzenleyiciden değiştirilebilir.
@@ -101,7 +116,8 @@ Bu dosya telefon ve uyumlu bileşenlerin sürüm kapsamını kaydeder. Dağıtı
 
 | Bileşen | versionName | versionCode | Dağıtım ve doğrulama kaydı |
 |---|---|---|---|
-| Telefon | 0.13.0 | 29 | Özellik kapsamı yukarıdaki bölümde, doğrulama ve dağıtım sonuçları sürüm sayfasında |
+| Telefon kaynak adayı | 0.13.3 | 32 | Yayımlanmadı; host kanıtı ve bekleyen kabuller yukarıdaki 0.13.3 bölümünde |
+| Yayımlanmış telefon | 0.13.0 | 29 | Doğrulama ve dağıtım sonuçları sürüm sayfasında |
 | Wear OS | 0.7.0 | 12 | Telefon 0.13.0 ile değişmiyor |
 | Ortak iletişim | v6 | — | Bu telefon kaynak sürümünde korunur |
 

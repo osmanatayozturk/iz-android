@@ -1,5 +1,15 @@
 # Değişiklik geçmişi
 
+## Telefon 0.13.3 / code 32 — haritadan yer seçimi (yayımlanmamış kaynak adayı)
+
+Haritaya açıkça dokunulduğunda birden fazla OSM yeri bulunursa numaralı işaretçiler ve altta bir seçim listesi gösterilir. Listenin yüksekliği sürükleyerek değiştirilebilir veya liste daraltılabilir; açıkta kalan harita kullanılabilir. Satıra veya işaretçiye dokunmak yeri seçer; ayrıntılar **Bilgileri aç** ile açılır. Bilgilerden geri dönüldüğünde liste, kaydırma konumu ve seçim yeni sorgu yapılmadan korunur. Tek sonuç doğrudan bilgi kartını açar.
+
+Seçilen basit kapalı OSM alanının sınırı yalnız haritada gösterim için alınır; bu, geometri düzenlemesi değildir. Sınır kullanılamazsa konum noktası ve bilgilere erişim korunur. Başarısızlık veya zaman aşımında yeniden deneme kullanıcı tarafından başlatılır; seçim değişince eski sınır kaldırılır. Room şeması, yedek biçimi, Wear OS, telefon-saat protokolü ve bağımlılıklar değişmez.
+
+**Host doğrulaması — `feb2ba7` kaynak adayı:** 1.698 birim testi geçti. Güncel Debug lint raporu 0 hata ve 119 uyarı içeriyor. AndroidTest derlemesi ve test APK üretimi tamamlandı; yalnız test dosyaları değiştiği için ürün/yapılandırma eşleşmesi doğrulanan mevcut uygulama APK'sı yeniden kullanıldı. Derlenmiş 20 test ve üç lifecycle metodunun JUnit imzaları doğrulandı; bir eski Main testi bu imza kapsamından açıkça dışlandı. Bu sonuçlar cihazda test çalıştırıldığı anlamına gelmez.
+
+**Bekleyen kabul:** Seçili 20 cihaz testi ve altı görüntülük inceleme, son UI/UX kabulü ve odaklı güvenlik incelemesi tamamlanmadı. Yapılandırılmış Overpass uç noktasına bilgisayardan yapılan ayrı canlı okuma engelli; canlı servis kabulü sağlanmadı. Bu kayıt yayımlanmış sürüm, APK dağıtımı veya cihaz kabulü değildir.
+
 ## Telefon 0.13.2 / code 31 — haritadan OSM düzenleme
 
 Ana haritaya uzun basarak yeni OSM mekânı ekle. Ad, tür ve telefon bilgilerini gir; türü aranabilir listeden seç ve sık kullandıklarını yıldızla favorilerine ekle. Yeni formda tür seçimi boş başlar. Mevcut desteklenen nokta ve basit kapalı alanların bilgileri aynı sade düzenleyiciden değiştirilebilir.
