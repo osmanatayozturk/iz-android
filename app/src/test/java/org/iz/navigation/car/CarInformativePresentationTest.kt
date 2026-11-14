@@ -1,6 +1,7 @@
 package org.iz.navigation.car
 
 import org.iz.navigation.data.SelectedOsmPlace
+import org.iz.navigation.data.Transport
 import org.iz.navigation.navigation.*
 import org.iz.navigation.weather.*
 import org.junit.Assert.*
@@ -12,7 +13,7 @@ class CarInformativePresentationTest {
     private val b = WeatherCoordinate(41.001, 29.001)
     private fun route() = PlannedRoute("auto-facts", listOf(RouteStop("Başlangıç", a), RouteStop("Hedef", b)),
         listOf(RouteVertex(a, 0.0), RouteVertex(b, 60.0)), 140.0, 60.0, now,
-        maneuvers = listOf(RouteManeuver(10, "Sağa dönün", "Sağa dönün", emptyList(), 0, 1, 0.0, 60.0)))
+        transport = Transport.CAR, maneuvers = listOf(RouteManeuver(10, "Sağa dönün", "Sağa dönün", emptyList(), 0, 1, 0.0, 60.0)))
     private fun current() = NavigationState(route = route(), guidance = true, gpsStale = false,
         progress = NavigationProgress(0.0, 60.0, 140.0, 0.0, 0, 50.0))
 
@@ -60,6 +61,12 @@ class CarInformativePresentationTest {
         val inconsistent = route().copy(provider = RouteProvider.VALHALLA,
             traffic = RouteTrafficInfo(now, 0.0, null))
         assertFalse(carRoutePreviewPresentation(inconsistent, now).source.contains("TomTom trafik"))
+    }
+
+    @Test fun motorcycleValhallaPreviewUsesTrafficFreeContextWithoutTomTomSetupText() {
+        val data = route().copy(transport = Transport.MOTORCYCLE, provider = RouteProvider.VALHALLA,
+            trafficUnavailableReason = "Kişisel TomTom anahtarı eklenmedi; trafiksiz rota.")
+        assertEquals("Valhalla · Trafik hariç", carRoutePreviewPresentation(data, now).source)
     }
 
     @Test fun unknownOrFutureTrafficTimeNeverClaimsFreshness() {

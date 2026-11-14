@@ -15,12 +15,13 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class NavigationPreferenceGateTest {
-    private class Runtime : NavigationRuntime {
+    private class Runtime(private val useRoutingPolicy: Boolean = false) : NavigationRuntime {
         override val journeys = MutableStateFlow<List<Journey>>(emptyList())
         var starts = 0
         var planned: PlannedRoute? = null
         var requestedPreferences: RoutePreferences? = null
         var requestedSpeed: Double? = null
+        var requests = 0
         private var running: String? = null
         override suspend fun activeJourney() = journeys.value.firstOrNull { it.endedAt == null }
         override suspend fun start(transport: Transport, stillCurrent: () -> Boolean): String {
@@ -39,9 +40,10 @@ class NavigationPreferenceGateTest {
             travelSpeedKmh: Double?): PlannedRoute {
             requestedPreferences = preferences
             requestedSpeed = travelSpeedKmh
-            return requireNotNull(planned)
+            requests++
+            return requireNotNull(planned).copy(stops = stops)
         }
-        override fun trafficRefreshEnabled(route: PlannedRoute) = true
+        override fun trafficRefreshEnabled(route: PlannedRoute) = !useRoutingPolicy || RoutingPolicy.usesTomTomRouting(route.transport)
         override suspend fun locate() = NavigationFix(WeatherCoordinate(40.0, 29.0), 1000, 4f)
         override fun render(state: NavigationState) = Unit
         override fun speak(text: String) = Unit
@@ -136,5 +138,34 @@ class NavigationPreferenceGateTest {
         assertEquals(18.0, runtime.requestedSpeed!!, 0.0)
         assertEquals("refreshed", owner.state.value.route?.id)
         assertEquals(1, runtime.starts)
+    }
+
+    @Test fun motorcycleTrafficTimerIsDisabledButDeviationStillReroutes() = runTest {
+        val runtime = Runtime(useRoutingPolicy = true)
+        val now = { 1000L + testScheduler.currentTime }
+        val owner = JourneyNavigationCoordinator(runtime, null, now, backgroundScope)
+        val initial = route(Transport.MOTORCYCLE, avoid = false, id = "selected")
+        runtime.planned = initial.copy(id = "rerouted")
+        owner.startGuidance(initial)
+        runCurrent()
+        advanceTimeBy(119_000)
+        owner.onAcceptedLocation("trip-1", NavigationFix(initial.stops.first().coordinate, now(), 5f))
+        while (owner.state.value.fix == null) yield()
+        runCurrent()
+        advanceTimeBy(1001)
+        runCurrent()
+        assertEquals(0, runtime.requests)
+        repeat(3) {
+            advanceTimeBy(3100)
+            val time = now()
+            owner.onAcceptedLocation("trip-1", NavigationFix(WeatherCoordinate(40.002, 29.003), time, 5f))
+            while (owner.state.value.fix?.recordedAt != time) yield()
+            runCurrent()
+        }
+        while (owner.state.value.loading) yield()
+        runCurrent()
+        assertEquals(1, runtime.requests)
+        assertEquals(RouteProvider.VALHALLA, owner.state.value.route?.provider)
+        assertEquals("rerouted", owner.state.value.route?.id)
     }
 }

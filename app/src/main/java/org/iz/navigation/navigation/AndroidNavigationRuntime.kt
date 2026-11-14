@@ -130,7 +130,7 @@ internal class AndroidNavigationRuntime(private val context: Context) : Navigati
     override suspend fun planModified(request: RouteModificationRequest): PlannedRoute =
         ConfiguredRoutePlanner(context).planModified(request)
     override fun trafficRefreshEnabled(route: PlannedRoute): Boolean {
-        if (route.transport !in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE)) return false
+        if (!org.iz.navigation.weather.RoutingPolicy.usesTomTomRouting(route.transport)) return false
         return TrafficSettingsStore(context).read().let { it.enabled && it.hasKey && it.freePlanAcknowledged }
     }
 

@@ -103,7 +103,7 @@ internal data class WeatherDepartureBundle(
 
 internal data class PlannerRequestContext(val stops: List<RouteStop>, val transport: Transport,
     val preferences: RoutePreferences, val speed: Double?, val routeKey: String?, val credentials: String,
-    val departureAt: Long, val departureIsNow: Boolean)
+    val departureAt: Long, val departureIsNow: Boolean, val routeEndpoint: String, val weatherEndpoint: String)
 
 internal fun recommendedAssessment(values: List<WeatherAssessment>): WeatherAssessment? =
     values.asSequence().filter { it.complete }
@@ -135,7 +135,8 @@ internal class WeatherPlannerCoordinator(
 
     private fun context(value: WeatherPlannerState, route: PlannedRoute? = value.route) = PlannerRequestContext(
         value.stops.toList(), value.transport, value.settings.preferences, value.settings.travelSpeedKmh,
-        route?.geometryKey(), services.credentialRevision(), value.departureAt, value.departureIsNow)
+        route?.geometryKey(), services.credentialRevision(), value.departureAt, value.departureIsNow,
+        value.settings.routeEndpoint, value.settings.weatherEndpoint)
     private val candidates = mutableMapOf<Long, WeatherDepartureBundle>()
     private var baseComparisons = emptyList<WeatherAssessment>()
     private var credentialsRevision = services.credentialRevision()
@@ -354,12 +355,13 @@ internal class WeatherPlannerCoordinator(
             return
         }
         val revision = services.credentialRevision()
+        val storedSettings = services.readSettings(snapshot.transport)
         mutableState.value = snapshot.copy(requestedDepartureAt = value, busy = true, error = null, trafficFreeDeparture = null,
             orderProposal = null, ordering = false)
         selectionJob = scope.launch {
             try {
-                val motorized = snapshot.transport in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE)
-                val planner = if (trafficFree || !motorized) services.trafficFreePlanner(snapshot.settings)
+                val trafficRouting = RoutingPolicy.usesTomTomRouting(snapshot.transport)
+                val planner = if (trafficFree || !trafficRouting) services.trafficFreePlanner(snapshot.settings)
                     else services.verificationPlanner(snapshot.settings)
                 val route = if (snapshot.route?.selectionLocked == true) planner.revalidateSelection(snapshot.route, snapshot.stops, value,
                     snapshot.transport, snapshot.settings.travelSpeedKmh, snapshot.settings.preferences)
@@ -367,7 +369,9 @@ internal class WeatherPlannerCoordinator(
                 route.requireRequestedBreakStops(snapshot.stops)
                 route.requireUsablePreferences()
                 val calculatedAt = services.clock()
-                check(route.transport == snapshot.transport && route.preferences == snapshot.settings.preferences && (trafficFree || !motorized || route.provider == RouteProvider.TOMTOM))
+                check(route.transport == snapshot.transport && route.preferences == snapshot.settings.preferences &&
+                    (if (snapshot.transport == Transport.MOTORCYCLE) route.provider == RouteProvider.VALHALLA
+                        else trafficFree || !trafficRouting || route.provider == RouteProvider.TOMTOM))
                 val departure = route.effectiveDepartureAt ?: value
                 val coordinates = WeatherEngine.sampleVertices(route).map { it.coordinate }
                 val until = RouteTravelTime.plannedArrival(RouteSchedule.planned(route, departure).arrivalAt, 3_600.0)
@@ -375,13 +379,15 @@ internal class WeatherPlannerCoordinator(
                     (departure - 3_600_000L).coerceAtLeast(0L), until)
                 val assessment = WeatherEngine.assess(route, departure, forecasts, snapshot.settings.thresholds)
                 if (token != generation) return@launch
+                if (snapshot.transport == Transport.MOTORCYCLE && services.readSettings(snapshot.transport) != storedSettings)
+                    throw CancellationException("Rota ayarları değişti; eski kalkış yanıtı iptal edildi.")
                 if (revision != services.credentialRevision()) { refreshCredentials(); return@launch }
                 commitDeparture(value, WeatherDepartureBundle(route, forecasts, assessment, calculatedAt))
             } catch (cancelled: CancellationException) { refreshCredentials(); throw cancelled }
             catch (error: Exception) {
                 if (revision != services.credentialRevision()) { refreshCredentials(); return@launch }
                 if (token == generation) mutableState.value = mutableState.value.copy(busy = false, requestedDepartureAt = null,
-                    trafficFreeDeparture = if (!trafficFree) value else null,
+                    trafficFreeDeparture = if (!trafficFree && RoutingPolicy.usesTomTomRouting(snapshot.transport)) value else null,
                     error = if (snapshot.route?.selectionLocked == true) "Seçilen yol bu kalkış için doğrulanamadı. Rotayı yeniden hesaplayıp seç."
                         else "Seçilen saatin rota ve hava verisi alınamadı. Önceki seçim korunuyor.")
             } finally {
@@ -511,7 +517,9 @@ internal class WeatherPlannerCoordinator(
             return null
         }
         val token = ++generation
-        mutableState.value = snapshot.copy(departureAt = departureAt, route = null, forecasts = emptyList(), comparisons = emptyList(), busy = true, error = null)
+        mutableState.value = if (snapshot.transport == Transport.MOTORCYCLE)
+            snapshot.copy(departureAt = departureAt, busy = true, error = null)
+        else snapshot.copy(departureAt = departureAt, route = null, forecasts = emptyList(), comparisons = emptyList(), busy = true, error = null)
         return scope.launch {
             try {
                 val result = load(snapshot.stops, departureAt, snapshot.settings, snapshot.transport) { route ->

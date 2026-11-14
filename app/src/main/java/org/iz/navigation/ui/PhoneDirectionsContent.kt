@@ -395,6 +395,10 @@ internal fun RouteTimingText(route: PlannedRoute, nav: NavigationState?, preview
 
 @Composable
 internal fun RouteTrafficText(route: PlannedRoute) {
+    if (route.transport == Transport.MOTORCYCLE && route.provider == RouteProvider.VALHALLA) {
+        Text(org.iz.navigation.weather.MOTORCYCLE_ROUTE_CONTEXT, style = MaterialTheme.typography.bodySmall)
+        return
+    }
     val now by produceState(System.currentTimeMillis(), route.traffic?.fetchedAt) {
         while (true) { value = System.currentTimeMillis(); delay(30_000) }
     }

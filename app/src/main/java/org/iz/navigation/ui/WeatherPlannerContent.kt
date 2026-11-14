@@ -337,6 +337,8 @@ internal fun WeatherPlannerContent(
                         )
                         Text(when {
                             state.requestedDepartureAt == assessment.departureAt -> "Seçtiğim saati kesinleştir · Hesaplanıyor…"
+                            state.transport == Transport.MOTORCYCLE && assessment.departureAt == state.selectedDepartureAt && state.selectedWeather != null ->
+                                org.iz.navigation.weather.MOTORCYCLE_ROUTE_CONTEXT + if (!assessment.complete) " · Hava verisi eksik" else ""
                             assessment.departureAt in state.verifiedDepartures -> "TomTom rotası hesaplandı" + if (!assessment.complete) " · Hava verisi eksik" else ""
                             else -> "Yaklaşık · Bu saatin rotasını hesaplamak için seç"
                         }, style = MaterialTheme.typography.bodySmall)

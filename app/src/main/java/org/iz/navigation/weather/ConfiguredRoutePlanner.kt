@@ -12,14 +12,18 @@ class ConfiguredRoutePlanner internal constructor(
     private val settings: () -> TrafficCredentials,
     private val fallback: (Transport) -> RoutePlanner,
     private val trafficPlanner: (String, () -> Unit) -> RoutePlanner,
+    private val routingSettings: (Transport) -> RideWeatherSettings? = { null },
 ) : RoutePlanner, RouteModificationPlanner {
     override suspend fun planModified(request: RouteModificationRequest): PlannedRoute = withContext(Dispatchers.IO) {
         val input = request.copy(stops = request.stops.toList(), avoidAreas = request.avoidAreas.toList())
-        val snapshot = settings()
+        val motorcycle = input.transport == Transport.MOTORCYCLE
+        val snapshot = if (motorcycle) null else settings()
+        val routeSnapshot = if (motorcycle) routingSettings(input.transport) else null
         val context = coroutineContext
         fun current() {
             context.ensureActive()
-            if (settings().revision != snapshot.revision) throw CancellationException("Rota ayarları değişti.")
+            if (motorcycle && routingSettings(input.transport) != routeSnapshot ||
+                !motorcycle && settings().revision != snapshot?.revision) throw CancellationException("Rota ayarları değişti.")
         }
         fun authorized() {
             current()
@@ -46,15 +50,16 @@ class ConfiguredRoutePlanner internal constructor(
             return route.copy(avoidAreas = input.avoidAreas)
         }
         val reason = when {
-            input.transport !in TRAFFIC_MODES -> "Bu ulaşım türünde trafik verisi kullanılmaz; trafiksiz rota."
-            snapshot.apiKey.isNullOrBlank() -> "Kişisel TomTom anahtarı eklenmedi; trafiksiz rota."
-            !snapshot.enabled -> "Trafik kapalı; trafiksiz rota."
-            !snapshot.freePlanAcknowledged -> "Ücretsiz kullanım onayı verilmedi; trafiksiz rota."
+            motorcycle -> MOTORCYCLE_ROUTE_CONTEXT
+            !RoutingPolicy.usesTomTomRouting(input.transport) -> "Bu ulaşım türünde trafik verisi kullanılmaz; trafiksiz rota."
+            snapshot?.apiKey.isNullOrBlank() -> "Kişisel TomTom anahtarı eklenmedi; trafiksiz rota."
+            snapshot?.enabled != true -> "Trafik kapalı; trafiksiz rota."
+            snapshot.freePlanAcknowledged != true -> "Ücretsiz kullanım onayı verilmedi; trafiksiz rota."
             else -> null
         }
         if (reason == null) {
             try {
-                val route = modified(trafficPlanner(requireNotNull(snapshot.apiKey), ::authorized))
+                val route = modified(trafficPlanner(requireNotNull(snapshot?.apiKey), ::authorized))
                 authorized()
                 val accepted = checked(route)
                 authorized()
@@ -82,17 +87,21 @@ class ConfiguredRoutePlanner internal constructor(
             }
         },
         trafficPlanner = { key, ensureAuthorized -> TomTomRoutePlanner(key, ensureAuthorized) },
+        routingSettings = { mode -> WeatherSettingsStore(context.applicationContext).read(mode) },
     )
 
     override suspend fun alternatives(stops: List<RouteStop>, departureAt: Long, transport: Transport,
         travelSpeedKmh: Double?, preferences: RoutePreferences): RouteAlternatives {
+        if (transport == Transport.MOTORCYCLE) return motorcycleRead { delegate ->
+            delegate.alternatives(stops.toList(), departureAt, transport, travelSpeedKmh, preferences)
+        }.let { it.copy(routes = it.routes.map(PlannedRoute::motorcycleTrafficFree)) }
         val snapshot = settings()
         val authorize = {
             val current = settings()
             if (current.revision != snapshot.revision) throw CancellationException("Rota ayarları değişti.")
             check(current.enabled && current.freePlanAcknowledged && !current.apiKey.isNullOrBlank())
         }
-        if (transport in TRAFFIC_MODES && snapshot.enabled && snapshot.freePlanAcknowledged && !snapshot.apiKey.isNullOrBlank()) {
+        if (RoutingPolicy.usesTomTomRouting(transport) && snapshot.enabled && snapshot.freePlanAcknowledged && !snapshot.apiKey.isNullOrBlank()) {
             try {
                 val result = trafficPlanner(snapshot.apiKey!!, authorize).alternatives(stops, departureAt, transport, travelSpeedKmh, preferences)
                 authorize()
@@ -108,7 +117,10 @@ class ConfiguredRoutePlanner internal constructor(
     override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport, travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences): PlannedRoute = withContext(Dispatchers.IO) {
         RouteStopLimits.requireEffective(stops.size)
         routeTravelSpeedKmh(transport, travelSpeedKmh)
-        if (transport !in TRAFFIC_MODES) return@withContext fallback(transport).plan(stops, departureAt, transport, travelSpeedKmh, preferences)
+        if (transport == Transport.MOTORCYCLE) return@withContext motorcycleRead { delegate ->
+            delegate.plan(stops.toList(), departureAt, transport, travelSpeedKmh, preferences)
+        }.motorcycleTrafficFree()
+        if (!RoutingPolicy.usesTomTomRouting(transport)) return@withContext fallback(transport).plan(stops, departureAt, transport, travelSpeedKmh, preferences)
             .copy(trafficUnavailableReason = "Bu ulaşım türünde trafik verisi kullanılmaz; trafiksiz rota.")
         val snapshot = settings()
         fun ensureCurrent() {
@@ -147,12 +159,29 @@ class ConfiguredRoutePlanner internal constructor(
             trafficUnavailableReason = reason ?: "TomTom trafik verisine ulaşılamadı veya kullanım sınırı doldu; trafiksiz rota.")
     }
 
-    private companion object { val TRAFFIC_MODES = setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE) }
+    private suspend fun <T> motorcycleRead(read: suspend (RoutePlanner) -> T): T {
+        val snapshot = routingSettings(Transport.MOTORCYCLE)
+        val context = coroutineContext
+        fun current() {
+            context.ensureActive()
+            if (routingSettings(Transport.MOTORCYCLE) != snapshot) throw CancellationException("Rota ayarları değişti.")
+        }
+        current()
+        val delegate = fallback(Transport.MOTORCYCLE)
+        current()
+        val result = read(delegate)
+        current()
+        return result
+    }
 }
 
 /** Explicit verification never silently substitutes another provider. */
 internal class VerifiedTomTomRoutePlanner(private val credentials: () -> TrafficCredentials) : RoutePlanner, RouteModificationPlanner {
+    private fun requireTransport(transport: Transport) {
+        if (!RoutingPolicy.usesTomTomRouting(transport)) throw RouteServiceException("Bu ulaşım türünde bu rota sağlayıcısı kullanılmaz.")
+    }
     override suspend fun planModified(request: RouteModificationRequest): PlannedRoute {
+        requireTransport(request.transport)
         val snapshot = credentials()
         val authorize = {
             val current = credentials()
@@ -168,6 +197,7 @@ internal class VerifiedTomTomRoutePlanner(private val credentials: () -> Traffic
 
     override suspend fun alternatives(stops: List<RouteStop>, departureAt: Long, transport: Transport,
         travelSpeedKmh: Double?, preferences: RoutePreferences): RouteAlternatives {
+        requireTransport(transport)
         val snapshot = credentials()
         val authorize = {
             val current = credentials()
@@ -179,6 +209,7 @@ internal class VerifiedTomTomRoutePlanner(private val credentials: () -> Traffic
     }
 
     override suspend fun plan(stops: List<RouteStop>, departureAt: Long, transport: Transport, travelSpeedKmh: Double?, preferences: org.iz.navigation.weather.RoutePreferences): PlannedRoute {
+        requireTransport(transport)
         val snapshot = credentials()
         val authorize = {
             val current = credentials()

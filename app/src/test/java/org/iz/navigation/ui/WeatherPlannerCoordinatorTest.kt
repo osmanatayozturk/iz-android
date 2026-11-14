@@ -77,7 +77,7 @@ class WeatherPlannerCoordinatorTest {
         }
         val coordinator = WeatherPlannerCoordinator(this,
             services(planner, { _, departure -> comparisons(departure, true, 0.0) }).copy(credentialRevision = { revision }),
-            SavedWeatherPlan(listOf(origin, destination), 50_000L))
+            SavedWeatherPlan(listOf(origin, destination), 50_000L, Transport.CAR))
         coordinator.calculate()!!.join()
         coordinator.selectDeparture(1_850_000L)
         yield()
@@ -131,7 +131,7 @@ class WeatherPlannerCoordinatorTest {
                         now += 121_000L
                         return emptyList()
                     }
-                } }), SavedWeatherPlan(listOf(origin, destination), 50_000L))
+                } }), SavedWeatherPlan(listOf(origin, destination), 50_000L, Transport.CAR))
         coordinator.calculate()!!.join()
         coordinator.selectDeparture(50_000L)
         yield()
@@ -157,7 +157,7 @@ class WeatherPlannerCoordinatorTest {
                         if (++forecasts == 2) { waiting.complete(Unit); release.await() }
                         return emptyList()
                     }
-                } }), SavedWeatherPlan(listOf(origin, destination), 50_000L))
+                } }), SavedWeatherPlan(listOf(origin, destination), 50_000L, Transport.CAR))
         coordinator.calculate()!!.join()
         coordinator.selectDeparture(1_850_000L)
         waiting.await()
@@ -188,7 +188,7 @@ class WeatherPlannerCoordinatorTest {
                 }
             } },
         )
-        val coordinator = WeatherPlannerCoordinator(this, service, SavedWeatherPlan(listOf(origin, destination), 50_000L))
+        val coordinator = WeatherPlannerCoordinator(this, service, SavedWeatherPlan(listOf(origin, destination), 50_000L, Transport.CAR))
         coordinator.calculate()!!.join()
         coordinator.selectDeparture(1_850_000L)
         waiting.await()
@@ -210,7 +210,7 @@ class WeatherPlannerCoordinatorTest {
                 .copy(provider = org.iz.navigation.weather.RouteProvider.TOMTOM, effectiveDepartureAt = departureAt)
         }
         val coordinator = WeatherPlannerCoordinator(this, services(planner, { _, departure -> comparisons(departure, true, 100.0) }),
-            SavedWeatherPlan(listOf(origin, destination), 50_000L))
+            SavedWeatherPlan(listOf(origin, destination), 50_000L, Transport.CAR))
         coordinator.calculate()!!.join()
         val untouched = coordinator.state.value.comparisons[2]
         coordinator.selectDeparture(1_850_000L)
@@ -231,7 +231,7 @@ class WeatherPlannerCoordinatorTest {
         }
         val coordinator = WeatherPlannerCoordinator(this,
             services(planner, { _, departure -> comparisons(departure, true, 0.0) }).copy(credentialRevision = { revision }),
-            SavedWeatherPlan(listOf(origin, destination), 50_000L))
+            SavedWeatherPlan(listOf(origin, destination), 50_000L, Transport.CAR))
         coordinator.calculate()!!.join()
         revision = "two"
         coordinator.selectDeparture(50_000L)
@@ -251,7 +251,7 @@ class WeatherPlannerCoordinatorTest {
             }
         }
         val coordinator = WeatherPlannerCoordinator(this, services(planner, { _, departure -> comparisons(departure, true, 0.0) }),
-            SavedWeatherPlan(listOf(origin, destination), 50_000L))
+            SavedWeatherPlan(listOf(origin, destination), 50_000L, Transport.CAR))
         coordinator.calculate()!!.join()
         coordinator.selectDeparture(1_850_000L)
         yield()
@@ -275,7 +275,7 @@ class WeatherPlannerCoordinatorTest {
             }
         }
         val coordinator = WeatherPlannerCoordinator(this, services(planner, { _, departure -> comparisons(departure, true, 0.0) }),
-            SavedWeatherPlan(listOf(origin, destination), 50_000L))
+            SavedWeatherPlan(listOf(origin, destination), 50_000L, Transport.CAR))
         coordinator.calculate()!!.join()
         coordinator.selectDeparture(1_850_000L)
         yield()

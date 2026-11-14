@@ -1,6 +1,7 @@
 package org.iz.navigation.car
 
 import org.iz.navigation.data.SelectedOsmPlace
+import org.iz.navigation.data.Transport
 import org.iz.navigation.navigation.NavigationState
 import org.iz.navigation.navigation.EngineReadiness
 import org.iz.navigation.navigation.SpeechChannel
@@ -131,7 +132,9 @@ internal data class CarRoutePreviewPresentation(val source: String, val warnings
 
 internal fun carRoutePreviewPresentation(route: PlannedRoute, now: Long): CarRoutePreviewPresentation {
     val traffic = route.traffic
-    val source = if (route.provider == RouteProvider.TOMTOM && traffic != null) {
+    val source = if (route.transport == Transport.MOTORCYCLE && route.provider == RouteProvider.VALHALLA)
+        org.iz.navigation.weather.MOTORCYCLE_ROUTE_CONTEXT
+    else if (route.provider == RouteProvider.TOMTOM && traffic != null) {
         val age = if (now <= 0 || traffic.fetchedAt <= 0 || traffic.fetchedAt > now) "Trafik zamanı doğrulanamadı" else {
             val seconds = (now - traffic.fetchedAt) / 1000
             if (seconds > 300) "Trafik verisi eski · ${seconds / 60} dk önce"
