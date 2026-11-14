@@ -14,7 +14,7 @@ def outputRoot = System.getenv('IZ_BUILD_WORKFLOW_OUTPUT')
 if (!configured || !outputRoot) throw new GradleException('Explicit task timing file and launcher output root required')
 def root = new File(outputRoot).canonicalFile
 def target = new File(configured).canonicalFile
-if (!root.path.matches('(?i)^D:[\\/].+') || !target.toPath().startsWith(root.toPath()) || target == root || target.exists()) {
+if (!root.toPath().root.toString().equalsIgnoreCase('D:\\') || !target.toPath().startsWith(root.toPath()) || target == root || target.exists()) {
     throw new GradleException('New task timing file must remain in configured D output')
 }
 def started = new ConcurrentHashMap<String, Long>()
