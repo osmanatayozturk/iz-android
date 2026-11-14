@@ -18,6 +18,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
+import android.view.Window
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -77,6 +78,9 @@ import org.maplibre.android.maps.MapView
 class MainMapOsmEditorEntryTest {
     @get:Rule val compose = createEmptyComposeRule()
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
+    private var observedTapDownTime = Long.MIN_VALUE
+    private var observedWindowTouches = JSONArray()
+    private val unconsumedMapClicks = AtomicInteger()
 
     /** Real MainActivity, production cache/parser/owner and native map. All geographic data is
      * synthetic; these fixtures do not establish live Overpass or public-map correctness. */
@@ -88,7 +92,7 @@ class MainMapOsmEditorEntryTest {
         val baselineSession = session(app)
         withOfflineMainActivity(app) { host ->
             val (view, map) = readyMap(host)
-            val fixture = discoverSynthetic(app, view, map)
+            val fixture = discoverSynthetic(app, host, view, map)
             compose.onNodeWithTag("place-info-open-information").assertIsNotEnabled()
             compose.onNodeWithTag("place-info-discovery-choice-0").assertIsNotSelected()
             compose.onNodeWithTag("place-info-discovery-choice-1").assertIsNotSelected()
@@ -107,14 +111,14 @@ class MainMapOsmEditorEntryTest {
             OsmLightEditorNativeCapture.capture("map-04-back")
             assertExposedMapPans(app, view, map)
             // New geographic tap replaces the old list. No query is required on back or pan.
-            val next = discoverSynthetic(app, view, map, count = 0)
+            val next = discoverSynthetic(app, host, view, map, count = 0)
             compose.onAllNodesWithTag("place-info-discovery-choice-0").assertCountEquals(0)
             compose.onNodeWithTag("place-info-open-information").assertIsNotEnabled()
             compose.onNodeWithTag("place-info-discovery-close").performClick()
             compose.onAllNodesWithTag("place-info-map-candidate-0").assertCountEquals(0)
             assertNotEquals(fixture.wayId, next.wayId)
             // A single way goes straight to the existing information window, without an outline.
-            val single = discoverSynthetic(app, view, map, count = 1)
+            val single = discoverSynthetic(app, host, view, map, count = 1)
             compose.waitUntil(10_000) { compose.onAllNodesWithTag("place-information-card").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText(single.wayName).assertExists()
             compose.onNodeWithTag("place-info-discovery").assertDoesNotExist()
@@ -134,7 +138,7 @@ class MainMapOsmEditorEntryTest {
         try {
             withOfflineMainActivity(app) { host ->
                 val (view, map) = readyMap(host)
-                val fixture = discoverSynthetic(app, view, map, area = true)
+                val fixture = discoverSynthetic(app, host, view, map, area = true)
                 compose.onNodeWithTag("place-info-discovery-choice-1").performClick().assertIsSelected()
                 compose.waitUntil(10_000) { onMain {
                     map.queryRenderedFeatures(RectF(0f, 0f, view.width.toFloat(), view.height.toFloat()), "selected-place-area-fill")
@@ -174,7 +178,7 @@ class MainMapOsmEditorEntryTest {
                 compose.waitUntil(10_000) { app.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE }
                 OsmLightEditorQaTargetAdmission.requireAdmittedTarget(allowLandscape = true)
                 val (view, map) = readyMap(host)
-                discoverSynthetic(app, view, map)
+                discoverSynthetic(app, host, view, map)
                 compose.onNodeWithTag("place-info-discovery-choice-0").performClick().assertIsSelected()
                 compose.onNodeWithTag("place-info-open-information").assertIsEnabled().assertIsDisplayed()
                 compose.onNodeWithTag("place-info-discovery-collapse").assertHeightIsAtLeast(androidx.compose.ui.unit.Dp(48f))
@@ -199,7 +203,7 @@ class MainMapOsmEditorEntryTest {
 
     private data class SyntheticSelection(val wayId: Long, val nodeName: String, val wayName: String)
 
-    private fun discoverSynthetic(app: Context, view: MapView, map: MapLibreMap, count: Int = 2, area: Boolean = false): SyntheticSelection {
+    private fun discoverSynthetic(app: Context, host: ActivityScenario<MainActivity>, view: MapView, map: MapLibreMap, count: Int = 2, area: Boolean = false): SyntheticSelection {
         val nonce = UUID.randomUUID().mostSignificantBits and 0x7fffffff
         val id = 8_000_000_000_000L + nonce * 10
         val fixture = SyntheticSelection(id + 2, "Synthetic QA point $nonce", "Synthetic QA area $nonce")
@@ -207,8 +211,8 @@ class MainMapOsmEditorEntryTest {
         onMain { map.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(35.0 + nonce % 10000 / 100000.0, 25.0 + nonce % 7000 / 100000.0), 18.0)) }
         compose.waitForIdle()
         val point = PointF(view.width * .35f, view.height * .36f)
+        onMain { observedTapDownTime = Long.MIN_VALUE; observedWindowTouches = JSONArray(); unconsumedMapClicks.set(0) }
         val touchSetup = mainMapTouchDiagnostics(view, map, point)
-        instrumentation.addResults(Bundle().apply { putString("osmMapSelectionTap_$nonce", touchSetup.toString()) })
         val tapped = onMain { map.projection.fromScreenLocation(point) }
         val wayCenter = LatLng(tapped.latitude, tapped.longitude + .00030)
         fun tags(name: String, way: Boolean) = JSONObject().put("name", name).put(if (way) "building" else "amenity", if (way) "yes" else "bench")
@@ -228,18 +232,58 @@ class MainMapOsmEditorEntryTest {
             MapSelectionCacheFixture.store(app, "map-outline:simple-area-v1:${OsmPresetCatalog.BUNDLED_SHA256}:$endpoint:WAY/${fixture.wayId}", body.toString())
         }
         val screen = onMain { IntArray(2).also(view::getLocationOnScreen) }
-        tapNative(screen[0] + point.x, screen[1] + point.y)
-        try {
-            compose.waitUntil(10_000) { compose.onAllNodesWithTag(if (count == 1) "place-information-card" else "place-info-discovery").fetchSemanticsNodes().isNotEmpty() }
-        } catch (failure: androidx.compose.ui.test.ComposeTimeoutException) {
-            val after = runCatching { mainMapTouchDiagnostics(view, map, point) }
+        fun afterTouch() = runCatching { mainMapTouchDiagnostics(view, map, point) }
                 .getOrElse { JSONObject().put("diagnosticFailureClass", it.javaClass.name) }
-            throw AssertionError("Actual Main map selection did not appear; before=$touchSetup; after=$after", failure)
+        observeMainInput(host, map).use {
+            var after: JSONObject? = null
+            try {
+                tapNative(screen[0] + point.x, screen[1] + point.y)
+                compose.waitUntil(10_000) { compose.onAllNodesWithTag(if (count == 1) "place-information-card" else "place-info-discovery").fetchSemanticsNodes().isNotEmpty() }
+            } catch (failure: androidx.compose.ui.test.ComposeTimeoutException) {
+                after = afterTouch()
+                if (area && InstrumentationRegistry.getArguments().getString("osmMapSelectionCaptureFailure") == "true") {
+                    runCatching { OsmLightEditorNativeCapture.capture("diagnostic-main-map-touch-failure") }
+                        .exceptionOrNull()?.let(failure::addSuppressed)
+                }
+                throw AssertionError("Actual Main map selection did not appear; before=$touchSetup; after=$after", failure)
+            } finally {
+                val report = JSONObject().put("before", touchSetup).put("after", after ?: afterTouch())
+                instrumentation.addResults(Bundle().apply { putString("osmMapSelectionTap_$nonce", report.toString()) })
+            }
         }
         if (count == 2) compose.waitUntil(10_000) { compose.onAllNodesWithTag("place-info-discovery-choice-1").fetchSemanticsNodes().isNotEmpty() }
         if (count == 0) compose.waitUntil(10_000) { compose.onAllNodesWithTag("place-info-discovery-choice-0").fetchSemanticsNodes().isEmpty() &&
             compose.onAllNodesWithText("Yakında bir OSM yeri veya bina bulunamadı. Yeni OSM mekânı için haritaya uzun basabilirsin.").fetchSemanticsNodes().isNotEmpty() }
         return fixture
+    }
+
+    /** Forward the actual Main window unchanged; never replace the SDK's existing listeners. */
+    private fun observeMainInput(host: ActivityScenario<MainActivity>, map: MapLibreMap): AutoCloseable {
+        lateinit var window: Window
+        lateinit var previous: Window.Callback
+        lateinit var observer: Window.Callback
+        val unconsumed = MapLibreMap.OnMapClickListener { unconsumedMapClicks.incrementAndGet(); false }
+        host.onActivity { activity ->
+            window = activity.window
+            previous = requireNotNull(window.callback)
+            observer = object : Window.Callback by previous {
+                override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+                    val observation = if (event.downTime == observedTapDownTime && observedWindowTouches.length() < 4)
+                        JSONObject().put("action", event.actionMasked).put("downTime", event.downTime).put("eventTime", event.eventTime)
+                            .put("x", event.x.toDouble()).put("y", event.y.toDouble()) else null
+                    val consumed = previous.dispatchTouchEvent(event)
+                    observation?.let { observedWindowTouches.put(it.put("consumed", consumed)) }
+                    return consumed
+                }
+            }
+            window.callback = observer
+            map.addOnMapClickListener(unconsumed)
+        }
+        return AutoCloseable { onMain {
+            map.removeOnMapClickListener(unconsumed)
+            check(window.callback === observer) { "Owned Main window callback changed during touch probe" }
+            window.callback = previous
+        } }
     }
 
     /** Bounded synthetic setup evidence only: keep the original gesture, owner and timeout. */
@@ -256,11 +300,20 @@ class MainMapOsmEditorEntryTest {
         }.take(8)
         val native = onMain {
             val camera = map.cameraPosition
+            val standard = map.gesturesManager.standardGestureDetector
+            fun event(value: MotionEvent?): Any = value?.let {
+                JSONObject().put("action", it.actionMasked).put("downTime", it.downTime).put("eventTime", it.eventTime)
+                    .put("x", it.x.toDouble()).put("y", it.y.toDouble()).put("source", it.source)
+                    .put("matchesInjectedDownTime", observedTapDownTime != Long.MIN_VALUE && it.downTime == observedTapDownTime)
+            } ?: JSONObject.NULL
             JSONObject().put("windowFocused", view.hasWindowFocus()).put("attached", view.isAttachedToWindow)
                 .put("viewBoundsInWindow", Rect(origin[0], origin[1], origin[0] + view.width, origin[1] + view.height).toShortString())
                 .put("zoom", camera.zoom).put("bearing", camera.bearing).put("tilt", camera.tilt)
                 .put("syntheticCameraLatitude", camera.target?.latitude).put("syntheticCameraLongitude", camera.target?.longitude)
                 .put("styleFullyLoaded", map.style?.isFullyLoaded == true)
+                .put("injectedDownTime", observedTapDownTime).put("windowTouches", JSONArray(observedWindowTouches.toString()))
+                .put("sdkStandardEnabled", standard.isEnabled).put("sdkCurrentEvent", event(standard.currentEvent))
+                .put("sdkPreviousEvent", event(standard.previousEvent)).put("unconsumedMapClickCount", unconsumedMapClicks.get())
         }
         return JSONObject().put("windowKind", "OWNED_MAIN_ACTIVITY").put("native", native)
             .put("nativeLocalX", point.x.toDouble()).put("nativeLocalY", point.y.toDouble())
@@ -294,6 +347,7 @@ class MainMapOsmEditorEntryTest {
 
     private fun tapNative(x: Float, y: Float) {
         val down = SystemClock.uptimeMillis()
+        onMain { observedTapDownTime = down }
         for (action in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) {
             val event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), action, x, y, 0).apply { source = InputDevice.SOURCE_TOUCHSCREEN }
             try { assertTrue(instrumentation.uiAutomation.injectInputEvent(event, true)) } finally { event.recycle() }

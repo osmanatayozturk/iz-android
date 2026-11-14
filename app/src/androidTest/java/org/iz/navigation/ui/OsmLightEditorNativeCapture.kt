@@ -44,12 +44,14 @@ internal object OsmLightEditorNativeCapture {
         "map-04-back" to "MainMapOsmEditorEntryTest#nativeMultiSelectionKeepsInformationBackAndMapInteraction",
         "map-05-area" to "MainMapOsmEditorEntryTest#nativeSelectedAreaDrawsRealRingAndMarkerLongPressKeepsEntry",
         "map-06-landscape" to "MainMapOsmEditorEntryTest#nativeSelectionPanelRemainsNonmodalInLandscape",
+        "diagnostic-main-map-touch-failure" to "MainMapOsmEditorEntryTest#nativeSelectedAreaDrawsRealRingAndMarkerLongPressKeepsEntry",
     )
 
     fun capture(state: String) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val args = InstrumentationRegistry.getArguments()
         val run = args.getString("osmLightEditorCaptureRunUUID") ?: return
+        if (state == "diagnostic-main-map-touch-failure") check(args.getString("osmMapSelectionCaptureFailure") == "true")
         check(Looper.myLooper() != Looper.getMainLooper())
         check(UUID.fromString(run).toString() == run && run != "00000000-0000-0000-0000-000000000000")
         val method = "org.iz.navigation.ui." + methods.getValue(state)
@@ -81,11 +83,11 @@ internal object OsmLightEditorNativeCapture {
                     it.decorView.context.activity() === host && it.decorView.isShown && it.decorView.hasWindowFocus()
                 }
             val window = windows.single()
-            val mapWindow = state.startsWith("map-") && state != "map-03-details"
+            val mapWindow = (state.startsWith("map-") && state != "map-03-details") || state == "diagnostic-main-map-touch-failure"
             check(if (mapWindow) window === host.window else window !== host.window)
             check(window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE == 0)
             if (state == "01-main-map-empty-type") check(host.javaClass.name == "org.iz.navigation.MainActivity")
-            if (state.startsWith("map-")) check(host.javaClass.name == "org.iz.navigation.MainActivity")
+            if (state.startsWith("map-") || state == "diagnostic-main-map-touch-failure") check(host.javaClass.name == "org.iz.navigation.MainActivity")
             host to window
         } }
         val (host, window) = requireNotNull(owned).getOrThrow()
@@ -133,6 +135,10 @@ internal object OsmLightEditorNativeCapture {
                 .put("width", bitmap.width).put("height", bitmap.height)
                 .put("capturedAt", System.currentTimeMillis()).put("elapsedRealtime", SystemClock.elapsedRealtime())
                 .put("captureStatus", "CAPTURED_PENDING_HOST_READBACK_UIUX").put("uiuxVerdict", "NOT_RUN")
+            if (state == "diagnostic-main-map-touch-failure") metadata
+                .put("evidencePurpose", "DIAGNOSTIC_ONLY_NOT_MAP_ACCEPTANCE")
+                .put("captureStatus", "CAPTURED_DIAGNOSTIC_ONLY_PENDING_HOST_READBACK")
+                .put("uiuxVerdict", "NOT_REQUESTED_DIAGNOSTIC_ONLY")
             val bytes = metadata.toString(2).toByteArray(Charsets.UTF_8)
             check(bytes.size <= 64 * 1024)
             Files.newOutputStream(json.toPath(), CREATE_NEW, WRITE).use { it.write(bytes) }
