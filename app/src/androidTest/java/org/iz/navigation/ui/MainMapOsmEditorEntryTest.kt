@@ -141,11 +141,15 @@ class MainMapOsmEditorEntryTest {
             withOfflineMainActivity(app) { host ->
                 val (view, map) = readyMap(host)
                 val fixture = discoverSynthetic(app, host, view, map, area = true)
-                compose.onNodeWithTag("place-info-discovery-choice-1").performClick().assertIsSelected()
+                compose.onNodeWithTag("place-info-discovery-choice-1").assertTextContains(fixture.wayName).performClick()
                 compose.waitUntil(10_000) { onMain {
                     map.queryRenderedFeatures(RectF(0f, 0f, view.width.toFloat(), view.height.toFloat()), "selected-place-area-fill")
                         .any { it.getNumberProperty("osmId")?.toLong() == fixture.wayId && it.geometry()?.type() == "Polygon" }
                 } }
+                // Outline loading can recompose/virtualize the bottom row; observe its current node.
+                compose.onNode(hasScrollToIndexAction() and hasAnyAncestor(hasTestTag("place-info-discovery")))
+                    .performScrollToNode(hasTestTag("place-info-discovery-choice-1"))
+                compose.onNodeWithTag("place-info-discovery-choice-1").assertTextContains(fixture.wayName).assertIsSelected()
                 compose.onNodeWithTag("place-info-map-candidate-1").assertIsSelected().assertIsDisplayed()
                 OsmLightEditorNativeCapture.capture("map-05-area")
                 compose.onNodeWithTag("place-info-map-candidate-1").performTouchInput { longClick() }
