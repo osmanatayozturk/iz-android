@@ -104,7 +104,7 @@ class MotorcycleSurfacePreferencesTest {
         assertTrue(surfacePreferenceWarnings(restored, RouteProvider.VALHALLA, Transport.WALK).single().contains("uygulanamadı"))
     }
     @Test fun matrixCannotSilentlyDropRequestedSurfaceAvoidance() {
-        assertNotNull(RoutePreferences(avoidUnpaved = true).matrixUnavailableReason(Transport.MOTORCYCLE))
-        assertNull(RoutePreferences(avoidUnpaved = false).matrixUnavailableReason(Transport.MOTORCYCLE))
+        assertNotNull(RoutePreferences(avoidUnpaved = true).matrixUnavailableReason(Transport.CAR))
+        assertNull(RoutePreferences(avoidUnpaved = false).matrixUnavailableReason(Transport.CAR))
     }
 }

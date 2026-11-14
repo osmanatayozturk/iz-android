@@ -42,7 +42,7 @@ class ConfiguredRoutePlannerTest {
     @Test fun providerFailureFallsBackAndDoesNotRetainForeignErrorDetails() = runBlocking {
         val settings = TrafficCredentials("fictional-key", true, true, "1")
         val planner = ConfiguredRoutePlanner({ settings }, { fakeRoutePlanner() }, { _, _ -> fakeRoutePlanner { throw RouteServiceException("https://secret/?key=fictional-key") } })
-        val route = planner.plan(trafficStops(), 1L, Transport.MOTORCYCLE)
+        val route = planner.plan(trafficStops(), 1L, Transport.CAR)
         assertEquals(RouteProvider.VALHALLA, route.provider)
         assertFalse(route.trafficUnavailableReason!!.contains("fictional-key"))
     }
@@ -80,7 +80,10 @@ class ConfiguredRoutePlannerTest {
             val gate = TrafficRequestGate()
             val endpoint = server.url("/routing/1/calculateRoute/").toString()
             val first = async(Dispatchers.IO) { TomTomRoutePlanner("fictional-key", endpoint, OkHttpClient(), { 500_000L }, gate).plan(trafficStops(), 1L, Transport.CAR) }
-            assertTrue(arrived.await(2, TimeUnit.SECONDS))
+            val firstFailure = AtomicReference<Throwable?>()
+            first.invokeOnCompletion { firstFailure.set(it) }
+            val reached = arrived.await(2, TimeUnit.SECONDS)
+            assertTrue("Control HTTP request not dispatched: active=${first.isActive}, completed=${first.isCompleted}, requests=${server.requestCount}, failure=${firstFailure.get()?.javaClass?.name}", reached)
             val settings = AtomicReference(TrafficCredentials("fictional-key", true, true, "enabled"))
             val capturedKey = CompletableDeferred<Unit>()
             val configured = ConfiguredRoutePlanner(settings::get, { error("Revoked request must be cancelled") }, { key, ensureAuthorized ->

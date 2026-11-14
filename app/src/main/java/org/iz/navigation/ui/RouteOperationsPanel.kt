@@ -217,7 +217,9 @@ internal fun RouteOperationsPanel(data: RouteOperationsPanelData, callbacks: Rou
                 Text("Hedef: ${preview.route.stops.last().label}")
                 Text("Planlanan mesafe: ${routeOperationDistance(preview.route.distanceMeters)}")
                 Text("Planlanan süre: ${routeOperationDuration(preview.route.durationSeconds)}")
-                Text("Sağlayıcı: ${if (preview.route.provider == RouteProvider.TOMTOM) "TomTom" else "Valhalla"}")
+                Text(if (preview.route.transport == org.iz.navigation.data.Transport.MOTORCYCLE && preview.route.provider == RouteProvider.VALHALLA)
+                    org.iz.navigation.weather.MOTORCYCLE_ROUTE_CONTEXT
+                else "Sağlayıcı: ${if (preview.route.provider == RouteProvider.TOMTOM) "TomTom" else "Valhalla"}")
                 preview.route.providerWarnings.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
                 Text("Onaylayana kadar mevcut rota korunur. Kayıt durumu değişmez.",
                     style = MaterialTheme.typography.bodySmall)

@@ -8,6 +8,11 @@ internal object RoutingPolicy {
     fun usesHeuristicOrder(transport: Transport, size: Int): Boolean = transport == Transport.MOTORCYCLE || size >= 6
     fun supportsStopOrder(transport: Transport, size: Int): Boolean = size in 4..RouteStopLimits.MAX_PLANNED_STOPS &&
         if (usesHeuristicOrder(transport, size)) transport != Transport.UNKNOWN else usesTomTomRouting(transport)
+    fun stopOrderIssue(transport: Transport, size: Int, preferences: RoutePreferences): String? = when {
+        !supportsStopOrder(transport, size) -> "Bu ulaşım türünde durak sırası önerisi kullanılamıyor."
+        usesHeuristicOrder(transport, size) -> null
+        else -> preferences.matrixUnavailableReason(transport)
+    }
 }
 
 internal const val MOTORCYCLE_ROUTE_CONTEXT = "Valhalla · Trafik hariç"

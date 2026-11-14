@@ -34,6 +34,8 @@ internal data class StopOrderProposal(
     fun canApplyTo(stops: List<RouteStop>, transport: Transport, preferences: RoutePreferences,
         revision: String, now: Long, settings: RideWeatherSettings? = null): Boolean =
         originalStops == stops && this.preferences == preferences && credentialRevision == revision &&
+            (transport != Transport.MOTORCYCLE || heuristic && !approximateMotorcycle &&
+                originalRoute.provider == RouteProvider.VALHALLA && proposedRoute.provider == RouteProvider.VALHALLA) &&
             now - createdAt in 0L..120_000L && (routeSettings == null || routeSettings == settings) &&
             orderedStops.firstOrNull() == stops.firstOrNull() && orderedStops.lastOrNull() == stops.lastOrNull() &&
             orderedStops.groupingBy { it }.eachCount() == stops.groupingBy { it }.eachCount() &&
@@ -168,10 +170,10 @@ internal class ConfiguredStopOrderPlanner internal constructor(
 
     suspend fun propose(stops: List<RouteStop>, departureAt: Long, transport: Transport, preferences: RoutePreferences): StopOrderProposal? {
         RouteStopLimits.requirePlanned(stops.size)
-        if (stops.size >= 6) return proposeLarge(stops.toList(), departureAt, transport, preferences)
+        if (RoutingPolicy.usesHeuristicOrder(transport, stops.size)) return proposeHeuristic(stops.toList(), departureAt, transport, preferences)
         preferences.matrixUnavailableReason(transport)?.let { throw RouteServiceException(it) }
         require(stops.size in 4..5)
-        require(transport in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE))
+        require(RoutingPolicy.usesTomTomRouting(transport))
         val snapshot = credentials()
         val authorize = {
             val current = credentials()
@@ -201,10 +203,10 @@ internal class ConfiguredStopOrderPlanner internal constructor(
         }) { "Rotalar aynı karşılaştırma saatine ait değil." }
         if (proposedRoute.durationSeconds >= originalRoute.durationSeconds) return null
         return StopOrderProposal(stops.toList(), ordered, originalRoute, proposedRoute, comparisonAt,
-            transport == Transport.MOTORCYCLE, clock(), snapshot.revision, preferences)
+            false, clock(), snapshot.revision, preferences)
     }
 
-    private suspend fun proposeLarge(stops: List<RouteStop>, departureAt: Long, transport: Transport,
+    private suspend fun proposeHeuristic(stops: List<RouteStop>, departureAt: Long, transport: Transport,
         preferences: RoutePreferences): StopOrderProposal? {
         require(transport != Transport.UNKNOWN && departureAt >= 0)
         val context = coroutineContext
@@ -223,8 +225,10 @@ internal class ConfiguredStopOrderPlanner internal constructor(
         val compareAt = ((maxOf(departureAt, now + 120_000L) + 999L) / 1000L) * 1000L
         val calculate = largeRoute ?: throw RouteServiceException("Bu rota için durak sırası hesabı kullanılamıyor.")
         checkCurrent()
-        val original = calculate(stops, compareAt, transport, preferences, null).requireUsablePreferences()
+        val requestedProvider = if (transport == Transport.MOTORCYCLE) RouteProvider.VALHALLA else null
+        val original = calculate(stops, compareAt, transport, preferences, requestedProvider).requireUsablePreferences()
         checkCurrent()
+        check(transport != Transport.MOTORCYCLE || original.provider == RouteProvider.VALHALLA) { "Motosiklet karşılaştırması Valhalla ile yapılmalı." }
         check(clock() < compareAt) { "Karşılaştırma saati geçti. Yeniden dene." }
         val proposed = calculate(ordered, compareAt, transport, preferences, original.provider).requireUsablePreferences()
         checkCurrent()

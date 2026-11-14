@@ -16,7 +16,7 @@ class MatrixRoutingTest {
         val planner = ConfiguredStopOrderPlanner(credentials = { credentialReads++; error("Must not read") })
         val stops = (0..3).map { RouteStop("$it", WeatherCoordinate(0.0, it * .001)) }
         listOf(RoutePreferences(avoidHighways = true), RoutePreferences(avoidFerries = true)).forEach { preferences ->
-            assertThrows(RouteServiceException::class.java) { runBlocking { planner.propose(stops, 200_000L, Transport.MOTORCYCLE, preferences) } }
+            assertThrows(RouteServiceException::class.java) { runBlocking { planner.propose(stops, 200_000L, Transport.CAR, preferences) } }
         }
         assertEquals(0, credentialReads)
     }
@@ -31,7 +31,7 @@ class MatrixRoutingTest {
             assertEquals("tollRoads", options.getJSONArray("avoid").getString(0))
         }
     }
-    @Test fun motorcycleProposalUsesOneComparisonInstantAndFullMotorcycleRoutes() = runBlocking {
+    @Test fun carMatrixProposalUsesOneComparisonInstantAndFullCarRoutes() = runBlocking {
         val stops = (0..3).map { RouteStop("$it", WeatherCoordinate(0.0, it * .001)) }
         val calls = mutableListOf<Pair<Long, Transport>>()
         var matrixAt = 0L
@@ -51,12 +51,12 @@ class MatrixRoutingTest {
                     transport = mode, preferences = preferences, provider = RouteProvider.TOMTOM, effectiveDepartureAt = at)
             },
         )
-        val result = requireNotNull(planner.propose(stops, 1_000L, Transport.MOTORCYCLE, RoutePreferences.defaults(Transport.MOTORCYCLE).copy(avoidUnpaved = false)))
+        val result = requireNotNull(planner.propose(stops, 1_000L, Transport.CAR, RoutePreferences()))
         assertEquals(121_000L, matrixAt)
-        assertEquals(listOf(matrixAt to Transport.MOTORCYCLE, matrixAt to Transport.MOTORCYCLE), calls)
+        assertEquals(listOf(matrixAt to Transport.CAR, matrixAt to Transport.CAR), calls)
         assertEquals(listOf(stops[0], stops[2], stops[1], stops[3]), result.orderedStops)
         assertEquals(30.0, result.savedSeconds, 0.0)
-        assertTrue(result.approximateMotorcycle)
+        assertFalse(result.approximateMotorcycle)
     }
 
     @Test fun unverifiedMatrixEntitlementSendsNothing() = runBlocking {

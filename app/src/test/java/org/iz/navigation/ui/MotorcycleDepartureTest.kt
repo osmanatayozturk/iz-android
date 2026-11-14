@@ -108,4 +108,42 @@ class MotorcycleDepartureTest {
         assertEquals(RouteProvider.VALHALLA, coordinator.state.value.route?.provider)
         assertEquals(3, calls)
     }
+
+    @Test fun endpointChangeDuringBaseWeatherCannotPublishOldForecastOrLeaveBusy() = runBlocking {
+        var settings = defaultWeatherSettings(Transport.MOTORCYCLE)
+        val started = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+        val valhalla = planner(RouteProvider.VALHALLA)
+        val coordinator = WeatherPlannerCoordinator(this, services(valhalla, valhalla, valhalla, read = { settings }, forecast = {
+            started.complete(Unit); release.await()
+        }), SavedWeatherPlan(stops, 50_000L))
+        val job = coordinator.calculate()!!
+        withTimeout(2000) { started.await() }
+        settings = settings.copy(routeEndpoint = "https://changed.invalid/route")
+        release.complete(Unit); job.join()
+        assertTrue(coordinator.state.value.comparisons.isEmpty())
+        assertNull(coordinator.state.value.selectedWeather)
+        assertFalse(coordinator.state.value.busy)
+    }
+
+    @Test fun endpointChangeCannotReuseCachedMotorcycleDeparture() = runBlocking {
+        var settings = defaultWeatherSettings(Transport.MOTORCYCLE)
+        var calls = 0
+        val endpoints = mutableListOf<String>()
+        val valhalla = planner(RouteProvider.VALHALLA) { calls++ }
+        val services = services(valhalla, valhalla, valhalla, read = { settings }).copy(routePlanner = { selected ->
+            endpoints += selected.routeEndpoint; valhalla
+        })
+        val coordinator = WeatherPlannerCoordinator(this, services, SavedWeatherPlan(stops, 50_000L))
+        coordinator.calculate()!!.join()
+        settings = settings.copy(routeEndpoint = "https://changed.invalid/route")
+        coordinator.selectDeparture(50_000L)
+        yield()
+        assertEquals(1, calls)
+        assertNull(coordinator.state.value.selectedWeather)
+        assertNotNull(coordinator.state.value.error)
+        coordinator.calculate()!!.join()
+        assertEquals(2, calls)
+        assertEquals("https://changed.invalid/route", endpoints.last())
+        assertEquals(RouteProvider.VALHALLA, coordinator.state.value.route?.provider)
+    }
 }

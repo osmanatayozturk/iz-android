@@ -149,7 +149,7 @@ internal fun routePreferences(json: JSONObject?, defaults: RoutePreferences): Ro
 }
 
 fun RoutePreferences.matrixUnavailableReason(transport: Transport): String? = when {
-    transport !in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE) -> "Bu ulaşım türünde durak sırası önerisi kullanılamıyor."
+    !RoutingPolicy.usesTomTomRouting(transport) -> "Bu ulaşım türünde Matrix kullanılmaz."
     avoidHighways || avoidFerries || avoidUnpaved -> "Matrix otoyol, feribot veya toprak yol tercihini uygulayamıyor. Bu tercihler açıkken durak sırası önerilmez."
     else -> null
 }

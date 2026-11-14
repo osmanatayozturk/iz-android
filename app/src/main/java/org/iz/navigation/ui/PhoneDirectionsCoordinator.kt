@@ -298,12 +298,12 @@ internal class PhoneDirectionsCoordinator(
     fun suggestStopOrder(): Job? {
         refreshCredentials()
         val before = state.value
-        if (before.busy || before.stops.size !in 4..RouteStopLimits.MAX_PLANNED_STOPS ||
-            before.origin == null || before.destination == null || before.transport == Transport.UNKNOWN) return null
-        if (before.stops.size <= 5)
-            before.preferences.matrixUnavailableReason(before.transport)?.let { reportMessage(it); return null }
+        if (before.busy || !RoutingPolicy.supportsStopOrder(before.transport, before.stops.size) ||
+            before.origin == null || before.destination == null) return null
+        RoutingPolicy.stopOrderIssue(before.transport, before.stops.size, before.preferences)?.let { reportMessage(it); return null }
         val token = ++revision
         val auth = credentialRevision()
+        val storedSettings = readSettings(before.transport)
         mutableState.update { it.copy(ordering = true, orderProposal = null, message = null) }
         return scope.launch(start = CoroutineStart.LAZY) {
             try {
@@ -311,6 +311,7 @@ internal class PhoneDirectionsCoordinator(
                     ?: if (suggestOrderWithPreferences == null) suggestOrder(before.stops, clock(), before.transport) else null
                 if (token != revision) return@launch
                 if (auth != credentialRevision()) { refreshCredentials(); return@launch }
+                if (before.transport == Transport.MOTORCYCLE && readSettings(before.transport) != storedSettings) return@launch
                 mutableState.update { it.copy(orderProposal = proposal,
                     message = if (proposal == null) "Daha hızlı bir durak sırası bulunamadı." else null) }
             } catch (cancelled: CancellationException) { throw cancelled }

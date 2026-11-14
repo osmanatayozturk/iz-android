@@ -39,6 +39,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.ensureActive
+import kotlin.coroutines.coroutineContext
 
 internal const val WEATHER_PLAN_WINDOW_MS = 7L * 24L * 60L * 60L * 1_000L
 
@@ -137,6 +139,14 @@ internal class WeatherPlannerCoordinator(
         value.stops.toList(), value.transport, value.settings.preferences, value.settings.travelSpeedKmh,
         route?.geometryKey(), services.credentialRevision(), value.departureAt, value.departureIsNow,
         value.settings.routeEndpoint, value.settings.weatherEndpoint)
+    private fun checkRequestSettings(snapshot: WeatherPlannerState, expected: RideWeatherSettings) {
+        if (snapshot.transport == Transport.MOTORCYCLE && services.readSettings(snapshot.transport) != expected)
+            throw CancellationException("Rota ayarları değişti. Yeniden hesapla.")
+    }
+    private suspend fun requireRequestSettings(snapshot: WeatherPlannerState, expected: RideWeatherSettings) {
+        coroutineContext.ensureActive()
+        checkRequestSettings(snapshot, expected)
+    }
     private val candidates = mutableMapOf<Long, WeatherDepartureBundle>()
     private var baseComparisons = emptyList<WeatherAssessment>()
     private var credentialsRevision = services.credentialRevision()
@@ -157,6 +167,19 @@ internal class WeatherPlannerCoordinator(
     }
 
     fun refreshCredentials() {
+        val current = mutableState.value
+        if (current.transport == Transport.MOTORCYCLE) {
+            val stored = services.readSettings(current.transport)
+            if (current.settings.routeEndpoint != stored.routeEndpoint || current.settings.weatherEndpoint != stored.weatherEndpoint) {
+                generation++
+                invalidateCandidates()
+                mutableState.value = mutableState.value.copy(settings = current.settings.copy(
+                    routeEndpoint = stored.routeEndpoint, weatherEndpoint = stored.weatherEndpoint),
+                    forecasts = emptyList(), comparisons = emptyList(), busy = false,
+                    error = "Rota ayarları değişti. Yeniden hesapla.")
+                return
+            }
+        }
         if (credentialsRevision == services.credentialRevision()) return
         generation++
         invalidateCandidates()
@@ -289,21 +312,21 @@ internal class WeatherPlannerCoordinator(
     fun suggestStopOrder(): Job? {
         refreshCredentials()
         val snapshot = mutableState.value
-        if (snapshot.starting || snapshot.busy || snapshot.ordering || snapshot.stops.size !in 4..RouteStopLimits.MAX_PLANNED_STOPS ||
-            (if (snapshot.stops.size >= 6) snapshot.transport == Transport.UNKNOWN
-                else snapshot.transport !in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE))) return null
-        (if (snapshot.stops.size <= 5) snapshot.settings.preferences.matrixUnavailableReason(snapshot.transport) else null)?.let {
+        if (snapshot.starting || snapshot.busy || snapshot.ordering || !RoutingPolicy.supportsStopOrder(snapshot.transport, snapshot.stops.size)) return null
+        RoutingPolicy.stopOrderIssue(snapshot.transport, snapshot.stops.size, snapshot.settings.preferences)?.let {
             mutableState.value = snapshot.copy(error = it, orderProposal = null); return null
         }
         val token = ++generation
         val revision = services.credentialRevision()
+        val storedSettings = services.readSettings(snapshot.transport)
         mutableState.value = snapshot.copy(ordering = true, orderProposal = null, error = null)
         return scope.launch {
             try {
                 val at = snapshot.selectedDepartureAt ?: if (snapshot.departureIsNow) services.clock() else snapshot.departureAt
                 val proposal = services.suggestOrderWithPreferences?.invoke(snapshot.stops, at, snapshot.transport, snapshot.settings.preferences)
                     ?: if (services.suggestOrderWithPreferences == null) services.suggestOrder(snapshot.stops, at, snapshot.transport) else null
-                if (token == generation && revision == services.credentialRevision()) mutableState.value = mutableState.value.copy(
+                if (token == generation && revision == services.credentialRevision() &&
+                    (snapshot.transport != Transport.MOTORCYCLE || services.readSettings(snapshot.transport) == storedSettings)) mutableState.value = mutableState.value.copy(
                     orderProposal = proposal, error = if (proposal == null) "Daha hızlı bir durak sırası bulunamadı." else null)
             } catch (cancelled: CancellationException) { refreshCredentials(); throw cancelled }
             catch (error: Exception) { if (token == generation) mutableState.value = mutableState.value.copy(error = error.message) }
@@ -360,6 +383,7 @@ internal class WeatherPlannerCoordinator(
             orderProposal = null, ordering = false)
         selectionJob = scope.launch {
             try {
+                requireRequestSettings(snapshot, storedSettings)
                 val trafficRouting = RoutingPolicy.usesTomTomRouting(snapshot.transport)
                 val planner = if (trafficFree || !trafficRouting) services.trafficFreePlanner(snapshot.settings)
                     else services.verificationPlanner(snapshot.settings)
@@ -368,6 +392,7 @@ internal class WeatherPlannerCoordinator(
                 else planner.plan(snapshot.stops, value, snapshot.transport, snapshot.settings.travelSpeedKmh, snapshot.settings.preferences)
                 route.requireRequestedBreakStops(snapshot.stops)
                 route.requireUsablePreferences()
+                requireRequestSettings(snapshot, storedSettings)
                 val calculatedAt = services.clock()
                 check(route.transport == snapshot.transport && route.preferences == snapshot.settings.preferences &&
                     (if (snapshot.transport == Transport.MOTORCYCLE) route.provider == RouteProvider.VALHALLA
@@ -379,8 +404,7 @@ internal class WeatherPlannerCoordinator(
                     (departure - 3_600_000L).coerceAtLeast(0L), until)
                 val assessment = WeatherEngine.assess(route, departure, forecasts, snapshot.settings.thresholds)
                 if (token != generation) return@launch
-                if (snapshot.transport == Transport.MOTORCYCLE && services.readSettings(snapshot.transport) != storedSettings)
-                    throw CancellationException("Rota ayarları değişti; eski kalkış yanıtı iptal edildi.")
+                requireRequestSettings(snapshot, storedSettings)
                 if (revision != services.credentialRevision()) { refreshCredentials(); return@launch }
                 commitDeparture(value, WeatherDepartureBundle(route, forecasts, assessment, calculatedAt))
             } catch (cancelled: CancellationException) { refreshCredentials(); throw cancelled }
@@ -441,10 +465,12 @@ internal class WeatherPlannerCoordinator(
         selectionJob?.cancel()
         val token = ++generation
         val revision = services.credentialRevision()
+        val storedSettings = services.readSettings(snapshot.transport)
         val at = snapshot.selectedDepartureAt ?: snapshot.departureAt
         mutableState.value = snapshot.copy(loadingAlternatives = true, alternativeMessage = null, ordering = false, orderProposal = null)
         return scope.launch {
             try {
+                requireRequestSettings(snapshot, storedSettings)
                 val result = services.routePlanner(snapshot.settings).alternatives(snapshot.stops, at, snapshot.transport,
                     snapshot.settings.travelSpeedKmh, snapshot.settings.preferences)
                 val routes = result.routes.onEach { route ->
@@ -454,6 +480,7 @@ internal class WeatherPlannerCoordinator(
                     RouteSchedule.planned(route, route.effectiveDepartureAt ?: at)
                 }.distinctBy { it.geometryKey() }.take(3)
                 if (token != generation) return@launch
+                requireRequestSettings(snapshot, storedSettings)
                 if (revision != services.credentialRevision()) { refreshCredentials(); return@launch }
                 mutableState.value = mutableState.value.copy(alternatives = routes, alternativeMessage = result.message)
             } catch (cancelled: CancellationException) { refreshCredentials(); throw cancelled }
@@ -471,6 +498,7 @@ internal class WeatherPlannerCoordinator(
         invalidateCandidates(clearAlternatives = false)
         val token = ++generation
         val revision = services.credentialRevision()
+        val storedSettings = services.readSettings(snapshot.transport)
         val at = route.effectiveDepartureAt ?: snapshot.selectedDepartureAt ?: snapshot.departureAt
         mutableState.value = mutableState.value.copy(route = route, forecasts = emptyList(), comparisons = emptyList(),
             selectedDepartureAt = at, busy = true, error = null)
@@ -483,6 +511,7 @@ internal class WeatherPlannerCoordinator(
                 val comparisons = services.compare(route, at, forecasts, snapshot.settings.thresholds)
                 check(comparisons.size == 7)
                 if (token != generation) return@launch
+                requireRequestSettings(snapshot, storedSettings)
                 if (revision != services.credentialRevision()) { refreshCredentials(); return@launch }
                 baseComparisons = comparisons
                 commitDeparture(at, WeatherDepartureBundle(route, forecasts, comparisons.first(), calculatedAt))
@@ -517,17 +546,21 @@ internal class WeatherPlannerCoordinator(
             return null
         }
         val token = ++generation
+        val storedSettings = services.readSettings(snapshot.transport)
         mutableState.value = if (snapshot.transport == Transport.MOTORCYCLE)
             snapshot.copy(departureAt = departureAt, busy = true, error = null)
         else snapshot.copy(departureAt = departureAt, route = null, forecasts = emptyList(), comparisons = emptyList(), busy = true, error = null)
         return scope.launch {
             try {
+                requireRequestSettings(snapshot, storedSettings)
                 val result = load(snapshot.stops, departureAt, snapshot.settings, snapshot.transport) { route ->
                     if (token != generation) throw CancellationException("Plan changed")
+                    checkRequestSettings(snapshot, storedSettings)
                     services.savePlan(SavedWeatherPlan(snapshot.stops, departureAt, snapshot.transport, snapshot.settings.preferences, snapshot.originUsesCurrentLocation, snapshot.settings.travelSpeedKmh))
                     mutableState.value = mutableState.value.copy(route = route, forecasts = emptyList(), comparisons = emptyList(), selectedDepartureAt = null)
                 }
                 if (token != generation) return@launch
+                requireRequestSettings(snapshot, storedSettings)
                 if (credentialsRevision != services.credentialRevision()) { refreshCredentials(); return@launch }
                 services.savePlan(SavedWeatherPlan(snapshot.stops, departureAt, snapshot.transport, snapshot.settings.preferences, snapshot.originUsesCurrentLocation, snapshot.settings.travelSpeedKmh))
                 baseComparisons = result.comparisons
@@ -548,6 +581,7 @@ internal class WeatherPlannerCoordinator(
                 )
             } catch (cancelled: CancellationException) {
                 refreshCredentials()
+                if (token == generation) mutableState.value = mutableState.value.copy(busy = false)
                 throw cancelled
             } catch (error: Exception) {
                 if (token == generation) mutableState.value = mutableState.value.copy(

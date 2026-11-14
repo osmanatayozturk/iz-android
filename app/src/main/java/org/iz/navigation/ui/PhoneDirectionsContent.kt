@@ -28,7 +28,7 @@ import org.iz.navigation.weather.RouteStop
 import org.iz.navigation.weather.RoutePreferences
 import org.iz.navigation.weather.RouteStopLimits.MAX_PLANNED_STOPS
 import org.iz.navigation.weather.geometryKey
-import org.iz.navigation.weather.matrixUnavailableReason
+import org.iz.navigation.weather.RoutingPolicy
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -218,6 +218,7 @@ internal fun PhoneDirectionsContent(
             }
             if (activeMode && ui.preferences.avoidHighways) Text("Otoyolsuz rota servis haritasından doğrulanır; doğrulanamazsa başlatılmaz. Harita verileri eksik olabilir.", style = MaterialTheme.typography.bodySmall)
             Text(if (activeMode) "Feribottan kaçınma tercihi mümkün olduğunda uygulanır; kesin feribot yasağı değildir."
+                else if (ui.transport == Transport.MOTORCYCLE) "Otoyol, ücretli yol, feribot ve toprak yoldan kaçınma tercihleri mümkün olduğunda uygulanır; kesin yol veya yüzey yasağı değildir."
                 else "Otoyol, ücretli yol ve feribottan kaçınma tercihleri mümkün olduğunda uygulanır; kesin yol yasağı değildir.", style = MaterialTheme.typography.bodySmall)
             saveRoute?.let { OutlinedButton(it, enabled = ui.stops.size in 2..MAX_PLANNED_STOPS && !locked, modifier = Modifier.testTag("directions-save-route")) { Text("Rotayı kaydet") } }
         }
@@ -254,16 +255,13 @@ internal fun PhoneDirectionsContent(
             }
             Text("Önizleme oturum başlatmaz. Başlat, seçtiğin kayıt tercihiyle sesli yönlendirmeyi açar.", style = MaterialTheme.typography.bodySmall)
         }
-        if (ui.origin != null && ui.destination != null && ui.stops.size in 4..MAX_PLANNED_STOPS &&
-            (if (ui.stops.size >= 6) ui.transport != Transport.UNKNOWN else ui.transport in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE))) item {
-            val matrixReason = if (ui.stops.size <= 5) ui.preferences.matrixUnavailableReason(ui.transport) else null
+        if (ui.origin != null && ui.destination != null && RoutingPolicy.supportsStopOrder(ui.transport, ui.stops.size)) item {
+            val matrixReason = RoutingPolicy.stopOrderIssue(ui.transport, ui.stops.size, ui.preferences)
             OutlinedButton(suggestStopOrder, enabled = matrixReason == null && !ui.busy && !locked,
                 modifier = Modifier.testTag("directions-matrix-order")) {
                 Text(if (ui.ordering) "Durak sırası hesaplanıyor…" else "Daha hızlı durak sırası öner")
             }
             matrixReason?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-            if (ui.stops.size <= 5 && ui.transport == Transport.MOTORCYCLE) Text("Matrix sıra önerisi otomobil tahminidir; motosiklet rotasıyla doğrulanır.",
-                style = MaterialTheme.typography.bodySmall)
         }
         ui.orderProposal?.let { proposal -> item {
             StopOrderProposalCard(proposal, !ui.busy && !locked, acceptStopOrder, dismissStopOrder)
@@ -280,7 +278,9 @@ internal fun PhoneDirectionsContent(
         } }
         if (ui.busy || ui.locating || nav.loading || commandBusy) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
         item {
-            TextButton(trafficSettings, enabled = !locked, modifier = Modifier.testTag("directions-traffic-settings")) { Text("Trafik ayarları") }
+            TextButton(trafficSettings, enabled = !locked, modifier = Modifier.testTag("directions-traffic-settings")) {
+                Text(if (ui.transport == Transport.MOTORCYCLE) "Hız sınırı ayarları" else "Trafik ayarları")
+            }
             lastDestination?.let { TextButton(it, enabled = !locked) { Text("Son hedefi seç") } }
             if (!nav.recording) OutlinedButton(freeDrive, enabled = !ui.busy && !commandBusy,
                 modifier = Modifier.testTag("start-free-drive")) { Text("Hedefsiz sürüş başlat") }

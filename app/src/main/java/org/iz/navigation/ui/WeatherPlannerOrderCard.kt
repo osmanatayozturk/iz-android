@@ -29,8 +29,6 @@ internal fun StopOrderProposalCard(proposal: StopOrderProposal, enabled: Boolean
                 modifier = Modifier.testTag("matrix-comparison-distances"), style = MaterialTheme.typography.bodySmall)
             Text("Karşılaştırma saati: ${weatherTime(proposal.comparisonDepartureAt)}. Başlangıç ve varış sabit; yalnızca durak sırası uygulanır.",
                 style = MaterialTheme.typography.bodySmall)
-            if (!proposal.heuristic && proposal.approximateMotorcycle) Text("Sıra önerisi otomobil Matrix tahmininden üretildi. Yukarıdaki süreler motosiklet rotasıyla yeniden hesaplandı.",
-                style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(apply, enabled = enabled, modifier = Modifier.testTag("matrix-apply-order")) { Text("Bu sırayı uygula") }
                 TextButton(dismiss, enabled = enabled) { Text("Mevcut sırayı koru") }

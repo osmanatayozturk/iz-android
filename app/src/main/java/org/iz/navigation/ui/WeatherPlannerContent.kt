@@ -52,7 +52,6 @@ import org.iz.navigation.weather.RideWeatherStatus
 import org.iz.navigation.weather.RouteStop
 import org.iz.navigation.weather.RoutePreferences
 import org.iz.navigation.weather.RouteSchedule
-import org.iz.navigation.weather.matrixUnavailableReason
 import org.iz.navigation.weather.geometryKey
 import org.iz.navigation.weather.WeatherAssessment
 import org.iz.navigation.weather.WeatherHazard
@@ -165,6 +164,7 @@ internal fun WeatherPlannerContent(
                 }
                 if (activeMode && preferences.avoidHighways) Text("Otoyolsuz rota servis haritasından doğrulanır; doğrulanamazsa başlatılmaz. Harita verileri eksik olabilir.", style = MaterialTheme.typography.bodySmall)
                 Text(if (activeMode) "Feribottan kaçınma tercihi mümkün olduğunda uygulanır; kesin feribot yasağı değildir."
+                    else if (state.transport == Transport.MOTORCYCLE) "Otoyol, ücretli yol, feribot ve toprak yoldan kaçınma tercihleri mümkün olduğunda uygulanır; kesin yol veya yüzey yasağı değildir."
                     else "Otoyol, ücretli yol ve feribottan kaçınma tercihleri mümkün olduğunda uygulanır; kesin yol yasağı değildir.", style = MaterialTheme.typography.bodySmall)
                 if (canSaveRoute) OutlinedButton(actions.saveRoute, enabled = state.stops.size in 2..MAX_PLANNED_STOPS && !interactionLocked,
                     modifier = Modifier.testTag("weather_save_route")) { Text("Rotayı kaydet") }
@@ -264,16 +264,13 @@ internal fun WeatherPlannerContent(
                 Text(if (state.busy) "Rota ve tahmin hesaplanıyor…" else "7 kalkış seçeneğini karşılaştır")
             }
         }
-        if (state.stops.size in 4..MAX_PLANNED_STOPS &&
-            (if (state.stops.size >= 6) state.transport != Transport.UNKNOWN else state.transport in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE))) item {
-            val matrixReason = if (state.stops.size <= 5) state.settings.preferences.matrixUnavailableReason(state.transport) else null
+        if (org.iz.navigation.weather.RoutingPolicy.supportsStopOrder(state.transport, state.stops.size)) item {
+            val matrixReason = org.iz.navigation.weather.RoutingPolicy.stopOrderIssue(state.transport, state.stops.size, state.settings.preferences)
             OutlinedButton(actions.suggestStopOrder, enabled = matrixReason == null && !state.busy && !state.ordering && !interactionLocked,
                 modifier = Modifier.testTag("weather-matrix-order")) {
                 Text(if (state.ordering) "Durak sırası hesaplanıyor…" else "Daha hızlı durak sırası öner")
             }
             matrixReason?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-            if (state.stops.size <= 5 && state.transport == Transport.MOTORCYCLE) Text("Matrix sıra önerisi otomobil tahminidir; motosiklet rotasıyla doğrulanır.",
-                style = MaterialTheme.typography.bodySmall)
         }
         state.orderProposal?.let { proposal -> item {
             StopOrderProposalCard(proposal, !state.busy && !state.ordering && !interactionLocked,
