@@ -207,6 +207,8 @@ class MainMapOsmEditorEntryTest {
         onMain { map.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(35.0 + nonce % 10000 / 100000.0, 25.0 + nonce % 7000 / 100000.0), 18.0)) }
         compose.waitForIdle()
         val point = PointF(view.width * .35f, view.height * .36f)
+        val touchSetup = mainMapTouchDiagnostics(view, map, point)
+        instrumentation.addResults(Bundle().apply { putString("osmMapSelectionTap_$nonce", touchSetup.toString()) })
         val tapped = onMain { map.projection.fromScreenLocation(point) }
         val wayCenter = LatLng(tapped.latitude, tapped.longitude + .00030)
         fun tags(name: String, way: Boolean) = JSONObject().put("name", name).put(if (way) "building" else "amenity", if (way) "yes" else "bench")
@@ -227,11 +229,45 @@ class MainMapOsmEditorEntryTest {
         }
         val screen = onMain { IntArray(2).also(view::getLocationOnScreen) }
         tapNative(screen[0] + point.x, screen[1] + point.y)
-        compose.waitUntil(10_000) { compose.onAllNodesWithTag(if (count == 1) "place-information-card" else "place-info-discovery").fetchSemanticsNodes().isNotEmpty() }
+        try {
+            compose.waitUntil(10_000) { compose.onAllNodesWithTag(if (count == 1) "place-information-card" else "place-info-discovery").fetchSemanticsNodes().isNotEmpty() }
+        } catch (failure: androidx.compose.ui.test.ComposeTimeoutException) {
+            val after = runCatching { mainMapTouchDiagnostics(view, map, point) }
+                .getOrElse { JSONObject().put("diagnosticFailureClass", it.javaClass.name) }
+            throw AssertionError("Actual Main map selection did not appear; before=$touchSetup; after=$after", failure)
+        }
         if (count == 2) compose.waitUntil(10_000) { compose.onAllNodesWithTag("place-info-discovery-choice-1").fetchSemanticsNodes().isNotEmpty() }
         if (count == 0) compose.waitUntil(10_000) { compose.onAllNodesWithTag("place-info-discovery-choice-0").fetchSemanticsNodes().isEmpty() &&
             compose.onAllNodesWithText("Yakında bir OSM yeri veya bina bulunamadı. Yeni OSM mekânı için haritaya uzun basabilirsin.").fetchSemanticsNodes().isNotEmpty() }
         return fixture
+    }
+
+    /** Bounded synthetic setup evidence only: keep the original gesture, owner and timeout. */
+    private fun mainMapTouchDiagnostics(view: MapView, map: MapLibreMap, point: PointF): JSONObject {
+        val origin = onMain { IntArray(2).also(view::getLocationInWindow) }
+        val x = origin[0] + point.x
+        val y = origin[1] + point.y
+        val blockers = compose.onAllNodes(hasClickAction() or hasTestTag("home-brand") or hasTestTag("place-info-discovery"),
+            useUnmergedTree = true).fetchSemanticsNodes().mapNotNull { node ->
+            val b = node.boundsInWindow
+            if (x < b.left || x >= b.right || y < b.top || y >= b.bottom) null else JSONObject()
+                .put("tag", if (node.config.contains(SemanticsProperties.TestTag)) node.config[SemanticsProperties.TestTag] else "untagged-clickable")
+                .put("boundsInWindow", b.toString())
+        }.take(8)
+        val native = onMain {
+            val camera = map.cameraPosition
+            JSONObject().put("windowFocused", view.hasWindowFocus()).put("attached", view.isAttachedToWindow)
+                .put("viewBoundsInWindow", Rect(origin[0], origin[1], origin[0] + view.width, origin[1] + view.height).toShortString())
+                .put("zoom", camera.zoom).put("bearing", camera.bearing).put("tilt", camera.tilt)
+                .put("syntheticCameraLatitude", camera.target?.latitude).put("syntheticCameraLongitude", camera.target?.longitude)
+                .put("styleFullyLoaded", map.style?.isFullyLoaded == true)
+        }
+        return JSONObject().put("windowKind", "OWNED_MAIN_ACTIVITY").put("native", native)
+            .put("nativeLocalX", point.x.toDouble()).put("nativeLocalY", point.y.toDouble())
+            .put("mainMapBoundsInWindow", JSONArray(compose.onAllNodesWithTag("navigation-home-map").fetchSemanticsNodes().map { it.boundsInWindow.toString() }))
+            .put("selectionPanelCount", compose.onAllNodesWithTag("place-info-discovery").fetchSemanticsNodes().size)
+            .put("fullscreenCount", compose.onAllNodesWithTag("fullscreen_map").fetchSemanticsNodes().size)
+            .put("coveringSemanticRegions", JSONArray(blockers))
     }
 
     private fun assertExposedMapPans(app: Context, view: MapView, map: MapLibreMap) {
