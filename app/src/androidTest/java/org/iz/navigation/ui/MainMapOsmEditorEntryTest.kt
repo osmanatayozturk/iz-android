@@ -114,7 +114,7 @@ class MainMapOsmEditorEntryTest {
             compose.onNodeWithTag("place-info-open-information").performClick()
             compose.onNodeWithTag("place-information-card").assertExists()
             awaitPublicInformation()
-            compose.onNodeWithText(fixture.nodeName).assertExists()
+            compose.onNode(hasText(fixture.nodeName) and hasAnyAncestor(hasTestTag("place-information-card"))).assertExists()
             OsmLightEditorNativeCapture.capture("map-03-details")
             Espresso.pressBack()
             compose.onNodeWithTag("place-info-discovery-choice-0").assertIsSelected()
@@ -132,7 +132,7 @@ class MainMapOsmEditorEntryTest {
             val single = discoverSynthetic(app, host, view, map, count = 1, information = true)
             compose.waitUntil(10_000) { compose.onAllNodesWithTag("place-information-card").fetchSemanticsNodes().isNotEmpty() }
             awaitPublicInformation()
-            compose.onNodeWithText(single.wayName).assertExists()
+            compose.onNode(hasText(single.wayName) and hasAnyAncestor(hasTestTag("place-information-card"))).assertExists()
             compose.onNodeWithTag("place-info-discovery").assertDoesNotExist()
             Espresso.pressBack()
             assertEquals(baselineSession, session(app))
