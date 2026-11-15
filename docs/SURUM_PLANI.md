@@ -11,12 +11,15 @@ Sorgu/uç nokta/kota/önbellek/zaman aşımı/iptal politikaları ve yalnız ell
 | Önceki RED | Test-only adayda beklenen çalışma zamanı başarısızlığı kaydedildi; yeni ürün için GREEN veya kabul kanıtı değildir. |
 | Host — `5ecec8c` | Birim testi, lint, Debug uygulama, AndroidTest derleme ve test APK üretimi aynı çağrıda 528,266 saniyede geçti. Yeni XML'lerde 1.736 test; sıfır başarısızlık/hata/atlama. Lint 0 hata / 120 uyarı. İlk sandbox erişim engeli standart yetkili çağrıyla aşıldı; anahtar, kilit, ACL ve ortam korunuyor. |
 | QA paketleri | Ayrı çevrimdışı uygulama/test çifti üretildi; iki manifestte INTERNET yok, servis alanları boş, beklenen QA imzası doğrulandı. Normal uygulama veya harici dağıtım paketi değildir. |
-| Yeni UI kapsamı | Yalnız iki yeni test ve bir lifecycle metodunun derlenmiş JUnit imzaları doğrulandı. Cihaz çalıştırması ve görsel kabul bekliyor; önceki native sonuçlar bu kapsama taşınmaz. |
+| Yeni UI kapsamı | İki yeni test ve bir lifecycle metodunun derlenmiş JUnit imzaları doğrulandı. İkinci tahsiste aynı mühürlü QA çiftiyle iki sentetik UI testi geçti; üç panel görüntüsü doğrulandı. Önceki native sonuçlar bu kapsama taşınmaz. |
+| UI/UX kabulü | Kaynak ve kapalı/açık/yeni denemede kapalı üç görüntü incelendi; teşhis bölümünde görünür engel bulunmadı. Kabul yalnız portre/font 1 Compose panel içindir; Main/native harita, canlı servis ve elle TalkBack kapsam dışıdır. |
+| QA kurulum yöntemleri | İlk streamed install v2 içerik SHA-256 doğrulama hatasıyla reddedildi; test başlamadı. Ayrı ikinci tahsiste cihazdaki dosyaların SHA-256 ve boyutu doğrulanarak yerel dosyadan kurulum başarılı oldu. İlk reddin kök nedeni doğrulanmadı; iki sonuç ayrı kanıttır. |
+| QA kapanışı | İkinci tur sonunda aynı QA çifti boşta, etkin servis yok; geçici aktarım dizini kaldırılmış olarak doğrulandı. Normal pakete işlem yapılmadı. |
 | Normal kurulum | Yerel kurulum yapılmadı; mevcut imzayı koruyan harici dağıtım bekleniyor. |
 | Canlı teşhis | Harici dağıtım sonrası gerçek hata sırasında güvenli kod gözlemi bekleniyor. Kök neden ve çözüm henüz doğrulanmadı. |
 | Güvenlik ve yayın | Bu adayın gerekli güvenlik kabulü ve koordinatörün son kabulü beklenir. Push, tag, Release ve APK yayını yapılmadı. |
 
-Host ve paket kanıtları tamamlanınca bu bölüm yalnız doğrulanmış sonuçlarla güncellenir. Salt belge takip commit'i, değişmeyen ürün/test/build girdileriyle eşleştirilir; tek başına yeniden test gerekçesi sayılmaz.
+Host, aynı mühürlü QA çiftiyle iki sentetik test ve sınırlı panel görsel kabulü kaydedildi; canlı teşhis ve son sürüm kabulü bekliyor. Salt belge takip commit'i, değişmeyen ürün/test/build girdileriyle eşleştirilir; tek başına yeniden test gerekçesi sayılmaz.
 
 ## Telefon 0.13.4 / code 33 - motosiklette Valhalla (kaynak/belge teslimi)
 
