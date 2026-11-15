@@ -19,12 +19,19 @@ import org.iz.navigation.integration.MapOutlineReadResult
 import org.iz.navigation.integration.mapCandidateHits
 import org.iz.navigation.integration.rankMapCandidates
 import org.iz.navigation.integration.validCoordinate
+import org.iz.navigation.integration.NearbyCode
+import org.iz.navigation.integration.NearbyStage
+import org.iz.navigation.integration.NearbyDiagnostic
+import org.iz.navigation.integration.NearbyFailure
+import org.iz.navigation.integration.NearbyFailureException
+import org.iz.navigation.integration.NearbyProbe
+import org.iz.navigation.integration.diagnostic
 
 internal data class PlaceInformationDiscoveryState(val open: Boolean = false, val busy: Boolean = false,
     val candidates: List<MapPlaceCandidate> = emptyList(), val selectedRef: OsmRef? = null,
     val hitRefs: Set<OsmRef> = emptySet(), val message: String? = null, val retryable: Boolean = false,
     val outlineBusy: Boolean = false, val outlineRetryable: Boolean = false, val outlineMessage: String? = null,
-    val generation: Long = 0, val identity: Any? = null) {
+    val generation: Long = 0, val identity: Any? = null, val diagnostic: NearbyDiagnostic? = null) {
     val visibleCandidates get() = candidates.filter { hitRefs.isEmpty() || it.place.osmRef in hitRefs }
     val selectedCandidate get() = candidates.firstOrNull { it.place.osmRef == selectedRef }
     val choices get() = visibleCandidates.map { it.place }
@@ -36,7 +43,8 @@ internal class PlaceInformationDiscoveryOwner(private val scope: CoroutineScope,
     private val nearby: suspend (Double, Double) -> List<MapPlaceCandidate>,
     private val onSelect: (SelectedOsmPlace) -> Unit, private val identity: () -> Any?,
     private val stillCurrent: () -> Boolean = { true },
-    private val outline: (suspend (MapPlaceCandidate) -> MapOutlineReadResult)? = null) {
+    private val outline: (suspend (MapPlaceCandidate) -> MapOutlineReadResult)? = null,
+    private val nowMillis: () -> Long = { System.nanoTime() / 1_000_000 }) {
     var state by mutableStateOf(PlaceInformationDiscoveryState())
         private set
     private var generation = 0L
@@ -63,9 +71,11 @@ internal class PlaceInformationDiscoveryOwner(private val scope: CoroutineScope,
             return
         }
         state = PlaceInformationDiscoveryState(open = true, busy = true, generation = token, identity = expected)
+        val started = nowMillis()
         job = scope.launch {
             try {
-                val found = withTimeoutOrNull(20_000) { nearby(latitude, longitude) } ?: error("Discovery timeout")
+                val found = withTimeoutOrNull(20_000) { nearby(latitude, longitude) } ?: throw NearbyFailureException(
+                    NearbyFailure(NearbyCode.ND_DISCOVERY_TIMEOUT, NearbyStage.DISCOVERY))
                 ensureActive()
                 if (!accepts(token, expected)) return@launch
                 val result = rankMapCandidates(found, latitude, longitude)
@@ -78,8 +88,9 @@ internal class PlaceInformationDiscoveryOwner(private val scope: CoroutineScope,
                 // One candidate keeps the existing direct information path; no preview geometry read.
                 if (single != null) onSelect(single.place)
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) {
+            catch (failure: Exception) {
                 if (accepts(token, expected)) state = state.copy(busy = false, retryable = true,
+                    diagnostic = NearbyProbe().failure(failure).diagnostic(nowMillis() - started),
                     message = "Yakındaki yerler alınamadı. Bağlantını kontrol edip yeniden dene.")
             } finally {
                 if (generation == token) { state = state.copy(busy = false); job = null }

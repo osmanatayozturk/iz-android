@@ -43,6 +43,7 @@ internal fun PlaceInformationSelectionPanel(state: PlaceInformationDiscoveryStat
     onPanelHeight: (Int) -> Unit = {}, onRetryOutline: () -> Unit = {}, compactLayout: Boolean = false) {
     DisposableEffect(state.open) { if (!state.open) onPanelHeight(0); onDispose { onPanelHeight(0) } }
     if (!state.open) return
+    var diagnosticExpanded by remember(state.generation) { mutableStateOf(false) }
     BackHandler(onBack = onClose)
     BoxWithConstraints(modifier.fillMaxSize()) {
         val density = LocalDensity.current
@@ -111,6 +112,9 @@ internal fun PlaceInformationSelectionPanel(state: PlaceInformationDiscoveryStat
                     if (state.hitRefs.isNotEmpty()) item { TextButton(onShowAll, Modifier.heightIn(min = 48.dp)) { Text("Tüm adayları göster") } }
                     if (state.retryable) item { TextButton(onRetry, Modifier.heightIn(min = 48.dp)
                         .testTag("place-info-discovery-retry")) { Text("Yeniden dene") } }
+                    state.diagnostic?.let { diagnostic -> item("nearby-diagnostics") {
+                        NearbyDiagnosticDetails(diagnostic, diagnosticExpanded) { diagnosticExpanded = !diagnosticExpanded }
+                    } }
                     item { Text("© OpenStreetMap katkıcıları", Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall) }
                 }
             }

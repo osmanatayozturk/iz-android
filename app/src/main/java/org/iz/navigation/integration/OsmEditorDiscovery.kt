@@ -32,11 +32,13 @@ internal fun parseOverpassPlaces(json: String, catalog: OsmPresetCatalog?): List
     parseOverpassMapCandidates(json, catalog).map { it.place }
 
 internal fun parseOverpassMapCandidates(json: String, catalog: OsmPresetCatalog? = null): List<MapPlaceCandidate> {
-    require(json.toByteArray(Charsets.UTF_8).size <= 512_000) { "OSM yanıtı boyut sınırını aştı." }
+    if (json.toByteArray(Charsets.UTF_8).size > 512_000) throw NearbyResponseException(
+        NearbyFailure(NearbyCode.ND_RESPONSE_LIMIT, NearbyStage.PARSER, limits = listOf(NearbyLimit.RESPONSE_BYTES)), "OSM yanıtı boyut sınırını aştı.")
     val root = JSONObject(json)
-    require(!root.has("remark")) { "OSM yer sorgusu tamamlanmadı." }
+    if (root.has("remark")) throw NearbyResponseException(NearbyFailure(NearbyCode.ND_SERVICE_ERROR, NearbyStage.PARSER), "OSM yer sorgusu tamamlanmadı.")
     val array = root.optJSONArray("elements") ?: return emptyList()
-    require(array.length() <= 2000) { "Bu bölgede çok fazla OSM nesnesi var." }
+    if (array.length() > 2000) throw NearbyResponseException(
+        NearbyFailure(NearbyCode.ND_OBJECT_LIMIT, NearbyStage.PARSER, limits = listOf(NearbyLimit.OBJECT_COUNT)), "Bu bölgede çok fazla OSM nesnesi var.")
     return (0 until array.length()).mapNotNull { index ->
         val item = array.optJSONObject(index) ?: return@mapNotNull null
         val ref = osmRef(item.optString("type"), item.optLong("id")) ?: return@mapNotNull null

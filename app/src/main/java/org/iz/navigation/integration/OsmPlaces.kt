@@ -108,26 +108,37 @@ class OsmPlaces(context: Context) {
 
     internal suspend fun nearbyCandidates(latitude: Double, longitude: Double): List<MapPlaceCandidate> = withContext(Dispatchers.IO) {
         require(validCoordinate(latitude, longitude)) { "Geçersiz harita koordinatı." }
-        overpassLock.withLock {
-            val endpoint = settings.read().overpass
-            // A ten metre cache cell prevents repeated taps on the same visible POI from re-querying.
-            val lat = String.format(Locale.US, "%.4f", latitude)
-            val lon = String.format(Locale.US, "%.4f", longitude)
-            val key = "nearby:editor-v2:${OsmPresetCatalog.BUNDLED_SHA256}:$endpoint:$lat:$lon"
-            val cached = cachedJson(key, 600_000)?.let { runCatching { parseOverpassMapCandidates(it, editorCatalog) }.getOrNull() }
-            coroutineContext.ensureActive()
-            if (settings.read().overpass != endpoint) throw kotlinx.coroutines.CancellationException("Harita servisi değişti.")
-            cached?.let { return@withLock it }
-            val query = osmEditorNearbyQuery(latitude, longitude, editorMatchKeys)
-            val json = performOverpass(query, endpoint)
-            coroutineContext.ensureActive()
-            if (settings.read().overpass != endpoint) throw kotlinx.coroutines.CancellationException("Harita servisi değişti.")
-            val result = parseOverpassMapCandidates(json, editorCatalog)
-            coroutineContext.ensureActive()
-            if (settings.read().overpass != endpoint) throw kotlinx.coroutines.CancellationException("Harita servisi değişti.")
-            storeCache(key, json)
-            result
-        }
+        val probe = NearbyProbe().apply { stage = NearbyStage.PREPARATION }
+        try {
+            overpassLock.withLock {
+                val endpoint = settings.read().overpass
+                // A ten metre cache cell prevents repeated taps on the same visible POI from re-querying.
+                val lat = String.format(Locale.US, "%.4f", latitude)
+                val lon = String.format(Locale.US, "%.4f", longitude)
+                val key = "nearby:editor-v2:${OsmPresetCatalog.BUNDLED_SHA256}:$endpoint:$lat:$lon"
+                val cached = cachedJson(key, 600_000)?.let { runCatching {
+                    probe.stage = NearbyStage.CATALOGUE
+                    val catalog = editorCatalog
+                    probe.stage = NearbyStage.PARSER
+                    parseOverpassMapCandidates(it, catalog)
+                }.getOrNull() }
+                coroutineContext.ensureActive()
+                if (settings.read().overpass != endpoint) throw kotlinx.coroutines.CancellationException("Harita servisi değişti.")
+                cached?.let { return@withLock it }
+                probe.stage = NearbyStage.CATALOGUE
+                val query = osmEditorNearbyQuery(latitude, longitude, editorMatchKeys)
+                val json = performOverpass(query, endpoint, probe)
+                coroutineContext.ensureActive()
+                if (settings.read().overpass != endpoint) throw kotlinx.coroutines.CancellationException("Harita servisi değişti.")
+                probe.stage = NearbyStage.PARSER
+                val result = parseOverpassMapCandidates(json, editorCatalog)
+                coroutineContext.ensureActive()
+                if (settings.read().overpass != endpoint) throw kotlinx.coroutines.CancellationException("Harita servisi değişti.")
+                storeCache(key, json)
+                result
+            }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (failure: Exception) { throw NearbyFailureException(probe.failure(failure)) }
     }
 
     /** Explicit user action only; never called by GPS polling or map movement.
@@ -166,8 +177,8 @@ class OsmPlaces(context: Context) {
         overpassLock.withLock { performOverpass(query) }
     }
 
-    private suspend fun performOverpass(query: String, endpoint: String = settings.read().overpass): String =
-        overpassRead.query(query, endpoint)
+    private suspend fun performOverpass(query: String, endpoint: String = settings.read().overpass,
+        probe: NearbyProbe? = null): String = overpassRead.query(query, endpoint, probe)
     private fun cachedJson(key: String, maxAge: Long): String? =
         readValidCachedJson(File(cacheDirectory, cacheKey(key)), System.currentTimeMillis(), maxAge)
     private fun cachedSurveyJson(key: String): String? = runCatching {
@@ -221,6 +232,7 @@ internal data class OsmReadBudget(
 ) {
     private fun forDay(now: Long): OsmReadBudget = if (now / 86_400_000 > day) copy(day = now / 86_400_000, queries = 0, bytes = 0) else this
     fun currentBytes(now: Long): Long = forDay(now).bytes
+    fun currentQueries(now: Long): Int = forDay(now).queries
     fun canRequest(now: Long): Boolean = forDay(now).let { now >= it.cooldownUntil && it.queries < 90 && it.bytes < 9_000_000 }
     fun startRequest(now: Long, reservedBytes: Long = 0): OsmReadBudget {
         check(canRequest(now))
@@ -294,14 +306,24 @@ internal fun retryAfterMillis(response: Response): Long {
     return (seconds?.let { it.coerceAtMost(86_400) * 1_000 } ?: dateDelay ?: 30_000).coerceIn(30_000, 86_400_000)
 }
 
-internal fun readLimited(response: Response, maxBytes: Long, onBytes: (Long) -> Unit): String {
-    val body = response.body ?: throw OsmServiceException("Servis boş yanıt verdi.")
+internal fun readLimited(response: Response, maxBytes: Long, onBytes: (Long) -> Unit): String =
+    readLimitedWithProbe(response, maxBytes, null, onBytes)
+
+internal fun readLimitedWithProbe(response: Response, maxBytes: Long, probe: NearbyProbe?, onBytes: (Long) -> Unit): String {
+    val body = response.body ?: run {
+        probe?.fail(NearbyCode.ND_MISSING_RESPONSE, NearbyStage.RESPONSE)
+        throw OsmServiceException("Servis boş yanıt verdi.")
+    }
     val output = ByteArrayOutputStream()
     body.byteStream().use { input ->
         val buffer = ByteArray(8_192)
         while (true) {
             val remaining = maxBytes - output.size()
-            if (remaining <= 0) throw OsmServiceException("Servis yanıtı boyut sınırını aştı.")
+            if (remaining <= 0) {
+                probe?.let { it.fail(NearbyCode.ND_RESPONSE_LIMIT, NearbyStage.RESPONSE,
+                    limits = listOf(it.responseLimit)) }
+                throw OsmServiceException("Servis yanıtı boyut sınırını aştı.")
+            }
             val count = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
             if (count < 0) break
             onBytes(count.toLong())
