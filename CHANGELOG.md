@@ -1,6 +1,6 @@
 # Değişiklik geçmişi
 
-## Telefon 0.13.4 / code 33 — motosiklette Valhalla (yayımlanmamış kaynak adayı)
+## Telefon 0.13.4 / code 33 — motosiklette Valhalla (kaynak/belge teslimi)
 
 Motosiklette hedef seçimi, rota planlama, alternatifler, rota değişikliği, sapma sonrası yeniden hesaplama ve hava durumuna göre kalkış doğrulaması mevcut Valhalla sağlayıcısını kullanır. Sağlayıcı ve süre bağlamı **Valhalla · Trafik hariç** olarak gösterilir. Motosikletin dönemsel trafik yenilemesi kaldırılır; sapma sonrası yeniden yönlendirme korunur. Hata durumunda seçimler ve varsa mevcut rota korunur; yeniden deneme kullanıcı tarafından başlatılır, TomTom'a otomatik geçilmez.
 
@@ -10,19 +10,23 @@ TomTom rota ve Matrix kullanımı otomobil/yolcu kapsamındadır. Mevcut TomTom 
 
 Günlük sürüş için mevcut Valhalla motosiklet profili beta niteliğindedir. Otoyol, ücretli yol, feribot ve kaplamasız yol tercihleri korunur; bu tercihler tüm yolların yüzeyini veya otoyol dışlamasını garanti etmez. Yeni kıvrımlı/macera modu veya çevrimdışı yeni rota hesaplama eklenmez. Wear OS, protokol, Room şeması, yedek biçimi ve bağımlılıklar değişmez.
 
-**Host doğrulaması — `e670a7b` kaynak adayı:** 1.722 birim testi başarısızlık, hata veya atlama olmadan geçti. Güncel Debug lint raporu 0 hata ve 120 uyarı içeriyor. Uygulama ve test APK üretimi ile AndroidTest derlemesi tek birleşik çağrıda tamamlandı. Derlenmiş 24 test ve dört lifecycle metodunun JUnit imzaları doğrulandı; bir eski Main testi bu imza kapsamından açıkça dışlandı. Önceki adayın PASS sonucu aktarılmadı; bu sonuçlar cihazda çalıştırma kanıtı değildir.
+0.13.3 başlığındaki haritadan yer seçimi bu 0.13.4 kaynak/belge teslimine dahildir. Alt seçim panelinin alt işlem çubuğuyla çakışması giderildi; dar ve yatay görünümde liste satırlarına kaydırarak ulaşılır.
 
-**Bekleyen kabul:** Cihaz testleri, son UI/UX görüntü kabulü ve odaklı güvenlik incelemesi bekliyor. 0.13.3'ün 20 harita kontrolü ve altı görüntülük kabulü de beklemeye devam ediyor. Ayrı canlı Valhalla şehir içi okuması HTTP yanıtından önce TLS aşamasında engellendi; şehirler arası okuma çalıştırılmadı. Önceki engelli Overpass okuması tekrarlanmadı. Bu kayıt yayın veya cihaz kabulü değildir.
+**Host doğrulaması:** Ürün kaynağı `c16874f` üzerinde 1.722 birim testi hata, başarısızlık veya atlama olmadan geçti; Debug lint 0 hata ve 120 uyarı verdi. Uygulama/test üretimi ve AndroidTest derlemesi aynı birleşik çağrıda tamamlandı. Son test-only aday `0de5565` için AndroidTest derleme, test APK üretimi ve lint 128,922 saniyede geçti; değişmeyen ürün, yapılandırma ve unit girdileri eşleştiğinden uygulama ile birim testi kanıtı yeniden kullanıldı. Derlenmiş 24 test ve dört lifecycle metodunun JUnit imzaları doğrulandı; bir eski Main testi bu imza kapsamından açıkça dışlandı.
 
-## Telefon 0.13.3 / code 32 — haritadan yer seçimi (yayımlanmamış kaynak adayı)
+**Telefon ve görsel kapsam:** 24 kontrollük kabul, ilgili kaynak/yapılandırma uyumuyla korunan 17 önceki sonuç ile son ürün üzerinde ayrı 4, 2 ve 1 kontrollük koşularda geçen yedi sonuçtan oluşur. Bu, tek final APK'da yeniden çalıştırılmış 24 test sonucu değildir. Altı durumun UI/UX incelemesinde görünür engelleyici bulunmadı; bilgi ve geri dönüş görüntüleri yenilendi, diğer dört gözlem aynı ürün uyumuyla korundu.
+
+**Kaynak güvenliği ve sınırlar:** Kaynak incelemesinde doğrulanmış güvenlik bulgusu yok; içe aktarılan katalog verisinin kökenine ilişkin `needs_validation` kaydı korunuyor. Bu kayıt son APK çiftinin bağımsız güvenlik kararı yerine geçmez. Ayrı canlı Valhalla şehir içi okuması HTTP öncesi TLS aşamasında engellendi; şehirler arası okuma çalıştırılmadı. Önceki engelli Overpass okuması tekrarlanmadı. Gerçek GNSS, OSM'ye yazma, elle TalkBack, canlı harita karoları, Wear ve fiziksel Android Auto bu turun kapsamı dışındadır. Teslim kaynak ve belgelerle sınırlıdır; tag, Release veya APK dağıtımı içermez.
+
+## Telefon 0.13.3 / code 32 — haritadan yer seçimi (0.13.4 teslimine dahil)
 
 Haritaya açıkça dokunulduğunda birden fazla OSM yeri bulunursa numaralı işaretçiler ve altta bir seçim listesi gösterilir. Listenin yüksekliği sürükleyerek değiştirilebilir veya liste daraltılabilir; açıkta kalan harita kullanılabilir. Satıra veya işaretçiye dokunmak yeri seçer; ayrıntılar **Bilgileri aç** ile açılır. Bilgilerden geri dönüldüğünde liste, kaydırma konumu ve seçim yeni sorgu yapılmadan korunur. Tek sonuç doğrudan bilgi kartını açar.
 
 Seçilen basit kapalı OSM alanının sınırı yalnız haritada gösterim için alınır; bu, geometri düzenlemesi değildir. Sınır kullanılamazsa konum noktası ve bilgilere erişim korunur. Başarısızlık veya zaman aşımında yeniden deneme kullanıcı tarafından başlatılır; seçim değişince eski sınır kaldırılır. Room şeması, yedek biçimi, Wear OS, telefon-saat protokolü ve bağımlılıklar değişmez.
 
-**Host doğrulaması — `feb2ba7` kaynak adayı:** 1.698 birim testi geçti. Güncel Debug lint raporu 0 hata ve 119 uyarı içeriyor. AndroidTest derlemesi ve test APK üretimi tamamlandı; yalnız test dosyaları değiştiği için ürün/yapılandırma eşleşmesi doğrulanan mevcut uygulama APK'sı yeniden kullanıldı. Derlenmiş 20 test ve üç lifecycle metodunun JUnit imzaları doğrulandı; bir eski Main testi bu imza kapsamından açıkça dışlandı. Bu sonuçlar cihazda test çalıştırıldığı anlamına gelmez.
+**Tarihsel host doğrulaması — `feb2ba7`:** 1.698 birim testi geçti; Debug lint 0 hata ve 119 uyarı verdi. AndroidTest derlemesi/test APK üretimi ve derlenmiş 20 test ile üç lifecycle imzası doğrulandı; uygulama APK'sı ürün/yapılandırma uyumuyla yeniden kullanıldı. Bir eski Main testi açıkça dışlandı. Bu önceki kaynak kanıtıdır; birleşik telefon ve görsel kabul yukarıdaki 0.13.4 tesliminde kaydedilir.
 
-**Bekleyen kabul:** Seçili 20 cihaz testi ve altı görüntülük inceleme, son UI/UX kabulü ve odaklı güvenlik incelemesi tamamlanmadı. Yapılandırılmış Overpass uç noktasına bilgisayardan yapılan ayrı canlı okuma engelli; canlı servis kabulü sağlanmadı. Bu kayıt yayımlanmış sürüm, APK dağıtımı veya cihaz kabulü değildir.
+Bu harita seçimi özelliği ayrı bir 0.13.3 APK dağıtımı olarak sunulmaz; 0.13.4 kaynak/belge tesliminin parçasıdır. Yapılandırılmış Overpass uç noktasına bilgisayardan yapılan ayrı canlı okuma engelli kalmıştır; sentetik telefon kontrolleri canlı servis kabulü değildir.
 
 ## Telefon 0.13.2 / code 31 — haritadan OSM düzenleme
 

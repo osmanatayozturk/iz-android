@@ -1,6 +1,6 @@
 # İz sürüm değişikliği planı
 
-## Telefon 0.13.4 / code 33 — motosiklette Valhalla (yayımlanmamış kaynak adayı)
+## Telefon 0.13.4 / code 33 — motosiklette Valhalla (kaynak/belge teslimi)
 
 Motosikletin tüm rota, alternatif, rota değişikliği, sapma sonrası yeniden hesaplama ve hava durumuna göre kalkış doğrulaması yolları mevcut Valhalla sağlayıcısını kullanır. Süre/sağlayıcı bağlamı **Valhalla · Trafik hariç** olarak gösterilir; kalkış saatinde hava durumu yeniden örneklenir, canlı trafik süresi vaat edilmez. Dönemsel trafik yenilemesi kaldırılır; sapma sonrası hesaplama korunur. Hata mevcut rota ve seçimleri silmez; elle yeniden denenir, TomTom'a otomatik dönüş yapılmaz.
 
@@ -10,16 +10,20 @@ TomTom rota/Matrix yolu otomobil ve yolcu için korunur. TomTom ayarları ve hı
 
 Günlük motosiklet kullanımı mevcut beta profiline dayanır. Otoyol/ücretli yol/feribot/kaplamasız yol tercihleri, tüm yollar için yüzey veya kesin otoyol dışlama güvencesi değildir. Yeni macera modu, çevrimdışı yeni rota motoru, Wear OS, protokol, şema, yedek veya bağımlılık değişikliği yoktur.
 
+0.13.3'te tanımlanan harita seçimi bu 0.13.4 kaynak/belge teslimine dahildir. Seçim paneli ile alt işlem çubuğunun çakışması giderildi; dar/yatay görünümde liste satırlarına kaydırarak erişim korunur.
+
 | Aşama | Durum ve kabul sınırı |
 |---|---|
-| Host — `e670a7b` | Yeni birleşik çağrıda 1.722 birim testi geçti; güncel Debug lint raporu 0 hata / 120 uyarı. Uygulama/test APK üretimi ve AndroidTest derlemesi tamamlandı. Önceki adayın PASS sonucu aktarılmadı. |
+| Host — `c16874f` / `0de5565` | Ürün kaynağı `c16874f` üzerinde yeni birleşik çağrıda 1.722 birim testi geçti; lint 0 hata / 120 uyarı, uygulama/test üretimi ve AndroidTest derlemesi tamamlandı. Son test-only `0de5565` derleme/test APK/lint çağrısı 128,922 saniyede geçti; değişmeyen ürün, yapılandırma ve unit girdileriyle uygulama/unit kanıtı yeniden kullanıldı. |
 | Derlenmiş test imzaları | 24 test ve dört lifecycle metodu doğrulandı; bir eski Main testi açıkça dışlandı. Bu, cihazda çalıştırma kanıtı değildir. |
-| Cihaz ve görsel kabul | Motosiklet kontrolleri, son UI/UX görüntü kabulü ve önceki harita seçiminin 20 kontrol/altı görüntü kapsamı bekliyor. |
-| Güvenlik | Son adaya yönelik odaklı inceleme bekliyor. |
+| Telefon kabulü | 24 kontrol: ilgili kaynak/yapılandırma uyumuyla korunan 17 önceki sonuç ve son ürün üzerinde ayrı 4, 2, 1 kontrollük koşularda geçen yedi sonuç. Tek final APK'da yeniden koşulmuş 24 test iddiası değildir. |
+| Görsel kapsam | Altı durumun UI/UX incelemesinde görünür engelleyici yok. Bilgi/geri dönüş görüntüleri yeni; diğer dört gözlem aynı ürün uyumuyla korunuyor. |
+| Kaynak güvenliği | Doğrulanmış kaynak bulgusu yok. İçe aktarılan katalog verisinin kökeni için `needs_validation` korunuyor; bu, son APK çiftinin bağımsız güvenlik kararı yerine geçmez. |
 | Canlı Valhalla | Ayrı şehir içi okuması HTTP öncesi TLS aşamasında engelli; şehirler arası okuma çalıştırılmadı. Canlı servis kabulü yok. Önceki engelli Overpass okuması tekrarlanmadı. |
-| Dağıtım | Yayımlanmamış kaynak adayı; yayın ve cihaz kabulü yok. |
+| Kapsam dışı | Gerçek GNSS, OSM'ye yazma, elle TalkBack, canlı harita karoları, Wear ve fiziksel Android Auto bu turda doğrulanmadı. |
+| Dağıtım | Kaynak/belge teslimi; tag, Release veya APK dağıtımı içermez. |
 
-## Telefon 0.13.3 / code 32 — haritadan yer seçimi (yayımlanmamış kaynak adayı)
+## Telefon 0.13.3 / code 32 — haritadan yer seçimi (0.13.4 teslimine dahil)
 
 Haritaya açıkça dokunma, yakındaki OSM yerlerini getirir. Birden fazla sonuç numaralı işaretçiler ve alttaki listede gösterilir. Listenin yüksekliği sürükleyerek değiştirilebilir veya liste daraltılabilir; açıkta kalan harita kullanılabilir. Satır veya işaretçi seçimi ayrıntıları kendiliğinden açmaz: seçilen yer için **Bilgileri aç** kullanılır. Bilgilerden geri dönüş listeyi, kaydırma konumunu ve seçimi yeni sorgu yapmadan korur. Tek sonuç doğrudan bilgi kartını açar.
 
@@ -27,12 +31,12 @@ Yalnız seçilen basit kapalı OSM alanının gösterim sınırı alınır. Geom
 
 | Aşama | Durum ve kabul sınırı |
 |---|---|
-| Host — `feb2ba7` | 1.698 birim testi geçti; güncel Debug lint raporu 0 hata / 119 uyarı. AndroidTest derlemesi ve test APK üretimi tamamlandı. Test dosyası değişikliklerinden etkilenmeyen uygulama APK'sı ürün/yapılandırma eşleşmesiyle yeniden kullanıldı. |
+| Tarihsel host — `feb2ba7` | Önceki kaynakta 1.698 birim testi, lint 0 hata / 119 uyarı, AndroidTest derlemesi/test üretimi geçti; uygulama APK'sı ürün/yapılandırma uyumuyla yeniden kullanıldı. Birleşik teslimin güncel kanıtı 0.13.4 bölümündedir. |
 | Derlenmiş test imzaları | 20 test ve üç lifecycle metodu doğrulandı; bir eski Main testi açıkça dışlandı. Bu kontrol cihazda çalıştırma veya runtime kabulü değildir. |
-| Cihaz ve görsel kabul | Seçili 20 cihaz testi ve altı görüntülük inceleme ile son UI/UX kabulü bekliyor. |
-| Güvenlik | Son adaya yönelik odaklı inceleme bekliyor; önceki sürümün sonucu bu adayın kabulü sayılmaz. |
+| Telefon ve görsel kabul | Bu harita özelliği 0.13.4 tesliminin parçasıdır; ayrı kanıt kayıtlarıyla 24 kontrol ve altı durumun görsel kapsamı üstte açıklanır. |
+| Güvenlik | Kaynak incelemesi ve sınırları 0.13.4 bölümünde belirtilir; önceki sürümün sonucu yeni adayın kabulü sayılmaz. |
 | Canlı Overpass | Bilgisayardan yapılan ayrı yapılandırılmış uç nokta okuması engelli; canlı servis kabulü tamamlanmadı. |
-| Dağıtım | Yayımlanmamış kaynak adayı; APK dağıtımı ve cihaz kabulü yok. |
+| Dağıtım | 0.13.4 kaynak/belge teslimine dahil; ayrı 0.13.3 APK dağıtımı yok. |
 
 ## Telefon 0.13.2 / code 31 — haritadan OSM düzenleme
 
