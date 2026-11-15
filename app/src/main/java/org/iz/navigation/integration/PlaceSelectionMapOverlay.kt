@@ -43,7 +43,8 @@ import kotlin.math.roundToInt
 @Composable
 internal fun PlaceSelectionMapOverlay(map: MapLibreMap?, owner: PlaceInformationDiscoveryOwner,
     baseInsets: PaddingValues = PaddingValues(16.dp), styleRevision: Int = 0, onSelected: () -> Unit = {},
-    onPriorityHit: (Offset) -> Boolean = { false }, onLongPress: (Offset) -> Unit = {}) {
+    onPriorityHit: (Offset) -> Boolean = { false }, onLongPress: (Offset) -> Unit = {},
+    panelInsets: PaddingValues = PaddingValues(top = baseInsets.calculateTopPadding()), compactPanel: Boolean = false) {
     val state = owner.state
     var projected by remember(map) { mutableStateOf(emptyList<Offset>()) }
     val currentCandidates by rememberUpdatedState(state.candidates)
@@ -58,6 +59,8 @@ internal fun PlaceSelectionMapOverlay(map: MapLibreMap?, owner: PlaceInformation
     val base = with(density) { listOf(baseInsets.calculateLeftPadding(direction).roundToPx(),
         baseInsets.calculateTopPadding().roundToPx(), baseInsets.calculateRightPadding(direction).roundToPx(),
         baseInsets.calculateBottomPadding().roundToPx()) }
+    val panelBottomPx = with(density) { panelInsets.calculateBottomPadding().roundToPx() }
+    val panelTopPx = with(density) { panelInsets.calculateTopPadding().roundToPx() }
     DisposableEffect(map) {
         fun project() { projected = currentCandidates.map { candidate ->
             val point = map?.projection?.toScreenLocation(GeoCoordinate(candidate.place.latitude, candidate.place.longitude).mapCoordinate())
@@ -80,10 +83,10 @@ internal fun PlaceSelectionMapOverlay(map: MapLibreMap?, owner: PlaceInformation
     LaunchedEffect(map, styleRevision, outlineJson) {
         map?.updateMeasuredGeoJson(MAP_OUTLINE_SOURCE, outlineJson, PowerDiagnostics.Metric.MAP_ROUTE)
     }
-    LaunchedEffect(map, state.selectedRef, state.selectedCandidate?.outline, panelPx, base, viewport) {
+    LaunchedEffect(map, state.selectedRef, state.selectedCandidate?.outline, panelPx, panelTopPx, panelBottomPx, compactPanel, base, viewport) {
         val target = map ?: return@LaunchedEffect
-        val padding = doubleArrayOf(base[0].toDouble(), base[1].toDouble(), base[2].toDouble(),
-            maxOf(base[3], panelPx + with(density) { 12.dp.roundToPx() }).toDouble())
+        val padding = doubleArrayOf(base[0].toDouble(), panelTopPx.toDouble(), base[2].toDouble(),
+            maxOf(base[3], panelPx + panelBottomPx + with(density) { (if (compactPanel) 0.dp else 12.dp).roundToPx() }).toDouble())
         val candidate = state.selectedCandidate
         if (viewport.width <= padding[0] + padding[2] || viewport.height <= padding[1] + padding[3]) return@LaunchedEffect
         if (candidate != null) {
@@ -125,6 +128,6 @@ internal fun PlaceSelectionMapOverlay(map: MapLibreMap?, owner: PlaceInformation
                 }
             }
         }
-        PlaceInformationDiscoveryContent(owner, Modifier.padding(top = baseInsets.calculateTopPadding()), onPanelHeight = { panelPx = it })
+        PlaceInformationDiscoveryContent(owner, Modifier.padding(panelInsets), onPanelHeight = { panelPx = it }, compactLayout = compactPanel)
     }
 }

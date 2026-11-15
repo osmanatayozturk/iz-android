@@ -96,10 +96,12 @@ class MainMapOsmEditorEntryTest {
             val (view, map) = readyMap(host)
             val fixture = discoverSynthetic(app, host, view, map)
             compose.onNodeWithTag("place-info-open-information").assertIsNotEnabled()
-            compose.onNodeWithTag("place-info-discovery-choice-0").assertIsNotSelected()
-            compose.onNodeWithTag("place-info-discovery-choice-1").assertIsNotSelected()
+            selectionRow(0).assertIsNotSelected()
+            selectionRow(1).assertIsNotSelected()
+            selectionRow(0)
             OsmLightEditorNativeCapture.capture("map-01-many")
-            compose.onNodeWithTag("place-info-discovery-choice-0").performClick().assertIsSelected()
+            clickSelectionRow(0)
+            compose.onNodeWithTag("place-info-discovery-choice-0").assertIsSelected()
             compose.onNodeWithTag("place-info-map-candidate-0").assertIsSelected()
             compose.onNodeWithTag("place-info-open-information").assertIsEnabled()
             OsmLightEditorNativeCapture.capture("map-02-point")
@@ -141,7 +143,8 @@ class MainMapOsmEditorEntryTest {
             withOfflineMainActivity(app) { host ->
                 val (view, map) = readyMap(host)
                 val fixture = discoverSynthetic(app, host, view, map, area = true)
-                compose.onNodeWithTag("place-info-discovery-choice-1").assertTextContains(fixture.wayName).performClick()
+                selectionRow(1).assertTextContains(fixture.wayName)
+                clickSelectionRow(1)
                 compose.waitUntil(10_000) { onMain {
                     map.queryRenderedFeatures(RectF(0f, 0f, view.width.toFloat(), view.height.toFloat()), "selected-place-area-fill")
                         .any { it.getNumberProperty("osmId")?.toLong() == fixture.wayId && it.geometry()?.type() == "Polygon" }
@@ -181,11 +184,12 @@ class MainMapOsmEditorEntryTest {
             var original = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             host.onActivity { original = it.requestedOrientation; it.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE }
             try {
-                compose.waitUntil(10_000) { app.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE }
+                val (view, map) = readyMap(host, Configuration.ORIENTATION_LANDSCAPE)
                 OsmLightEditorQaTargetAdmission.requireAdmittedTarget(allowLandscape = true)
-                val (view, map) = readyMap(host)
                 discoverSynthetic(app, host, view, map)
-                compose.onNodeWithTag("place-info-discovery-choice-0").performClick().assertIsSelected()
+                selectionRow(1).assertIsNotSelected()
+                clickSelectionRow(0)
+                compose.onNodeWithTag("place-info-discovery-choice-0").assertIsSelected()
                 compose.onNodeWithTag("place-info-open-information").assertIsEnabled().assertIsDisplayed()
                 compose.onNodeWithTag("place-info-discovery-collapse").assertHeightIsAtLeast(androidx.compose.ui.unit.Dp(48f))
                 OsmLightEditorNativeCapture.capture("map-06-landscape")
@@ -194,7 +198,13 @@ class MainMapOsmEditorEntryTest {
                 compose.onNodeWithTag("place-info-open-information").assertIsDisplayed()
                 compose.onNodeWithTag("place-info-discovery-close").performClick()
                 assertEquals(baselineSession, session(app))
-            } finally { host.onActivity { it.requestedOrientation = original } }
+            } finally {
+                host.onActivity { it.requestedOrientation = original }
+                try { readyMap(host, Configuration.ORIENTATION_PORTRAIT) }
+                catch (failure: androidx.compose.ui.test.ComposeTimeoutException) {
+                    throw IllegalStateException("Owned Activity must finish portrait restoration before another fixture starts", failure)
+                }
+            }
         }
         assertEquals(before, DiaryRepository(app).snapshot())
     }
@@ -258,10 +268,43 @@ class MainMapOsmEditorEntryTest {
                 instrumentation.addResults(Bundle().apply { putString("osmMapSelectionTap_$nonce", report.toString()) })
             }
         }
-        if (count == 2) compose.waitUntil(10_000) { compose.onAllNodesWithTag("place-info-discovery-choice-1").fetchSemanticsNodes().isNotEmpty() }
+        // Lazy rows outside the viewport need not be composed (especially in landscape).
+        if (count == 2) compose.onNode(hasScrollToIndexAction() and hasAnyAncestor(hasTestTag("place-info-discovery"))).assertExists()
         if (count == 0) compose.waitUntil(10_000) { compose.onAllNodesWithTag("place-info-discovery-choice-0").fetchSemanticsNodes().isEmpty() &&
             compose.onAllNodesWithText("Yakında bir OSM yeri veya bina bulunamadı. Yeni OSM mekânı için haritaya uzun basabilirsin.").fetchSemanticsNodes().isNotEmpty() }
         return fixture
+    }
+
+    private fun selectionRow(index: Int): SemanticsNodeInteraction {
+        compose.onNode(hasScrollToIndexAction() and hasAnyAncestor(hasTestTag("place-info-discovery")))
+            .performScrollToIndex(index)
+        return compose.onNodeWithTag("place-info-discovery-choice-$index").assertIsDisplayed()
+            .assertHeightIsAtLeast(androidx.compose.ui.unit.Dp(64f))
+    }
+
+    private fun clickSelectionRow(index: Int) {
+        val row = selectionRow(index)
+        val target = row.fetchSemanticsNode().boundsInWindow.center
+        val panelBounds = compose.onNodeWithTag("place-info-discovery").fetchSemanticsNode().boundsInWindow
+        val footerBounds = compose.onNodeWithTag("home-bottom-actions").fetchSemanticsNode().boundsInWindow
+        assertTrue("Selection panel $panelBounds intersects footer $footerBounds", panelBounds.bottom <= footerBounds.top + 1f)
+        val mapNode = compose.onNodeWithTag("navigation-home-map").fetchSemanticsNode()
+        fun ancestors(node: SemanticsNode) = generateSequence(node) { it.parent }
+        val mapAncestors = ancestors(mapNode).map { it.id }.toSet()
+        val root = ancestors(mapNode).last().layoutInfo
+        val blockers = compose.onAllNodes(SemanticsMatcher("Main chrome outside map") { true }, useUnmergedTree = true)
+            .fetchSemanticsNodes().filter { node ->
+                ancestors(node).last().layoutInfo === root && node.id !in mapAncestors &&
+                    ancestors(node).none { it.id == mapNode.id } && node.boundsInWindow.contains(target)
+            }
+        assertTrue("Candidate $index physical center $target is covered by Main chrome: ${blockers.map { it.boundsInWindow }}", blockers.isEmpty())
+        instrumentation.addResults(Bundle().apply {
+            putString("osmSelectionRow_$index", JSONObject().put("rowBounds", row.fetchSemanticsNode().boundsInWindow.toString())
+                .put("center", target.toString()).put("panelBounds", panelBounds.toString())
+                .put("footerBounds", footerBounds.toString()).put("coveringChromeCount", blockers.size).toString())
+        })
+        // Keep the real center touch. Never invoke OnClick semantics to bypass another Surface.
+        row.performClick()
     }
 
     /** Forward the actual Main window unchanged; never replace the SDK's existing listeners. */
@@ -372,6 +415,7 @@ class MainMapOsmEditorEntryTest {
         fun ancestors(node: SemanticsNode) = generateSequence(node) { it.parent }
         val mapAncestors = ancestors(mapNode).map { it.id }.toSet()
         val mainRoot = ancestors(mapNode).last().layoutInfo
+        val selectionPanelId = compose.onAllNodesWithTag("place-info-discovery").fetchSemanticsNodes().singleOrNull()?.id
         val origin = onMain {
             check(view.isShown && view.hasWindowFocus()) { "Actual Main map must be visible and focused" }
             IntArray(2).also(view::getLocationInWindow)
@@ -387,7 +431,7 @@ class MainMapOsmEditorEntryTest {
         val blockers = compose.onAllNodes(SemanticsMatcher("Owned Main overlay geometry") { true }, useUnmergedTree = true)
             .fetchSemanticsNodes().filter { node ->
                 ancestors(node).last().layoutInfo === mainRoot && node.id !in mapAncestors &&
-                    (ancestors(node).none { it.id == mapNode.id } || node.config.contains(SemanticsActions.OnClick))
+                    (ancestors(node).none { it.id == mapNode.id } || node.id == selectionPanelId || node.config.contains(SemanticsActions.OnClick))
             }.map { it.boundsInWindow }.filter { it.width > 0f && it.height > 0f }
             .map { RectF(it.left - margin, it.top - margin, it.right + margin, it.bottom + margin) }
             .filter { RectF.intersects(inside, it) }
@@ -604,17 +648,27 @@ class MainMapOsmEditorEntryTest {
         listOf(it.sessionId, it.recording, it.guidance, it.journey?.id, it.route?.id)
     }
 
-    private fun readyMap(host: ActivityScenario<MainActivity>): Pair<MapView, MapLibreMap> {
+    private fun readyMap(host: ActivityScenario<MainActivity>, orientation: Int = Configuration.ORIENTATION_PORTRAIT): Pair<MapView, MapLibreMap> {
         var view: MapView? = null
-        compose.waitUntil(10_000) {
-            host.onActivity { view = it.window.decorView.findMap() }
-            view?.let { candidate -> onMain { candidate.isShown && candidate.width > 0 && candidate.height > 0 } } == true
-        }
-        val actual = requireNotNull(view)
         val loaded = AtomicReference<MapLibreMap?>()
-        onMain { actual.getMapAsync { loaded.set(it) } }
-        compose.waitUntil(10_000) { onMain { loaded.get()?.style?.isFullyLoaded == true } }
-        return actual to requireNotNull(loaded.get())
+        compose.waitUntil(10_000) {
+            var ready = false
+            host.onActivity { activity ->
+                val candidate = activity.window.decorView.findMap()
+                if (activity.resources.configuration.orientation == orientation && candidate != null &&
+                    candidate.isAttachedToWindow && candidate.isShown && candidate.width > 0 && candidate.height > 0 &&
+                    (if (orientation == Configuration.ORIENTATION_LANDSCAPE) candidate.width > candidate.height else candidate.height > candidate.width)) {
+                    if (view !== candidate) {
+                        view = candidate
+                        loaded.set(null)
+                        candidate.getMapAsync { if (view === candidate) loaded.set(it) }
+                    }
+                    ready = loaded.get()?.style?.isFullyLoaded == true
+                }
+            }
+            ready
+        }
+        return requireNotNull(view) to requireNotNull(loaded.get())
     }
 
     private fun longPressNative(x: Float, y: Float) {

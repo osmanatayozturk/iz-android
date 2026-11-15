@@ -9,6 +9,8 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
@@ -105,8 +107,12 @@ internal fun NavigationHomeContent(
     var panelsMeasurement by remember { mutableStateOf<Pair<List<Any?>, androidx.compose.ui.unit.Dp>?>(null) }
     var dashboardMeasurement by remember { mutableStateOf<Pair<List<Any?>, IntSize>?>(null) }
     var dashboardButtonMeasurement by remember { mutableStateOf<Pair<List<Any?>, androidx.compose.ui.unit.Dp>?>(null) }
+    var fixedTopMeasurement by remember { mutableStateOf<Pair<List<Any?>, androidx.compose.ui.unit.Dp>?>(null) }
+    var multiSelectionOpen by remember { mutableStateOf(false) }
     val dashboardEpoch = remember(dashboardVisible) { Any() }
     BoxWithConstraints(Modifier.fillMaxSize().testTag("navigation-home")) {
+        var bottomActionsHeight by remember(maxWidth, maxHeight, density.density, density.fontScale) { mutableStateOf(0.dp) }
+        val compactSelection = multiSelectionOpen && (maxWidth > maxHeight || maxHeight < 400.dp)
         val shortIdle = baseShowBrand && (maxWidth > maxHeight || maxHeight < 400.dp)
         val dashboardAtSide = dashboardVisible && maxWidth > maxHeight
         val dashboardKey = listOf(maxWidth, maxHeight, density.density, density.fontScale, dashboardAtSide, dashboardEpoch)
@@ -142,8 +148,12 @@ internal fun NavigationHomeContent(
         val controlsTopInset = headerHeight + shortcutOffset + if (shortIdle) 20.dp else 24.dp
         val horizontalMapControls = baseShowBrand && (shortIdle || controlsTopInset + 104.dp > maxHeight - 92.dp)
         // Compact branches depend on measured header/shortcut extents as well as input data.
-        val panelsKey = layoutKey + listOf(compact, shortIdle, headerHeight, shortcutOffset)
+        val panelsKey = layoutKey + listOf(compact, shortIdle, headerHeight, shortcutOffset, compactSelection)
         val panelsHeight = panelsMeasurement?.takeIf { it.first == panelsKey }?.second ?: 0.dp
+        val fixedTopHeight = fixedTopMeasurement?.takeIf { it.first == panelsKey }?.second ?: 0.dp
+        // Warnings stay outside this scroll. Reserve actions + one candidate and real map space.
+        val selectionHeaderBudget = (maxHeight - bottomActionsHeight - 112.dp - 48.dp - fixedTopHeight).coerceAtLeast(0.dp)
+        val selectionTopInset = panelsHeight + if (compactSelection) 0.dp else 24.dp
         // Never draw controls with a provisional offset when their own row/header changed.
         val controlsReady = (!showDestinationHeader || headerMeasurement?.first == headerKey) &&
             (!showShortcuts || shortcutMeasurement?.first == shortcutKey) &&
@@ -211,19 +221,28 @@ internal fun NavigationHomeContent(
             drivingCamera = phoneDriveCameraInput(nav, showPlanner, android.os.SystemClock.elapsedRealtime()),
             cameraViewportReady = viewportReady, navigationControlsReady = controlsReady,
             navigationLayout = true, members = members, onLocate = onLocate, onMapLongClick = onPin,
-            navigationControlsTopInset = if (presentation.editPreviewLabel != null)
+            navigationControlsTopInset = if (compactSelection) selectionTopInset else if (presentation.editPreviewLabel != null)
                 panelsHeight + 24.dp else controlsTopInset,
             navigationControlsHorizontal = horizontalMapControls,
             attributionBottomInset = if (dashboardBottomHeight > 0.dp) dashboardBottomHeight + 92.dp else if (showPlanner && !dashboardVisible) maxHeight * .64f + 4.dp else 92.dp,
             cameraViewportInsets = PaddingValues(start = 28.dp,
-                top = if (externalHeader) 24.dp else if (shortIdle) controlsTopInset else panelsHeight + 24.dp,
+                top = if (externalHeader) 24.dp else if (compactSelection) selectionTopInset else if (shortIdle) controlsTopInset else panelsHeight + 24.dp,
                 end = if (externalHeader) 28.dp else if (horizontalMapControls) 124.dp else 84.dp,
                 bottom = if (dashboardBottomHeight > 0.dp) dashboardBottomHeight + 112.dp else if (showPlanner && !dashboardVisible) maxHeight * .64f + 24.dp else 112.dp + dashboardButtonHeight),
             navigationHeader = if (externalHeader) navigationHeader else null, layersRequest = layersRequest,
-            onOsmPlaceClick = onOsmPlaceClick, placeInformationIdentity = placeInformationIdentity)
-        if (!externalHeader) Column(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(end = dashboardSideWidth).padding(12.dp)
-            .onSizeChanged { panelsMeasurement = panelsKey to with(density) { it.height.toDp() } }, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            entryPanels()
+            onOsmPlaceClick = onOsmPlaceClick, placeInformationIdentity = placeInformationIdentity,
+            selectionPanelInsets = PaddingValues(top = if (externalHeader) 0.dp else selectionTopInset,
+                bottom = bottomActionsHeight), compactSelectionPanel = compactSelection,
+            onMultiSelectionOpenChanged = { multiSelectionOpen = it })
+        if (!externalHeader) Column(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(end = dashboardSideWidth)
+            .padding(horizontal = 12.dp, vertical = if (compactSelection) 0.dp else 12.dp)
+            .onSizeChanged { panelsMeasurement = panelsKey to with(density) { it.height.toDp() } },
+            verticalArrangement = Arrangement.spacedBy(if (compactSelection) 0.dp else 8.dp)) {
+            if (compactSelection) Column(Modifier.fillMaxWidth().heightIn(max = selectionHeaderBudget)
+                .verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) { entryPanels() }
+            else entryPanels()
+            Column(Modifier.fillMaxWidth().onSizeChanged { fixedTopMeasurement = panelsKey to with(density) { it.height.toDp() } },
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (!showPlanner && !dashboardVisible && live) {
                 HomeSessionCard(nav, onMute, onManageSession, Modifier.padding(end = 60.dp),
                     plannedBreakResumeEnabled = plannedBreakResumeEnabled, onResumePlannedBreak = onResumePlannedBreak) {
@@ -241,6 +260,7 @@ internal fun NavigationHomeContent(
             if (!showPlanner && !dashboardVisible) statusMessage()
             if (!showPlanner && !dashboardVisible && !shortIdle) HomeWeatherChip(weatherLabel, onWeather,
                 if (compact && live) Modifier.align(Alignment.End).widthIn(max = compactWeatherWidth) else Modifier)
+            }
         }
         if (showPlanner && !dashboardVisible) Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(.64f).padding(bottom = 88.dp),
             shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp), shadowElevation = 8.dp,
@@ -256,7 +276,10 @@ internal fun NavigationHomeContent(
                 dashboardButtonMeasurement = dashboardButtonKey to with(density) { it.height.toDp() }
             })
         }
-        Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(end = dashboardSideWidth).padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+        Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+            .onSizeChanged { bottomActionsHeight = with(density) { it.height.toDp() } }
+            .testTag("home-bottom-actions")
+            .padding(end = dashboardSideWidth).padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
             shape = RoundedCornerShape(24.dp), shadowElevation = 6.dp, color = MaterialTheme.colorScheme.surface) {
             Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilledTonalButton(onRecord, Modifier.weight(1f).height(56.dp).testTag("home-record"),

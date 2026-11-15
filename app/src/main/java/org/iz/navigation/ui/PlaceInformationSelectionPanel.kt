@@ -29,10 +29,10 @@ import java.util.Locale
 
 @Composable
 internal fun PlaceInformationDiscoveryContent(owner: PlaceInformationDiscoveryOwner, modifier: Modifier = Modifier,
-    onPanelHeight: (Int) -> Unit = {}) {
+    onPanelHeight: (Int) -> Unit = {}, compactLayout: Boolean = false) {
     val state = owner.state
     PlaceInformationSelectionPanel(state, { owner.choose(it, state.generation) }, { owner.openInformation(state.generation, state.selectedRef) },
-        { owner.close() }, owner::retry, owner::showAll, modifier, onPanelHeight, owner::retryOutline)
+        { owner.close() }, owner::retry, owner::showAll, modifier, onPanelHeight, owner::retryOutline, compactLayout)
 }
 
 /** Plain state/events content; no app graph, query or modal scrim. Map remains interactive above it. */
@@ -40,7 +40,7 @@ internal fun PlaceInformationDiscoveryContent(owner: PlaceInformationDiscoveryOw
 internal fun PlaceInformationSelectionPanel(state: PlaceInformationDiscoveryState,
     onChoose: (SelectedOsmPlace) -> Unit, onInformation: () -> Unit, onClose: () -> Unit,
     onRetry: () -> Unit, onShowAll: () -> Unit, modifier: Modifier = Modifier,
-    onPanelHeight: (Int) -> Unit = {}, onRetryOutline: () -> Unit = {}) {
+    onPanelHeight: (Int) -> Unit = {}, onRetryOutline: () -> Unit = {}, compactLayout: Boolean = false) {
     DisposableEffect(state.open) { if (!state.open) onPanelHeight(0); onDispose { onPanelHeight(0) } }
     if (!state.open) return
     BackHandler(onBack = onClose)
@@ -49,8 +49,10 @@ internal fun PlaceInformationSelectionPanel(state: PlaceInformationDiscoveryStat
         var fraction by rememberSaveable(state.generation) { mutableFloatStateOf(.5f) }
         var collapsed by rememberSaveable(state.generation) { mutableStateOf(false) }
         val availablePx = with(density) { maxHeight.toPx() }.coerceAtLeast(1f)
+        // Only compact multi-selection trades the usual minimum for actions + one full row.
+        val minimumExpandedHeight = if (compactLayout) minOf(112.dp, maxHeight) else minOf(160.dp, maxHeight * .7f)
         val height = if (collapsed) minOf(56.dp, maxHeight)
-            else (maxHeight * fraction).coerceIn(minOf(160.dp, maxHeight * .7f), maxHeight * .8f)
+            else (maxHeight * fraction).coerceIn(minimumExpandedHeight, maxOf(minimumExpandedHeight, maxHeight * .8f))
         val drag = rememberDraggableState { delta ->
             collapsed = false
             fraction = (fraction - delta / availablePx).coerceIn(.2f, .8f)
@@ -73,7 +75,7 @@ internal fun PlaceInformationSelectionPanel(state: PlaceInformationDiscoveryStat
                         .testTag("place-info-discovery-close")) { Text("Kapat") }
                 }
                 if (!collapsed) LazyColumn(Modifier.fillMaxWidth().weight(1f), state = list,
-                    contentPadding = PaddingValues(bottom = 12.dp)) {
+                    contentPadding = PaddingValues(bottom = if (compactLayout) 0.dp else 12.dp)) {
                     if (state.busy) item { Column(Modifier.padding(12.dp)) {
                         LinearProgressIndicator(Modifier.fillMaxWidth()); Text("OSM yerleri aranıyor…")
                     } }

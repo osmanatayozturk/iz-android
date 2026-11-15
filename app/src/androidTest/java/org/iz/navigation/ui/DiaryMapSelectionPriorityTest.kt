@@ -62,7 +62,11 @@ class DiaryMapSelectionPriorityTest {
         val previous = main { MapLibre.getInstance(app); MapLibre.getModuleProvider() }
         val offline = MainMapOsmEditorEntryTest.NoNetworkMaps(previous)
         main { MapLibre.setModuleProvider(offline) }
-        val place = Place(id = "qa-private-${UUID.randomUUID()}", name = "Synthetic private pin", latitude = 35.1234, longitude = 25.1234)
+        // A new synthetic cache cell per method/run; both discoveries in this method reuse it.
+        val origin = UUID.randomUUID()
+        val place = Place(id = "qa-private-$origin", name = "Synthetic private pin",
+            latitude = 30.0 + (origin.mostSignificantBits ushr 1) % 100_000 * .0002,
+            longitude = 20.0 + (origin.leastSignificantBits ushr 1) % 100_000 * .0002)
         val chosen = mutableListOf<Place>()
         val sample = RouteWeatherSample(WeatherCoordinate(place.latitude!!, place.longitude!!), 0.0, 1L,
             WeatherReading(null, null, null, null, null, null), emptySet(), false)
@@ -107,7 +111,14 @@ class DiaryMapSelectionPriorityTest {
                 val key = "nearby:editor-v2:${OsmPresetCatalog.BUNDLED_SHA256}:${OsmServiceSettings(app).read().overpass}:${String.format(Locale.US, "%.4f", tapped.latitude)}:${String.format(Locale.US, "%.4f", tapped.longitude)}"
                 // The second invocation uses exactly the admitted fixture, without replacing it.
                 if (chosen.isEmpty() && sampleChosen.isEmpty()) MapSelectionCacheFixture.store(app, key, JSONObject().put("elements", elements).toString())
-                compose.onRoot().performTouchInput { click(androidx.compose.ui.geometry.Offset(tapPixel.x, tapPixel.y)) }
+                // MapLibre coordinates are local to MapView, not the Compose root (status inset).
+                val mapOrigin = main { IntArray(2).also(actual::getLocationOnScreen) }
+                val root = compose.onRoot().fetchSemanticsNode()
+                val rootOrigin = root.positionOnScreen
+                val rootPixel = androidx.compose.ui.geometry.Offset(
+                    mapOrigin[0] + tapPixel.x - rootOrigin.x, mapOrigin[1] + tapPixel.y - rootOrigin.y)
+                check(rootPixel.x in 0f..root.size.width.toFloat() && rootPixel.y in 0f..root.size.height.toFloat())
+                compose.onRoot().performTouchInput { click(rootPixel) }
                 compose.waitUntil(10_000) { compose.onAllNodesWithTag("place-info-map-candidate-0").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithTag("place-info-discovery-collapse").performClick()
             }

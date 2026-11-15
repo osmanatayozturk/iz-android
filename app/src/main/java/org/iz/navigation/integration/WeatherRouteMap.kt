@@ -101,6 +101,9 @@ fun WeatherRouteMap(
     layersRequest: Int = 0,
     onOsmPlaceClick: ((org.iz.navigation.data.SelectedOsmPlace) -> Unit)? = null,
     placeInformationIdentity: Any? = null,
+    selectionPanelInsets: PaddingValues = PaddingValues(top = cameraViewportInsets.calculateTopPadding()),
+    compactSelectionPanel: Boolean = false,
+    onMultiSelectionOpenChanged: (Boolean) -> Unit = {},
     overlay: @Composable BoxScope.() -> Unit = {},
 ) {
     ExpandableMap(modifier = modifier, title = title, expandable = expandable) { mapModifier ->
@@ -110,7 +113,8 @@ fun WeatherRouteMap(
                     liveCoordinate, recordedPoints, gpsStale, singleStopLabel, cameraIdentity, navigationLayout,
                     members, onLocate, attributionBottomInset, cameraViewportInsets, navigationControlsTopInset,
                     navigationControlsHorizontal, drivingCamera, cameraViewportReady, navigationControlsReady,
-                    preparedRoutes, navigationHeader, layersRequest, onOsmPlaceClick, placeInformationIdentity)
+                    preparedRoutes, navigationHeader, layersRequest, onOsmPlaceClick, placeInformationIdentity,
+                    selectionPanelInsets, compactSelectionPanel, onMultiSelectionOpenChanged)
             }
             overlay()
         }
@@ -144,6 +148,9 @@ private fun ColumnScope.WeatherRouteMapContent(
     layersRequest: Int,
     onOsmPlaceClick: ((org.iz.navigation.data.SelectedOsmPlace) -> Unit)?,
     placeInformationIdentity: Any?,
+    selectionPanelInsets: PaddingValues,
+    compactSelectionPanel: Boolean,
+    onMultiSelectionOpenChanged: (Boolean) -> Unit,
 ) {
     val context = LocalContext.current
     val selectOsmPlace by rememberUpdatedState(onOsmPlaceClick)
@@ -159,6 +166,10 @@ private fun ColumnScope.WeatherRouteMapContent(
                 discoveryLifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) },
             outline = { places.selectedOutline(requireNotNull(it.place.osmRef)) })
     }
+    val currentMultiSelectionChanged by rememberUpdatedState(onMultiSelectionOpenChanged)
+    val multiSelectionOpen = discovery.state.open && discovery.state.candidates.size > 1
+    LaunchedEffect(multiSelectionOpen) { currentMultiSelectionChanged(multiSelectionOpen) }
+    DisposableEffect(Unit) { onDispose { currentMultiSelectionChanged(false) } }
     DisposableEffect(discovery, discoveryLifecycle) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_PAUSE) discovery.close() }
         discoveryLifecycle.addObserver(observer)
@@ -446,7 +457,8 @@ private fun ColumnScope.WeatherRouteMapContent(
                 ?.firstOrNull()?.getNumberProperty("sampleIndex")?.toInt()
             val sample = index?.let { assessment?.samples?.getOrNull(it) }
             if (sample != null) { discovery.close(); onSampleClick(sample); true } else false
-        }, onLongPress = { point -> map?.projection?.fromScreenLocation(android.graphics.PointF(point.x, point.y))?.let {
+        }, panelInsets = selectionPanelInsets, compactPanel = compactSelectionPanel,
+        onLongPress = { point -> map?.projection?.fromScreenLocation(android.graphics.PointF(point.x, point.y))?.let {
             discovery.close(); onMapLongClick(GeoCoordinate(it.latitude, it.longitude))
         } })
         if (navigationLayout) {
