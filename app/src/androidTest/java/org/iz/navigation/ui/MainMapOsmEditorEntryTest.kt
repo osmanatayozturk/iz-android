@@ -181,30 +181,21 @@ class MainMapOsmEditorEntryTest {
         val before = DiaryRepository(app).snapshot()
         val baselineSession = session(app)
         withOfflineMainActivity(app) { host ->
-            var original = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-            host.onActivity { original = it.requestedOrientation; it.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE }
-            try {
-                val (view, map) = readyMap(host, Configuration.ORIENTATION_LANDSCAPE)
-                OsmLightEditorQaTargetAdmission.requireAdmittedTarget(allowLandscape = true)
-                discoverSynthetic(app, host, view, map)
-                selectionRow(1).assertIsNotSelected()
-                clickSelectionRow(0)
-                compose.onNodeWithTag("place-info-discovery-choice-0").assertIsSelected()
-                compose.onNodeWithTag("place-info-open-information").assertIsEnabled().assertIsDisplayed()
-                compose.onNodeWithTag("place-info-discovery-collapse").assertHeightIsAtLeast(androidx.compose.ui.unit.Dp(48f))
-                OsmLightEditorNativeCapture.capture("map-06-landscape")
-                assertExposedMapPans(app, view, map)
-                compose.onNodeWithTag("place-info-discovery-collapse").performClick()
-                compose.onNodeWithTag("place-info-open-information").assertIsDisplayed()
-                compose.onNodeWithTag("place-info-discovery-close").performClick()
-                assertEquals(baselineSession, session(app))
-            } finally {
-                host.onActivity { it.requestedOrientation = original }
-                try { readyMap(host, Configuration.ORIENTATION_PORTRAIT) }
-                catch (failure: androidx.compose.ui.test.ComposeTimeoutException) {
-                    throw IllegalStateException("Owned Activity must finish portrait restoration before another fixture starts", failure)
-                }
-            }
+            host.onActivity { it.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE }
+            val (view, map) = readyMap(host, Configuration.ORIENTATION_LANDSCAPE, "LANDSCAPE_ENTRY")
+            OsmLightEditorQaTargetAdmission.requireAdmittedTarget(allowLandscape = true)
+            discoverSynthetic(app, host, view, map)
+            selectionRow(1).assertIsNotSelected()
+            clickSelectionRow(0)
+            compose.onNodeWithTag("place-info-discovery-choice-0").assertIsSelected()
+            compose.onNodeWithTag("place-info-open-information").assertIsEnabled().assertIsDisplayed()
+            compose.onNodeWithTag("place-info-discovery-collapse").assertHeightIsAtLeast(androidx.compose.ui.unit.Dp(48f))
+            OsmLightEditorNativeCapture.capture("map-06-landscape")
+            assertExposedMapPans(app, view, map)
+            compose.onNodeWithTag("place-info-discovery-collapse").performClick()
+            compose.onNodeWithTag("place-info-open-information").assertIsDisplayed()
+            compose.onNodeWithTag("place-info-discovery-close").performClick()
+            assertEquals(baselineSession, session(app))
         }
         assertEquals(before, DiaryRepository(app).snapshot())
     }
@@ -287,16 +278,18 @@ class MainMapOsmEditorEntryTest {
     private fun clickSelectionRow(index: Int) {
         val row = selectionRow(index)
         val target = row.fetchSemanticsNode().boundsInWindow.center
-        val panelBounds = compose.onNodeWithTag("place-info-discovery").fetchSemanticsNode().boundsInWindow
+        val panel = compose.onNodeWithTag("place-info-discovery", useUnmergedTree = true).fetchSemanticsNode()
+        val panelBounds = panel.boundsInWindow
         val footerBounds = compose.onNodeWithTag("home-bottom-actions").fetchSemanticsNode().boundsInWindow
         assertTrue("Selection panel $panelBounds intersects footer $footerBounds", panelBounds.bottom <= footerBounds.top + 1f)
-        val mapNode = compose.onNodeWithTag("navigation-home-map").fetchSemanticsNode()
+        val mapNode = compose.onNodeWithTag("navigation-home-map", useUnmergedTree = true).fetchSemanticsNode()
         fun ancestors(node: SemanticsNode) = generateSequence(node) { it.parent }
         val mapAncestors = ancestors(mapNode).map { it.id }.toSet()
         val root = ancestors(mapNode).last().layoutInfo
         val blockers = compose.onAllNodes(SemanticsMatcher("Main chrome outside map") { true }, useUnmergedTree = true)
             .fetchSemanticsNodes().filter { node ->
                 ancestors(node).last().layoutInfo === root && node.id !in mapAncestors &&
+                    ancestors(node).none { it.id == panel.id } &&
                     ancestors(node).none { it.id == mapNode.id } && node.boundsInWindow.contains(target)
             }
         assertTrue("Candidate $index physical center $target is covered by Main chrome: ${blockers.map { it.boundsInWindow }}", blockers.isEmpty())
@@ -650,26 +643,48 @@ class MainMapOsmEditorEntryTest {
         listOf(it.sessionId, it.recording, it.guidance, it.journey?.id, it.route?.id)
     }
 
-    private fun readyMap(host: ActivityScenario<MainActivity>, orientation: Int = Configuration.ORIENTATION_PORTRAIT): Pair<MapView, MapLibreMap> {
+    private fun readyMap(host: ActivityScenario<MainActivity>, orientation: Int = Configuration.ORIENTATION_PORTRAIT,
+        stage: String = "INITIAL_MAIN"): Pair<MapView, MapLibreMap> {
         var view: MapView? = null
         val loaded = AtomicReference<MapLibreMap?>()
-        compose.waitUntil(10_000) {
+        val transitions = JSONArray()
+        var lastState = ""
+        fun report() = JSONObject().put("stage", stage).put("expectedOrientation", orientation)
+            .put("waitLimitMs", 10_000).put("transitions", transitions).put("lastState", JSONObject(lastState.ifEmpty { "{}" }))
+        try { compose.waitUntil(10_000) {
             var ready = false
             host.onActivity { activity ->
                 val candidate = activity.window.decorView.findMap()
-                if (activity.resources.configuration.orientation == orientation && candidate != null &&
-                    candidate.isAttachedToWindow && candidate.isShown && candidate.width > 0 && candidate.height > 0 &&
-                    (if (orientation == Configuration.ORIENTATION_LANDSCAPE) candidate.width > candidate.height else candidate.height > candidate.width)) {
+                if (candidate != null && candidate.isAttachedToWindow && candidate.isShown && candidate.width > 0 && candidate.height > 0) {
                     if (view !== candidate) {
                         view = candidate
                         loaded.set(null)
                         candidate.getMapAsync { if (view === candidate) loaded.set(it) }
                     }
-                    ready = loaded.get()?.style?.isFullyLoaded == true
+                    ready = activity.resources.configuration.orientation == orientation &&
+                        activity.applicationContext.resources.configuration.orientation == orientation &&
+                        (if (orientation == Configuration.ORIENTATION_LANDSCAPE) candidate.width > candidate.height else candidate.height > candidate.width) &&
+                        loaded.get()?.style?.isFullyLoaded == true
+                }
+                val observation = JSONObject().put("activityIdentity", System.identityHashCode(activity))
+                    .put("activityOrientation", activity.resources.configuration.orientation)
+                    .put("applicationOrientation", activity.applicationContext.resources.configuration.orientation)
+                    .put("requestedOrientation", activity.requestedOrientation)
+                    .put("viewIdentity", candidate?.let(System::identityHashCode))
+                    .put("attached", candidate?.isAttachedToWindow).put("shown", candidate?.isShown)
+                    .put("windowFocus", candidate?.hasWindowFocus()).put("width", candidate?.width).put("height", candidate?.height)
+                    .put("mapIdentity", loaded.get()?.let(System::identityHashCode))
+                    .put("styleFullyLoaded", loaded.get()?.style?.isFullyLoaded).put("ready", ready).toString()
+                if (observation != lastState) {
+                    lastState = observation
+                    if (transitions.length() < 8) transitions.put(JSONObject(observation))
                 }
             }
             ready
-        }
+        } } catch (failure: androidx.compose.ui.test.ComposeTimeoutException) {
+            if (stage == "PORTRAIT_RESTORE") throw IllegalStateException("Owned portrait restoration did not settle: ${report()}", failure)
+            throw AssertionError("Actual Main map readiness did not settle: ${report()}", failure)
+        } finally { instrumentation.addResults(Bundle().apply { putString("osmMainMapReadiness_$stage", report().toString()) }) }
         return requireNotNull(view) to requireNotNull(loaded.get())
     }
 
@@ -702,7 +717,15 @@ class MainMapOsmEditorEntryTest {
         }
         try {
             val intent = Intent().setComponent(ComponentName(app.packageName, MainActivity::class.java.name))
-            ActivityScenario.launch<MainActivity>(intent).use { host -> block(host) }
+            ActivityScenario.launch<MainActivity>(intent).use { host ->
+                // Root-authorized owned fixture orientation; no user/global rotation setting writes.
+                host.onActivity { it.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT }
+                try { block(host) }
+                finally {
+                    host.onActivity { it.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT }
+                    readyMap(host, Configuration.ORIENTATION_PORTRAIT, "PORTRAIT_RESTORE")
+                }
+            }
         } finally {
             try { offline.drain(); offline.assertHealthy() }
             finally { onMain { MapLibre.setModuleProvider(previous); check(MapLibre.getModuleProvider() === previous) } }
