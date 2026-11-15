@@ -269,7 +269,9 @@ class MainMapOsmEditorEntryTest {
             }
         }
         // Lazy rows outside the viewport need not be composed (especially in landscape).
-        if (count == 2) compose.onNode(hasScrollToIndexAction() and hasAnyAncestor(hasTestTag("place-info-discovery"))).assertExists()
+        if (count == 2) compose.waitUntil(10_000) {
+            compose.onAllNodesWithTag("place-info-map-candidate-1").fetchSemanticsNodes().isNotEmpty()
+        }
         if (count == 0) compose.waitUntil(10_000) { compose.onAllNodesWithTag("place-info-discovery-choice-0").fetchSemanticsNodes().isEmpty() &&
             compose.onAllNodesWithText("Yakında bir OSM yeri veya bina bulunamadı. Yeni OSM mekânı için haritaya uzun basabilirsin.").fetchSemanticsNodes().isNotEmpty() }
         return fixture
