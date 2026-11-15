@@ -54,6 +54,12 @@ import org.iz.navigation.data.MapEditDraft
 import org.iz.navigation.data.MapEditFieldAction
 import org.iz.navigation.data.MapEditStage
 import org.iz.navigation.data.MapEditStatus
+import org.iz.navigation.data.OsmRef
+import org.iz.navigation.data.OsmType
+import org.iz.navigation.placeinfo.PlaceInfoKey
+import org.iz.navigation.placeinfo.PlaceInfoServices
+import org.iz.navigation.placeinfo.PublicPlaceCache
+import org.iz.navigation.placeinfo.PublicPlaceSnapshot
 import org.iz.navigation.osmcatalog.OsmPresetCatalog
 import org.iz.navigation.osmcatalog.OsmPresetGeometry
 import org.iz.navigation.tracking.TrackingService
@@ -94,7 +100,7 @@ class MainMapOsmEditorEntryTest {
         val baselineSession = session(app)
         withOfflineMainActivity(app) { host ->
             val (view, map) = readyMap(host)
-            val fixture = discoverSynthetic(app, host, view, map)
+            val fixture = discoverSynthetic(app, host, view, map, information = true)
             compose.onNodeWithTag("place-info-open-information").assertIsNotEnabled()
             selectionRow(0).assertIsNotSelected()
             selectionRow(1).assertIsNotSelected()
@@ -107,6 +113,7 @@ class MainMapOsmEditorEntryTest {
             OsmLightEditorNativeCapture.capture("map-02-point")
             compose.onNodeWithTag("place-info-open-information").performClick()
             compose.onNodeWithTag("place-information-card").assertExists()
+            awaitPublicInformation()
             compose.onNodeWithText(fixture.nodeName).assertExists()
             OsmLightEditorNativeCapture.capture("map-03-details")
             Espresso.pressBack()
@@ -122,8 +129,9 @@ class MainMapOsmEditorEntryTest {
             compose.onAllNodesWithTag("place-info-map-candidate-0").assertCountEquals(0)
             assertNotEquals(fixture.wayId, next.wayId)
             // A single way goes straight to the existing information window, without an outline.
-            val single = discoverSynthetic(app, host, view, map, count = 1)
+            val single = discoverSynthetic(app, host, view, map, count = 1, information = true)
             compose.waitUntil(10_000) { compose.onAllNodesWithTag("place-information-card").fetchSemanticsNodes().isNotEmpty() }
+            awaitPublicInformation()
             compose.onNodeWithText(single.wayName).assertExists()
             compose.onNodeWithTag("place-info-discovery").assertDoesNotExist()
             Espresso.pressBack()
@@ -210,7 +218,8 @@ class MainMapOsmEditorEntryTest {
 
     private data class SyntheticSelection(val wayId: Long, val nodeName: String, val wayName: String)
 
-    private fun discoverSynthetic(app: Context, host: ActivityScenario<MainActivity>, view: MapView, map: MapLibreMap, count: Int = 2, area: Boolean = false): SyntheticSelection {
+    private fun discoverSynthetic(app: Context, host: ActivityScenario<MainActivity>, view: MapView, map: MapLibreMap,
+        count: Int = 2, area: Boolean = false, information: Boolean = false): SyntheticSelection {
         val nonce = UUID.randomUUID().mostSignificantBits and 0x7fffffff
         val id = 8_000_000_000_000L + nonce * 10
         val fixture = SyntheticSelection(id + 2, "Synthetic QA point $nonce", "Synthetic QA area $nonce")
@@ -232,6 +241,11 @@ class MainMapOsmEditorEntryTest {
         val endpoint = OsmServiceSettings(app).read().overpass
         val key = "nearby:editor-v2:${OsmPresetCatalog.BUNDLED_SHA256}:$endpoint:${String.format(Locale.US, "%.4f", tapped.latitude)}:${String.format(Locale.US, "%.4f", tapped.longitude)}"
         MapSelectionCacheFixture.store(app, key, JSONObject().put("elements", elements).toString())
+        if (information) {
+            check(count in 1..2)
+            val ref = if (count == 2) OsmRef(OsmType.NODE, id + 1) else OsmRef(OsmType.WAY, fixture.wayId)
+            seedPublicInformation(app, ref, if (count == 2) fixture.nodeName else fixture.wayName)
+        }
         if (area) {
             val vertices = listOf(-.00010 to -.00010, -.00010 to .00010, .00010 to .00010, .00010 to -.00010, -.00010 to -.00010)
             val geometry = JSONArray().also { a -> vertices.forEach { (lat, lon) -> a.put(JSONObject().put("lat", wayCenter.latitude + lat).put("lon", wayCenter.longitude + lon)) } }
@@ -266,6 +280,77 @@ class MainMapOsmEditorEntryTest {
         if (count == 0) compose.waitUntil(10_000) { compose.onAllNodesWithTag("place-info-discovery-choice-0").fetchSemanticsNodes().isEmpty() &&
             compose.onAllNodesWithText("Yakında bir OSM yeri veya bina bulunamadı. Yeni OSM mekânı için haritaya uzun basabilirsin.").fetchSemanticsNodes().isNotEmpty() }
         return fixture
+    }
+
+    /** Exercise the real public cache on an owned copy before adding a fresh synthetic ref.
+     * A malformed/full cache, collision, eviction or any prior-row change stops before the real write.
+     */
+    private fun seedPublicInformation(app: Context, ref: OsmRef, name: String) {
+        check(Looper.myLooper() != Looper.getMainLooper())
+        val root = app.cacheDir.canonicalFile
+        fun child(parent: File, name: String): File = File(parent, name).also {
+            check(!Files.isSymbolicLink(it.toPath()) && it.canonicalFile.parentFile == parent.canonicalFile)
+        }
+        val directory = child(root, "public-place-info")
+        val target = child(directory, "places-v1.json")
+        val temporary = child(directory, "places-v1.tmp")
+        fun readStore(): ByteArray? {
+            check(!temporary.exists() && !Files.isSymbolicLink(directory.toPath()) && !Files.isSymbolicLink(target.toPath()))
+            if (!target.exists()) return null
+            check(target.isFile && target.length() in 1..5_242_880L)
+            return target.readBytes().also { check(it.size <= 5_242_880) }
+        }
+        fun rows(bytes: ByteArray?): Map<Triple<String, String, Long>, String> {
+            if (bytes == null) return emptyMap()
+            val json = JSONObject(bytes.toString(Charsets.UTF_8))
+            check(json.getInt("format") == 1)
+            val entries = json.getJSONArray("entries")
+            check(entries.length() <= 200)
+            return (0 until entries.length()).associate { i ->
+                val row = entries.getJSONObject(i)
+                Triple(row.getString("endpoint"), row.getString("type"), row.getLong("id")) to row.toString()
+            }.also { check(it.size == entries.length()) }
+        }
+        val before = readStore()
+        val prior = rows(before)
+        val key = PlaceInfoKey(PlaceInfoServices.DEFAULT_ENDPOINT, ref)
+        val identity = Triple(key.endpoint, ref.type.name, ref.id)
+        check(identity !in prior && prior.size < 200) { "Preserve existing public cache; fresh synthetic ref/capacity required" }
+        val fixtures = child(root, "qa-public-place-seeds")
+        check(fixtures.isDirectory || fixtures.mkdir())
+        val preview = child(fixtures, UUID.randomUUID().toString())
+        check(preview.mkdir())
+        val previewFile = child(preview, "places-v1.json")
+        if (before != null) Files.newOutputStream(previewFile.toPath(), CREATE_NEW, WRITE).use { it.write(before) }
+        val snapshot = PublicPlaceSnapshot(key, 1L, mapOf("name" to name,
+            (if (ref.type == OsmType.NODE) "amenity" else "building") to (if (ref.type == OsmType.NODE) "bench" else "yes")),
+            System.currentTimeMillis())
+        check(runBlocking { PublicPlaceCache(preview).put(snapshot) })
+        val expected = previewFile.readBytes().also { check(it.size <= 5_242_880) }
+        val next = rows(expected)
+        check(next.size == prior.size + 1 && identity in next && prior.all { (k, v) -> next[k] == v }) {
+            "Public cache preview must retain every prior entry without eviction or mutation"
+        }
+        val current = readStore()
+        check(if (before == null) current == null else current != null && before.contentEquals(current))
+        check(runBlocking { PublicPlaceCache(directory).put(snapshot) })
+        check(requireNotNull(readStore()).contentEquals(expected)) { "Real public cache must match the guarded additive preview" }
+        instrumentation.addResults(Bundle().apply {
+            putString("osmPublicInfoFixture_${ref.type}_${ref.id}", JSONObject().put("priorCount", prior.size)
+                .put("afterCount", next.size).put("priorEntriesUnchanged", true).put("evictions", 0)
+                .put("bytes", expected.size).put("previewRetained", true).toString())
+        })
+    }
+
+    private fun awaitPublicInformation() {
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithTag("place-info-status").fetchSemanticsNodes().singleOrNull()?.config?.let { config ->
+                config.contains(SemanticsProperties.Text) && config[SemanticsProperties.Text].any {
+                    it.text.startsWith("OSM bilgileri") && it.text.contains("Son ")
+                }
+            } == true
+        }
+        compose.onNodeWithTag("place-info-refresh").assertIsEnabled()
     }
 
     private fun selectionRow(index: Int): SemanticsNodeInteraction {
