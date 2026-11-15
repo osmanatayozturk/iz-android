@@ -1,6 +1,24 @@
 # İz sürüm değişikliği planı
 
-## Telefon 0.13.4 / code 33 — motosiklette Valhalla (kaynak/belge teslimi)
+## Telefon 0.13.5 / code 34 - yakındaki yerler için güvenli teşhis
+
+Amaç, yakındaki yerleri bulma hatasında kullanıcının açabileceği **Teknik ayrıntı** ile güvenli hata kodunu görünür kılmaktır. Sabit kod, aşama, geçen süre ve varsa HTTP durumu, bekleme ve sabit sınır bilgileri son deneme boyunca bellekte tutulur. Yeni deneme eski teşhisi temizler ve ayrıntıyı kapatır. Ham hata mesajı, URL, sorgu, koordinat, yanıt gövdesi, hesap ve anahtar teşhis kapsamında saklanmaz veya gönderilmez.
+
+Sorgu/uç nokta/kota/önbellek/zaman aşımı/iptal politikaları ve yalnız elle yeniden deneme korunur. Wear OS, telefon-saat protokolü ve bağımlılıklar değişmez. Gerçek hatanın kök nedeni henüz doğrulanmadı; bu sürüm notu hatanın giderildiği iddiası taşımaz.
+
+| Aşama | Durum ve kabul sınırı |
+|---|---|
+| Önceki RED | Test-only adayda beklenen çalışma zamanı başarısızlığı kaydedildi; yeni ürün için GREEN veya kabul kanıtı değildir. |
+| Host — `5ecec8c` | Birim testi, lint, Debug uygulama, AndroidTest derleme ve test APK üretimi aynı çağrıda 528,266 saniyede geçti. Yeni XML'lerde 1.736 test; sıfır başarısızlık/hata/atlama. Lint 0 hata / 120 uyarı. İlk sandbox erişim engeli standart yetkili çağrıyla aşıldı; anahtar, kilit, ACL ve ortam korunuyor. |
+| QA paketleri | Ayrı çevrimdışı uygulama/test çifti üretildi; iki manifestte INTERNET yok, servis alanları boş, beklenen QA imzası doğrulandı. Normal uygulama veya harici dağıtım paketi değildir. |
+| Yeni UI kapsamı | Yalnız iki yeni test ve bir lifecycle metodunun derlenmiş JUnit imzaları doğrulandı. Cihaz çalıştırması ve görsel kabul bekliyor; önceki native sonuçlar bu kapsama taşınmaz. |
+| Normal kurulum | Yerel kurulum yapılmadı; mevcut imzayı koruyan harici dağıtım bekleniyor. |
+| Canlı teşhis | Harici dağıtım sonrası gerçek hata sırasında güvenli kod gözlemi bekleniyor. Kök neden ve çözüm henüz doğrulanmadı. |
+| Güvenlik ve yayın | Bu adayın gerekli güvenlik kabulü ve koordinatörün son kabulü beklenir. Push, tag, Release ve APK yayını yapılmadı. |
+
+Host ve paket kanıtları tamamlanınca bu bölüm yalnız doğrulanmış sonuçlarla güncellenir. Salt belge takip commit'i, değişmeyen ürün/test/build girdileriyle eşleştirilir; tek başına yeniden test gerekçesi sayılmaz.
+
+## Telefon 0.13.4 / code 33 - motosiklette Valhalla (kaynak/belge teslimi)
 
 Motosikletin tüm rota, alternatif, rota değişikliği, sapma sonrası yeniden hesaplama ve hava durumuna göre kalkış doğrulaması yolları mevcut Valhalla sağlayıcısını kullanır. Süre/sağlayıcı bağlamı **Valhalla · Trafik hariç** olarak gösterilir; kalkış saatinde hava durumu yeniden örneklenir, canlı trafik süresi vaat edilmez. Dönemsel trafik yenilemesi kaldırılır; sapma sonrası hesaplama korunur. Hata mevcut rota ve seçimleri silmez; elle yeniden denenir, TomTom'a otomatik dönüş yapılmaz.
 

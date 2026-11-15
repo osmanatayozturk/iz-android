@@ -1,6 +1,16 @@
 # Değişiklik geçmişi
 
-## Telefon 0.13.4 / code 33 — motosiklette Valhalla (kaynak/belge teslimi)
+## Telefon 0.13.5 / code 34 - yakındaki yerler için güvenli teşhis (doğrulama bekliyor)
+
+Yakındaki yerleri bulma işlemi başarısız olduğunda **Teknik ayrıntı** bölümü sabit hata kodunu, aşamayı, geçen süreyi ve varsa HTTP durumu, bekleme süresi ve sabit sınır bilgisini gösterir. Yeniden deneme kullanıcı tarafından başlatılır; yeni deneme önceki teşhisi temizler ve ayrıntıyı kapatır. Son denemenin teşhisi yalnız bellekte tutulur; ham hata mesajı, URL, sorgu, koordinat, yanıt gövdesi, hesap veya anahtar teşhis kaydına alınmaz ve gönderilmez.
+
+Bu ekleme kullanıcının yaşadığı gerçek hatanın kök nedeninin bulunduğu veya giderildiği anlamına gelmez. Sorgu, uç nokta, kota, önbellek, zaman aşımı ve iptal politikaları korunur. Wear OS, telefon-saat protokolü ve bağımlılıklar değişmez.
+
+**Host doğrulaması — `5ecec8c`:** Önceki test-only adayın beklenen çalışma zamanı RED kaydı korundu. Yeni üründe beş görev tek çağrıda 528,266 saniyede geçti: 1.736 birim testi, sıfır başarısızlık/hata/atlama; Debug lint 0 hata ve 120 uyarı; uygulama APK'sı, AndroidTest derlemesi ve test APK'sı üretimi. Ayrı çevrimdışı QA çiftinde INTERNET izninin bulunmadığı, servis alanlarının boş olduğu ve beklenen QA imzası doğrulandı. Yalnız iki yeni UI testi ve bir lifecycle metodunun derlenmiş JUnit imzaları doğrulandı. İlk sandbox erişim engeli standart yetkili çağrıyla aşıldı; anahtar, kilit, ACL ve ortam değiştirilmedi. İki sentetik UI senaryosunun cihazda çalıştırılması ve görsel inceleme bekliyor; önceki native sonuçlar yeni kabul olarak taşınmaz.
+
+**Dağıtım ve canlı gözlem:** Normal yerel kurulum yapılmadı. Mevcut uygulamanın imzasını koruyan harici dağıtım ve ardından gerçek hata sırasında güvenli kodun gözlenmesi bekleniyor. Canlı servis, fiziksel telefon ve güvenlik kabulü tamamlanmış sayılmaz; push, tag, Release veya APK yayını yapılmadı.
+
+## Telefon 0.13.4 / code 33 - motosiklette Valhalla (kaynak/belge teslimi)
 
 Motosiklette hedef seçimi, rota planlama, alternatifler, rota değişikliği, sapma sonrası yeniden hesaplama ve hava durumuna göre kalkış doğrulaması mevcut Valhalla sağlayıcısını kullanır. Sağlayıcı ve süre bağlamı **Valhalla · Trafik hariç** olarak gösterilir. Motosikletin dönemsel trafik yenilemesi kaldırılır; sapma sonrası yeniden yönlendirme korunur. Hata durumunda seçimler ve varsa mevcut rota korunur; yeniden deneme kullanıcı tarafından başlatılır, TomTom'a otomatik geçilmez.
 
