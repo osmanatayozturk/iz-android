@@ -42,7 +42,7 @@ class HandlebarCalibrationControlTest {
     @Test fun keyboardCancelReturnsFocusToOpenerAndDoesNotSave() {
         var saves = 0
         var captures = 0
-        compose.setContent { MaterialTheme {
+        compose.setContent { EvidenceFixture {
             HandlebarCalibrationControl(false, { true }, { saves++ }, {}) { _, _, _ ->
                 captures++
                 error("Capture requires park confirmation and Start")
@@ -85,7 +85,7 @@ class HandlebarCalibrationControlTest {
 
     @Test fun cancelingAnActiveCaptureStopsItAndRestoresFocus() {
         var stopped = false
-        compose.setContent { MaterialTheme {
+        compose.setContent { EvidenceFixture {
             HandlebarCalibrationControl(false, { true }, { error("Canceled capture cannot save") }, {}) { step, _, _ ->
                 step(HandlebarCalibrationStep.RIGHT)
                 try { awaitCancellation() } finally { stopped = true }
