@@ -173,6 +173,7 @@ private fun leanPartialLabel(reason: String): String {
     val value = reason.lowercase(Locale.ROOT)
     return when {
         value == "gnss_course_uncertain" -> "GPS yönü yeterince güvenilir değildi."
+        value == "gnss_motion_disagreement" -> "GPS konum değişimi, hız veya yön bilgisiyle uyuşmadı."
         value == "gnss_quality" -> "GPS konum veya hız kalitesi yetersizdi."
         value == "parked_steering_or_stationary" -> "Motosiklet hareketsizdi. Parkta gidon çevirmek viraj olarak sayılmaz."
         value == "low_speed_unsupported" -> "Düşük hızdaki bölümler yatış tahminine katılmadı."
