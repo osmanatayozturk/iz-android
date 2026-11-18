@@ -4,6 +4,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
 
+internal fun LeanCalibration.acceptsAlgorithm(version: String): Boolean =
+    if (bodyConfirmed) version != HandlebarLeanEstimator.VERSION else version == HandlebarLeanEstimator.VERSION
+
 /** Versioned, bounded private telemetry; never forwarded to power diagnostics or sharing. */
 internal object LeanCodec {
     const val MAX_CHUNK_BYTES = 256 * 1024
@@ -23,7 +26,9 @@ internal object LeanCodec {
             c.gyroBias.map { java.lang.Double.doubleToLongBits(it) }, input.bootId,
             input.startedAtUtc, input.startedAtElapsedNanos, input.endedAtElapsedNanos,
             input.partialReasons.sorted(), input.droppedSamples, parts).joinToString("\n")
-        return sha256(identity.toByteArray(Charsets.UTF_8))
+        val boundIdentity = if (c.bodyConfirmed) identity else
+            identity + "\nhandlebar-v1\n" + c.steeringAxis.map { java.lang.Double.doubleToLongBits(it) }
+        return sha256(boundIdentity.toByteArray(Charsets.UTF_8))
     }
     private fun obj(vararg fields: Pair<String, Any?>) = JSONObject().apply {
         fields.forEach { (key, value) -> put(key, value ?: JSONObject.NULL) }
@@ -48,15 +53,21 @@ internal object LeanCodec {
         require(value.epoch.isNotBlank() && value.epoch.length <= 200 && value.createdAt >= 0)
         require(value.uprightGravity.size == 3 && value.gyroBias.size == 3)
         require((value.uprightGravity + value.gyroBias).all { it.isFinite() })
-        return obj("version" to 1, "epoch" to value.epoch, "createdAt" to value.createdAt,
+        require(if (value.bodyConfirmed) value.steeringAxis.isEmpty() else validHandlebarReference(value))
+        return obj("version" to if (value.bodyConfirmed) 1 else 2, "epoch" to value.epoch, "createdAt" to value.createdAt,
             "gravity" to JSONArray(value.uprightGravity), "bias" to JSONArray(value.gyroBias),
-            "body" to value.bodyConfirmed).toString()
+            "body" to value.bodyConfirmed).apply {
+                if (!value.bodyConfirmed) put("steeringAxis", JSONArray(value.steeringAxis))
+            }.toString()
     }
     fun calibration(raw: String): LeanCalibration {
         require(raw.length <= 8192)
-        val j = JSONObject(raw); require(j.getInt("version") == 1 && j.get("body") is Boolean)
+        val j = JSONObject(raw)
+        val body = j.get("body") as Boolean
+        require(j.getInt("version") == if (body) 1 else 2)
         return LeanCalibration(j.text("epoch"), j.long("createdAt"), vector(j.getJSONArray("gravity")),
-            vector(j.getJSONArray("bias")), j.getBoolean("body"))
+            vector(j.getJSONArray("bias")), body, if (body) emptyList() else vector(j.getJSONArray("steeringAxis")))
+            .also { require(body || validHandlebarReference(it)) }
     }
     fun reasonsJson(values: Set<String>): String {
         require(values.size <= 64 && values.all { it.matches(Regex("[A-Za-z0-9_.:-]{1,100}")) })

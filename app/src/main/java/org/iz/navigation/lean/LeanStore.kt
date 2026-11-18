@@ -38,7 +38,8 @@ class LeanStore internal constructor(
         utcMillis: Long, elapsedNanos: Long): LeanSessionToken? = withContext(Dispatchers.IO) {
         withSnapshotLease {
             recoverLocked()
-            require(calibration.bodyConfirmed && utcMillis >= 0 && elapsedNanos >= 0 && bootId.isNotBlank() && bootId.length <= 200)
+            require(calibration.bodyConfirmed || (HandlebarLeanGate.enabled && validHandlebarReference(calibration)))
+            require(utcMillis >= 0 && elapsedNanos >= 0 && bootId.isNotBlank() && bootId.length <= 200)
             val encoded = LeanCodec.calibrationJson(calibration)
             db.withTransaction {
                 val trip = db.diaryDao().journey(journeyId) ?: return@withTransaction null
@@ -123,6 +124,14 @@ class LeanStore internal constructor(
     }
 
     fun observeReport(journeyId: String): Flow<LeanJourneyReport> = dao.sessions(journeyId).map { rows ->
+        val groups = rows.groupBy { row -> runCatching { LeanCodec.calibration(row.calibrationJson).bodyConfirmed }.getOrNull() }
+        val summary = summarize(groups[true].orEmpty())
+        val body = if (groups.containsKey(null)) summary.copy(partialReasons = summary.partialReasons + "INVALID_METADATA") else summary
+        val bars = groups[false]
+        if (HandlebarLeanGate.enabled && !bars.isNullOrEmpty()) body.copy(handlebar = summarize(bars)) else body
+    }.flowOn(Dispatchers.IO)
+
+    private suspend fun summarize(rows: List<LeanSessionEntity>): LeanJourneyReport {
         val reasons = linkedSetOf<String>()
         val results = rows.mapNotNull { row ->
             reasons += runCatching { LeanCodec.reasons(row.reasonsJson) }.getOrDefault(setOf("INVALID_METADATA"))
@@ -131,18 +140,21 @@ class LeanStore internal constructor(
             }
         }
         results.forEach { reasons += it.partialReasons }
-        LeanJourneyReport(rows.any { it.state != "COMPLETE" },
+        return LeanJourneyReport(rows.any { it.state != "COMPLETE" },
             results.mapNotNull { it.leftDegrees }.maxOrNull(), results.mapNotNull { it.rightDegrees }.maxOrNull(),
             results.sumOf { it.validMillis }, results.sumOf { it.observedMillis }, reasons,
             results.flatMap { it.curves }.sortedBy { it.startUtcMillis ?: Long.MAX_VALUE }.take(LeanCodec.MAX_CURVES),
             results.map { it.algorithmVersion }.toSet())
-    }.flowOn(Dispatchers.IO)
+    }
 
     internal suspend fun pendingInputs(): List<LeanInputSession> = withContext(Dispatchers.IO) {
         withSnapshotLease { recoverLocked(); dao.pending().map { input(it, dao.chunkInfos(it.id)) } }
     }
     internal suspend fun hasPending(): Boolean = withContext(Dispatchers.IO) {
-        withSnapshotLease { recoverLocked(); dao.pending().isNotEmpty() }
+        withSnapshotLease {
+            recoverLocked()
+            dao.pending().any { HandlebarLeanGate.enabled || LeanCodec.calibration(it.calibrationJson).bodyConfirmed }
+        }
     }
     internal suspend fun recoverInterrupted() = withContext(Dispatchers.IO) {
         withSnapshotLease { recoverLocked() }
@@ -182,7 +194,11 @@ class LeanStore internal constructor(
                             record.elapsedNanos <= row.endedAtElapsedNanos) yield(record)
                     }
                 }
-                val result = estimator.estimate(source, records, checkAllowed)
+                val selected = if (source.calibration.bodyConfirmed) estimator else {
+                    if (!HandlebarLeanGate.enabled) continue
+                    HandlebarLeanEstimator()
+                }
+                val result = selected.estimate(source, records, checkAllowed)
                 checkAllowed()
                 if (commitResultLocked(row.id, source.inputHash, result, checkAllowed)) cleanupCommittedRawLocked()
             }
@@ -205,6 +221,8 @@ class LeanStore internal constructor(
                 return@withTransaction false
             val source = input(row, dao.chunkInfos(row.id))
             if (source.inputHash != expectedHash || estimate.calibrationEpoch != source.calibration.epoch) return@withTransaction false
+            if (!source.calibration.bodyConfirmed && !HandlebarLeanGate.enabled) return@withTransaction false
+            if (!source.calibration.acceptsAlgorithm(estimate.algorithmVersion)) return@withTransaction false
             val prior = dao.result(row.id)
             if (prior != null) return@withTransaction prior.inputHash == expectedHash
             dao.insert(LeanResultEntity(row.id, row.journeyId, expectedHash, estimate.algorithmVersion, estimate.calibrationEpoch, encoded))

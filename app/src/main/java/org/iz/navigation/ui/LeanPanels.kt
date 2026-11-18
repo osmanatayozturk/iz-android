@@ -9,6 +9,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -59,7 +60,21 @@ internal fun LeanSetupPanel(onMessage: (String) -> Unit) {
                         FilterChip(config.mount == mount, { cancel(); upright = false; save { settings.mount(mount) } }, { Text(label) })
                     }
                 }
-                if (config.mount != LeanMount.BODY) Text("Gidon veya belirsiz bağlantıda sayısal yatış raporu üretilemez. Navigasyon ve yolculuk kaydı kullanılabilir.")
+                if (config.mount == LeanMount.HANDLEBAR && HandlebarLeanGate.enabled) {
+                    HandlebarCalibrationControl(
+                        hasProfile = validHandlebarReference(config.calibration),
+                        canCalibrate = {
+                            val live = settings.state.value
+                            HandlebarLeanGate.enabled && live.enabled && live.mount == LeanMount.HANDLEBAR
+                        },
+                        onSave = { profile ->
+                            settings.reference(profile)
+                            onMessage("Gidon kalibrasyonu kaydedildi.")
+                        },
+                        onReset = { save { settings.clearCalibration() } },
+                        capture = { step, accepted, retry -> captureHandlebarCalibration(app, step, accepted, retry) },
+                    )
+                } else if (config.mount != LeanMount.BODY) Text("Gidon veya belirsiz bağlantıda sayısal yatış raporu üretilemez. Navigasyon ve yolculuk kaydı kullanılabilir.")
                 else {
                     Text("Telefonu motosiklet gövdesine sıkıca sabitle. Referansı güvenli bir yerde dururken, motosikleti dik tutarak al; yan ayaklıkta alma.")
                     Row { Checkbox(upright, { upright = it }, enabled = !calibrating); Text("Duruyorum; motosiklet dik ve telefon gövdeye sabit.", Modifier.weight(1f)) }
@@ -98,41 +113,71 @@ internal fun LeanJourneyReportPanel(journey: Journey) {
     val store = remember(app) { LeanStore.get(app) }
     val flow = remember(store, journey.id) { store.observeReport(journey.id) }
     val report by flow.collectAsStateWithLifecycle(LeanJourneyReport(false, null, null, 0, 0, emptySet(), emptyList(), emptySet()))
-    var curves by remember(journey.id) { mutableStateOf(false) }
+    val handlebar = report.handlebar.takeIf { HandlebarLeanGate.enabled }
+    val showBody = handlebar == null || report.pending || report.observedMillis > 0 || report.partialReasons.isNotEmpty() ||
+        report.leftDegrees != null || report.rightDegrees != null
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Deneysel yatış raporu", style = MaterialTheme.typography.titleLarge)
-            Text("Dikey dünyaya göre tahmini gövde yatışı; ölçülmüş doğruluk iddiası değildir.", style = MaterialTheme.typography.bodySmall)
-            if (journey.endedAt == null) Text("Rapor yolculuk bittikten sonra hazırlanır.")
-            else if (report.pending) Text("Hazırlanacak · Kayıt ve navigasyon bitmeli, pil en az %20 olmalı.")
-            else if (report.leftDegrees == null && report.rightDegrees == null) Text("Kullanılabilir yatış tahmini yok. Önceki yolculuklara sonradan değer eklenmez.")
-            else {
-                fun angle(value: Double?) = value?.takeIf { it.isFinite() }?.let { "${it.roundToInt()}°" } ?: "Kullanılamıyor"
-                Text("En büyük geçerli sol tahmin: ${angle(report.leftDegrees)}")
-                Text("En büyük geçerli sağ tahmin: ${angle(report.rightDegrees)}")
-                if (report.curves.isNotEmpty()) {
-                    TextButton(onClick = { curves = !curves }) { Text(if (curves) "Virajları gizle" else "Virajları göster (${report.curves.size})") }
-                    if (curves) LazyColumn(Modifier.fillMaxWidth().heightIn(max = 260.dp)) {
-                        items(report.curves) { curve ->
-                            val time = curve.startUtcMillis?.let { SimpleDateFormat("HH:mm:ss", Locale.forLanguageTag("tr-TR")).format(Date(it)) } ?: "Saat eşlenemedi"
-                            Text("$time · Sol ${angle(curve.leftDegrees)} · Sağ ${angle(curve.rightDegrees)}", style = MaterialTheme.typography.bodyMedium)
-                            if (curve.latitude != null && curve.longitude != null) Text(String.format(Locale.ROOT, "Rota noktası %.5f, %.5f", curve.latitude, curve.longitude), style = MaterialTheme.typography.bodySmall)
-                            HorizontalDivider()
-                        }
-                    }
+            if (showBody) {
+                key(journey.id, LeanMount.BODY) {
+                    LeanReportSection(journey, report, "Gövde yatışı".takeIf { handlebar != null },
+                        "Dikey dünyaya göre tahmini gövde yatışı; ölçülmüş doğruluk iddiası değildir.", "Gövde", "body-lean-report")
                 }
             }
-            if (journey.endedAt != null && !report.pending) {
-                Text("Geçerli kapsam ${report.validMillis / 1000} sn / gözlenen ${report.observedMillis / 1000} sn", style = MaterialTheme.typography.bodySmall)
+            if (handlebar != null) {
+                if (showBody) HorizontalDivider()
+                key(journey.id, LeanMount.HANDLEBAR) {
+                    LeanReportSection(journey, handlebar, "Gidon bağlantısından tahmini yatış",
+                        "Gidon hareketi ayrıştırılarak yapılan deneysel sürüş sonrası tahmin.", "Gidon", "handlebar-lean-report")
+                }
             }
-            report.partialReasons.map(::leanPartialLabel).distinct().forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
         }
     }
+}
+
+@Composable
+private fun LeanReportSection(journey: Journey, report: LeanJourneyReport, title: String?, description: String,
+    mountLabel: String, reportTag: String) {
+    var curves by remember { mutableStateOf(false) }
+    if (title != null) Text(title, style = MaterialTheme.typography.titleMedium)
+    Text(description, Modifier.testTag(reportTag), style = MaterialTheme.typography.bodySmall)
+    if (journey.endedAt == null) Text("Rapor yolculuk bittikten sonra hazırlanır.")
+    else if (report.pending) Text("Hazırlanacak · Kayıt ve navigasyon bitmeli, pil en az %20 olmalı.")
+    else if (report.leftDegrees == null && report.rightDegrees == null) Text("Kullanılabilir yatış tahmini yok. Önceki yolculuklara sonradan değer eklenmez.")
+    else {
+        fun angle(value: Double?) = value?.takeIf { it.isFinite() }?.let { "${it.roundToInt()}°" } ?: "Kullanılamıyor"
+        Text("En büyük geçerli sol tahmin: ${angle(report.leftDegrees)}")
+        Text("En büyük geçerli sağ tahmin: ${angle(report.rightDegrees)}")
+        if (report.curves.isNotEmpty()) {
+            TextButton(onClick = { curves = !curves }, modifier = Modifier.testTag("$reportTag-curves")) {
+                Text(if (curves) "$mountLabel virajlarını gizle" else "$mountLabel virajlarını göster (${report.curves.size})")
+            }
+            if (curves) LazyColumn(Modifier.fillMaxWidth().heightIn(max = 260.dp)) {
+                items(report.curves) { curve ->
+                    val time = curve.startUtcMillis?.let { SimpleDateFormat("HH:mm:ss", Locale.forLanguageTag("tr-TR")).format(Date(it)) } ?: "Saat eşlenemedi"
+                    Text("$time · Sol ${angle(curve.leftDegrees)} · Sağ ${angle(curve.rightDegrees)}", style = MaterialTheme.typography.bodyMedium)
+                    if (curve.latitude != null && curve.longitude != null) Text(String.format(Locale.ROOT, "Rota noktası %.5f, %.5f", curve.latitude, curve.longitude), style = MaterialTheme.typography.bodySmall)
+                    HorizontalDivider()
+                }
+            }
+        }
+    }
+    if (journey.endedAt != null && !report.pending) {
+        Text("Geçerli kapsam ${report.validMillis / 1000} sn / gözlenen ${report.observedMillis / 1000} sn", style = MaterialTheme.typography.bodySmall)
+    }
+    report.partialReasons.map(::leanPartialLabel).distinct().forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
 }
 
 private fun leanPartialLabel(reason: String): String {
     val value = reason.lowercase(Locale.ROOT)
     return when {
+        value == "gnss_course_uncertain" -> "GPS yönü yeterince güvenilir değildi."
+        value == "gnss_quality" -> "GPS konum veya hız kalitesi yetersizdi."
+        value == "parked_steering_or_stationary" -> "Motosiklet hareketsizdi. Parkta gidon çevirmek viraj olarak sayılmaz."
+        value == "low_speed_unsupported" -> "Düşük hızdaki bölümler yatış tahminine katılmadı."
+        value == "steering_or_motion_veto" -> "Gidon hareketi, titreşim veya ani hareket nedeniyle bazı bölümler tahmine katılmadı."
+        value == "no_supported_curves" -> "Yatış tahmini için yeterli koşulları sağlayan viraj bulunamadı."
         "chunk_limit" in value -> "Sensör verisi bölüm sınırına ulaştı; rapor kısmi."
         "capacity" in value || "budget" in value -> "Sensör verisi depolama sınırına ulaştı; rapor kısmi."
         "sensor" in value -> "Gerekli sensör verisi uygun değil veya sensör bulunamadı."

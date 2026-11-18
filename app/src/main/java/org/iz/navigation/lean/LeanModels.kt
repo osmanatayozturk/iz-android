@@ -7,6 +7,7 @@ data class LeanCalibration(
     val epoch: String, val createdAt: Long,
     val uprightGravity: List<Double>, val gyroBias: List<Double>,
     val bodyConfirmed: Boolean = true,
+    val steeringAxis: List<Double> = emptyList(),
 )
 
 sealed interface LeanRecord { val elapsedNanos: Long }
@@ -58,6 +59,7 @@ data class LeanJourneyReport(
     val validMillis: Long, val observedMillis: Long,
     val partialReasons: Set<String>, val curves: List<LeanCurveResult>,
     val algorithmVersions: Set<String>,
+    val handlebar: LeanJourneyReport? = null,
 )
 
 /** Metadata only; raw BLOBs are streamed under the store snapshot lease. */

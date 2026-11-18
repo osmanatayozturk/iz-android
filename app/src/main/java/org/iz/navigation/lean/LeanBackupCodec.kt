@@ -77,7 +77,6 @@ internal object LeanBackupCodec {
             val end = requireNotNull(input.endedAtElapsedNanos) { "Active lean capture cannot be backed up" }
             require(input.startedAtUtc >= 0 && input.startedAtElapsedNanos >= 0 && end >= input.startedAtElapsedNanos &&
                 input.droppedSamples >= 0 && digest.matches(input.inputHash))
-            require(input.calibration.bodyConfirmed)
             LeanCodec.calibration(LeanCodec.calibrationJson(input.calibration))
             LeanCodec.reasonsJson(input.partialReasons)
             require(session.state in setOf("SEALED", "PARTIAL", "COMPLETE")) { "Active lean capture cannot be backed up" }
@@ -85,6 +84,7 @@ internal object LeanBackupCodec {
             session.result?.let { result ->
                 LeanCodec.estimateJson(result)
                 require(result.calibrationEpoch == input.calibration.epoch)
+                require(input.calibration.acceptsAlgorithm(result.algorithmVersion))
                 require(result.observedMillis <= (end - input.startedAtElapsedNanos) / 1_000_000)
                 require(result.curves.all { it.startElapsedNanos >= input.startedAtElapsedNanos && it.endElapsedNanos <= end })
             }

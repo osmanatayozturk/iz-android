@@ -13,18 +13,34 @@ import kotlin.math.sqrt
 internal data class LeanCaptureSettings(val enabled: Boolean = false, val mount: LeanMount = LeanMount.UNKNOWN,
     val calibration: LeanCalibration? = null)
 
-internal fun validLeanReference(reference: LeanCalibration?): Boolean = reference != null &&
-    reference.bodyConfirmed && reference.epoch.isNotBlank() && reference.createdAt > 0 &&
+private fun validVectors(reference: LeanCalibration): Boolean =
+    reference.epoch.isNotBlank() && reference.createdAt > 0 &&
     reference.uprightGravity.size == 3 && reference.gyroBias.size == 3 &&
     reference.uprightGravity.all { it.isFinite() } && reference.gyroBias.all { it.isFinite() } &&
     sqrt(reference.uprightGravity.sumOf { it * it }) in 8.8..10.8
 
-internal fun leanCaptureEligible(journey: Journey?, settings: LeanCaptureSettings): Boolean =
-    settings.enabled && settings.mount == LeanMount.BODY && validLeanReference(settings.calibration) &&
+internal fun validLeanReference(reference: LeanCalibration?): Boolean =
+    reference != null && reference.bodyConfirmed && reference.steeringAxis.isEmpty() && validVectors(reference)
+
+internal fun validHandlebarReference(reference: LeanCalibration?): Boolean =
+    reference != null && !reference.bodyConfirmed && validVectors(reference) &&
+        reference.gyroBias.sumOf { it * it } <= 0.25 &&
+        reference.steeringAxis.size == 3 && reference.steeringAxis.sumOf { it * it } in 0.98..1.02
+
+private fun matchesMount(mount: LeanMount, reference: LeanCalibration?, handlebarEnabled: Boolean): Boolean =
+    when (mount) {
+        LeanMount.BODY -> validLeanReference(reference)
+        LeanMount.HANDLEBAR -> handlebarEnabled && validHandlebarReference(reference)
+        LeanMount.UNKNOWN -> false
+    }
+
+internal fun leanCaptureEligible(journey: Journey?, settings: LeanCaptureSettings,
+    handlebarEnabled: Boolean = HandlebarLeanGate.enabled): Boolean =
+    settings.enabled && matchesMount(settings.mount, settings.calibration, handlebarEnabled) &&
         journey?.transport == Transport.MOTORCYCLE && journey.status == JourneyStatus.CONFIRMED && journey.endedAt == null
 
 /** Explicit single-MOTO feature settings; not a transport/profile or a diary inference. */
-internal class LeanSettingsStore private constructor(context: Context) {
+internal class LeanSettingsStore internal constructor(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences("lean_capture_v1", Context.MODE_PRIVATE)
     private val mutable = MutableStateFlow(read())
     val state = mutable.asStateFlow()
@@ -35,21 +51,26 @@ internal class LeanSettingsStore private constructor(context: Context) {
             fun vector(name: String) = json.getJSONArray(name).let { values ->
                 require(values.length() == 3); (0..2).map { values.getDouble(it) }
             }
+            val body = json.getBoolean("body")
+            require(body || json.optInt("version") == 2)
             LeanCalibration(json.getString("epoch"), json.getLong("created"), vector("gravity"), vector("bias"),
-                json.getBoolean("body"))
-        }?.takeIf(::validLeanReference)
+                body, if (json.has("steeringAxis")) vector("steeringAxis") else emptyList())
+        }?.takeIf { matchesMount(mount, it, HandlebarLeanGate.enabled) }
         LeanCaptureSettings(prefs.getBoolean("enabled", false), mount, reference)
     }.getOrElse { LeanCaptureSettings() }
     @Synchronized fun enabled(value: Boolean) = save(state.value.copy(enabled = value))
-    @Synchronized fun mount(value: LeanMount) = save(state.value.copy(mount = value, calibration = null))
+    @Synchronized fun mount(value: LeanMount) {
+        if (state.value.mount != value) save(state.value.copy(mount = value, calibration = null))
+    }
     @Synchronized fun clearCalibration() = save(state.value.copy(calibration = null))
     @Synchronized fun reference(value: LeanCalibration) {
-        require(state.value.mount == LeanMount.BODY && validLeanReference(value))
+        require(matchesMount(state.value.mount, value, HandlebarLeanGate.enabled))
         save(state.value.copy(calibration = value))
     }
     private fun save(value: LeanCaptureSettings) {
         val reference = value.calibration?.let { JSONObject().put("epoch", it.epoch).put("created", it.createdAt)
-            .put("gravity", JSONArray(it.uprightGravity)).put("bias", JSONArray(it.gyroBias)).put("body", it.bodyConfirmed).toString() }
+            .put("gravity", JSONArray(it.uprightGravity)).put("bias", JSONArray(it.gyroBias)).put("body", it.bodyConfirmed)
+            .apply { if (!it.bodyConfirmed) put("version", 2).put("steeringAxis", JSONArray(it.steeringAxis)) }.toString() }
         check(prefs.edit().putBoolean("enabled", value.enabled).putString("mount", value.mount.name)
             .putString("reference", reference).commit()) { "Motosiklet ölçüm ayarları kaydedilemedi." }
         mutable.value = value
