@@ -1,6 +1,10 @@
 package org.iz.navigation.ui
 
 import android.graphics.Bitmap
+import android.os.SystemClock
+import android.view.InputDevice
+import android.view.KeyEvent
+import android.view.MotionEvent
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -10,7 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.graphics.asAndroidBitmap
-import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -44,10 +48,10 @@ class HandlebarCalibrationControlTest {
                 error("Capture requires park confirmation and Start")
             }
         } }
-        compose.onNodeWithTag("handlebar-calibration-open").performClick()
-        val cancel = compose.onNodeWithTag("handlebar-calibration-cancel")
-        cancel.assertIsFocused().performKeyInput { pressKey(Key.DirectionCenter) }
-        compose.onNodeWithTag("handlebar-calibration-open").assertIsFocused()
+        touch("handlebar-calibration-open")
+        enterDirectionalMode("handlebar-calibration-cancel", KeyEvent.KEYCODE_TAB)
+        pressOn("handlebar-calibration-cancel", KeyEvent.KEYCODE_ENTER)
+        awaitFocus("handlebar-calibration-open")
         compose.runOnIdle { assertEquals(0, saves); assertEquals(0, captures) }
     }
 
@@ -62,21 +66,19 @@ class HandlebarCalibrationControlTest {
                 completed.await()
             }
         } }
-        compose.onNodeWithTag("handlebar-calibration-open").performClick()
+        touch("handlebar-calibration-open")
         compose.onNodeWithTag("handlebar-calibration-start").assertIsNotEnabled()
-        compose.onNodeWithTag("handlebar-calibration-cancel").assertIsFocused()
-            .performKeyInput { pressKey(Key.DirectionUp) }
-        val park = compose.onNodeWithTag("handlebar-calibration-parked")
-        park.assertIsFocused().performKeyInput { pressKey(Key.DirectionCenter) }
-        park.assertIsOn().performKeyInput { pressKey(Key.DirectionDown) }
-        compose.onNodeWithTag("handlebar-calibration-start").assertIsFocused()
-            .performKeyInput { pressKey(Key.DirectionCenter) }
+        enterDirectionalMode("handlebar-calibration-cancel")
+        pressOn("handlebar-calibration-cancel", KeyEvent.KEYCODE_DPAD_UP)
+        pressOn("handlebar-calibration-parked", KeyEvent.KEYCODE_DPAD_CENTER)
+        compose.onNodeWithTag("handlebar-calibration-parked").assertIsOn()
+        pressOn("handlebar-calibration-parked", KeyEvent.KEYCODE_DPAD_DOWN)
+        pressOn("handlebar-calibration-start", KeyEvent.KEYCODE_DPAD_CENTER)
         compose.onNodeWithTag("handlebar-calibration-step").assertIsDisplayed()
         captureEvidence(EvidenceFrame.STEP, compose.onNode(isDialog()))
         compose.runOnIdle { assertNull(saved); completed.complete(HandlebarCalibrationResult.Ready(profile)) }
-        compose.onNodeWithTag("handlebar-calibration-save").assertIsFocused()
-            .performKeyInput { pressKey(Key.DirectionCenter) }
-        compose.onNodeWithTag("handlebar-calibration-open").assertIsFocused()
+        pressOn("handlebar-calibration-save", KeyEvent.KEYCODE_DPAD_CENTER)
+        awaitFocus("handlebar-calibration-open")
         compose.runOnIdle { assertSame(profile, saved) }
         captureEvidence(EvidenceFrame.RESTORED_FOCUS, compose.onNodeWithTag("handlebar-calibration-fixture"))
     }
@@ -89,12 +91,13 @@ class HandlebarCalibrationControlTest {
                 try { awaitCancellation() } finally { stopped = true }
             }
         } }
-        compose.onNodeWithTag("handlebar-calibration-open").performClick()
-        compose.onNodeWithTag("handlebar-calibration-parked").performScrollTo().performClick()
-        compose.onNodeWithTag("handlebar-calibration-start").performScrollTo().performClick()
+        touch("handlebar-calibration-open")
+        touch("handlebar-calibration-parked", scroll = true)
+        touch("handlebar-calibration-start", scroll = true)
         compose.onNodeWithTag("handlebar-calibration-step").assertIsDisplayed()
-        compose.onNodeWithTag("handlebar-calibration-cancel").performScrollTo().performClick()
-        compose.onNodeWithTag("handlebar-calibration-open").assertIsFocused()
+        touch("handlebar-calibration-cancel", scroll = true)
+        compose.onNodeWithTag("handlebar-calibration-cancel").assertDoesNotExist()
+        enterDirectionalMode("handlebar-calibration-open")
         compose.onNodeWithTag("handlebar-calibration-save").assertDoesNotExist()
         compose.runOnIdle { assertTrue(stopped) }
     }
@@ -114,16 +117,77 @@ class HandlebarCalibrationControlTest {
                 awaitCancellation()
             }
         } }
-        compose.onNodeWithTag("handlebar-calibration-open").performClick()
-        compose.onNodeWithTag("handlebar-calibration-parked").performScrollTo().performClick()
-        compose.onNodeWithTag("handlebar-calibration-start").performScrollTo().performClick()
+        touch("handlebar-calibration-open")
+        touch("handlebar-calibration-parked", scroll = true)
+        touch("handlebar-calibration-start", scroll = true)
         compose.onNodeWithText("Gidonu önceki sol konuma getir", substring = true).assertIsDisplayed()
-        val retryButton = compose.onNodeWithTag("handlebar-calibration-retry").assertIsFocused()
+        enterDirectionalMode("handlebar-calibration-retry")
         captureEvidence(EvidenceFrame.RETRY, compose.onNode(isDialog()))
-        retryButton.performKeyInput { pressKey(Key.DirectionCenter) }
+        pressOn("handlebar-calibration-retry", KeyEvent.KEYCODE_DPAD_CENTER)
         compose.runOnIdle { assertEquals(1, attempts); assertEquals(1, retries) }
-        compose.onNodeWithTag("handlebar-calibration-cancel").performScrollTo().performClick()
+        pressOn("handlebar-calibration-cancel", KeyEvent.KEYCODE_DPAD_CENTER)
         compose.onNodeWithText("Gidon kalibrasyonu hazır.").assertIsDisplayed()
+    }
+
+    /** Follow the same window and touch-mode route as hardware keys and a real tap. */
+    private fun enterDirectionalMode(tag: String, keyCode: Int = KeyEvent.KEYCODE_DPAD_UP) {
+        awaitWindow(tag, inTouchMode = true)
+        compose.onNodeWithTag(tag).assertIsNotFocused()
+        sendKey(keyCode)
+        awaitFocus(tag)
+    }
+
+    private fun pressOn(tag: String, keyCode: Int) {
+        awaitFocus(tag)
+        sendKey(keyCode)
+    }
+
+    private fun sendKey(keyCode: Int) {
+        InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(keyCode)
+        compose.waitForIdle()
+    }
+
+    private fun awaitFocus(tag: String) {
+        awaitWindow(tag, inTouchMode = false)
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(hasTestTag(tag) and isFocused()).fetchSemanticsNodes().size == 1
+        }
+        compose.onNodeWithTag(tag).assertIsDisplayed().assertIsFocused()
+    }
+
+    private fun awaitWindow(tag: String, inTouchMode: Boolean? = null) {
+        compose.waitUntil(5_000) {
+            val node = compose.onAllNodesWithTag(tag).fetchSemanticsNodes().singleOrNull() ?: return@waitUntil false
+            val view = (node.root as ViewRootForTest).view
+            compose.runOnIdle { view.hasWindowFocus() && (inTouchMode == null || view.isInTouchMode == inTouchMode) }
+        }
+    }
+
+    private fun touch(tag: String, scroll: Boolean = false) {
+        awaitWindow(tag)
+        val interaction = compose.onNodeWithTag(tag)
+        if (scroll) interaction.performScrollTo()
+        val node = interaction.assertIsDisplayed().fetchSemanticsNode()
+        val view = (node.root as ViewRootForTest).view
+        val (x, y) = compose.runOnIdle {
+            check(view.hasWindowFocus())
+            val origin = IntArray(2).also(view::getLocationOnScreen)
+            val center = node.boundsInRoot.center
+            (center.x + origin[0]) to (center.y + origin[1])
+        }
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val down = SystemClock.uptimeMillis()
+        for (action in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) {
+            val event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), action,
+                x, y, 0)
+            try {
+                event.source = InputDevice.SOURCE_TOUCHSCREEN
+                instrumentation.sendPointerSync(event)
+            } finally {
+                event.recycle()
+            }
+        }
+        compose.waitForIdle()
     }
 
     private enum class EvidenceFrame(val filename: String) {

@@ -3,6 +3,7 @@ package org.iz.navigation.ui
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.view.HapticFeedbackConstants
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
@@ -11,10 +12,15 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -47,6 +53,8 @@ internal fun HandlebarCalibrationControl(
     ) -> HandlebarCalibrationResult,
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val hostWindow = LocalWindowInfo.current
+    val hostInput = LocalInputModeManager.current
     val scope = rememberCoroutineScope()
     val opener = remember { FocusRequester() }
     val cancelButton = remember { FocusRequester() }
@@ -85,14 +93,17 @@ internal fun HandlebarCalibrationControl(
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer); attempt++; job?.cancel() }
     }
-    LaunchedEffect(open, resumed, restoreFocus) {
-        if (!open && resumed && restoreFocus) {
-            opener.requestFocus()
-            restoreFocus = false
+    val hostReadyForFocus = hostWindow.isWindowFocused && hostInput.inputMode == InputMode.Keyboard
+    LaunchedEffect(open, resumed, restoreFocus, hostReadyForFocus) {
+        if (!open && resumed && restoreFocus && hostReadyForFocus) {
+            // The dialog may already be removed while Android is still returning window focus.
+            withFrameNanos { }
+            if (!open && resumed && hostWindow.isWindowFocused && hostInput.inputMode == InputMode.Keyboard &&
+                opener.requestFocus(FocusDirection.Enter)) restoreFocus = false
         }
     }
     Text("Gidon yatışı deneysel bir sürüş sonrası tahmindir.")
-    Button(onClick = { open = true }, modifier = Modifier.focusRequester(opener)
+    Button(onClick = { restoreFocus = false; open = true }, modifier = Modifier.calibrationFocus(opener)
         .heightIn(min = 48.dp).testTag("handlebar-calibration-open")) {
         Text(if (hasProfile) "Gidonu yeniden kalibre et" else "Gidonu kalibre et")
     }
@@ -106,11 +117,20 @@ internal fun HandlebarCalibrationControl(
 
     Dialog(onDismissRequest = ::close) {
         val view = LocalView.current
-        LaunchedEffect(job != null, retry, result) {
-            when {
-                result != null -> saveButton.requestFocus()
-                retry != null -> retryButton.requestFocus()
-                else -> cancelButton.requestFocus()
+        val window = LocalWindowInfo.current
+        val input = LocalInputModeManager.current
+        val readyForFocus = window.isWindowFocused && input.inputMode == InputMode.Keyboard
+        LaunchedEffect(job != null, retry, result, readyForFocus) {
+            if (readyForFocus) {
+                withFrameNanos { }
+                if (window.isWindowFocused && input.inputMode == InputMode.Keyboard) {
+                    val action = when {
+                        result != null -> saveButton
+                        retry != null -> retryButton
+                        else -> cancelButton
+                    }
+                    action.requestFocus(FocusDirection.Enter)
+                }
             }
         }
         Surface(shape = MaterialTheme.shapes.extraLarge) {
@@ -121,14 +141,14 @@ internal fun HandlebarCalibrationControl(
                 if (job == null && result == null) {
                     Text("Sinyallerle gidonu düz tut, sola çevir, sağa çevir ve yeniden düz konuma getir. Her konumda bir sonraki sinyali bekle.")
                     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("handlebar-calibration-parked")
-                        .focusRequester(parkButton).focusProperties { down = if (parked) startButton else cancelButton }
+                        .calibrationFocus(parkButton).focusProperties { down = if (parked) startButton else cancelButton }
                         .toggleable(parked, role = Role.Checkbox, onValueChange = { parked = it }),
                         verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(parked, onCheckedChange = null)
                         Text("Park halindeyim ve motosiklet dik.", Modifier.weight(1f))
                     }
                     Button(enabled = parked && resumed, modifier = Modifier.fillMaxWidth()
-                        .focusRequester(startButton).focusProperties { up = parkButton; down = cancelButton }
+                        .calibrationFocus(startButton).focusProperties { up = parkButton; down = cancelButton }
                         .heightIn(min = 48.dp).testTag("handlebar-calibration-start"), onClick = {
                         if (job == null && parked && resumed && currentAllowed()) {
                             error = null
@@ -195,7 +215,7 @@ internal fun HandlebarCalibrationControl(
                     Text(step?.retryInstruction.orEmpty(), Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                         color = MaterialTheme.colorScheme.error)
                     Button(onClick = { retryRequest.complete(Unit) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                        .focusRequester(retryButton).testTag("handlebar-calibration-retry")) { Text("Bu adımı yeniden dene") }
+                        .calibrationFocus(retryButton).testTag("handlebar-calibration-retry")) { Text("Bu adımı yeniden dene") }
                 } else if (job != null) {
                     LinearProgressIndicator(Modifier.fillMaxWidth())
                     val instruction = if (stepAccepted) "Adım doğrulandı. Bir sonraki sinyali bekle."
@@ -213,10 +233,10 @@ internal fun HandlebarCalibrationControl(
                             catch (_: Exception) { error = "Kalibrasyon kaydedilemedi. Yeniden deneyebilirsin." }
                         }
                     }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                        .focusRequester(saveButton).testTag("handlebar-calibration-save")) { Text("Kalibrasyonu kaydet") }
+                        .calibrationFocus(saveButton).testTag("handlebar-calibration-save")) { Text("Kalibrasyonu kaydet") }
                 }
                 TextButton(onClick = ::close, modifier = Modifier.heightIn(min = 48.dp)
-                    .focusRequester(cancelButton).focusProperties {
+                    .calibrationFocus(cancelButton).focusProperties {
                         up = when {
                             result != null -> saveButton
                             retry != null -> retryButton
@@ -228,6 +248,16 @@ internal fun HandlebarCalibrationControl(
             }
         }
     }
+}
+
+@Composable
+private fun Modifier.calibrationFocus(requester: FocusRequester): Modifier {
+    var focused by remember(requester) { mutableStateOf(false) }
+    val showOutline = focused && LocalWindowInfo.current.isWindowFocused &&
+        LocalInputModeManager.current.inputMode == InputMode.Keyboard
+    return focusRequester(requester).onFocusChanged { focused = it.isFocused }
+        .then(if (showOutline) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, ButtonDefaults.shape) else Modifier)
+        .padding(2.dp)
 }
 
 private val HandlebarCalibrationStep.instruction: String
