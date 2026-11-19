@@ -1,6 +1,8 @@
 package org.iz.navigation.weather
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import java.io.File
 import java.io.IOException
 import java.nio.file.Files
@@ -27,6 +29,7 @@ class OpenMeteoWeatherProvider(
     private val storageDirectory: File,
     client: OkHttpClient,
     private val clock: () -> Long = System::currentTimeMillis,
+    private val networkAllowed: Boolean = true,
 ) : WeatherProvider {
     private val client = singleAttemptHttpClient(client)
 
@@ -34,6 +37,8 @@ class OpenMeteoWeatherProvider(
         endpoint = endpoint,
         storageDirectory = weatherStorage(context, "route-weather-forecast"),
         client = defaultWeatherHttpClient(),
+        networkAllowed = context.packageManager.checkPermission(Manifest.permission.INTERNET, context.packageName) ==
+            PackageManager.PERMISSION_GRANTED,
     )
 
     override suspend fun hourly(
@@ -52,6 +57,7 @@ class OpenMeteoWeatherProvider(
             if (results[index] == null) missingIndexes += index
         }
         if (missingIndexes.isEmpty()) return@withContext results.map { requireNotNull(it) }
+        if (!networkAllowed) throw WeatherServiceException("Çevrimdışı kullanım için bu konumun tahmini bulunamadı.")
 
         try {
             WeatherHttpGate.forecast(storageDirectory, clock) {

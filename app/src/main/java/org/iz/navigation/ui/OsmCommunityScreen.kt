@@ -19,7 +19,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -220,7 +219,6 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
     BackHandler(onBack = ::back)
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = ::back) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "OSM topluluğundan geri dön") }
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleLarge)
                 if (!gpsOpen && !nestedPage) Text(authState.user?.displayName ?: "OpenStreetMap insanlarıyla bağlantı kur",

@@ -30,9 +30,7 @@ internal fun WeatherCard(weather: WearRouteWeather, now: Long, connectionFresh: 
     ) {
         when {
             !connectionFresh -> {
-                Text("Telefon bağlantısı/verisi güncel değil", color = MaterialTheme.colors.onSurface, fontSize = 11.sp,
-                    textAlign = TextAlign.Center)
-                if (weather.headline.isNotBlank()) Text(weather.headline, color = MaterialTheme.colors.onSurface, fontSize = 15.sp,
+                Text("Telefon bağlantısı/verisi güncel değil", color = MaterialTheme.colors.onSurface, fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
                 Text("Tahmin: ${measurementTime(weather.calculatedAt)}", color = MaterialTheme.colors.onSurface,
                     fontSize = 10.sp, textAlign = TextAlign.Center)
@@ -61,9 +59,8 @@ internal fun WeatherCard(weather: WearRouteWeather, now: Long, connectionFresh: 
                     fontSize = 10.sp, textAlign = TextAlign.Center)
             }
             !readyAndFresh -> {
-                Text(weather.headline, color = MaterialTheme.colors.onSurface, fontSize = 15.sp,
+                Text("Tahmin süresi doldu", color = MaterialTheme.colors.onSurface, fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
-                Text("Tahmin süresi doldu", color = MaterialTheme.colors.onSurface, fontSize = 11.sp, textAlign = TextAlign.Center)
                 Text("Tahmin: ${measurementTime(weather.calculatedAt)}", color = MaterialTheme.colors.onSurface,
                     fontSize = 10.sp, textAlign = TextAlign.Center)
             }

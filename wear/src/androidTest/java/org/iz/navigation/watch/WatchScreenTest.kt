@@ -119,10 +119,15 @@ class WatchScreenTest {
             assertTrue(output.length() > 0)
         }
         capture("task2-fresh-fixture.png")
+        compose.onNodeWithText(ready.headline).assertExists()
         compose.runOnIdle { shown.value = active(ready.copy(validUntil = now - 1L)) }
         capture("task2-expired-fixture.png")
+        compose.onNodeWithText("Tahmin süresi doldu").assertExists()
+        compose.onNodeWithText(ready.headline).assertDoesNotExist()
         compose.runOnIdle { shown.value = active(ready).copy(phoneId = null) }
         capture("task2-disconnected-fixture.png", centerWeather = true)
+        compose.onNodeWithText("Telefon bağlantısı/verisi güncel değil").assertExists()
+        compose.onNodeWithText(ready.headline).assertDoesNotExist()
     }
     @Test fun nullWeatherHidesTheCardOnSmallWatch() {
         compose.setContent { Box(Modifier.size(192.dp)) { WatchScreen(active(null), now, {}, {}, {}) } }

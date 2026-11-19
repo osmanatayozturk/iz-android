@@ -18,6 +18,7 @@ class OsmCommunityEntryTest {
         listOf("Posta", "Kişiler", "Hesabım").forEach {
             compose.onNodeWithText(it).assertExists()
         }
+        compose.onNodeWithContentDescription("OSM topluluğundan geri dön").assertDoesNotExist()
         compose.onNodeWithTag("return-home-map").performClick()
         compose.onNodeWithTag("navigation-home-map").assertIsDisplayed()
     }

@@ -39,11 +39,23 @@ class OpenMeteoWeatherProviderTest {
             val coordinate = WeatherCoordinate(41.0, 29.0)
             provider(server, directory).hourly(listOf(coordinate), from, from + 3_600_000)
 
-            val cached = provider(server, directory).hourly(listOf(coordinate), from, from + 3_600_000)
+            val cached = provider(server, directory, networkAllowed = false).hourly(listOf(coordinate), from, from + 3_600_000)
 
             assertEquals(1, server.requestCount)
             assertEquals(coordinate, cached.single().coordinate)
             assertEquals(from, cached.single().fetchedAt)
+        }
+    }
+
+    @Test fun missingOfflineForecastNeverStartsHttp() {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setResponseCode(503))
+            val offline = provider(server, temporary.newFolder("offline-miss"), networkAllowed = false)
+            val error = assertThrows(WeatherServiceException::class.java) {
+                runBlocking { offline.hourly(listOf(WeatherCoordinate(41.0, 29.0)), from, from + 3_600_000) }
+            }
+            assertTrue(error.message!!.contains("Çevrimdışı"))
+            assertEquals(0, server.requestCount)
         }
     }
 
@@ -74,11 +86,12 @@ class OpenMeteoWeatherProviderTest {
         }
     }
 
-    private fun provider(server: MockWebServer, directory: File, clock: () -> Long = { from }) = OpenMeteoWeatherProvider(
+    private fun provider(server: MockWebServer, directory: File, networkAllowed: Boolean = true, clock: () -> Long = { from }) = OpenMeteoWeatherProvider(
         endpoint = server.url("/forecast").toString(),
         storageDirectory = directory,
         client = OkHttpClient.Builder().retryOnConnectionFailure(false).build(),
         clock = clock,
+        networkAllowed = networkAllowed,
     )
 
     private val forecastObject = """
