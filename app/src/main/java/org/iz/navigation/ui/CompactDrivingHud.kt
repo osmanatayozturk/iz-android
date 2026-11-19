@@ -2,6 +2,8 @@ package org.iz.navigation.ui
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.MoreVert
@@ -18,6 +20,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.iz.navigation.navigation.NavigationState
@@ -63,22 +66,25 @@ internal fun compactHudData(nav: NavigationState, weather: String, message: Stri
         weather, warnings, nav.muted, nav.guidance, nav.gpsStale, nav.recordingPending)
 }
 
-/** Height depends only on orientation and font scale, never maneuver/status/data content. */
+/** Two-line guidance slots keep the map steady across maneuvers. Extra status appears only when needed. */
 @Composable
 internal fun CompactDrivingHud(data: CompactHudData, landscape: Boolean, onMute: () -> Unit,
     onManage: () -> Unit, onWeather: () -> Unit, onRecoverRecording: (() -> Unit)? = null,
     onResumeBreak: (() -> Unit)? = null, resumeEnabled: Boolean = false,
     disclosure: @Composable () -> Unit = {}, controls: @Composable () -> Unit) {
     val scale = LocalDensity.current.fontScale
-    val height = if (landscape) (76 + 52 * scale).dp else (144 + 96 * scale).dp
     val instruction: @Composable () -> Unit = {
-        Text(data.instruction, Modifier.testTag("hud-instruction").semantics { contentDescription = data.instruction },
-            fontSize = if (landscape) 11.sp else 15.sp, lineHeight = if (landscape) 13.5.sp else 20.sp,
-            maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Box(Modifier.fillMaxWidth().height((44 * scale).dp)) {
+            Text(data.instruction, Modifier.fillMaxWidth().testTag("hud-instruction").semantics { contentDescription = data.instruction },
+                fontSize = 20.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold,
+                maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
     }
     val summary: @Composable () -> Unit = {
-        Text(data.summaryText, Modifier.fillMaxWidth().testTag("hud-remaining").semantics { contentDescription = data.summaryDescription },
-            fontSize = 12.sp, lineHeight = if (landscape) 14.5.sp else 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Box(Modifier.fillMaxWidth().height((34 * scale).dp)) {
+            Text(data.summaryText, Modifier.fillMaxWidth().testTag("hud-remaining").semantics { contentDescription = data.summaryDescription },
+                fontSize = 15.sp, lineHeight = 17.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
     }
     val commands: @Composable () -> Unit = {
         Row {
@@ -88,12 +94,6 @@ internal fun CompactDrivingHud(data: CompactHudData, landscape: Boolean, onMute:
             IconButton(onManage, Modifier.size(48.dp).testTag("home-finish-session")) {
                 Icon(Icons.Outlined.MoreVert, "Yolculuk işlemlerini aç")
             }
-            onRecoverRecording?.let { action -> IconButton(action, Modifier.size(48.dp).testTag("recording-permission-settings")) {
-                Icon(Icons.Outlined.Settings, "Kayıt için konum iznini düzelt")
-            } }
-            onResumeBreak?.let { action -> IconButton(action, Modifier.size(48.dp).testTag("hud-resume-break"), enabled = resumeEnabled) {
-                Icon(Icons.Outlined.PlayArrow, "Planlı molayı bitir ve devam et")
-            } }
         }
     }
     val warnings: @Composable () -> Unit = {
@@ -101,48 +101,76 @@ internal fun CompactDrivingHud(data: CompactHudData, landscape: Boolean, onMute:
             if (data.gpsWarning) add("GPS bekleniyor")
             if (data.recordingWarning) add("Kayıt bekleniyor")
             data.warnings.filterNot { data.gpsWarning && it == "GPS konumu bekleniyor" ||
-                data.recordingWarning && it.startsWith("Kayıt:") }.forEach { if (size < 3) add(it) }
+                data.recordingWarning && it == "Kayıt: hassas ve güvenilir konum bekleniyor" }.forEach(::add)
         }
-        Column(Modifier.fillMaxWidth().height((44 * scale).dp).testTag("hud-reserved-status")
-            .semantics { contentDescription = data.warnings.joinToString(" · ") }) {
-            repeat(3) { index ->
-                Text(visible.getOrNull(index).orEmpty(), Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.error,
-                    fontSize = 11.sp, lineHeight = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (visible.isNotEmpty()) {
+            Column(Modifier.fillMaxWidth().testTag("hud-reserved-status")
+                .semantics { contentDescription = data.warnings.joinToString(" · ") }) {
+                visible.forEach { warning ->
+                    Text(warning, Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.error,
+                        fontSize = 12.sp, lineHeight = 15.sp)
+                }
             }
         }
     }
     val preparedDisclosure: @Composable () -> Unit = {
-        Box(Modifier.fillMaxWidth().height((12 * scale + 4).dp).testTag("hud-prepared-status-slot")) {
+        Box(Modifier.fillMaxWidth().testTag("hud-prepared-status-slot")) {
             MaterialTheme(typography = MaterialTheme.typography.copy(
                 labelSmall = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, lineHeight = 12.sp))) {
                 disclosure()
             }
         }
     }
-    Surface(Modifier.fillMaxWidth().height(height).testTag("compact-guidance-header")) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            if (landscape) Row(Modifier.weight(1f).testTag("live-guidance-card")
-                .clickable(onClickLabel = "Yolculuk işlemlerini aç", onClick = onManage),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Column(Modifier.weight(1f)) { instruction(); summary() }
-                Column(Modifier.weight(1f)) { warnings(); preparedDisclosure() }
-            } else {
-                Row(Modifier.testTag("live-guidance-card").clickable(onClickLabel = "Yolculuk işlemlerini aç", onClick = onManage),
-                    verticalAlignment = Alignment.Top) {
-                    Box(Modifier.weight(1f)) { instruction() }; commands()
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val extraActions = onRecoverRecording != null || onResumeBreak != null
+        val controlsHeight = if (extraActions) 96.dp else 48.dp
+        val textBudget = (maxHeight - minOf(maxHeight * .30f, 160.dp) - controlsHeight - 4.dp).coerceAtLeast(0.dp)
+        val wide = landscape && maxWidth >= 480.dp
+        Surface(Modifier.fillMaxWidth().testTag("compact-guidance-header")) {
+            Column(Modifier.padding(horizontal = 12.dp, vertical = 2.dp)) {
+                Column(Modifier.fillMaxWidth().heightIn(max = textBudget).verticalScroll(rememberScrollState())
+                    .testTag("live-guidance-card").clickable(onClickLabel = "Yolculuk işlemlerini aç", onClick = onManage)) {
+                    if (wide && scale <= 1.3f) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Box(Modifier.weight(.55f)) { instruction() }
+                            Box(Modifier.weight(.45f)) { summary() }
+                        }
+                        warnings()
+                        preparedDisclosure()
+                    } else if (wide) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Box(Modifier.weight(.55f)) { instruction() }
+                            Column(Modifier.weight(.45f)) { warnings(); preparedDisclosure() }
+                        }
+                        summary()
+                    } else {
+                        instruction()
+                        summary()
+                        warnings()
+                        preparedDisclosure()
+                    }
                 }
-                summary()
-                Column(Modifier.weight(1f)) { warnings(); preparedDisclosure() }
-            }
-            Row(Modifier.fillMaxWidth().height(48.dp).testTag("navigation-map-controls-row"), verticalAlignment = Alignment.CenterVertically) {
-                Text(data.speed, Modifier.weight(1f).testTag("road-speed-panel").semantics { contentDescription = data.speedDescription },
-                    style = MaterialTheme.typography.titleSmall, maxLines = 1)
-                TextButton(onWeather, Modifier.weight(1f).height(48.dp).testTag("hud-weather").semantics { contentDescription = "Hava durumu: ${data.weather}" }) {
-                    Icon(Icons.Outlined.Cloud, null, Modifier.size(18.dp))
-                    Text(data.weather, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Row(Modifier.fillMaxWidth().height(48.dp).testTag("navigation-map-controls-row"),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text(data.speed, Modifier.weight(1f).testTag("road-speed-panel").semantics { contentDescription = data.speedDescription },
+                        style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    TextButton(onWeather, Modifier.weight(1f).widthIn(min = 48.dp).height(48.dp).testTag("hud-weather")
+                        .semantics { contentDescription = "Hava durumu: ${data.weather}" },
+                        contentPadding = PaddingValues(horizontal = 4.dp)) {
+                        Icon(Icons.Outlined.Cloud, null, Modifier.size(18.dp))
+                        Text(data.weather, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    commands()
+                    controls()
                 }
-                if (landscape) commands()
-                controls()
+                if (extraActions) Row(Modifier.fillMaxWidth().height(48.dp), horizontalArrangement = Arrangement.End) {
+                    onRecoverRecording?.let { action -> IconButton(action, Modifier.size(48.dp).testTag("recording-permission-settings")) {
+                        Icon(Icons.Outlined.Settings, "Kayıt için konum iznini düzelt")
+                    } }
+                    onResumeBreak?.let { action -> IconButton(action, Modifier.size(48.dp).testTag("hud-resume-break"), enabled = resumeEnabled) {
+                        Icon(Icons.Outlined.PlayArrow, "Planlı molayı bitir ve devam et")
+                    } }
+                }
             }
         }
     }

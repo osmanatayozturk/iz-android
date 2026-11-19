@@ -371,7 +371,8 @@ private fun ColumnScope.WeatherRouteMapContent(
                 preparedCenterCovered -> "Hazır harita: kapsamı doğrula"
                 else -> "Hazır haritanın kapsamı dışında"
             }, Modifier.padding(horizontal = 8.dp, vertical = 2.dp).testTag("prepared-map-status")
-                .semantics { contentDescription = preparedDescription }, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                .semantics { contentDescription = preparedDescription },
+                maxLines = if (navigationHeader == null) 1 else Int.MAX_VALUE, overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.labelSmall)
         }
     }

@@ -192,8 +192,8 @@ class SharedNavigationVisualCaptureTest {
                 val maneuver = longLayout.single()
                 val summary = knownSummary.single()
                 check(maneuver.layoutInput.density.fontScale == 1f && summary.layoutInput.density.fontScale == 1f)
-                check(maneuver.layoutInput.style.fontSize == 11.sp && maneuver.layoutInput.style.lineHeight == 13.5.sp)
-                check(summary.layoutInput.style.fontSize == 12.sp && summary.layoutInput.style.lineHeight == 14.5.sp)
+                check(maneuver.layoutInput.style.fontSize == 20.sp && maneuver.layoutInput.style.lineHeight == 22.sp)
+                check(summary.layoutInput.style.fontSize == 15.sp && summary.layoutInput.style.lineHeight == 17.sp)
                 check(maneuver.layoutInput.maxLines == 2 && summary.layoutInput.maxLines == 2)
                 metadata.put("normalLandscapeFontOne", JSONObject()
                     .put("effectiveComposeFontScale", maneuver.layoutInput.density.fontScale)
@@ -220,7 +220,7 @@ class SharedNavigationVisualCaptureTest {
             check(!unknownSummary.single().hasVisualOverflow) { "Unknown HUD summary must fit without ellipsis" }
             compose.onNodeWithTag("navigation-home-map").assertIsDisplayed()
             val after = bounds("compact-guidance-header")
-            assertEquals(before.height, after.height, 1f)
+            check(after.height >= before.height - 1f) { "Warnings may expand the HUD but must not shrink its guidance slots" }
             for (tag in listOf("compact-card-mute", "home-finish-session", "hud-weather", "directions-recenter",
                 "home-record", "home-group", "home-menu")) {
                 compose.onNodeWithTag(tag).assertIsDisplayed()

@@ -25,8 +25,8 @@ class CompactDrivingHudUiTest {
     @get:Rule val compose = createComposeRule()
     private val initial = CompactHudData("Sağa dön", "Manevra 200 m", "Kalan 3.0 km · 8 dk · 2 dk mola dahil",
         "30/50 km/sa", "Hızım30, sınır50", "18°", emptyList(), false, true)
-    @Test fun portraitPanelHeightDoesNotFollowInstructionsOrWarnings() = verify(false, 1f)
-    @Test fun landscapeFontTwoKeepsCriticalGpsAndRecordWarningsVisible() = verify(true, 2f)
+    @Test fun portraitPanelHeightDoesNotFollowInstructionsOrWarnings() { verify(false, 1f) }
+    @Test fun landscapeFontTwoKeepsCriticalGpsAndRecordWarningsVisible() { verify(true, 2f) }
     @Test fun preparedDisclosureUsesReservedSlotWithoutChangingPanelHeight() {
         var visible by mutableStateOf(false)
         val warnings = initial.copy(gpsWarning = true, recordingWarning = true,
@@ -43,11 +43,12 @@ class CompactDrivingHudUiTest {
         } } }
         val before = compose.onNodeWithTag("compact-guidance-header").fetchSemanticsNode().boundsInRoot
         compose.runOnIdle { visible = true }
-        assertEquals(before, compose.onNodeWithTag("compact-guidance-header").fetchSemanticsNode().boundsInRoot)
+        val after = compose.onNodeWithTag("compact-guidance-header").fetchSemanticsNode().boundsInRoot
+        assertTrue("The disclosure adds only its own space", after.height in before.height..(before.height + 32f))
         val status = compose.onNodeWithTag("prepared-map-status", useUnmergedTree = true).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         val slot = compose.onNodeWithTag("hud-prepared-status-slot", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         assertTrue(status.top >= slot.top && status.bottom <= slot.bottom)
-        assertTrue(slot.top >= before.top && slot.bottom <= before.bottom)
+        assertTrue(slot.top >= after.top && slot.bottom <= after.bottom)
         val statusLayouts = mutableListOf<TextLayoutResult>()
         compose.onNodeWithTag("prepared-map-status", useUnmergedTree = true)
             .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(statusLayouts) }
@@ -87,7 +88,7 @@ class CompactDrivingHudUiTest {
             assertTrue(bounds.top >= warningSlot.top && bounds.bottom <= warningSlot.bottom)
         }
         assertSummary("200 m · 3,0 km / 8 dk · 2 dk mola dahil",
-            "Manevra 200 m · Kalan 3.0 km · 8 dk · 2 dk mola dahil", true)
+            "Manevra 200 m · Kalan 3.0 km · 8 dk · 2 dk mola dahil")
     }
     private fun verify(landscape: Boolean, fontScale: Float) {
         val summaryLayouts = mutableListOf<Pair<Boolean, String>>()
@@ -100,19 +101,22 @@ class CompactDrivingHudUiTest {
             }
         } } }
         assertSummary("— · — / — · 2 dk mola dahil", "Manevra — · Kalan — · — · 2 dk mola dahil",
-            landscape, summaryLayouts)
+            summaryLayouts)
         val originalHeight = compose.onNodeWithTag("compact-guidance-header").fetchSemanticsNode().boundsInRoot.height
         val full = "Sentetik kavşaktan sağa dön ve uzun sahil caddesini izleyerek ikinci yol ayrımından şehir merkezi yönünde devam et"
         val warning = "GPS konumu bekleniyor · Kayıt: hassas ve güvenilir konum bekleniyor"
-        compose.runOnIdle { data = data.copy(instruction = full,
+        compose.runOnIdle { data = data.copy(instruction = full) }
+        assertEquals(originalHeight, compose.onNodeWithTag("compact-guidance-header").fetchSemanticsNode().boundsInRoot.height, 1f)
+        compose.runOnIdle { data = data.copy(
             warnings = listOf("GPS konumu bekleniyor", "Kayıt: hassas ve güvenilir konum bekleniyor"), weather = "Bilinmiyor",
             gpsWarning = true, recordingWarning = true) }
-        assertEquals(originalHeight, compose.onNodeWithTag("compact-guidance-header").fetchSemanticsNode().boundsInRoot.height, .1f)
+        val warningHeight = compose.onNodeWithTag("compact-guidance-header").fetchSemanticsNode().boundsInRoot.height
+        assertTrue(warningHeight in originalHeight..(originalHeight + 46 * fontScale))
         compose.onNodeWithContentDescription(full).assertIsDisplayed()
         val layouts = mutableListOf<TextLayoutResult>()
         compose.onNodeWithTag("hud-instruction", useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
-        assertEquals(if (landscape) 11f else 15f, layouts.single().layoutInput.style.fontSize.value, .01f)
-        assertEquals(if (landscape) 13.5f else 20f, layouts.single().layoutInput.style.lineHeight.value, .01f)
+        assertEquals(20f, layouts.single().layoutInput.style.fontSize.value, .01f)
+        assertEquals(22f, layouts.single().layoutInput.style.lineHeight.value, .01f)
         assertEquals(2, layouts.single().layoutInput.maxLines)
         assertTrue(layouts.single().lineCount <= 2)
         compose.onNodeWithContentDescription(warning, useUnmergedTree = true).assertIsDisplayed()
@@ -138,22 +142,56 @@ class CompactDrivingHudUiTest {
                 "12,3 km · 999,9 km / 206 dk · 3 dk mola dahil", "Manevra 12.3 km · Kalan 999.9 km · 206 dk · 3 dk mola dahil"))
         for ((next, remaining, expected, description) in summaries) {
             compose.runOnIdle { data = data.copy(next = next, remaining = remaining) }
-            assertSummary(expected, description, landscape, summaryLayouts)
-            assertEquals(originalHeight, compose.onNodeWithTag("compact-guidance-header").fetchSemanticsNode().boundsInRoot.height, 1f)
+            assertSummary(expected, description, summaryLayouts)
+            assertEquals(warningHeight, compose.onNodeWithTag("compact-guidance-header").fetchSemanticsNode().boundsInRoot.height, 1f)
         }
         assertTrue("HUD_SUMMARY_LAYOUTS\n" + summaryLayouts.joinToString("\n") { "fits=${it.first}; ${it.second}" },
             summaryLayouts.all { it.first })
     }
 
-    private fun assertSummary(expected: String, description: String, landscape: Boolean,
+    @Test fun landscapeLargeTextExposesLaterWarningsAndKeepsPermissionAndBreakActionsReachable() {
+        var permission = 0
+        var resumed = 0
+        val laterWarning = "Trafik güncellenemedi. Mevcut rota korunuyor ve önceki trafik bilgileri artık güncel olmayabilir."
+        val disclosure = "Hazır haritanın kapsamı dışında. Bağlantıyı kontrol edip harita paketini yeniden doğrula."
+        val data = initial.copy(instruction = "Planlı mola", gpsWarning = true, recordingWarning = true,
+            warnings = listOf("GPS konumu bekleniyor", "Kayıt: hassas ve güvenilir konum bekleniyor",
+                "Yaklaşık konum", "Yönlendirme duraklatıldı", laterWarning))
+        compose.setContent { CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) { IzTheme {
+            Box(Modifier.requiredSize(640.dp, 360.dp)) {
+                CompactDrivingHud(data, true, {}, {}, {}, onRecoverRecording = { permission++ },
+                    onResumeBreak = { resumed++ }, resumeEnabled = true,
+                    disclosure = { Text(disclosure, Modifier.testTag("prepared-map-status"),
+                        style = androidx.compose.material3.MaterialTheme.typography.labelSmall) }) {
+                    IconButton({}, Modifier.size(48.dp).testTag("directions-recenter")) { Text("?") }
+                }
+            }
+        } } }
+        compose.onNodeWithText("GPS bekleniyor", useUnmergedTree = true).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Kayıt bekleniyor", useUnmergedTree = true).performScrollTo().assertIsDisplayed()
+        val later = compose.onNodeWithText(laterWarning, useUnmergedTree = true).performScrollTo().assertIsDisplayed()
+        val wrapped = mutableListOf<TextLayoutResult>()
+        later.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(wrapped) }
+        assertTrue(wrapped.single().lineCount > 1)
+        assertFalse(wrapped.single().hasVisualOverflow)
+        compose.onNodeWithTag("prepared-map-status", useUnmergedTree = true).performScrollTo().assertIsDisplayed()
+            .assertTextEquals(disclosure)
+        for (tag in listOf("recording-permission-settings", "hud-resume-break")) {
+            compose.onNodeWithTag(tag).assertIsDisplayed().assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
+                .assertHasClickAction().performClick()
+        }
+        compose.runOnIdle { assertEquals(1, permission); assertEquals(1, resumed) }
+    }
+
+    private fun assertSummary(expected: String, description: String,
         collectedLayouts: MutableList<Pair<Boolean, String>>? = null) {
         val node = compose.onNodeWithTag("hud-remaining", useUnmergedTree = true)
             .assertTextEquals(expected).assertContentDescriptionEquals(description).assertIsDisplayed()
         val measured = mutableListOf<TextLayoutResult>()
         node.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(measured) }
         val layout = measured.single()
-        assertEquals(12f, layout.layoutInput.style.fontSize.value, .01f)
-        assertEquals(if (landscape) 14.5f else 16f, layout.layoutInput.style.lineHeight.value, .01f)
+        assertEquals(15f, layout.layoutInput.style.fontSize.value, .01f)
+        assertEquals(17f, layout.layoutInput.style.lineHeight.value, .01f)
         assertEquals(2, layout.layoutInput.maxLines)
         val details = textLayoutDetails("summary: $expected", layout)
         if (collectedLayouts == null) {

@@ -1,12 +1,16 @@
 package org.iz.navigation.ui
 
 import android.graphics.Bitmap
+import android.graphics.Color
+import android.graphics.RectF
 import android.content.ContextWrapper
+import android.app.UiAutomation
+import android.os.Build
 import android.os.SystemClock
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.width
-import androidx.compose.runtime.mutableStateOf
+import android.view.WindowManager
+import android.view.Window
+import androidx.compose.foundation.layout.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.asAndroidBitmap
@@ -20,21 +24,29 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.iz.navigation.data.Transport
 import org.iz.navigation.BuildConfig
 import org.iz.navigation.health.HealthPrivacyActivity
+import org.iz.navigation.integration.LocalOsmMapPresentation
+import org.iz.navigation.integration.OsmMapPresentation
 import org.iz.navigation.navigation.NavigationProgress
 import org.iz.navigation.navigation.NavigationState
 import org.iz.navigation.weather.*
 import org.json.JSONObject
+import org.json.JSONArray
+import org.maplibre.android.maps.MapLibreMap
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /** Synthetic card geometry and callback contracts; real session regression is in ApprovedPhoneUsabilityAcceptanceTest. */
 @RunWith(AndroidJUnit4::class)
@@ -48,6 +60,9 @@ class CompactNavigationCardTest {
     private var fontScale = 0f
     private var opens = 0
     private var mutes = 0
+    private var weatherOpens = 0
+    private var locationRequests = 0
+    private val nativeMap = AtomicReference<MapLibreMap?>()
 
     @Test fun shortManeuverFitsCompactCardAt360Dp() {
         render(360.dp)
@@ -57,7 +72,7 @@ class CompactNavigationCardTest {
         val mute = bounds("compact-card-mute")
         val operations = bounds("home-finish-session")
         assertTrue("Maneuver/remaining summary stays above the map-controls row", distance.bottom <= bounds("navigation-map-controls-row").top)
-        assertTrue("Operations should share the first row at 360dp", mute.overlapsVertically(operations))
+        assertTrue("Operations should share the controls row at 360dp", mute.overlapsVertically(operations))
         assertControlsAndMapStaySeparate()
         capture("short-360")
     }
@@ -80,6 +95,66 @@ class CompactNavigationCardTest {
         capture("short-allocated-width")
     }
 
+    @Test fun portrait384DpKeepsTwoManeuversStableAndReclaimsMapHeight() {
+        verifyViewport(384, 832, 115f..130.6f, 240f, 109f,
+            "İkinci kavşaktan sola dön ve sahil yoluna devam et", "portrait-384x832-compact")
+    }
+
+    @Test fun landscape832DpKeepsTwoManeuversStableAndReclaimsMapHeight() {
+        verifyViewport(832, 384, 92f..105f, 128f, 31f,
+            "İkinci ışıklardan sola dön ve sahil yolundan şehir merkezine devam et", "landscape-832x384-compact")
+    }
+
+    private fun verifyViewport(width: Int, height: Int, expectedHeight: ClosedFloatingPointRange<Float>,
+        baselineHeight: Float, minGain: Float, next: String, evidence: String) {
+        render(viewport = width to height)
+        assertHomeWidth(width)
+        val home = bounds("navigation-home")
+        assertEquals("Requested synthetic viewport height", height.toFloat(), home.height / density, 1f)
+        val header = bounds("compact-guidance-header")
+        val map = bounds("navigation-home-map")
+        val visibleMapBottom = minOf(map.bottom, bounds("home-bottom-actions").top)
+        val card = bounds("live-guidance-card")
+        val heightDp = header.height / density
+        assertTrue("Expected a header within $expectedHeight dp, got $heightDp", heightDp in expectedHeight)
+        assertEquals("Real map starts immediately after HUD", header.bottom, map.top, 1f)
+        assertTrue("At least ${minGain}dp of map reclaimed against 8e75446's ${baselineHeight}dp header",
+            map.height / density - (home.height / density - baselineHeight) >= minGain)
+        assertTrue("The gained area must also be visible above the bottom dock",
+            (visibleMapBottom - map.top) / density -
+                ((visibleMapBottom - home.top) / density - baselineHeight) >= minGain)
+        assertMeasuredAction("hud-weather")
+        if (width > height) {
+            val instruction = bounds("hud-instruction")
+            val summary = bounds("hud-remaining")
+            assertTrue("Landscape maneuver and summary share one row", instruction.overlapsVertically(summary))
+            assertTrue("Landscape summary does not cover the maneuver", instruction.right <= summary.left)
+        }
+        assertCompactTypography()
+        assertControlsAndMapStaySeparate()
+
+        compose.runOnIdle { state.value = guided(next) }
+        assertEquals(header, bounds("compact-guidance-header"))
+        assertEquals(card, bounds("live-guidance-card"))
+        assertEquals(map, bounds("navigation-home-map"))
+        compose.onNodeWithContentDescription(next, useUnmergedTree = true).assertIsDisplayed()
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithTag("hud-instruction", useUnmergedTree = true)
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        assertEquals("Two-line ordinary maneuver", 2, layouts.single().lineCount)
+        assertFalse("Ordinary maneuver must fit without clipping", layouts.single().hasVisualOverflow)
+        val maneuver = layouts.single()
+        val maneuverBounds = bounds("hud-instruction")
+        assertTrue(maneuverBounds.top + maneuver.getLineTop(0) >= card.top - 1f)
+        assertTrue(maneuverBounds.top + maneuver.getLineBottom(1) <= card.bottom + 1f)
+        assertTrue(maneuver.getLineBottom(1) <= maneuver.size.height + 0.5f)
+        compose.onNodeWithTag("hud-weather").assertHasClickAction().performTouchInput { click() }
+        compose.onNodeWithTag("directions-recenter").assertHasClickAction().performTouchInput { click() }
+        compose.runOnIdle { assertEquals(1, weatherOpens); assertEquals(1, locationRequests) }
+        awaitLocalRoute()
+        capture(evidence, ownedWindowPng = true)
+    }
+
     @Test fun longManeuverWrapsAndPanelHasFullInstruction() {
         val instruction = "Sentetik kavşaktan sağa dön ve uzun sahil caddesini izleyerek ikinci yol ayrımından şehir merkezi yönünde devam et"
         state.value = guided(instruction)
@@ -90,7 +165,7 @@ class CompactNavigationCardTest {
         val layout = layouts.single()
         assertTrue("Long instructions use at most two visible lines", layout.lineCount in 1..2)
         node.assertContentDescriptionEquals(instruction)
-        assertEquals(15f, layout.layoutInput.style.fontSize.value, .01f)
+        assertEquals(20f, layout.layoutInput.style.fontSize.value, .01f)
         assertControlsAndMapStaySeparate()
         capture("long-320")
         compose.onNodeWithTag("home-finish-session").performClick()
@@ -199,15 +274,15 @@ class CompactNavigationCardTest {
         compose.runOnIdle { assertEquals(original, state.value) }
     }
 
-    private fun render(width: Dp? = null) {
+    private fun render(width: Dp? = null, viewport: Pair<Int, Int>? = null) {
         uxHost.setContent { IzTheme {
-            density = LocalDensity.current.density
-            fontScale = LocalDensity.current.fontScale
-            Box(if (width == null) Modifier.fillMaxSize() else Modifier.width(width).fillMaxSize()) {
+            val scene: @Composable () -> Unit = {
+                density = LocalDensity.current.density
+                fontScale = LocalDensity.current.fontScale
                 val open = { opens++; panel.value = true }
                 NavigationHomeContent(PhoneDirectionsState(), state.value, emptyList(), emptyList(),
-                    panel.value, "Hava", open, {}, {}, {}, {},
-                    { mutes++; state.value = state.value.copy(muted = !state.value.muted) }, open, {}, {},
+                    panel.value, if (viewport != null) "18°" else "Hava", open, {}, {}, {}, { weatherOpens++ },
+                    { mutes++; state.value = state.value.copy(muted = !state.value.muted) }, open, { locationRequests++ }, {},
                     planner = {
                         PhoneDirectionsContent(ui = PhoneDirectionsState(), nav = state.value, points = emptyList(),
                             commandBusy = false, onClose = { panel.value = false }, chooseOrigin = {}, chooseDestination = {},
@@ -217,6 +292,17 @@ class CompactNavigationCardTest {
                             permissions = {}, showMap = false)
                     })
             }
+            if (viewport != null) BoxWithConstraints(Modifier.fillMaxSize()) {
+                val physicalDensity = LocalDensity.current.density
+                val (widthDp, heightDp) = viewport
+                val fit = minOf(maxWidth.value / widthDp, maxHeight.value / heightDp)
+                val localMap = remember { OsmMapPresentation(::compactLocalStyle, nativeMap::set) }
+                // Fit the documented phone viewport into the owned window without changing device settings.
+                CompositionLocalProvider(LocalDensity provides Density(physicalDensity * fit, 1f),
+                    LocalOsmMapPresentation provides localMap) {
+                    Box(Modifier.size(widthDp.dp, heightDp.dp)) { scene() }
+                }
+            } else Box(if (width == null) Modifier.fillMaxSize() else Modifier.width(width).fillMaxSize()) { scene() }
         } }
         compose.onNodeWithTag("live-guidance-card").assertIsDisplayed()
         compose.runOnIdle { assertEquals("Run only the allocated normal-font scenario", 1f, fontScale, .01f) }
@@ -227,7 +313,6 @@ class CompactNavigationCardTest {
     }
 
     private fun assertCompactTypography() {
-        val landscape = bounds("navigation-home").let { it.width > it.height }
         compose.onNodeWithTag("hud-remaining", useUnmergedTree = true).assertTextEquals("200 m · 1,5 km / 10 dk")
         compose.onAllNodes(hasText("Tahmini varış", substring = true), useUnmergedTree = true).assertCountEquals(0)
         compose.onNodeWithTag("hud-remaining", useUnmergedTree = true)
@@ -241,19 +326,19 @@ class CompactNavigationCardTest {
             assertEquals(lineHeight, layouts.single().layoutInput.style.lineHeight.value, .01f)
             assertEquals(2, layouts.single().layoutInput.maxLines)
         }
-        assertSize("Sağa dön", if (landscape) 11f else 15f, if (landscape) 13.5f else 20f)
+        assertSize("Sağa dön", 20f, 22f)
         val summaryLayouts = mutableListOf<TextLayoutResult>()
         compose.onNodeWithTag("hud-remaining", useUnmergedTree = true)
             .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(summaryLayouts) }
-        assertEquals(12f, summaryLayouts.single().layoutInput.style.fontSize.value, .01f)
-        assertEquals(if (landscape) 14.5f else 16f, summaryLayouts.single().layoutInput.style.lineHeight.value, .01f)
+        assertEquals(15f, summaryLayouts.single().layoutInput.style.fontSize.value, .01f)
+        assertEquals(17f, summaryLayouts.single().layoutInput.style.lineHeight.value, .01f)
         assertEquals(2, summaryLayouts.single().layoutInput.maxLines)
     }
 
     private fun assertControlsAndMapStaySeparate() {
         val card = bounds("live-guidance-card")
         val actions = listOf("compact-card-mute", "home-finish-session").map { tag ->
-            compose.onNodeWithTag(tag).assertIsDisplayed().assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
+            assertMeasuredAction(tag)
             bounds(tag).also {
                 val header = bounds("compact-guidance-header")
                 assertTrue("$tag must remain inside the fixed guidance header", it.left >= header.left && it.right <= header.right &&
@@ -268,27 +353,30 @@ class CompactNavigationCardTest {
         compose.onNodeWithTag("open-navigation-dashboard").assertDoesNotExist()
         listOf("directions-recenter").forEach { tag ->
             compose.onAllNodesWithTag(tag).assertCountEquals(1)
-            compose.onNodeWithTag(tag).assertIsDisplayed().assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
+            assertMeasuredAction(tag)
             val control = bounds(tag)
             assertFalse("Card covers map control $tag", card.overlaps(control))
             assertTrue("$tag must be above the real map", control.bottom <= map.top)
         }
     }
 
+    private fun assertMeasuredAction(tag: String) {
+        compose.onNodeWithTag(tag).assertIsDisplayed().assertHasClickAction()
+        val size = bounds(tag)
+        assertTrue("$tag must occupy 48×48dp at the effective scene density",
+            size.width >= 48f * density - 1f && size.height >= 48f * density - 1f)
+    }
+
     private fun bounds(tag: String) = compose.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
     private fun textBounds(text: String) = compose.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
     private fun Rect.overlapsVertically(other: Rect) = top < other.bottom && bottom > other.top
 
-    private fun capture(name: String) {
+    private fun capture(name: String, ownedWindowPng: Boolean = false) {
         val directory = File(requireNotNull(InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null)),
             "qa/compact-navigation-card/$name-${SystemClock.uptimeMillis()}").apply { check(mkdirs()) }
-        File(directory, "screen.png").outputStream().use {
-            check(compose.onNodeWithTag("navigation-home").captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it))
-        }
-
         val evidenceType = "OWNED_COMPOSE_SEMANTICS_NOT_PLATFORM_TALKBACK"
         val home = compose.onNodeWithTag("navigation-home", useUnmergedTree = true).assertIsDisplayed().fetchSemanticsNode()
-        val nodes = compose.runOnIdle {
+        val (nodes, window) = compose.runOnIdle {
             runCatching {
                 check(home.config.getOrNull(SemanticsProperties.TestTag) == "navigation-home")
                 val rootView = checkNotNull((home.root as? ViewRootForTest)?.view)
@@ -320,7 +408,7 @@ class CompactNavigationCardTest {
                     node.children.forEach { readNode(it, depth + 1) }
                 }
                 readNode(home, 0)
-                result.toList()
+                result.toList() to owner.window
             }
         }.getOrThrow()
         File(directory, "ui.xml").outputStream().use { output ->
@@ -341,12 +429,110 @@ class CompactNavigationCardTest {
         }
         val map = bounds("navigation-home-map")
         val card = bounds("live-guidance-card")
-        File(directory, "geometry.json").writeText(JSONObject().put("density", density).put("fontScale", fontScale)
+        val header = bounds("compact-guidance-header")
+        val landscape = home.boundsInRoot.width > home.boundsInRoot.height
+        val baselineHeight = if (landscape) 128f else 240f
+        val visibleMap = Rect(map.left, map.top, map.right, minOf(map.bottom, bounds("home-bottom-actions").top))
+        val metadata = JSONObject().put("density", density).put("fontScale", fontScale)
+            .put("captureMethod", if (ownedWindowPng) "API34_OWNED_WINDOW_VIEWPORT_CROP" else "COMPOSE_NODE_CROP")
             .put("treeEvidenceType", evidenceType)
+            .put("homeHeightDp", home.boundsInRoot.height / density)
+            .put("headerHeightDp", header.height / density).put("headerBoundsPx", header.toString())
+            .put("baselineHeightDp", baselineHeight).put("baselineSource", "8e75446232faa3f9ee83366d375f0030138b7c6b")
+            .put("baselineInstructionSp", if (landscape) 11 else 15).put("baselineSummarySp", 12)
+            .put("mapHeightGainDpAgainstBaseline", baselineHeight - (map.top - home.boundsInRoot.top) / density)
             .put("homeWidthDp", bounds("navigation-home").width / density).put("cardWidthDp", card.width / density)
             .put("cardHeightDp", card.height / density).put("cardBoundsPx", card.toString())
             .put("mapBoundsPx", map.toString()).put("cardOverlapsRealMap", card.overlaps(map))
-            .put("sourceCommitArgument", InstrumentationRegistry.getArguments().getString("izCandidateCommit")).toString(2))
+            .put("visibleMapAboveDockBoundsPx", visibleMap.toString()).put("visibleMapAboveDockHeightDp", visibleMap.height / density)
+            .put("sourceCommitArgument", InstrumentationRegistry.getArguments().getString("izCandidateCommit"))
+        if (ownedWindowPng) {
+            metadata.put("localRenderedRouteQuery", true).put("localMapPngBackground", "NOT_CAPTURED")
+            for (tag in listOf("hud-instruction", "hud-remaining")) {
+                val layouts = mutableListOf<TextLayoutResult>()
+                compose.onNodeWithTag(tag, useUnmergedTree = true)
+                    .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+                val layout = layouts.single()
+                metadata.put(tag, JSONObject().put("fontSizeSp", layout.layoutInput.style.fontSize.value)
+                    .put("lineHeightSp", layout.layoutInput.style.lineHeight.value).put("lines", layout.lineCount))
+            }
+        }
+        val geometry = File(directory, "geometry.json")
+        geometry.writeText(metadata.toString(2))
+        val png = File(directory, "screen.png")
+        if (ownedWindowPng) {
+            val matching = captureOwnedViewport(home, window, png)
+            metadata.put("localMapPngBackground", if (matching >= 2) "SAMPLED_BACKGROUND_VISIBLE" else "NOT_DETECTED")
+                .put("matchingLocalBackgroundSamples", matching).put("localBackgroundSamples", 4)
+            geometry.writeText(metadata.toString(2))
+        } else png.outputStream().use {
+            check(compose.onNodeWithTag("navigation-home").captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it))
+        }
+    }
+
+    private fun compactLocalStyle(raw: String): String = JSONObject(raw).apply {
+        getJSONObject("sources").remove("osm-tiles")
+        val original = getJSONArray("layers")
+        put("layers", JSONArray().put(JSONObject().put("id", "qa-compact-hud-background")
+            .put("type", "background").put("paint", JSONObject().put("background-color", "#E4EEE6"))).apply {
+            for (i in 0 until original.length()) {
+                val layer = original.getJSONObject(i)
+                if (layer.optString("source") != "osm-tiles" && layer.optString("type") !in setOf("symbol", "background")) put(layer)
+            }
+        })
+        remove("glyphs")
+        remove("sprite")
+    }.toString().also { check("https://" !in it && "http://" !in it) }
+
+    private fun awaitLocalRoute() {
+        compose.waitUntil(20_000) {
+            compose.runOnIdle {
+                nativeMap.get()?.let { map ->
+                    map.width > 0f && map.height > 0f &&
+                        map.queryRenderedFeatures(RectF(0f, 0f, map.width, map.height), "weather-route-layer").isNotEmpty()
+                } == true
+            }
+        }
+    }
+
+    private fun captureOwnedViewport(home: SemanticsNode, window: Window, file: File): Int {
+        check(Build.VERSION.SDK_INT >= 34)
+        val viewport = compose.runOnIdle {
+            val view = (home.root as ViewRootForTest).view
+            check(view.isAttachedToWindow && view.rootView === window.decorView.rootView)
+            check(window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE == 0)
+            home.boundsInWindow
+        }
+        val automation = InstrumentationRegistry.getInstrumentation()
+            .getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES)
+        val windowBitmap = checkNotNull(automation.takeScreenshot(window))
+        val captured = if (windowBitmap.config == Bitmap.Config.ARGB_8888) windowBitmap else try {
+            checkNotNull(windowBitmap.copy(Bitmap.Config.ARGB_8888, false))
+        } finally { windowBitmap.recycle() }
+        return try {
+            val left = viewport.left.roundToInt()
+            val top = viewport.top.roundToInt()
+            val width = viewport.right.roundToInt() - left
+            val height = viewport.bottom.roundToInt() - top
+            check(captured.width in 1..4096 && captured.height in 1..4096)
+            check(width > 0 && height > 0 && left >= 0 && top >= 0 &&
+                left + width <= captured.width && top + height <= captured.height)
+            val crop = Bitmap.createBitmap(captured, left, top, width, height)
+            try {
+                file.outputStream().use { check(crop.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+                // Confirm that the local native map background reached the window capture.
+                val expected = Color.rgb(228, 238, 230)
+                val map = bounds("navigation-home-map")
+                val sampleY = (map.top - home.boundsInRoot.top + map.height * .42f).roundToInt()
+                check(sampleY in 0 until height)
+                listOf(.18f, .32f, .68f, .82f).count { x ->
+                    val pixel = crop.getPixel((width * x).roundToInt(), sampleY)
+                    abs(Color.red(pixel) - Color.red(expected)) <= 12 &&
+                        abs(Color.green(pixel) - Color.green(expected)) <= 12 &&
+                        abs(Color.blue(pixel) - Color.blue(expected)) <= 12
+                }
+            } finally { if (crop !== captured) crop.recycle() }
+        } finally { captured.recycle() }
     }
 
     private fun guided(instruction: String = "Sağa dön"): NavigationState {
