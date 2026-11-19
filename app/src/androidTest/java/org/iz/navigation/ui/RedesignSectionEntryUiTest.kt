@@ -4,6 +4,15 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.os.Handler
+import android.os.Looper
+import android.view.PixelCopy
+import android.view.View
+import android.view.ViewGroup
+import android.view.Window
+import android.view.inspector.WindowInspector
+import androidx.activity.OnBackPressedDispatcherOwner
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
@@ -17,6 +26,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.test.core.app.ActivityScenario
 import androidx.test.espresso.Espresso.pressBack
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -37,7 +47,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.File
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(AndroidJUnit4::class)
 class RedesignSectionEntryUiTest {
@@ -45,23 +59,24 @@ class RedesignSectionEntryUiTest {
 
     @Test fun phoneSectionsReturnToMapWithoutCreatingASession() {
         val app = requireIsolatedApp()
-        ActivityScenario.launch(MainActivity::class.java).use {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             compose.onNodeWithTag("navigation-home-map").assertIsDisplayed()
+            captureWindowIfAllocated(scenario, "home-synthetic.png")
             compose.onNodeWithTag("home-record").assertIsDisplayed().performClick()
             compose.onNodeWithText("Vazgeç").assertIsDisplayed().performClick()
             compose.onNodeWithTag("navigation-home-map").assertIsDisplayed()
-            visit("menu-route-plan", { compose.onNodeWithTag("navigation-screen").assertIsDisplayed() })
-            visit("menu-journeys", { compose.onNode(hasText("Yolculuklar") and !hasClickAction()).assertIsDisplayed() })
-            visit("menu-osm", { compose.onNodeWithTag("osm-contribution-hub").assertIsDisplayed() })
-            visit("menu-weather", { compose.onNodeWithTag("weather_planner").assertIsDisplayed() })
-            visit("menu-settings", {
+            visit(scenario, "menu-route-plan") { compose.onNodeWithTag("navigation-screen").assertIsDisplayed() }
+            visit(scenario, "menu-journeys") { compose.onNode(hasText("Yolculuklar") and !hasClickAction()).assertIsDisplayed() }
+            visit(scenario, "menu-osm") { compose.onNodeWithTag("osm-contribution-hub").assertIsDisplayed() }
+            visit(scenario, "menu-weather") { compose.onNodeWithTag("weather_planner").assertIsDisplayed() }
+            visit(scenario, "menu-settings") {
                 compose.onNodeWithTag("settings").assertIsDisplayed()
                 compose.onNodeWithTag("settings").performScrollToNode(hasTestTag("settings-open-detection"))
                 compose.onNodeWithTag("settings-open-detection").performClick()
                 compose.onNodeWithTag("settings-view-detection").assertIsDisplayed()
-                pressBack()
+                dispatchActivityBack(scenario)
                 compose.onNodeWithTag("settings").assertIsDisplayed()
-            })
+            }
             compose.runOnIdle { assertIdleNavigation(app.navigation.state.value) }
         }
     }
@@ -72,7 +87,7 @@ class RedesignSectionEntryUiTest {
         val original = preferences.all["show_route"] as? Boolean
         val saved = !(original ?: true)
         try {
-            ActivityScenario.launch(MainActivity::class.java).use {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                 compose.onNodeWithTag("home-menu").performClick()
                 compose.onNodeWithTag("menu-settings").performScrollTo().performClick()
                 compose.onNodeWithTag("settings").performScrollToNode(hasTestTag("settings-open-voice"))
@@ -86,18 +101,18 @@ class RedesignSectionEntryUiTest {
                 compose.onNodeWithText("Harita katmanları").performScrollTo().performClick()
                 val route = compose.onNodeWithTag("map-layer-route").performScrollTo()
                 if (saved) route.assertIsOn() else route.assertIsOff()
-                pressBack()
+                pressModalBack()
                 compose.onNodeWithTag("map-layers-settings").assertDoesNotExist()
                 compose.onNodeWithTag("settings-view-voice").assertIsDisplayed()
 
-                pressBack()
+                dispatchActivityBack(scenario)
                 compose.onNodeWithTag("settings").assertIsDisplayed()
-                pressBack()
+                dispatchActivityBack(scenario)
                 compose.onNodeWithTag("navigation-home-map").assertIsDisplayed()
                 compose.onNodeWithTag("home-menu").performClick()
                 compose.onNodeWithTag("menu-map-layers").performScrollTo().performClick()
                 compose.onNodeWithText(if (saved) "✓ Planlanan rota" else "Planlanan rota").assertIsDisplayed()
-                pressBack()
+                pressModalBack()
                 compose.runOnIdle { assertIdleNavigation(app.navigation.state.value) }
             }
         } finally {
@@ -117,10 +132,12 @@ class RedesignSectionEntryUiTest {
         assertEquals(DiarySnapshot(), runBlocking { repository.snapshot() })
         runBlocking { repository.saveJourney(journey) }
         try {
-            ActivityScenario.launch(MainActivity::class.java).use {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                 compose.onNodeWithTag("home-menu").performClick()
                 compose.onNodeWithTag("menu-journeys").performScrollTo().performClick()
                 visitJournalLink(journey.title)
+                compose.onNode(hasText(journey.title) and !hasClickAction()).assertIsDisplayed()
+                captureWindowIfAllocated(scenario, "journal-synthetic.png")
 
                 val subpages = listOf(
                     "İzi haritada aç" to "Konum kaydında kesinti var.",
@@ -132,7 +149,7 @@ class RedesignSectionEntryUiTest {
                 for ((entry, heading) in subpages) {
                     visitJournalLink(entry)
                     compose.onNodeWithText(heading).assertIsDisplayed()
-                    pressBack()
+                    dispatchActivityBack(scenario)
                     val pageTitle = hasText(journey.title) and !hasClickAction()
                     compose.onNode(hasScrollToIndexAction()).performScrollToNode(pageTitle)
                     compose.onNode(pageTitle).assertIsDisplayed()
@@ -167,12 +184,56 @@ class RedesignSectionEntryUiTest {
         compose.onNode(link).assertIsDisplayed().performClick()
     }
 
-    private fun visit(menuTag: String, assertDestination: () -> Unit) {
+    private fun visit(scenario: ActivityScenario<MainActivity>, menuTag: String, assertDestination: () -> Unit) {
         compose.onNodeWithTag("home-menu").performClick()
         compose.onNodeWithTag(menuTag).performScrollTo().assertIsDisplayed().performClick()
         assertDestination()
-        pressBack()
+        dispatchActivityBack(scenario)
         compose.onNodeWithTag("navigation-home-map").assertIsDisplayed()
+    }
+
+    private fun dispatchActivityBack(scenario: ActivityScenario<MainActivity>) {
+        if (useRedesignDispatcherBack()) {
+            scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+            compose.waitForIdle()
+        } else {
+            pressBack()
+        }
+    }
+
+    private fun pressModalBack() {
+        if (useRedesignDispatcherBack()) compose.runOnIdle { dispatchRedesignModalBack() }
+        else pressBack()
+    }
+
+    private fun captureWindowIfAllocated(scenario: ActivityScenario<MainActivity>, name: String) {
+        if (InstrumentationRegistry.getArguments().getString("izRedesignWindowPng") != "true") return
+        val app = requireIsolatedApp()
+        val copyDone = CountDownLatch(1)
+        val result = AtomicInteger(PixelCopy.ERROR_UNKNOWN)
+        lateinit var bitmap: Bitmap
+        scenario.onActivity { activity ->
+            check(activity.packageName == app.packageName && !activity.isDestroyed)
+            val decor = activity.window.decorView
+            check(decor.isShown && decor.width in 1..4096 && decor.height in 1..4096)
+            bitmap = Bitmap.createBitmap(decor.width, decor.height, Bitmap.Config.ARGB_8888)
+            PixelCopy.request(activity.window, bitmap, { status ->
+                result.set(status)
+                copyDone.countDown()
+            }, Handler(Looper.getMainLooper()))
+        }
+        try {
+            check(copyDone.await(5, TimeUnit.SECONDS) && result.get() == PixelCopy.SUCCESS) {
+                "QA Activity PixelCopy failed with status ${result.get()}"
+            }
+            val directory = File(app.cacheDir, "redesign-window-captures")
+            check(directory.mkdirs() || directory.isDirectory)
+            val output = File(directory, name)
+            check(output.createNewFile())
+            output.outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+        } finally {
+            bitmap.recycle()
+        }
     }
 
     private fun assertIdleNavigation(state: NavigationState) {
@@ -183,4 +244,25 @@ class RedesignSectionEntryUiTest {
         assertFalse(state.guidance)
         assertFalse(state.recording)
     }
+}
+
+internal fun useRedesignDispatcherBack(): Boolean =
+    InstrumentationRegistry.getInstrumentation().targetContext.packageName == "org.iz.navigation.qaredesign20261119" &&
+        InstrumentationRegistry.getArguments().getString("izRedesignBack") == "dispatcher-no-focus"
+
+// Dispatch the owned Compose dialog callback without claiming that Android delivered a Back input.
+internal fun dispatchRedesignModalBack() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    check(useRedesignDispatcherBack())
+    check(context.checkSelfPermission(Manifest.permission.INTERNET) == PackageManager.PERMISSION_DENIED)
+    check(Looper.myLooper() == Looper.getMainLooper())
+    val windows = linkedSetOf<Window>()
+    fun collect(view: View) {
+        if (view is DialogWindowProvider && view.window.context.packageName == context.packageName &&
+            view.window.decorView.isShown) windows += view.window
+        if (view is ViewGroup) for (index in 0 until view.childCount) collect(view.getChildAt(index))
+    }
+    WindowInspector.getGlobalWindowViews().forEach(::collect)
+    val owner = windows.single().callback as OnBackPressedDispatcherOwner
+    owner.onBackPressedDispatcher.onBackPressed()
 }

@@ -1,6 +1,8 @@
 package org.iz.navigation.ui
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
@@ -39,10 +41,17 @@ internal class Ux0111ComposeHost(private val compose: ComposeTestRule) : AutoClo
     fun setContent(content: @Composable () -> Unit) {
         if (scenario == null) {
             val context = instrumentation.targetContext
+            val redesignQaPackage = "org.iz.navigation.qaredesign20261119"
             check(BuildConfig.DEBUG && BuildConfig.APPLICATION_ID != "org.iz.navigation" &&
                 BuildConfig.APPLICATION_ID in setOf("org.iz.navigation.batterycheck", "org.iz.navigation.qacompacthud20261119",
-                    "org.iz.navigation.placeinfoqa20261112p01", "org.iz.navigation.placeinfoqa20261112p02", "org.iz.navigation.placeinfoqa20261112p03") &&
+                    "org.iz.navigation.placeinfoqa20261112p01", "org.iz.navigation.placeinfoqa20261112p02", "org.iz.navigation.placeinfoqa20261112p03",
+                    redesignQaPackage) &&
                 context.packageName == BuildConfig.APPLICATION_ID) { "Dedicated QA package only" }
+            if (context.packageName == redesignQaPackage) {
+                check(context.checkSelfPermission(Manifest.permission.INTERNET) == PackageManager.PERMISSION_DENIED) {
+                    "The redesign QA package must be offline"
+                }
+            }
             check(!TrackingService.isRunning) { "An allocated idle recorder is required" }
             check(!org.iz.navigation.tracking.TrackerSettings(context).enabled) { "QA automatic recording must already be disabled" }
             val nav = (context.applicationContext as IzApplication).navigation.state.value

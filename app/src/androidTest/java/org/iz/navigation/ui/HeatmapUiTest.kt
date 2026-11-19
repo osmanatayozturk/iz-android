@@ -55,7 +55,11 @@ class HeatmapUiTest {
         compose.setContent { IzTheme { HeatmapScreenContent(DiaryState()) { empty } } }
         compose.onNodeWithTag("heatmap_show_filters").performClick()
         compose.onNodeWithTag("heatmap_period_WEEK").performClick()
-        pressBack()
+        if (useRedesignDispatcherBack()) {
+            compose.runOnIdle { dispatchRedesignModalBack() }
+        } else {
+            pressBack()
+        }
         compose.onNodeWithText("Tüm kayıtlar · Tüm ulaşım türleri").assertIsDisplayed()
         compose.onNodeWithTag("heatmap_show_filters").performClick()
         compose.onNodeWithTag("heatmap_period_MONTH").performClick()
