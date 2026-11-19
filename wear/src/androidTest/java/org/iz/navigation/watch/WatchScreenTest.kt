@@ -231,6 +231,9 @@ class WatchScreenTest {
             }
         }
         openStart()
+        val connectionReason = "Kaydı başlatmak için telefon bağlantısı gerekiyor."
+        watchList().performScrollToNode(hasText(connectionReason))
+        compose.onNodeWithText(connectionReason).assertIsDisplayed()
         watchList().performScrollToNode(hasTestTag("start"))
         compose.onNodeWithTag("start").assertIsDisplayed().assertIsNotEnabled()
         watchList().performScrollToNode(hasTestTag("refresh"))

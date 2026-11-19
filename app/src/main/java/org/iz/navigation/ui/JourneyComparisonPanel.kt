@@ -157,7 +157,7 @@ private fun JourneyComparisonValues(result: JourneyComparisonResult) {
     val distanceDifference = if (first.observedMillis > 0 && second.observedMillis > 0) {
         val km = (second.distanceMeters - first.distanceMeters) / 1000
         String.format(Locale.forLanguageTag("tr-TR"), "%+.2f km", km)
-    } else "-"
+    } else "—"
     val timeDifference = second.elapsedMillis - first.elapsedMillis
     val sign = when {
         timeDifference > 0 -> "+"
@@ -220,4 +220,4 @@ private fun comparisonJourneyDate(journey: Journey): String =
 
 internal fun comparisonDistance(stats: JourneyStats): String =
     stats.distanceMeters.takeIf { stats.observedMillis > 0 && it.isFinite() && it >= 0.0 }
-        ?.let { String.format(Locale.forLanguageTag("tr-TR"), "%.2f km", it / 1000) } ?: "-"
+        ?.let { String.format(Locale.forLanguageTag("tr-TR"), "%.2f km", it / 1000) } ?: "—"

@@ -93,7 +93,11 @@ internal fun WatchScreen(
     holder.SaveableStateProvider(page.id) {
         WatchPageLayout(page.id, page.title, WatchPalette.from(snapshot?.paletteId),
             if (entry != null) "surface-detail" else "watch-list") {
-            if (page != WatchPage.SETTINGS && !fresh) item {
+            if (page == WatchPage.START && !state.fresh(now)) item {
+                val reason = if (state.phoneId == null) "Kaydı başlatmak için telefon bağlantısı gerekiyor."
+                    else "Kaydı başlatmak için telefondan güncel durum bekleniyor."
+                Note(listOfNotNull(reason, age).joinToString(" · "), highlighted = true)
+            } else if (page != WatchPage.SETTINGS && !fresh) item {
                 Note(listOfNotNull(phoneLabel, age).joinToString(" · "), highlighted = true)
             }
             if (state.pending != null || page == WatchPage.START || page == WatchPage.END || page == WatchPage.SETTINGS) {
@@ -121,7 +125,7 @@ internal fun WatchScreen(
                 }
                 WatchPage.START -> {
                     item { WatchValue(WearMode.valueOf(mode).label()) }
-                    if (fresh) item { Note(listOfNotNull(phoneLabel, age).joinToString(" · ")) }
+                    if (state.fresh(now)) item { Note(listOfNotNull(phoneLabel, age).joinToString(" · ")) }
                     item { WatchAction("Telefonda kaydı başlat", { onStart(WearMode.valueOf(mode)) },
                         primary = true, enabled = state.canStart(now, WearMode.valueOf(mode)), tag = "start") }
                     (listOf(WearMode.MOTORCYCLE) + WearMode.entries.filter { it != WearMode.MOTORCYCLE }).forEach { value ->
