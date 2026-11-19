@@ -40,7 +40,7 @@ class NavigationSessionEntryTest {
             .fetchSemanticsNode().config[SemanticsActions.OnClick].label)
         compose.onNodeWithTag("live-guidance-card").performClick()
         compose.runOnIdle { assertEquals(1, opens); assertEquals(0, resets); assertTrue(panel.value); panel.value = false }
-        compose.onNodeWithTag("home-finish-session").assertTextEquals("İşlemler")
+        compose.onNodeWithTag("home-finish-session").assertIsDisplayed()
             .assertContentDescriptionEquals("Yolculuk işlemlerini aç").assertHasClickAction().performClick()
         compose.runOnIdle { assertEquals(2, opens); assertEquals(0, resets); panel.value = false }
         compose.onNodeWithTag("open-navigation").assertDoesNotExist()

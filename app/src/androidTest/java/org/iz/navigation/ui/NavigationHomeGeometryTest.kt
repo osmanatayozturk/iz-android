@@ -13,7 +13,9 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -44,6 +46,8 @@ class NavigationHomeGeometryTest {
     @Test fun idleHomeAlignsBrandSearchAndMenu() {
         renderIdle(360.dp, 560.dp)
         assertIdleBrandGeometry()
+        assertShortcutLabel(DestinationShortcutKind.HOME, visible = "Ev adresi ekle", full = "Ev adresi ekle")
+        assertShortcutLabel(DestinationShortcutKind.WORK, visible = "İş adresi ekle", full = "İş adresi ekle")
         captureHome("home-brand-small-360x560")
     }
 
@@ -153,10 +157,16 @@ class NavigationHomeGeometryTest {
         compose.runOnIdle { shortcuts.value = listOf(work, invalidHome) }
         compose.onNodeWithTag(homeTag).assertIsEnabled().assertTextEquals("Ev adresi ekle")
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Atanmamış")).performClick()
-        compose.onNodeWithTag(workTag).assertIsEnabled().assertTextContains(work.place.name, substring = true).performClick()
+        val workButton = compose.onNodeWithTag(workTag).assertIsEnabled()
+        assertEquals("İş · ${work.place.name} için yol tarifi al",
+            workButton.fetchSemanticsNode().config[SemanticsActions.OnClick].label)
+        workButton.performClick()
         assertSlotsAndControls()
         compose.runOnIdle { shortcuts.value = listOf(work, home) }
-        compose.onNodeWithTag(homeTag).assertIsEnabled().assertTextContains(home.place.name, substring = true).performClick()
+        val homeButton = compose.onNodeWithTag(homeTag).assertIsEnabled()
+        assertEquals("Ev · ${home.place.name} için yol tarifi al",
+            homeButton.fetchSemanticsNode().config[SemanticsActions.OnClick].label)
+        homeButton.performClick()
         assertSlotsAndControls()
         compose.runOnIdle {
             assertEquals(listOf(DestinationShortcutKind.HOME, DestinationShortcutKind.WORK, DestinationShortcutKind.HOME,
@@ -165,8 +175,12 @@ class NavigationHomeGeometryTest {
     }
 
     @Test fun idleBrandTitleFitsAtLargeFontWithoutCoveringControls() {
-        renderIdle(360.dp, 560.dp, fontScale = 2f)
+        val assigned = mutableStateOf(emptyList<DestinationShortcut>())
+        val opened = mutableListOf<DestinationShortcutKind>()
+        renderIdle(360.dp, 560.dp, fontScale = 2f, shortcuts = { assigned.value }, onShortcut = { opened += it })
         assertIdleBrandGeometry()
+        assertShortcutLabel(DestinationShortcutKind.HOME, visible = "Ev", full = "Ev adresi ekle").performClick()
+        assertShortcutLabel(DestinationShortcutKind.WORK, visible = "İş", full = "İş adresi ekle").performClick()
         val title = compose.onNodeWithText("İz", useUnmergedTree = true).assertIsDisplayed()
             .fetchSemanticsNode().boundsInRoot
         val searchLabel = compose.onNodeWithText("Nereye?", useUnmergedTree = true).assertIsDisplayed()
@@ -174,6 +188,42 @@ class NavigationHomeGeometryTest {
         assertTrue(title.right <= searchLabel.left)
         assertEquals(title.center.y, searchLabel.center.y, 1f)
         captureHome("home-brand-large-font-360x560")
+
+        val workName = "Ankara merkezindeki uzun örnek iş adresi"
+        compose.runOnIdle {
+            assigned.value = listOf(
+                DestinationShortcut(DestinationShortcutKind.HOME,
+                    Place(id = "large-font-home", name = "Evim", latitude = 41.0, longitude = 29.0)),
+                DestinationShortcut(DestinationShortcutKind.WORK,
+                    Place(id = "large-font-work", name = workName, latitude = 41.1, longitude = 29.1)),
+            )
+        }
+        assertIdleBrandGeometry()
+        assertShortcutLabel(DestinationShortcutKind.HOME, visible = "Ev", full = "Ev · Evim", assigned = true).performClick()
+        assertShortcutLabel(DestinationShortcutKind.WORK, visible = "İş", full = "İş · $workName", assigned = true).performClick()
+        compose.runOnIdle {
+            assertEquals(listOf(DestinationShortcutKind.HOME, DestinationShortcutKind.WORK,
+                DestinationShortcutKind.HOME, DestinationShortcutKind.WORK), opened)
+        }
+    }
+
+    private fun assertShortcutLabel(
+        kind: DestinationShortcutKind, visible: String, full: String, assigned: Boolean = false,
+    ): SemanticsNodeInteraction {
+        val tag = "destination-shortcut-${kind.name}"
+        val button = compose.onNodeWithTag(tag).assertIsEnabled()
+        if (visible != full) button.assertContentDescriptionEquals(full)
+        assertEquals(if (assigned) "$full için yol tarifi al" else full,
+            button.fetchSemanticsNode().config[SemanticsActions.OnClick].label)
+        val text = compose.onNode(hasText(visible) and hasAnyAncestor(hasTestTag(tag)), useUnmergedTree = true)
+            .assertIsDisplayed()
+        val layouts = mutableListOf<TextLayoutResult>()
+        text.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        val layout = layouts.single()
+        assertEquals(1, layout.lineCount)
+        assertFalse("$visible has visual overflow", layout.hasVisualOverflow)
+        assertFalse("$visible is ellipsized", layout.isLineEllipsized(0))
+        return button
     }
 
     @Test fun brandIsOneAccessibleLabelWithNoDecorativeLogoDescription() {
@@ -225,12 +275,15 @@ class NavigationHomeGeometryTest {
     }
 
     private fun renderIdle(width: Dp, height: Dp, fontScale: Float = 1f,
-        navigationBar: (@androidx.compose.runtime.Composable () -> Unit)? = null) {
+        navigationBar: (@androidx.compose.runtime.Composable () -> Unit)? = null,
+        shortcuts: () -> List<DestinationShortcut> = { emptyList() },
+        onShortcut: (DestinationShortcutKind) -> Unit = {},
+    ) {
         // Use a known density so portrait and landscape viewports both fit the emulator window.
         uxHost.setContent { CompositionLocalProvider(LocalDensity provides Density(1f, fontScale)) {
             IzTheme { Box(Modifier.requiredSize(width, height)) {
                 NavigationHomeContent(PhoneDirectionsState(), NavigationState(), emptyList(), emptyList(), false, "Hava",
-                    {}, {}, {}, {}, {}, {}, {}, {}, {}, shortcuts = emptyList(), onShortcut = {},
+                    {}, {}, {}, {}, {}, {}, {}, {}, {}, shortcuts = shortcuts(), onShortcut = onShortcut,
                     idleNavigationBar = navigationBar, planner = {})
             } }
         } }

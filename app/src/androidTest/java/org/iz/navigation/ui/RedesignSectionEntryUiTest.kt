@@ -137,6 +137,9 @@ class RedesignSectionEntryUiTest {
                 compose.onNodeWithTag("menu-journeys").performScrollTo().performClick()
                 visitJournalLink(journey.title)
                 compose.onNode(hasText(journey.title) and !hasClickAction()).assertIsDisplayed()
+                compose.waitUntil(10_000) {
+                    compose.onAllNodes(hasText("Mesafe ölçülemedi", substring = true)).fetchSemanticsNodes().isNotEmpty()
+                }
                 captureWindowIfAllocated(scenario, "journal-synthetic.png")
 
                 val subpages = listOf(
@@ -213,6 +216,35 @@ class RedesignSectionEntryUiTest {
             compose.onNode(compare).assertIsDisplayed()
             dispatchActivityBack(scenario)
             compose.onNodeWithTag("navigation-home-map").assertIsDisplayed()
+        }
+    }
+
+    @Test fun routePreferencesCanBeOpenedAndCancelledWithoutStartingANavigationSession() {
+        val app = requireIsolatedApp()
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            compose.onNodeWithTag("home-menu").performClick()
+            compose.onNodeWithTag("menu-settings").performScrollTo().performClick()
+            compose.onNodeWithTag("settings").performScrollToNode(hasTestTag("settings-open-voice"))
+            compose.onNodeWithTag("settings-open-voice").performClick()
+            compose.onNodeWithTag("settings-open-Vasıtaya göre rota tercihleri").performScrollTo().performClick()
+            compose.onNodeWithText("Rota tercihleri").assertIsDisplayed()
+            compose.onNodeWithText("Vazgeç").performClick()
+            compose.onNodeWithTag("settings-view-voice").performScrollTo().assertIsDisplayed()
+            dispatchActivityBack(scenario)
+            compose.onNodeWithTag("settings").assertIsDisplayed()
+            compose.runOnIdle { assertIdleNavigation(app.navigation.state.value) }
+        }
+    }
+
+    @Test fun expiredWatchRequestExplainsItsStateAndCannotStartARecording() {
+        val app = requireIsolatedApp()
+        ActivityScenario.launch(org.iz.navigation.wear.WearStartActivity::class.java).use {
+            val explanation = "Bu isteğin süresi dolmuş veya işlem tamamlanmış. Saatten tekrar deneyebilirsin."
+            compose.waitUntil(10_000) { compose.onAllNodes(hasText(explanation)).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText(explanation).assertIsDisplayed()
+            compose.onNodeWithText("Başlat").assertDoesNotExist()
+            compose.onNodeWithText("Kapat").performClick()
+            compose.runOnIdle { assertIdleNavigation(app.navigation.state.value) }
         }
     }
 

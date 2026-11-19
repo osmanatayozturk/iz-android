@@ -92,10 +92,12 @@ import java.util.Locale
 private fun date(value: Long) = SimpleDateFormat("d MMM yyyy · HH:mm", Locale.forLanguageTag("tr-TR")).format(Date(value))
 private fun duration(value: Long): String { val m = value.coerceAtLeast(0) / 60_000; return if (m >= 60) "${m / 60} sa ${m % 60} dk" else "$m dk" }
 private fun countdown(value: Long): String { val seconds = (value.coerceIn(0L, TrackingPolicy.AUTOMATIC_WINDOW_MS) + 999) / 1000; return String.format(Locale.forLanguageTag("tr-TR"), "%02d:%02d", seconds / 60, seconds % 60) }
-private fun journeyDistance(journey: Journey, state: DiaryState): String =
-    state.prepared(journey)?.stats?.distanceMeters?.let {
-        String.format(Locale.forLanguageTag("tr-TR"), "%.1f km", it / 1000)
-    } ?: if (journey.status == JourneyStatus.TEMPORARY) "500 metre için ölçülüyor" else state.analysisLabel
+private fun journeyDistance(journey: Journey, state: DiaryState): String {
+    val stats = state.prepared(journey)?.stats
+        ?: return if (journey.status == JourneyStatus.TEMPORARY) "500 metre için ölçülüyor" else state.analysisLabel
+    val meters = stats.observedDistanceMeters ?: return "Mesafe ölçülemedi"
+    return String.format(Locale.forLanguageTag("tr-TR"), "%.1f km", meters / 1000)
+}
 private data class PhotoTarget(val journeyId: String? = null, val visitId: String? = null)
 private data class TransportAction(val journeyId: String? = null, val split: Boolean = false, val suggestion: Transport = Transport.WALK)
 private data class Deletion(val text: String, val action: suspend () -> Unit)
@@ -1130,10 +1132,19 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     if (draft != null) vm.repository.savePlaceAndAssignShortcut(shortcutAssignment, draft)
                     else library.setDestinationShortcut(shortcutAssignment, checkNotNull(existingPlace).id)
                 }
-            } else executeEditor("Yer ziyaretin kaydedildi.") {
-                val place = existingPlace ?: newPlace().also { vm.repository.savePlace(it) }
-                vm.repository.saveVisit(Visit(placeId = place.id, journeyId = targetJourney, visitedAt = now, note = note.trim()))
-                addPlace = false; selectedJourney = null; selectedPlace = place.id
+            } else {
+                val place = existingPlace ?: newPlace()
+                val visit = Visit(placeId = place.id, journeyId = targetJourney, visitedAt = now, note = note.trim())
+                val entryKey = uiEntry.key
+                val revision = addPlaceState.revision
+                executeEditor("Yer ziyaretin kaydedildi.") {
+                    vm.repository.savePlaceVisit(place.takeIf { existingPlace == null }, visit)
+                    if (history.current.key == entryKey && addPlace && addPlaceState.revision == revision) {
+                        addPlace = false
+                        exitGuard.update(null)
+                        history.push(UiPage.PLACE, place.id)
+                    }
+                }
             }
         },
     )

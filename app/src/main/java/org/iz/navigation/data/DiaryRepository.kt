@@ -283,6 +283,14 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
         dao.save(entity.copy(sortOrder = position))
     }
 
+    internal suspend fun savePlaceVisit(newPlace: Place?, visit: Visit) = db.withTransaction {
+        if (newPlace != null) {
+            require(visit.placeId == newPlace.id)
+            savePlace(newPlace)
+        }
+        saveVisit(visit)
+    }
+
     internal suspend fun savePlaceAndAssignShortcut(kind: DestinationShortcutKind, entity: Place) = db.withTransaction {
         require(entity.isValidDestinationShortcut()) { "Adres için geçerli bir yer adı ve konum gerekli." }
         check(dao.place(entity.id) == null) { "Bu yer zaten kayıtlı. Kayıtlı yerlerden seç." }

@@ -20,7 +20,10 @@ data class JourneyStats(
     val movingAverageSpeedKmh: Double?,
     /** Fastest usable GPS interval; this is a sampled interval speed, not an instantaneous peak. */
     val maxSpeedKmh: Double?,
-)
+) {
+    val observedDistanceMeters: Double?
+        get() = distanceMeters.takeIf { observedMillis > 0 && it.isFinite() && it >= 0.0 }
+}
 
 /** Pure, mode-independent calculations shared by active and completed journey screens. */
 object JourneyStatistics {

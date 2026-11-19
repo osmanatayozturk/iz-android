@@ -68,6 +68,15 @@ class CarTemplatesTest {
         assertTrue((home.onGetTemplate() as NavigationTemplate).navigationInfo is MessageInfo)
     }
 
+    @Test fun savedPlacesTemplateOffersSearchAndBackOnEntry() = onCar { context, _, home ->
+        val places = CarPlacesScreen(context, home)
+        val template = places.onGetTemplate() as ListTemplate
+        assertEquals("carplaces", places.marker)
+        assertEquals("Hedef ve yerler", template.title.toString())
+        assertEquals(androidx.car.app.model.Action.BACK, template.headerAction)
+        assertEquals(listOf("Hedef ara"), template.actionStrip?.actions?.map { it.title.toString() })
+    }
+
     @Test fun menusSearchPreviewWeatherAndFinishMeetHostConstraints() = onCar { context, surface, home ->
         assertTrue(CarMenuScreen(context, home).onGetTemplate() is ListTemplate)
         assertTrue(CarDrivingOptionsScreen(context, home).onGetTemplate() is ListTemplate)

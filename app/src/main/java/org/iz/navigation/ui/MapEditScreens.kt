@@ -440,7 +440,7 @@ fun MapEditPage(
 }
 
 @Composable
-private fun MapEditSubmissionStatus(draft: MapEditDraft, target: OsmCorrectionElement?, busy: Boolean, message: String?, onClose: () -> Unit,
+internal fun MapEditSubmissionStatus(draft: MapEditDraft, target: OsmCorrectionElement?, busy: Boolean, message: String?, onClose: () -> Unit,
     onCheck: () -> Unit) {
     val localTags = if (draft.surveyPayload == null) runCatching { draft.publicTags() }.getOrDefault(emptyMap())
         else draft.surveyObservation()?.let { mapOf("opening_hours" to it.hours.value, "wheelchair" to it.wheelchair.value) }.orEmpty()

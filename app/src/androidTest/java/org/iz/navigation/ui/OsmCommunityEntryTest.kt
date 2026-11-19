@@ -15,7 +15,7 @@ class OsmCommunityEntryTest {
     @Test fun menuOpensCommunityAndReturnsToMainMap() {
         compose.onNodeWithTag("home-menu").performClick()
         compose.onNodeWithTag("menu-community").performScrollTo().performClick()
-        listOf("Mesajlar", "Kişiler", "Hesabım").forEach {
+        listOf("Posta", "Kişiler", "Hesabım").forEach {
             compose.onNodeWithText(it).assertExists()
         }
         compose.onNodeWithTag("return-home-map").performClick()

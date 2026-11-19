@@ -124,33 +124,37 @@ internal fun PlacesScreen(state: DiaryState, onPlace: (Place) -> Unit, onAdd: ()
         }
         itemsIndexed(visible, key = { _, place -> place.id }) { index, place ->
             Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLow,
-                modifier = Modifier.fillMaxWidth().testTag("place-row-${place.id}").then(if (sorting) Modifier else Modifier.clickable { onPlace(place) })) {
-                Row(Modifier.fillMaxWidth().padding(if (sorting) 8.dp else 18.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (sorting) PlaceOrderHandle(place, !saving, { move(place.id, it) })
-                    else Icon(Icons.Outlined.Place, null, tint = Forest, modifier = Modifier.size(48.dp).background(Leaf, RoundedCornerShape(14.dp)).padding(12.dp))
-                    Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(place.name, style = MaterialTheme.typography.titleMedium)
-                        val aliases = shortcutsByPlace[place.id].orEmpty().map { it.kind.placeLabel() }
-                        Text(if (sorting) "${index + 1}. sıra" else (aliases + "${visitCounts[place.id] ?: 0} ziyaret").joinToString(" · "),
-                            style = MaterialTheme.typography.bodySmall, color = Muted)
-                        if (!sorting && shortcutRouteStop(place) != null) FlowRow {
-                            DestinationShortcutKind.entries.forEach { kind ->
-                                val assigned = shortcutsByPlace[place.id].orEmpty().any { it.kind == kind }
-                                TextButton(onClick = { onShortcut(kind, if (assigned) null else place) },
-                                    modifier = Modifier.testTag("assign-${kind.name}-${place.id}")) {
-                                    val label = kind.placeLabel()
-                                    Text(if (assigned) "$label kısayolunu kaldır" else "$label yap")
-                                }
+                modifier = Modifier.fillMaxWidth()) {
+                Column {
+                    Row(Modifier.fillMaxWidth().testTag("place-row-${place.id}")
+                        .then(if (sorting) Modifier else Modifier.clickable { onPlace(place) })
+                        .padding(if (sorting) 8.dp else 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (sorting) PlaceOrderHandle(place, !saving, { move(place.id, it) })
+                        else Icon(Icons.Outlined.Place, null, tint = Forest, modifier = Modifier.size(48.dp).background(Leaf, RoundedCornerShape(14.dp)).padding(12.dp))
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(place.name, style = MaterialTheme.typography.titleMedium)
+                            val aliases = shortcutsByPlace[place.id].orEmpty().map { it.kind.placeLabel() }
+                            Text(if (sorting) "${index + 1}. sıra" else (aliases + "${visitCounts[place.id] ?: 0} ziyaret").joinToString(" · "),
+                                style = MaterialTheme.typography.bodySmall, color = Muted)
+                        }
+                        if (sorting) {
+                            IconButton(onClick = { move(place.id, -1) }, enabled = !saving && index > 0,
+                                modifier = Modifier.testTag("place-up-${place.id}")) { Icon(Icons.Outlined.KeyboardArrowUp, "${place.name}: yukarı taşı") }
+                            IconButton(onClick = { move(place.id, 1) }, enabled = !saving && index < visible.lastIndex,
+                                modifier = Modifier.testTag("place-down-${place.id}")) { Icon(Icons.Outlined.KeyboardArrowDown, "${place.name}: aşağı taşı") }
+                        } else Icon(Icons.Outlined.ChevronRight, null)
+                    }
+                    if (!sorting && shortcutRouteStop(place) != null) FlowRow(Modifier.padding(start = 18.dp, end = 18.dp, bottom = 6.dp)) {
+                        DestinationShortcutKind.entries.forEach { kind ->
+                            val assigned = shortcutsByPlace[place.id].orEmpty().any { it.kind == kind }
+                            TextButton(onClick = { onShortcut(kind, if (assigned) null else place) },
+                                modifier = Modifier.testTag("assign-${kind.name}-${place.id}")) {
+                                val label = kind.placeLabel()
+                                Text(if (assigned) "$label kısayolunu kaldır" else "$label yap")
                             }
                         }
                     }
-                    if (sorting) {
-                        IconButton(onClick = { move(place.id, -1) }, enabled = !saving && index > 0,
-                            modifier = Modifier.testTag("place-up-${place.id}")) { Icon(Icons.Outlined.KeyboardArrowUp, "${place.name}: yukarı taşı") }
-                        IconButton(onClick = { move(place.id, 1) }, enabled = !saving && index < visible.lastIndex,
-                            modifier = Modifier.testTag("place-down-${place.id}")) { Icon(Icons.Outlined.KeyboardArrowDown, "${place.name}: aşağı taşı") }
-                    } else Icon(Icons.Outlined.ChevronRight, null)
                 }
             }
         }

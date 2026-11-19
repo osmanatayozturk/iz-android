@@ -141,7 +141,8 @@ class OsmGpsBatchUiTest {
         val recentTop = newer.fetchSemanticsNode().boundsInRoot.top
         val oldTop = older.fetchSemanticsNode().boundsInRoot.top
         check(recentTop < oldTop)
-        compose.onNodeWithText("İşleniyor").assertExists()
+        newer.assertTextContains("GPS izi · OSM'de işleniyor")
+        older.assertTextContains("GPS izi · Yüklendi")
         newer.performClick()
         compose.runOnIdle { assertEquals(20L, opened) }
     }

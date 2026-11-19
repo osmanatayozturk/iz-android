@@ -219,5 +219,5 @@ private fun comparisonJourneyDate(journey: Journey): String =
     SimpleDateFormat("d MMM yyyy HH:mm", Locale.forLanguageTag("tr-TR")).format(Date(journey.startedAt))
 
 internal fun comparisonDistance(stats: JourneyStats): String =
-    stats.distanceMeters.takeIf { stats.observedMillis > 0 && it.isFinite() && it >= 0.0 }
+    stats.observedDistanceMeters
         ?.let { String.format(Locale.forLanguageTag("tr-TR"), "%.2f km", it / 1000) } ?: "—"
