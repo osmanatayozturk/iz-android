@@ -166,6 +166,56 @@ class RedesignSectionEntryUiTest {
         }
     }
 
+    @Test fun settingsSectionsAndDiagnosticsReturnWithoutChangingPermissionsOrAccounts() {
+        val app = requireIsolatedApp()
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            compose.onNodeWithTag("home-menu").performClick()
+            compose.onNodeWithTag("menu-settings").performScrollTo().performClick()
+            for (section in listOf("theme", "voice", "detection", "calibrate", "health", "osmsettings", "backup", "licenses")) {
+                val entry = "settings-open-$section"
+                compose.onNodeWithTag("settings").performScrollToNode(hasTestTag(entry))
+                compose.onNodeWithTag(entry).performClick()
+                compose.onNodeWithTag("settings-view-$section").assertIsDisplayed()
+                when (section) {
+                    "voice" -> {
+                        compose.onNodeWithTag("settings-open-Trafik ve hız sınırı").performScrollTo().performClick()
+                        compose.onNodeWithText("Kapat").performClick()
+                        compose.onNodeWithTag("settings-view-voice").performScrollTo().assertIsDisplayed()
+                    }
+                    "detection" -> {
+                        compose.onNodeWithTag("settings-open-Algılama tanısı").performScrollTo().performClick()
+                        compose.onNodeWithTag("settings-view-diags").assertIsDisplayed()
+                        dispatchActivityBack(scenario)
+                        compose.onNodeWithTag("settings-view-detection").performScrollTo().assertIsDisplayed()
+                    }
+                    "licenses" -> compose.onNodeWithText("© OpenStreetMap katkıcıları").performScrollTo().assertIsDisplayed()
+                }
+                dispatchActivityBack(scenario)
+                compose.onNodeWithTag("settings").assertIsDisplayed()
+            }
+            dispatchActivityBack(scenario)
+            compose.onNodeWithTag("navigation-home-map").assertIsDisplayed()
+            compose.runOnIdle { assertIdleNavigation(app.navigation.state.value) }
+        }
+    }
+
+    @Test fun statisticsOpensComparisonAndReturnsToItsCallerWithAnEmptyDiary() {
+        val app = requireIsolatedApp()
+        assertEquals(DiarySnapshot(), runBlocking { DiaryRepository(app).snapshot() })
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            compose.onNodeWithTag("home-menu").performClick()
+            compose.onNodeWithTag("menu-statistics").performScrollTo().performClick()
+            val compare = hasText("Karşılaştır") and hasClickAction()
+            compose.onNode(hasScrollToIndexAction()).performScrollToNode(compare)
+            compose.onNode(compare).performClick()
+            compose.onNodeWithText("Karşılaştırmak için iki tamamlanmış yolculuk gerekiyor.").assertIsDisplayed()
+            dispatchActivityBack(scenario)
+            compose.onNode(compare).assertIsDisplayed()
+            dispatchActivityBack(scenario)
+            compose.onNodeWithTag("navigation-home-map").assertIsDisplayed()
+        }
+    }
+
     private fun requireIsolatedApp(): IzApplication {
         val app = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as IzApplication
         assertEquals("org.iz.navigation.qaredesign20261119", app.packageName)

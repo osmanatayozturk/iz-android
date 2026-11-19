@@ -1,8 +1,10 @@
 package org.iz.navigation.integration
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.content.ComponentCallbacks2
 import android.content.Context
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.os.Bundle
 import android.view.MotionEvent
@@ -198,9 +200,12 @@ internal object OsmMapRuntime {
     }
     @Synchronized fun initialize(context: Context) {
         if (initialized) return
-        MapLibre.getInstance(context.applicationContext)
+        val app = context.applicationContext
+        val hasInternet = app.packageManager.checkPermission(Manifest.permission.INTERNET, app.packageName) ==
+            PackageManager.PERMISSION_GRANTED
+        MapLibre.getInstance(app)
         val client = OkHttpClient.Builder()
-            .cache(Cache(File(context.applicationContext.cacheDir, "osm_tiles_http"), 64L * 1024 * 1024))
+            .cache(Cache(File(app.cacheDir, "osm_tiles_http"), 64L * 1024 * 1024))
             .addInterceptor { chain ->
                 chain.proceed(chain.request().newBuilder().header("User-Agent", osmUserAgent).build())
             }
@@ -216,7 +221,15 @@ internal object OsmMapRuntime {
             .dispatcher(Dispatcher().apply { maxRequests = 4; maxRequestsPerHost = 4 })
             .addNetworkInterceptor(OfflineWireBudget.interceptor())
             .build()
-        offlineRouter = OfflineMapHttpRouter(client)
+        val ordinary = if (hasInternet) client else client.newBuilder()
+            .addInterceptor { chain ->
+                val request = chain.request().newBuilder()
+                    .addHeader("Cache-Control", "only-if-cached")
+                    .build()
+                chain.proceed(request)
+            }
+            .build()
+        offlineRouter = OfflineMapHttpRouter(ordinary)
         HttpRequestUtil.setOkHttpClient(offlineRouter)
         HttpRequestUtil.setLogEnabled(false)
         HttpRequestUtil.setPrintRequestUrlOnFailure(false)
