@@ -4,6 +4,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.junit4.createComposeRule
+import org.iz.navigation.data.DestinationShortcut
+import org.iz.navigation.data.DestinationShortcutKind
 import org.iz.navigation.data.Place
 import org.junit.Assert.*
 import org.junit.Rule
@@ -30,6 +32,19 @@ class PlacesOrderUiTest {
         compose.onNodeWithTag("places-search").performTextInput("Alpha")
         compose.onNodeWithTag("places-sort").assertIsNotEnabled()
         compose.onNodeWithText("Sıralamak için aramayı temizle.").assertIsDisplayed()
+    }
+    @Test fun homeAliasFiltersSavedPlacesAndOpensTheAssignedRecord() {
+        val home = places[1].copy(latitude = 39.9, longitude = 32.8)
+        var opened: Place? = null
+        compose.setContent { IzTheme {
+            PlacesScreen(DiaryState(places = listOf(places[0], home, places[2])),
+                onPlace = { opened = it }, onAdd = {}, onReorder = { _, _ -> },
+                shortcuts = listOf(DestinationShortcut(DestinationShortcutKind.HOME, home)))
+        } }
+        compose.onNodeWithTag("places-search").performTextInput("Ev")
+        compose.onNodeWithTag("place-row-a").assertDoesNotExist()
+        compose.onNodeWithTag("place-row-b").performClick()
+        compose.runOnIdle { assertEquals(home, opened) }
     }
     @Test fun dragHandleMovesAPlaceAndSavesTheResult() {
         var saved: List<String>? = null

@@ -37,11 +37,13 @@ internal fun routeOperationsData(entryId: Long, nav: NavigationState, edits: Rou
     val currentLookup = lookup.takeIf { active && !nav.paused && it.owner == owner }
     val lookupFresh = currentLookup?.fetchedAt?.let { now - it in 0..600_000L } == true
     val preview = edits.preview?.takeIf { active && !nav.paused && it.owner == owner }?.let {
+        val remaining = nav.progress?.takeIf { progressing }
         RouteOperationUiPreview(token, it.id, it.route, when (it.action) {
             is RouteEditAction.AvoidManeuver -> RoutePreviewUiReason.AVOID
             is RouteEditAction.SkipStop -> RoutePreviewUiReason.SKIP
             is RouteEditAction.AddStop -> RoutePreviewUiReason.POI
-        })
+        }, currentRemainingMeters = remaining?.remainingMeters?.takeIf { it.isFinite() && it >= 0 },
+            currentDrivingSeconds = remaining?.remainingSeconds?.takeIf { it.isFinite() && it >= 0 })
     }
     val maneuvers = if (progressing && route != null) route.maneuvers.mapIndexedNotNull { index, maneuver ->
         if (maneuver.endElapsedSeconds > requireNotNull(nav.progress).elapsedSeconds &&

@@ -21,7 +21,6 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
@@ -38,7 +37,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
@@ -57,7 +55,6 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import coil.compose.AsyncImage
 import org.iz.navigation.BuildConfig
 import org.iz.navigation.data.*
 import org.iz.navigation.placeinfo.*
@@ -480,8 +477,8 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
         val places = vm.repository.places.first().map { it.id }.toSet()
         val account = osmAuth.state.value
         history.prune { row -> when (row.page) {
-            UiPage.JOURNEY -> row.entityId in journeys
-            UiPage.PLACE -> row.entityId in places
+            in journeyPages -> row.entityId in journeys
+            UiPage.PLACE, UiPage.PUBLIC_PLACE -> row.entityId in places
             UiPage.COMMUNITY, UiPage.MAP_EDITS, UiPage.OSM_SURVEY ->
                 account.busy || row.accountKey == null || row.accountKey == account.user?.id?.toString()
             else -> true
@@ -496,11 +493,34 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
         val prompt = delivered.getStringExtra("trackingPrompt")
         val suggestion = runCatching { Transport.valueOf(delivered.getStringExtra("suggestedTransport").orEmpty()) }.getOrDefault(Transport.WALK)
         val pending = if (prompt == "confirm") id?.let { vm.repository.getJourney(it) } else null
+        val carAction = delivered.action?.takeIf { it.startsWith("org.iz.navigation.action.") }
+            ?.removePrefix("org.iz.navigation.action.")
+        val carPlanId = if (carAction == "OPEN_ROUTE_PLAN") delivered.getStringExtra("routePlanId") else null
+        val carPlan = carPlanId?.takeIf { it.length in 1..200 }?.let { planId ->
+            library.savedPlans.first().firstOrNull { it.id == planId }
+        }
         val activeId = if (prompt == "mode_change") vm.repository.activeJourney()?.id else null
         // Delivery is consumed once. Restoration never supplies a fresh intent from MainActivity.
         exitGuard.requestExit {
             exitGuard.update(null)
             when {
+                carAction == "OPEN_ROUTE_PLAN" -> {
+                    if (carPlanId != null && carPlan == null) {
+                        history.openExternal(UiPage.ROUTES, cold = incomingIsCold)
+                        vm.message("Bu rota artık kayıtlı değil.")
+                    } else {
+                        if (incomingIsCold) history.toMap()
+                        val plan = carPlan?.let {
+                            SavedWeatherPlan(it.stops, System.currentTimeMillis(), it.transport, it.preferences,
+                                it.originUsesCurrentLocation, it.travelSpeedKmh)
+                        } ?: org.iz.navigation.weather.WeatherPlanStore(context).read()
+                        openDirections(plan?.stops, plan?.transport ?: active?.transport, plan, carPlan?.id)
+                    }
+                }
+                carAction == "OPEN_PLACES" -> history.openExternal(UiPage.PLACES, cold = incomingIsCold)
+                carAction == "OPEN_WEATHER" -> history.openExternal(UiPage.WEATHER, cold = incomingIsCold)
+                carAction == "OPEN_VOICE_SETTINGS" -> history.openExternal(UiPage.SETTINGS, "voice", cold = incomingIsCold)
+                carAction == "OPEN_LOCATION_SETUP" -> history.openExternal(UiPage.SETTINGS, "detection", cold = incomingIsCold)
                 delivered.getBooleanExtra("openGpx", false) -> {
                     if (incomingIsCold) history.toMap()
                     openGpx()
@@ -601,7 +621,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     val informationKey = informationRef?.let { PlaceInfoKey(PlaceInfoServices.DEFAULT_ENDPOINT, it) }
     var informationActionError by remember(informationKey) { mutableStateOf<String?>(null) }
     val informationVisible = informationKey != null && !mapEditsPage && !contributionPicker && contributionEdit == null && !addPlace &&
-        (uiEntry.page == UiPage.PLACE || (informationMapPlace != null && uiEntry.key == informationOwner))
+        (uiEntry.page == UiPage.PUBLIC_PLACE || (informationMapPlace != null && uiEntry.key == informationOwner))
     val informationSession = rememberPlaceInformationSession(informationKey, informationVisible,
         placeInformationContributionRevision(informationKey, informationEdits.orEmpty()), contributionReady = informationEdits != null,
         knownContributionVersion = placeInformationContributionVersion(informationKey, informationEdits.orEmpty()))
@@ -639,8 +659,9 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     Icon(Icons.Outlined.Menu, null); Spacer(Modifier.width(6.dp)); Text("Menü")
                 }
             }
-            val journey = state.journeys.firstOrNull { it.id == selectedJourney }
-            val place = state.places.firstOrNull { it.id == selectedPlace }
+            val journey = if (uiEntry.page in journeyPages) state.journeys.firstOrNull { it.id == uiEntry.entityId } else null
+            val place = if (uiEntry.page == UiPage.PLACE || uiEntry.page == UiPage.PUBLIC_PLACE)
+                state.places.firstOrNull { it.id == uiEntry.entityId } else null
             if (homeVisible && navigationState.trackFollow != null) {
                 TextButton(onClick = { openGpx() }, modifier = Modifier.fillMaxWidth().testTag("home-active-gpx")) {
                     Text("GPX takibine dön")
@@ -701,6 +722,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                 communityPage -> OsmCommunityScreen(vm = featureOwners.getSavedState("community", uiEntry.key, OsmCommunityViewModel::class.java, context.applicationContext as android.app.Application, savedStateHost), onClose = { communityPage = false; communityMessageId = null; communityAccountId = null },
                     initialMessageId = remember(uiEntry.key) { uiEntry.entityId?.toLongOrNull()?.takeIf { !history.isRestoredEntry(uiEntry.key) && resultOwner.deliveredCommunityTargets.add(uiEntry.key) } }, initialAccountId = uiEntry.accountKey?.toLongOrNull(),
                     initialGpsJourneyId = osmGpsJourneyFromEntry(uiEntry, entries.getOrNull(entries.lastIndex - 1)), gpsJourneys = state.journeys,
+                    initialSection = CommunitySection.ACCOUNT.takeIf { uiEntry.entityId == "account" },
                     initialGpsPage = when (uiEntry.entityId) {
                         "gps-share" -> OsmGpsPage.AVAILABLE
                         "gps-history" -> OsmGpsPage.HISTORY
@@ -719,6 +741,8 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     onPlaceResult = ::openMapEditDraft,
                     onGpsHistory = { navigator.open(UiPage.COMMUNITY, "gps-history") },
                     onManageNotes = { contributionsPage = true },
+                    onCommunity = { navigator.open(UiPage.COMMUNITY) },
+                    onManagePlaces = { navigator.open(UiPage.MAP_EDITS) },
                     onSurvey = { navigator.open(UiPage.OSM_SURVEY) },
                 )
                 surveyPage -> OsmSurveyScreen(vm.repository, onClose = ::returnToParent,
@@ -740,7 +764,10 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     onCheck = ::checkMapNote,
                     onDelete = { draft -> deletion = Deletion("Bu kayıt yalnızca uygulamadaki katkı listenden silinecek. OSM’de yayımlanmış bildirim silinmez.") { vm.repository.deleteContribution(draft.id) } },
                 )
-                journey != null -> JourneyDetail(journey, state, now,
+                journey != null -> JourneyDetail(journey, state, now, uiEntry.page,
+                    onSection = { section -> navigator.open(section, journey.id) },
+                    onCompare = { navigator.open(UiPage.COMPARISON) },
+                    onHealth = { navigator.open(UiPage.SETTINGS, "health") },
                     listState = rememberUiBrowseListState(browseHolder, uiEntry.key),
                     onEdit = { if (journey.status == JourneyStatus.TEMPORARY) transportAction = TransportAction(journey.id) else editJourney = journey }, onConfirm = { transportAction = TransportAction(journey.id) },
                     onFinish = {
@@ -752,7 +779,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     },
                     onSwitch = { transportAction = TransportAction(split = true) },
                     onAddPlace = { openAddPlace(journey.id) }, onPhoto = { photoTarget = PhotoTarget(journeyId = journey.id) },
-                    onVisit = { selectedPlace = it.placeId; selectedJourney = null },
+                    onVisit = { editVisit = it },
                     onDelete = { deletion = Deletion("Bu yolculuğun rotası ve yalnızca bu yolculuğa bağlı fotoğraflar silinecek. Kaydedilmiş yer ziyaretleri korunacak.") { if (active?.id == journey.id) vm.tracker.finish(journey.id); vm.repository.deleteJourney(journey.id); selectedJourney = null } },
                     onDeletePhoto = { photo -> deletion = Deletion("Fotoğraf uygulamadaki günlükten silinecek.") { vm.repository.deletePhoto(photo.id) } },
                     onEditPhoto = { editPhoto = it },
@@ -761,6 +788,8 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     onSharePhotos = { photosToShare = state.photos.filter { it.journeyId == journey.id } },
                 )
                 place != null -> PlaceDetail(place, state,
+                    isPublicPage = uiEntry.page == UiPage.PUBLIC_PLACE,
+                    onOpenPublic = { navigator.open(UiPage.PUBLIC_PLACE, place.id) },
                     publicInformation = informationKey?.let { key -> @Composable {
                         PlaceInformationContent(informationSession.state, key, "OSM yer bilgisi", informationSession.instant,
                             informationSession.deviceZone, informationSession.overrideZoneId, informationSession.changeZone,
@@ -787,9 +816,9 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     onDeletePhoto = { photo -> deletion = Deletion("Fotoğraf günlükten silinecek.") { vm.repository.deletePhoto(photo.id) } },
                     onEditPhoto = { editPhoto = it },
                 )
-                uiEntry.page == UiPage.JOURNEY || uiEntry.page == UiPage.PLACE -> Text("Kayıt açılıyor…", Modifier.padding(24.dp))
+                uiEntry.page in journeyPages || uiEntry.page == UiPage.PLACE || uiEntry.page == UiPage.PUBLIC_PLACE -> Text("Kayıt açılıyor…", Modifier.padding(24.dp))
                 uiEntry.page == UiPage.MAP || navigationPage -> NavigationScreen(onClose = { navigationPage = false; navigationTarget = null; navigationShared = null },
-                    vm = phoneModel(uiEntry),
+                    vm = phoneModel(uiEntry), liveLeanReadings = liveLeanReadings(navigationState),
                     incomingTarget = navigationTarget, initialStops = navigationStops, initialTransport = navigationTransport,
                     incomingShared = navigationShared.takeIf { navigationPage },
                     dashboardRequest = navigationDashboardRequest, layersRequest = navigationLayersRequest,
@@ -821,7 +850,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                             mapEditCoordinateState.setForEntry(entry.key, coordinate)
                         }
                     })
-                tab == 1 -> browseHolder.SaveableStateProvider(uiEntry.key) { JourneysScreen(state, now, onJourney = { selectedJourney = it.id }, onStart = { transportAction = TransportAction() }, onConfirm = { transportAction = TransportAction(it.id) }, onReject = { j -> deletion = Deletion("Bu geçici rota silinecek ve açıksa takip duracak.") { vm.tracker.reject(j.id) } }) }
+                tab == 1 -> browseHolder.SaveableStateProvider(uiEntry.key) { JourneysScreen(state, now, onBrowse = { navigator.open(it) }, onJourney = { selectedJourney = it.id }, onStart = { transportAction = TransportAction() }, onConfirm = { transportAction = TransportAction(it.id) }, onReject = { j -> deletion = Deletion("Bu geçici rota silinecek ve açıksa takip duracak.") { vm.tracker.reject(j.id) } }) }
                 shortcutAssignment != null -> DestinationShortcutAssignmentScreen(shortcutAssignment, state.places,
                     busy = resultOwner.formBusy.value, error = shortcutError,
                     onPlace = { place -> assignShortcut(shortcutAssignment) {
@@ -836,10 +865,16 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     onCancel = ::returnToParent)
                 tab == 2 -> browseHolder.SaveableStateProvider(uiEntry.key) { PlacesScreen(state, onPlace = { selectedPlace = it.id }, onAdd = { openAddPlace() }, onReorder = vm.repository::reorderPlaces, shortcuts = destinationShortcuts,
                     onShortcut = { kind, target -> vm.execute { library.setDestinationShortcut(kind, target?.id) } }) }
-                tab == 3 -> browseHolder.SaveableStateProvider(uiEntry.key) { HeatmapScreen(state) }
-                tab == 5 -> browseHolder.SaveableStateProvider(uiEntry.key) { DiaryStatisticsScreen(state, now, onJourney = { selectedJourney = it.id }) }
-                else -> SettingsScreen(settings, refresh, backupBusy,
-                    listState = rememberUiBrowseListState(browseHolder, uiEntry.key),
+                tab == 3 -> browseHolder.SaveableStateProvider(uiEntry.key) { HeatmapScreen(state, onOpenJourneys = { tab = 1 }) }
+                uiEntry.page == UiPage.COMPARISON -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+                    JourneyComparisonPanel(state)
+                }
+                tab == 5 -> browseHolder.SaveableStateProvider(uiEntry.key) { DiaryStatisticsScreen(state, now, onJourney = { navigator.open(UiPage.JOURNEY_STATS, it.id) }, onCompare = { navigator.open(UiPage.COMPARISON) }) }
+                else -> browseHolder.SaveableStateProvider(uiEntry.key) { SettingsScreen(settings, refresh, backupBusy,
+                    initialSection = uiEntry.entityId,
+                    onAccount = { navigator.open(UiPage.COMMUNITY, "account") },
+                    onLayers = { navigator.toMap(); navigationLayersRequest++ },
+                    listState = rememberLazyListState(),
                     onDetection = { if (settings.enabled) { vm.tracker.disableDetection(); refresh++ } else showDetection = true },
                     onRepairDetection = { vm.tracker.enableDetection { error -> refresh++; error?.let(vm::message) } },
                     onStopMinutes = { settings.stopMinutes = it; refresh++ },
@@ -857,7 +892,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     },
                     onContributions = { contributionHub = true }, onMessage = vm::message,
                     onCommunity = { communityMessageId = null; communityAccountId = null; navigator.open(UiPage.COMMUNITY) },
-                )
+                ) }
             }
         }
     }
@@ -865,12 +900,15 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     if (menuOpen) AlertDialog(onDismissRequest = { menuOpen = false }, title = { Text("Menü") }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             fun open(action: () -> Unit) { menuOpen = false; action() }
-            TextButton({ open { tab = 1 } }, Modifier.fillMaxWidth().testTag("menu-journeys")) { Text("Yolculuklar") }
             TextButton({ open { openDirections() } }, Modifier.fillMaxWidth().testTag("menu-route-plan")) { Text("Rota planla") }
+            TextButton({ open { groupPage = true } }, Modifier.fillMaxWidth().testTag("menu-group")) { Text("Grup yolculuğu") }
+            TextButton({ open { weatherPage = true } }, Modifier.fillMaxWidth().testTag("menu-weather")) { Text("Yolculuk havası") }
             if (uiEntry.page in setOf(UiPage.MAP, UiPage.DIRECTIONS)) {
                 TextButton({ open { navigationDashboardRequest++ } }, Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("menu-navigation-dashboard")) { Text("Yolculuk göstergesi") }
                 TextButton({ open { navigationLayersRequest++ } }, Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("menu-map-layers")) { Text("Harita katmanları") }
             }
+            HorizontalDivider()
+            TextButton({ open { tab = 1 } }, Modifier.fillMaxWidth().testTag("menu-journeys")) { Text("Yolculuklar") }
             TextButton({ open { libraryOpen = true } }, Modifier.fillMaxWidth().testTag("menu-route-library")) { Text("Rotalarım") }
             TextButton({ open { collectionsOpen = true } }, Modifier.fillMaxWidth().testTag("menu-collections")) { Text("Geziler") }
             TextButton({ open { openGpx() } }, Modifier.fillMaxWidth().testTag("menu-gpx-follow")) { Text("GPX izi takip et") }
@@ -880,7 +918,6 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
             TextButton({ open { openAddPlace() } }, Modifier.fillMaxWidth().testTag("menu-add-place")) { Text("Bir yer kaydet") }
             TextButton({ open { navigator.open(UiPage.COMMUNITY) } }, Modifier.fillMaxWidth().testTag("menu-community")) { Text("OSM Topluluğu") }
             TextButton({ open { contributionHub = true } }, Modifier.fillMaxWidth().testTag("menu-osm")) { Text("OSM'ye katkı") }
-            TextButton({ open { weatherPage = true } }, Modifier.fillMaxWidth().testTag("menu-weather")) { Text("Hava durumu") }
             TextButton({ open { tab = 4 } }, Modifier.fillMaxWidth().testTag("menu-settings")) { Text("Ayarlar") }
         }
     }, confirmButton = { TextButton({ menuOpen = false; returnToMap() }) { Text("Haritaya dön") } })
@@ -1068,22 +1105,17 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
             }
         },
     )
-    if (searchOsm) {
-        val editorRevision = addPlaceState.revision
-        fun searchIsCurrent() = shortcutAssignment == null ||
-            (searchOsm && addPlace && addPlaceState.revision == editorRevision)
-        OsmSearchDialog(onDismiss = { if (searchIsCurrent()) searchOsm = false }, onSelect = {
-            if (searchIsCurrent()) {
-                shortcutLocation?.cancel()
-                shortcutError = null
-                osmSelection = it
-                pin = GeoCoordinate(it.latitude, it.longitude)
-                searchOsm = false
-            }
-        })
+    editVisit?.let { visit ->
+        VisitEditor(visit, onDismiss = { editVisit = null },
+            placeName = state.places.firstOrNull { it.id == visit.placeId }?.name,
+            onPhoto = { photoTarget = PhotoTarget(visit.journeyId, visit.id) },
+        ) { note -> executeEditor("Ziyaret güncellendi.") {
+            vm.repository.saveVisit(visit.copy(note = note))
+            editVisit = null
+        } }
     }
     photoTarget?.let { target ->
-        AlertDialog(onDismissRequest = { photoTarget = null }, title = { Text("Bir anı ekle") }, text = { Text("Seçtiğin fotoğrafların bir kopyası yalnızca bu uygulamada saklanır.") },
+        AlertDialog(onDismissRequest = { photoTarget = null }, title = { Text("Fotoğraf ekle") }, text = { Text("Seçtiğin fotoğrafların bir kopyası yalnızca bu uygulamada saklanır.") },
             confirmButton = { TextButton(onClick = { gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) { owner -> resultOwner.putPayload("gallery", owner, UiResultPayload.Photos(target.journeyId, target.visitId, photoTargetState.revision)) } }) { Text("Galeriden seç") } },
             dismissButton = { TextButton(onClick = {
                 runCatching { camera.launchPrepared { owner -> val uri = media.createCaptureUri(); resultOwner.putPayload("camera", owner, UiResultPayload.Camera(uri.toString(), target.journeyId, target.visitId)); photoTarget = null; uri } }.onFailure { vm.message("Kamera açılamadı: ${it.message}") }
@@ -1103,7 +1135,21 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
         onDismiss = { editPlace = null },
         onSave = { updated -> executeEditor("Yer bilgileri kaydedildi.") { vm.repository.savePlace(updated); editPlace = null } },
     ) }
-    editVisit?.let { v -> VisitEditor(v, { editVisit = null }) { note -> executeEditor("Ziyaret güncellendi.") { vm.repository.saveVisit(v.copy(note = note)); editVisit = null } } }
+    if (searchOsm) {
+        val editorRevision = addPlaceState.revision
+        val owner = uiEntry.key
+        fun searchIsCurrent() = history.current.key == owner && searchOsm &&
+            (editPlace != null || addPlace && addPlaceState.revision == editorRevision)
+        OsmSearchDialog(onDismiss = { if (searchIsCurrent()) searchOsm = false }, onSelect = {
+            if (searchIsCurrent()) {
+                shortcutLocation?.cancel()
+                shortcutError = null
+                osmSelection = it
+                pin = GeoCoordinate(it.latitude, it.longitude)
+                searchOsm = false
+            }
+        })
+    }
     val photoEditor = editPhoto ?: missingPhotoMetadata.firstOrNull()
     photoEditor?.let { photo ->
         fun closePhoto() { if (editPhoto != null) editPhoto = null else missingPhotoMetadata = missingPhotoMetadata.drop(1) }
@@ -1186,7 +1232,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
             Text("İzinleri vermeden de yolculukları elle başlatabilirsin.", style = MaterialTheme.typography.bodySmall, color = Muted)
         }
     }, confirmButton = { TextButton(onClick = { vm.tracker.enableDetection { error -> refresh++; if (error == null) { showDetection = false; vm.message("Hareket algılama açıldı.") } else vm.message(error) } }) { Text("Algılamayı aç") } }, dismissButton = { TextButton(onClick = { showDetection = false }) { Text("Şimdi değil") } })
-    restoreUri?.let { uri -> AlertDialog(onDismissRequest = { restoreUri = null }, title = { Text("Yedeği geri yükle") }, text = { Text("Dosya doğrulanıp günlük başarıyla değiştirildiğinde aktif yolculuk kaydı duracak. Mevcut kayıtların için önce yedek alabilirsin.") }, confirmButton = { TextButton(enabled = !backupBusy, onClick = {
+    restoreUri?.let { uri -> RestoreConfirmation(uri, busy = backupBusy, onDismiss = { restoreUri = null }, onConfirm = {
         if (!backupImportBusy && !backupExport.busy) {
             restoreUri = null
             backupImportBusy = true
@@ -1201,7 +1247,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                 finally { settings.enabled = wasEnabled; backupImportBusy = false; refresh++ }
             }
         }
-    }) { Text("Geri yükle") } }, dismissButton = { TextButton(onClick = { restoreUri = null }) { Text("Vazgeç") } }) }
+    }) }
     if (showBackupOptions) AlertDialog(onDismissRequest = { showBackupOptions = false },
         title = { Text("Yedek içeriği") },
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1318,18 +1364,22 @@ private fun HomeMapMenu(active: Journey?, onDismiss: () -> Unit, onJourney: () -
 }
 
 @Composable
-private fun JourneysScreen(state: DiaryState, now: Long, onJourney: (Journey) -> Unit, onStart: () -> Unit, onConfirm: (Journey) -> Unit, onReject: (Journey) -> Unit) {
+private fun JourneysScreen(state: DiaryState, now: Long, onBrowse: (UiPage) -> Unit, onJourney: (Journey) -> Unit, onStart: () -> Unit, onConfirm: (Journey) -> Unit, onReject: (Journey) -> Unit) {
     var filter by rememberSaveable { mutableStateOf<String?>(null) }
     var dateFilter by rememberSaveable { mutableStateOf("Tümü") }
     val cutoff = when (dateFilter) { "7 gün" -> now - 7 * 86_400_000L; "30 gün" -> now - 30 * 86_400_000L; else -> 0L }
     val visible = state.journeys.filter { (it.expiresAt == null || it.expiresAt > now) && (filter == null || it.transport.name == filter || (filter == "OWN_DRIVING" && it.transport in listOf(Transport.CAR, Transport.MOTORCYCLE))) && it.startedAt >= cutoff }.sortedByDescending { it.startedAt }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        item { PageHeading("Yolculukların", "Her rotanın bir hikâyesi var.") }
+        item { Text("Yolculuklar", style = MaterialTheme.typography.headlineMedium) }
         item { FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) { FilterChip(filter == null, { filter = null }, { Text("Tümü") }); FilterChip(filter == "OWN_DRIVING", { filter = "OWN_DRIVING" }, { Text("Sürüşlerim") }); transportDisplayOrder.forEach { t -> FilterChip(filter == t.name, { filter = t.name }, { Text(t.label()) }) } } }
         item { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("Tümü", "7 gün", "30 gün").forEach { f -> FilterChip(dateFilter == f, { dateFilter = f }, { Text(f) }) } } }
-        if (visible.isEmpty()) item { EmptyCard(Icons.Outlined.Route, "Yeni bir rota seni bekliyor", "Başlattığın yolculuklar ve hareketle önerilen geçici kayıtlar burada birikir.") }
-        items(visible, key = { it.id }) { journey ->
-            Surface(shape = RoundedCornerShape(22.dp), color = if (journey.status == JourneyStatus.TEMPORARY) Leaf else Color.White, onClick = { onJourney(journey) }) {
+        if (visible.isEmpty()) item { Text(if (state.journeys.isEmpty()) "Henüz kayıtlı yolculuk yok." else "Bu filtrelerde yolculuk bulunamadı.") }
+        val dayFormat = SimpleDateFormat("d MMMM yyyy", Locale.forLanguageTag("tr-TR"))
+        val byDay = visible.groupBy { dayFormat.format(Date(it.startedAt)) }
+        byDay.forEach { (day, records) ->
+            item(key = "date-$day") { Text(day, style = MaterialTheme.typography.titleSmall) }
+            items(records, key = { it.id }) { journey ->
+            Surface(shape = RoundedCornerShape(22.dp), color = if (journey.status == JourneyStatus.TEMPORARY) Leaf else MaterialTheme.colorScheme.surfaceContainer, onClick = { onJourney(journey) }) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) { ModeBadge(journey.transport); Spacer(Modifier.width(12.dp)); Column(Modifier.weight(1f)) { Text(journey.title.ifBlank { journey.transport.label() }, style = MaterialTheme.typography.titleMedium); Text(date(journey.startedAt), style = MaterialTheme.typography.bodySmall, color = Muted) }; Icon(Icons.Outlined.ChevronRight, null) }
                     Text("${journeyDistance(journey, state)}  ·  ${duration((journey.endedAt ?: now) - journey.startedAt)}${if (journey.interrupted) "  ·  Kesinti var" else ""}", color = Muted)
@@ -1341,43 +1391,120 @@ private fun JourneysScreen(state: DiaryState, now: Long, onJourney: (Journey) ->
                 }
             }
         }
+        }
         item { OutlinedButton(onClick = onStart, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Add, null); Text("Yeni yolculuk") } }
+        item { FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("Yerler" to UiPage.PLACES, "Rotalarım" to UiPage.ROUTES, "Geziler" to UiPage.COLLECTIONS,
+                "İstatistikler" to UiPage.STATISTICS, "Yoğunluk haritası" to UiPage.HEATMAP).forEach { (label, page) ->
+                TextButton(onClick = { onBrowse(page) }) { Text(label) }
+            }
+        } }
     }
 }
 
 @Composable
-private fun JourneyDetail(journey: Journey, state: DiaryState, now: Long, onEdit: () -> Unit, onConfirm: () -> Unit, onFinish: () -> Unit, onSwitch: () -> Unit, onAddPlace: () -> Unit, onPhoto: () -> Unit, onVisit: (Visit) -> Unit, onDelete: () -> Unit, onDeletePhoto: (Photo) -> Unit, onEditPhoto: (Photo) -> Unit, onExportGpx: () -> Unit, onOpenGpsTraces: () -> Unit, onSharePhotos: () -> Unit, listState: LazyListState = rememberLazyListState()) {
+private fun JourneyDetail(
+    journey: Journey, state: DiaryState, now: Long, section: UiPage,
+    onSection: (UiPage) -> Unit, onCompare: () -> Unit, onHealth: () -> Unit,
+    onEdit: () -> Unit, onConfirm: () -> Unit, onFinish: () -> Unit, onSwitch: () -> Unit,
+    onAddPlace: () -> Unit, onPhoto: () -> Unit, onVisit: (Visit) -> Unit, onDelete: () -> Unit,
+    onDeletePhoto: (Photo) -> Unit, onEditPhoto: (Photo) -> Unit, onExportGpx: () -> Unit,
+    onOpenGpsTraces: () -> Unit, onSharePhotos: () -> Unit, listState: LazyListState,
+) {
     val prepared = state.prepared(journey)
     val visits = state.visits.filter { it.journeyId == journey.id }.sortedBy { it.visitedAt }
-    LazyColumn(state = listState, contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        item { PageHeading(journey.title.ifBlank { journey.transport.label() }, date(journey.startedAt)) }
-        item { Row(verticalAlignment = Alignment.CenterVertically) { ModeBadge(journey.transport); Spacer(Modifier.width(12.dp)); Text(journey.transport.label(), Modifier.weight(1f)); IconButton(onClick = onEdit) { Icon(Icons.Outlined.Edit, "Yolculuğu düzenle") } } }
-        if (journey.interrupted) item { Notice("Konum kaydında kesinti var. Eksik bölüm rotaya eklenmedi.") }
-        item { DiaryMap(emptyList(), state.places.filter { p -> visits.any { it.placeId == p.id } }, Modifier.fillMaxWidth().height(240.dp).clip(RoundedCornerShape(24.dp)), journeyId = journey.id, analysis = if (prepared == null) state.analysis.copy(pending = true) else state.analysis) }
-        if (journey.status == JourneyStatus.TEMPORARY) item { Button(onClick = onConfirm, modifier = Modifier.fillMaxWidth()) { Text("Bu yolculuğu sakla") } }
-        if (journey.endedAt == null) item { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton(onClick = onSwitch, Modifier.weight(1f)) { Text("Tür değiştir") }; Button(onClick = onFinish, Modifier.weight(1f)) { Icon(Icons.Outlined.Stop, null); Text("Bitir") } } }
-        item { JourneyStatsPanel(journey, prepared?.stats, state.analysisLabel) }
-        TrackingPolicy.automaticCandidateDeadline(journey)?.let { deadline ->
-            item { Notice("Otomatik kayıt için 500 metre bekleniyor · Sıfırlanmaya ${countdown(deadline - now)}") }
+    val photos = state.photos.filter { it.journeyId == journey.id }
+    val places = state.places.filter { place -> visits.any { it.placeId == place.id } }
+    val analysis = if (prepared == null) state.analysis.copy(pending = true) else state.analysis
+    val title = journey.title.ifBlank { journey.transport.label() }
+    if (section == UiPage.TRACK_MAP) {
+        Column(Modifier.fillMaxSize()) {
+            Text(title, Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.titleLarge)
+            if (journey.interrupted) Notice("Konum kaydında kesinti var.")
+            DiaryMap(emptyList(), places, Modifier.fillMaxWidth().weight(1f), journeyId = journey.id,
+                analysis = analysis, expandable = false)
         }
-        item { JourneyHealthPanel(journey, state, now) }
-        item { RecordedCurvePanel(journey, state) }
-        item { LeanJourneyReportPanel(journey) }
-        if (journey.endedAt != null && journey.status == JourneyStatus.CONFIRMED) item { OutlinedButton(onClick = onExportGpx, modifier = Modifier.fillMaxWidth()) { Text("GPX rotasını dışa aktar") } }
-        if (osmGpsEligibleJourney(journey)) item {
-            OutlinedButton(onClick = onOpenGpsTraces, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                .testTag("journey-osm-gps-traces")) {
-                Text("OSM'ye GPS izi gönder")
+        return
+    }
+    LazyColumn(state = listState, contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        when (section) {
+            UiPage.JOURNEY_VISITS -> {
+                item { PageHeading("Ziyaretler", title) }
+                if (visits.isEmpty()) item { Text("Bu yolculukta kayıtlı ziyaret yok.") }
+                items(visits, key = { it.id }) { visit ->
+                    JournalLink(state.places.firstOrNull { it.id == visit.placeId }?.name ?: "Yer",
+                        date(visit.visitedAt), { onVisit(visit) })
+                }
+                item { JournalLink("Yer ekle", onClick = onAddPlace) }
+            }
+            UiPage.JOURNEY_PHOTOS -> {
+                item { PageHeading("Fotoğraflar", title) }
+                if (photos.isEmpty()) item { Text("Bu yolculukta fotoğraf yok.") }
+                item { DiaryPhotoGallery(photos, onDeletePhoto, onEditPhoto) }
+                item { JournalLink("Fotoğraf ekle", onClick = onPhoto) }
+                if (photos.isNotEmpty()) item { JournalLink("Paylaşılacakları seç", onClick = onSharePhotos) }
+            }
+            UiPage.JOURNEY_STATS -> {
+                item { PageHeading("Yolculuk istatistikleri", title) }
+                item { JourneyStatsPanel(journey, prepared?.stats, state.analysisLabel) }
+                item { JourneyHealthPanel(journey, state, now) }
+                item { JournalLink("Saat ve sağlık", onClick = onHealth) }
+                item { JournalLink("Raporlar", onClick = { onSection(UiPage.JOURNEY_REPORTS) }) }
+            }
+            UiPage.JOURNEY_REPORTS -> {
+                item { PageHeading("Viraj ve yatış raporu", title) }
+                item { RecordedCurvePanel(journey, state) }
+                item { LeanJourneyReportPanel(journey) }
+                item { JournalLink("İki yolculuğu karşılaştır", onClick = onCompare) }
+            }
+            else -> {
+                item { PageHeading(title, date(journey.startedAt)) }
+                item { DiaryMap(emptyList(), places, Modifier.fillMaxWidth().height(220.dp)
+                    .clip(RoundedCornerShape(18.dp)), journeyId = journey.id, analysis = analysis) }
+                item { JournalLink("İzi haritada aç", onClick = { onSection(UiPage.TRACK_MAP) }) }
+                item { JournalLink("Süre ve mesafe", duration((journey.endedAt ?: now) - journey.startedAt) +
+                    " · " + journeyDistance(journey, state), { onSection(UiPage.JOURNEY_STATS) }) }
+                if (journey.interrupted) item { Notice("Konum kaydında kesinti var. Eksik bölüm rotaya eklenmedi.") }
+                if (journey.status == JourneyStatus.TEMPORARY) item {
+                    Button(onClick = onConfirm, modifier = Modifier.fillMaxWidth()) { Text("Bu yolculuğu sakla") }
+                }
+                if (journey.endedAt == null) item {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = onSwitch) { Text("Tür değiştir") }
+                        Button(onClick = onFinish) { Text("Bitir") }
+                    }
+                }
+                TrackingPolicy.automaticCandidateDeadline(journey)?.let { deadline ->
+                    item { Notice("Otomatik kayıt için 500 metre bekleniyor · Sıfırlanmaya " + countdown(deadline - now)) }
+                }
+                if (journey.note.isNotBlank()) item { Text(journey.note) }
+                item { JournalLink("Ziyaretler", visits.size.toString(), { onSection(UiPage.JOURNEY_VISITS) }) }
+                item { JournalLink("Fotoğraflar", photos.size.toString(), { onSection(UiPage.JOURNEY_PHOTOS) }) }
+                item { JournalLink("Raporlar", onClick = { onSection(UiPage.JOURNEY_REPORTS) }) }
+                item { JournalLink("Yolculuğu düzenle", onClick = onEdit) }
+                if (journey.endedAt != null && journey.status == JourneyStatus.CONFIRMED)
+                    item { JournalLink("GPX rotasını dışa aktar", onClick = onExportGpx) }
+                if (osmGpsEligibleJourney(journey)) item {
+                    OutlinedButton(onOpenGpsTraces, Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                        .testTag("journey-osm-gps-traces")) { Text("OSM'ye GPS izi gönder") }
+                }
+                item { TextButton(onClick = onDelete) { Text("Yolculuğu sil", color = MaterialTheme.colorScheme.error) } }
             }
         }
-        if (journey.note.isNotBlank()) item { Text(journey.note) }
-        item { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton(onClick = onAddPlace, Modifier.weight(1f)) { Icon(Icons.Outlined.AddLocationAlt, null); Text("Yer ekle") }; OutlinedButton(onClick = onPhoto, Modifier.weight(1f)) { Icon(Icons.Outlined.AddAPhoto, null); Text("Fotoğraf") } } }
-        item { Text("Yol üzerindeki anlar", style = MaterialTheme.typography.titleLarge) }
-        if (visits.isEmpty()) item { Text("Bu yolculuğa henüz bir durak eklemedin.", color = Muted) }
-        items(visits, key = { it.id }) { visit -> Surface(onClick = { onVisit(visit) }, shape = RoundedCornerShape(18.dp), color = Color.White) { Row(Modifier.fillMaxWidth().padding(16.dp)) { Icon(Icons.Outlined.Place, null, tint = Forest); Spacer(Modifier.width(12.dp)); Column { Text(state.places.firstOrNull { it.id == visit.placeId }?.name ?: "Yer", style = MaterialTheme.typography.titleMedium); Text(date(visit.visitedAt), style = MaterialTheme.typography.bodySmall, color = Muted) } } } }
-        item { PhotoGrid(state.photos.filter { it.journeyId == journey.id }, onDeletePhoto, onEditPhoto) }
-        if (state.photos.any { it.journeyId == journey.id }) item { TextButton(onClick = onSharePhotos) { Text("Fotoğrafları paylaş") } }
-        item { TextButton(onClick = onDelete) { Icon(Icons.Outlined.DeleteOutline, null); Text("Yolculuğu sil") } }
+    }
+}
+
+@Composable
+private fun JournalLink(label: String, detail: String? = null, onClick: () -> Unit) {
+    OutlinedCard(onClick = onClick, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(label, style = MaterialTheme.typography.titleMedium)
+                detail?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }
+            Icon(Icons.Outlined.ChevronRight, contentDescription = null)
+        }
     }
 }
 
@@ -1387,15 +1514,22 @@ internal fun PlaceDetail(place: Place, state: DiaryState, onEdit: () -> Unit, on
     onDelete: () -> Unit, onDeleteVisit: (Visit) -> Unit, onDeletePhoto: (Photo) -> Unit, onEditPhoto: (Photo) -> Unit,
     onSurvey: (() -> Unit)? = null,
     publicInformation: (@Composable () -> Unit)? = null,
-    listState: LazyListState = rememberLazyListState()) {
+    listState: LazyListState = rememberLazyListState(),
+    isPublicPage: Boolean = false, onOpenPublic: (() -> Unit)? = null) {
     val visits = state.visits.filter { it.placeId == place.id }.sortedByDescending { it.visitedAt }
     LazyColumn(state = listState, contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        publicInformation?.let { content -> item(key = "public-osm-information") { content() } }
-        item { HorizontalDivider(); Text("Kişisel yer günlüğü", style = MaterialTheme.typography.titleLarge); Text("Bu yere verdiğin ad", style = MaterialTheme.typography.bodySmall) }
+        if (isPublicPage) {
+            item(key = "public-osm-information") {
+                if (publicInformation != null) publicInformation() else Text("Bu yere bağlı OSM kaydı bulunamadı.")
+            }
+            return@LazyColumn
+        }
+        item { Text("Kişisel yer günlüğü", style = MaterialTheme.typography.titleLarge) }
         item { Row(verticalAlignment = Alignment.Top) { Column(Modifier.weight(1f)) { PageHeading(place.name, "${visits.size} ziyaret · Kişisel yer günlüğü") }; IconButton(onClick = onEdit) { Icon(Icons.Outlined.Edit, "Yer adını düzenle") } } }
         if (place.latitude != null && place.longitude != null) item { DiaryMap(emptyList(), listOf(place), Modifier.fillMaxWidth().height(200.dp).clip(RoundedCornerShape(24.dp))) }
         item {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (onOpenPublic != null && publicInformation != null) OutlinedButton(onClick = onOpenPublic) { Text("OSM yer bilgisi") }
                 OutlinedButton(onClick = onMaps) { Text("Başka haritada aç") }
                 OutlinedButton(onClick = onContribute) { Text("Harita notu yaz") }
                 onCorrect?.takeIf { publicInformation == null }?.let { OutlinedButton(onClick = it) { Text("OSM mekânını düzelt") } }
@@ -1405,10 +1539,10 @@ internal fun PlaceDetail(place: Place, state: DiaryState, onEdit: () -> Unit, on
             }
         }
         items(visits, key = { it.id }) { visit ->
-            Surface(color = Color.White, shape = RoundedCornerShape(22.dp)) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = RoundedCornerShape(22.dp)) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) { Text(date(visit.visitedAt), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium); IconButton(onClick = { onEditVisit(visit) }) { Icon(Icons.Outlined.EditNote, "Notu düzenle") } }
                 Text(visit.note.ifBlank { "Bu ziyaret için bir not ekleyebilirsin." }, color = if (visit.note.isBlank()) Muted else Ink)
-                PhotoGrid(state.photos.filter { it.visitId == visit.id }, onDeletePhoto, onEditPhoto)
+                DiaryPhotoGallery(state.photos.filter { it.visitId == visit.id }, onDeletePhoto, onEditPhoto)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { TextButton(onClick = { onPhoto(visit) }) { Icon(Icons.Outlined.AddAPhoto, null); Text("Fotoğraf") }; TextButton(onClick = { onShare(visit) }, enabled = state.photos.any { it.visitId == visit.id }) { Icon(Icons.Outlined.IosShare, null); Text("Fotoğrafları paylaş") }; IconButton(onClick = { onDeleteVisit(visit) }) { Icon(Icons.Outlined.DeleteOutline, "Ziyareti sil") } }
             } }
         }
@@ -1417,32 +1551,14 @@ internal fun PlaceDetail(place: Place, state: DiaryState, onEdit: () -> Unit, on
 }
 
 @Composable
-private fun SettingsScreen(settings: TrackerSettings, refresh: Int, busy: Boolean, onDetection: () -> Unit, onRepairDetection: () -> Unit, onStopMinutes: (Int) -> Unit, onPermissions: () -> Unit, onExport: () -> Unit, onImport: () -> Unit, onContributions: () -> Unit, onMessage: (String) -> Unit, onCommunity: () -> Unit, listState: LazyListState = rememberLazyListState()) {
-    val context = LocalContext.current
-    val photoSize = remember(refresh) { File(context.filesDir, "photos").walkTopDown().filter { it.isFile }.sumOf { it.length() } / (1024 * 1024) }
-    LazyColumn(state = listState, contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-        item { PageHeading("Senin günlüğün,\nsenin kontrolün.", "Kayıtlar yalnızca bu telefonda saklanır.") }
-        item { Surface(shape = RoundedCornerShape(22.dp), color = Color.White) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("Hareketi fark et", style = MaterialTheme.typography.titleMedium); Text("15 dakikada 500 metreyi tamamlayınca kaydet", style = MaterialTheme.typography.bodySmall, color = Muted) }; Switch(settings.enabled, { onDetection() }) }
-            Text("15 dakika içinde 500 metre dolmazsa geçici ölçüm sıfırlanır. Bu süre içindeki dur-kalklar mesafeyi sıfırlamaz. Kayda dönüşen yolculuklar ve elle başlattığın kayıtlar bu sınırdan etkilenmez. Araba, motosiklet ve yolcu ayrımını sen seçersin.", style = MaterialTheme.typography.bodyMedium, color = Muted)
-            TrackingDiagnosticsPanel(settings, refresh, onRepairDetection)
-            settings.lastActivityEvent?.let { Text("Son algılama: $it\n${date(settings.lastActivityEventAt)}", style = MaterialTheme.typography.bodySmall, color = Muted) }
-            settings.lastDetectionDecision?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = Muted) }
-            TextButton(onClick = onPermissions) { Text("Android izinlerini yönet") }
-        } } }
-        item { Text("Durak önerisi", style = MaterialTheme.typography.titleMedium); Text("Hareketsizlikten sonra hatırlat. Yolculuk kendiliğinden bitmez.", color = Muted); Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf(5, 10, 15).forEach { minutes -> FilterChip(settings.stopMinutes == minutes, { onStopMinutes(minutes) }, { Text("$minutes dk") }) } } }
-        item { HorizontalDivider() }
-        item { Text("Arşivin", style = MaterialTheme.typography.titleLarge); Text("Fotoğraflar: $photoSize MB · Otomatik bulut yedeği kapalı", color = Muted) }
-        item { Text("Telefon değiştirirken veya uygulamayı kaldırmadan önce dosyaya yedek al. Yedek, özel konumlarını ve fotoğraflarını içerir.", style = MaterialTheme.typography.bodyMedium) }
-        item { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton(onClick = onExport, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.FileDownload, null); Text("Yedek dosyası oluştur") }; OutlinedButton(onClick = onImport, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.FileUpload, null); Text("Yedekten geri yükle") }; if (busy) LinearProgressIndicator(Modifier.fillMaxWidth()) } }
-        item { HorizontalDivider() }
-        item { HealthSettingsPanel(onMessage) }
-        item { LeanSetupPanel(onMessage) }
-        item { OsmSettingsPanel(onContributions, onMessage) }
-        item { OutlinedButton(onClick = onCommunity, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Forum, null); Spacer(Modifier.width(8.dp)); Text("OSM Topluluğu") } }
-        item { Text("İz · ${BuildConfig.VERSION_NAME}\nKüçük yollar, güzel anılar.", style = MaterialTheme.typography.bodySmall, color = Muted) }
-    }
-}
+private fun SettingsScreen(settings: TrackerSettings, refresh: Int, busy: Boolean,
+    onDetection: () -> Unit, onRepairDetection: () -> Unit, onStopMinutes: (Int) -> Unit,
+    onPermissions: () -> Unit, onExport: () -> Unit, onImport: () -> Unit,
+    onContributions: () -> Unit, onMessage: (String) -> Unit, onCommunity: () -> Unit,
+    listState: LazyListState = rememberLazyListState(), initialSection: String? = null,
+    onLayers: () -> Unit = {}, onAccount: () -> Unit = onCommunity,
+) = PhoneSettings(settings, refresh, busy, onDetection, onRepairDetection, onStopMinutes,
+    onPermissions, onExport, onImport, onContributions, onMessage, onCommunity, listState, initialSection, onLayers, onAccount)
 
 @Composable
 private fun TextEditor(title: String, initial: String, initialNote: String?, onDismiss: () -> Unit, onSave: (String, String) -> Unit) {
@@ -1454,15 +1570,8 @@ private fun TextEditor(title: String, initial: String, initialNote: String?, onD
     AlertDialog(onDismissRequest = back, title = { Text(title) }, text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) { OutlinedTextField(name, { name = it }, label = { Text("Ad") }); if (initialNote != null) OutlinedTextField(note, { note = it }, label = { Text("Özel not") }, minLines = 3) } }, confirmButton = { TextButton(onClick = { onSave(name.trim(), note.trim()) }, enabled = name.isNotBlank()) { Text("Kaydet") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Vazgeç") } })
 }
 
-@Composable
-private fun PhotoGrid(photos: List<Photo>, onDelete: (Photo) -> Unit, onEdit: (Photo) -> Unit) {
-    if (photos.isEmpty()) return
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        photos.forEach { photo -> Box(Modifier.size(96.dp).clip(RoundedCornerShape(16.dp)).clickable { onEdit(photo) }) { AsyncImage(File(LocalContext.current.filesDir, photo.relativePath), photo.caption.ifBlank { "Günlük fotoğrafı" }, Modifier.fillMaxSize(), contentScale = ContentScale.Crop); IconButton(onClick = { onDelete(photo) }, Modifier.align(Alignment.TopEnd).size(30.dp).background(Color.White.copy(alpha = .9f), CircleShape)) { Icon(Icons.Outlined.Close, "Fotoğrafı sil", Modifier.size(16.dp)) } } }
-    }
-}
 @Composable private fun PageHeading(title: String, subtitle: String) { Text(title, style = MaterialTheme.typography.headlineMedium); Spacer(Modifier.height(8.dp)); Text(subtitle, color = Muted, style = MaterialTheme.typography.bodyMedium) }
 @Composable private fun Stat(label: String, value: String) { Column { Text(label, style = MaterialTheme.typography.labelSmall, color = Muted, letterSpacing = 1.sp); Spacer(Modifier.height(6.dp)); Text(value, style = MaterialTheme.typography.titleLarge) } }
 @Composable private fun ModeBadge(transport: Transport) { Icon(transport.icon(), null, tint = transport.accentColor(), modifier = Modifier.size(44.dp).background(transport.badgeColor(), RoundedCornerShape(14.dp)).padding(10.dp)) }
 @Composable private fun Notice(text: String) { Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(14.dp)) { Text(text, Modifier.padding(14.dp), style = MaterialTheme.typography.bodySmall) } }
-@Composable private fun EmptyCard(icon: ImageVector, title: String, body: String) { Surface(shape = RoundedCornerShape(24.dp), color = Color.White) { Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { Icon(icon, null, Modifier.size(42.dp), tint = Forest); Text(title, style = MaterialTheme.typography.titleLarge); Text(body, color = Muted) } } }
+@Composable private fun EmptyCard(icon: ImageVector, title: String, body: String) { Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surfaceContainer) { Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { Icon(icon, null, Modifier.size(42.dp), tint = Forest); Text(title, style = MaterialTheme.typography.titleLarge); Text(body, color = Muted) } } }

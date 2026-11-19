@@ -129,14 +129,14 @@ class OsmSurveyNativeRoutingTest {
             assertEquals(tags["opening_hours"], observation.hours.before)
             assertEquals(tags["check_date:opening_hours"], observation.hours.beforeDate)
             assertEquals(date, observation.observedOn)
-            compose.onNodeWithText("Kapat").performClick() // actual map-edit page -> nearby
+            compose.onNodeWithTag("osm-map-drafts-back").performClick() // actual map-edit page -> nearby
             compose.onNodeWithTag(row).assertIsDisplayed()
             capture("03-nearby-saved-list")
             compose.onNodeWithTag(row).performClick() // actual distance-list route
             assertReopened(raw, date)
             assertSameDraft(repository, saved, ref)
             editorClose()
-            compose.onNodeWithText("Kapat").performClick()
+            compose.onNodeWithTag("osm-map-drafts-back").performClick()
             compose.onNodeWithText("Geri").performClick()
             compose.onNodeWithText("Kapat").performClick() // hub -> home
             compose.onNodeWithTag("home-menu").performClick()
@@ -170,6 +170,15 @@ class OsmSurveyNativeRoutingTest {
         compose.onAllNodesWithTag("osm-survey-editor-list").fetchSemanticsNodes().isNotEmpty()
     }
     private fun editor(tag: String): SemanticsNodeInteraction {
+        val list = compose.onNodeWithTag("osm-survey-editor-list")
+        val editingHours = compose.onAllNodesWithTag("osm-survey-hours-screen").fetchSemanticsNodes().isNotEmpty()
+        if (tag.startsWith("osm-survey-hours-") && !editingHours) {
+            list.performScrollToNode(hasTestTag("osm-survey-hours-open"))
+            compose.onNodeWithTag("osm-survey-hours-open").performClick()
+        } else if (!tag.startsWith("osm-survey-hours-") && tag != "osm-survey-save" && editingHours) {
+            list.performScrollToNode(hasTestTag("osm-survey-hours-return"))
+            compose.onNodeWithTag("osm-survey-hours-return").performClick()
+        }
         compose.onNodeWithTag("osm-survey-editor-list").performScrollToNode(hasTestTag(tag))
         return compose.onNodeWithTag(tag)
     }

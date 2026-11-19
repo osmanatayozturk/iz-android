@@ -5,6 +5,7 @@ package org.iz.navigation.ui
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -56,6 +57,9 @@ internal fun OsmSurveyEditor(
     var review by remember(initial.id) { mutableStateOf<OsmCorrectionReview?>(null) }
     var reviewed by remember(initial.id) { mutableStateOf(false) }
     var replacement by remember(initial.id) { mutableStateOf<OsmCorrectionElement?>(null) }
+    var editingHours by rememberSaveable(initial.id) { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    LaunchedEffect(editingHours) { listState.scrollToItem(0) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val auth = remember(context) { OsmAuthManager.get(context) }
@@ -143,17 +147,23 @@ internal fun OsmSurveyEditor(
 
     Dialog(onDismissRequest = {
         if (!locked) {
-            if (review != null) resetReview() else exit(onClose)
+            if (review != null) resetReview() else if (editingHours) editingHours = false else exit(onClose)
         }
     }, properties = DialogProperties(usePlatformDefaultWidth = false,
         dismissOnBackPress = !locked, dismissOnClickOutside = false)) {
-        Surface(Modifier.fillMaxWidth().widthIn(max = 600.dp).fillMaxHeight(.96f).padding(12.dp),
-            shape = MaterialTheme.shapes.extraLarge) {
-            LazyColumn(Modifier.fillMaxSize().testTag("osm-survey-editor-list"),
+        Surface(Modifier.fillMaxSize().systemBarsPadding().imePadding()
+            .testTag(if (editingHours) "osm-survey-hours-screen" else "osm-survey-observation-screen"),
+            color = MaterialTheme.colorScheme.background) {
+            LazyColumn(Modifier.fillMaxSize().testTag("osm-survey-editor-list"), state = listState,
                 contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 item {
-                    Text(if (activeReview == null) "Yerinde tamamla" else "Gözlemi yayımlamadan önce",
-                        Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineSmall)
+                    OsmEditorHeading(when {
+                        activeReview != null -> "OSM gönderim önizlemesi"
+                        editingHours -> "Saat düzenleyici"
+                        else -> "Yerinde gözlem ve doğrulama"
+                    }, !locked) {
+                        if (review != null) resetReview() else if (editingHours) editingHours = false else exit(onClose)
+                    }
                     Text(current?.tags?.get("name:tr") ?: current?.tags?.get("name") ?: initial.preset.label)
                 }
                 (error ?: authError)?.let { message -> item(key = "survey-error/${initial.id}") { Text(message, color = MaterialTheme.colorScheme.error) } }
@@ -161,6 +171,7 @@ internal fun OsmSurveyEditor(
                 if (activeReview != null) {
                     item {
                         Text("OSM hesabı · ${activeReview.credentials.user.displayName}")
+                        Text("Hedef · OSM ${activeReview.original.ref.type.apiName()}/${activeReview.original.ref.id}")
                         Text("Gözlem tarihi · ${observation.observedOn}")
                         Text("OSM sürümü ${activeReview.original.version}")
                     }
@@ -188,7 +199,7 @@ internal fun OsmSurveyEditor(
                         TextButton(onClick = ::resetReview, enabled = !locked, modifier = Modifier.heightIn(min = 48.dp)) { Text("Düzenlemeye dön") }
                     }
                 } else {
-                    item {
+                    if (!editingHours) item {
                         TextButton(onClick = {
                             if (!entryIsCurrent()) return@TextButton
                             val owner = auth.currentCredentials()
@@ -212,7 +223,7 @@ internal fun OsmSurveyEditor(
                             Text("Güncel OSM bilgilerini yeniden oku")
                         }
                     }
-                    replacement?.let { fresh ->
+                    replacement?.takeUnless { editingHours }?.let { fresh ->
                         item {
                             Text("OSM sürümü değişti: ${observation.baseVersion} → ${fresh.version}. Gözlemini güncel bilgiyle karşılaştır.")
                             for ((field, saved) in listOf(SurveyField.OPENING_HOURS to observation.hours, SurveyField.WHEELCHAIR to observation.wheelchair)) {
@@ -237,84 +248,105 @@ internal fun OsmSurveyEditor(
                             TextButton(onClick = { replacement = null }, enabled = !locked, modifier = Modifier.heightIn(min = 48.dp)) { Text("Eski taslağı koru") }
                         }
                     }
-                    item {
+                    if (!editingHours) item {
                         OutlinedTextField(date, { date = it; confirmed = false; resetReview() }, enabled = !locked,
                             label = { Text("Gözlem tarihi (YYYY-MM-DD)") }, isError = !validDate,
                             modifier = Modifier.fillMaxWidth().testTag("osm-survey-observed-on"), singleLine = true)
                         if (!validDate) Text("Gelecekte olmayan geçerli bir gözlem tarihi gir.", color = MaterialTheme.colorScheme.error)
                     }
-                    item {
+                    if (!editingHours) item {
                         SurveyFieldHeader(SurveyField.OPENING_HOURS, observation.hours, locked,
                             venue?.tasks(today)?.firstOrNull { it.field == SurveyField.OPENING_HOURS }) {
                             field(SurveyField.OPENING_HOURS, it)
                         }
                     }
                     if (observation.hours.action == SurveyAction.EDIT) {
-                        val convertible = restoredSurveyWeek(observation.hours)
-                            ?: SurveyOpeningHours.toWeek(observation.hours.value.ifBlank { observation.hours.before.orEmpty() })
-                        item {
-                            Row {
-                                TextButton(onClick = { simple = false }, enabled = !locked,
-                                    modifier = Modifier.heightIn(min = 48.dp)) { Text("Gelişmiş OSM ifadesi") }
-                                if (convertible != null) TextButton(onClick = {
-                                    update(observation.copy(hours = observation.hours.copy(
-                                        value = convertible.expression(), formDraft = convertible.encodeDraft())))
-                                    formWeek = convertible
-                                    simple = true
-                                }, enabled = !locked, modifier = Modifier.heightIn(min = 48.dp).testTag("osm-survey-hours-simple")) {
-                                    Text("Haftalık form")
-                                }
-                                if (observation.hours.before.isNullOrBlank() && observation.hours.value.isBlank()) TextButton(onClick = {
-                                    val week = SurveyWeek(List(7) { SurveyDayHours(SurveyDayState.UNKNOWN) })
-                                    update(observation.copy(hours = observation.hours.copy(value = week.expression(), formDraft = week.encodeDraft())))
-                                    formWeek = week
-                                    simple = true
-                                }, enabled = !locked, modifier = Modifier.heightIn(min = 48.dp)) { Text("Haftalık form") }
+                        if (!editingHours) item {
+                            OutlinedButton(onClick = { editingHours = true }, enabled = !locked,
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("osm-survey-hours-open")) {
+                                Text("Saat programını düzenle")
                             }
-                        }
-                        if (simple && formWeek != null) {
-                            itemsIndexed(requireNotNull(formWeek).days) { index, day ->
-                                SurveyHoursDay(index, day, !locked) { changed ->
-                                    val next = requireNotNull(formWeek).editDay(index, changed)
-                                    val privateDraft = runCatching { next.encodeDraft() }.getOrNull()
-                                    if (privateDraft == null) error = "Saat formu sınırı aşıldı. Son kabul edilen aralıklar korunuyor."
-                                    else if (update(observation.copy(hours = observation.hours.copy(
-                                        value = next.expression(), formDraft = privateDraft, fullyObserved = false)))) formWeek = next
-                                }
-                            }
-                        } else item(key = "survey-hours-advanced/${initial.id}") {
-                            OutlinedTextField(observation.hours.value, {
-                                // Repeated accepted text must preserve warning, consent and review state.
-                                val accepted = decodeSurveyObservation(payload)
-                                if (it != accepted.hours.value) {
-                                    update(accepted.copy(hours = accepted.hours.copy(value = it, formDraft = null, fullyObserved = false)))
-                                }
-                            }, enabled = !locked, label = { Text("Gelişmiş OSM saat ifadesi") },
-                                modifier = Modifier.fillMaxWidth().testTag("osm-survey-hours-advanced"),
-                                isError = !SurveyOpeningHours.isValid(observation.hours.value), minLines = 2)
-                        }
-                        item {
-                            TextButton(onClick = {
-                                update(observation.copy(hours = observation.hours.copy(value = "24/7", formDraft = null, fullyObserved = false)))
-                                simple = false
-                            }, enabled = !locked, modifier = Modifier.heightIn(min = 48.dp)) { Text("24 saat / 7 gün") }
-                            val complete = SurveyOpeningHours.isValid(observation.hours.value) && !SurveyOpeningHours.isPartial(observation.hours.value)
-                            SurveyConfirmation("Haftanın tamamını yerinde doğruladım.", "osm-survey-hours-complete",
-                                observation.hours.fullyObserved, complete && !locked) {
-                                update(observation.copy(hours = observation.hours.copy(fullyObserved = it)))
-                            }
-                            if (!SurveyOpeningHours.isValid(observation.hours.value)) {
+                            Text(observation.hours.value.ifBlank { "Saat programı girilmedi." },
+                                style = MaterialTheme.typography.bodySmall)
+                            if (!SurveyOpeningHours.isValid(observation.hours.value))
                                 Text("Saat ifadesini kontrol et. Taslağın saklanıyor.", color = MaterialTheme.colorScheme.error)
+                        }
+                        if (editingHours) {
+                            val convertible = restoredSurveyWeek(observation.hours)
+                                ?: SurveyOpeningHours.toWeek(observation.hours.value.ifBlank { observation.hours.before.orEmpty() })
+                            item {
+                                Text(if (SurveyOpeningHours.isValid(observation.hours.value)) "Sözdizimi geçerli" else "Sözdizimi kontrol edilmeli",
+                                    color = if (SurveyOpeningHours.isValid(observation.hours.value)) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.testTag("osm-survey-hours-syntax"))
+                                Row {
+                                    TextButton(onClick = { simple = false }, enabled = !locked,
+                                        modifier = Modifier.heightIn(min = 48.dp)) { Text("Gelişmiş OSM ifadesi") }
+                                    if (convertible != null) TextButton(onClick = {
+                                        update(observation.copy(hours = observation.hours.copy(
+                                            value = convertible.expression(), formDraft = convertible.encodeDraft())))
+                                        formWeek = convertible
+                                        simple = true
+                                    }, enabled = !locked, modifier = Modifier.heightIn(min = 48.dp).testTag("osm-survey-hours-simple")) {
+                                        Text("Haftalık form")
+                                    }
+                                    if (observation.hours.before.isNullOrBlank() && observation.hours.value.isBlank()) TextButton(onClick = {
+                                        val week = SurveyWeek(List(7) { SurveyDayHours(SurveyDayState.UNKNOWN) })
+                                        update(observation.copy(hours = observation.hours.copy(value = week.expression(), formDraft = week.encodeDraft())))
+                                        formWeek = week
+                                        simple = true
+                                    }, enabled = !locked, modifier = Modifier.heightIn(min = 48.dp)) { Text("Haftalık form") }
+                                }
+                            }
+                            if (simple && formWeek != null) {
+                                itemsIndexed(requireNotNull(formWeek).days) { index, day ->
+                                    SurveyHoursDay(index, day, !locked) { changed ->
+                                        val next = requireNotNull(formWeek).editDay(index, changed)
+                                        val privateDraft = runCatching { next.encodeDraft() }.getOrNull()
+                                        if (privateDraft == null) error = "Saat formu sınırı aşıldı. Son kabul edilen aralıklar korunuyor."
+                                        else if (update(observation.copy(hours = observation.hours.copy(
+                                            value = next.expression(), formDraft = privateDraft, fullyObserved = false)))) formWeek = next
+                                    }
+                                }
+                            } else item(key = "survey-hours-advanced/${initial.id}") {
+                                OutlinedTextField(observation.hours.value, {
+                                    // Repeated accepted text must preserve warning, consent and review state.
+                                    val accepted = decodeSurveyObservation(payload)
+                                    if (it != accepted.hours.value) {
+                                        update(accepted.copy(hours = accepted.hours.copy(value = it, formDraft = null, fullyObserved = false)))
+                                    }
+                                }, enabled = !locked, label = { Text("Gelişmiş OSM saat ifadesi") },
+                                    modifier = Modifier.fillMaxWidth().testTag("osm-survey-hours-advanced"),
+                                    isError = !SurveyOpeningHours.isValid(observation.hours.value), minLines = 2)
+                            }
+                            item {
+                                TextButton(onClick = {
+                                    update(observation.copy(hours = observation.hours.copy(value = "24/7", formDraft = null, fullyObserved = false)))
+                                    simple = false
+                                }, enabled = !locked, modifier = Modifier.heightIn(min = 48.dp)) { Text("24 saat / 7 gün") }
+                                val complete = SurveyOpeningHours.isValid(observation.hours.value) && !SurveyOpeningHours.isPartial(observation.hours.value)
+                                SurveyConfirmation("Haftanın tamamını yerinde doğruladım.", "osm-survey-hours-complete",
+                                    observation.hours.fullyObserved, complete && !locked) {
+                                    update(observation.copy(hours = observation.hours.copy(fullyObserved = it)))
+                                }
+                                if (!SurveyOpeningHours.isValid(observation.hours.value)) {
+                                    Text("Saat ifadesini kontrol et. Taslağın saklanıyor.", color = MaterialTheme.colorScheme.error)
+                                }
+                            }
+                            item {
+                                Button(onClick = { editingHours = false }, enabled = !locked,
+                                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("osm-survey-hours-return")) {
+                                    Text("Gözleme dön")
+                                }
                             }
                         }
                     }
-                    item {
+                    if (!editingHours) item {
                         SurveyFieldHeader(SurveyField.WHEELCHAIR, observation.wheelchair, locked,
                             venue?.tasks(today)?.firstOrNull { it.field == SurveyField.WHEELCHAIR }) {
                             field(SurveyField.WHEELCHAIR, it)
                         }
                     }
-                    if (observation.wheelchair.action == SurveyAction.EDIT) item {
+                    if (!editingHours && observation.wheelchair.action == SurveyAction.EDIT) item {
                         Column {
                             for ((value, label, guidance) in listOf(
                                 Triple("yes", "Uygun", "Giriş ve kullanım tekerlekli sandalye ile mümkün."),
@@ -328,7 +360,7 @@ internal fun OsmSurveyEditor(
                             }
                         }
                     }
-                    item {
+                    if (!editingHours) item {
                         Text("Bilmiyorum, OSM’deki değeri ve kontrol tarihini korur.", style = MaterialTheme.typography.bodySmall)
                         SurveyConfirmation("Doğruladığım bilgileri yerinde gözlemledim.", "osm-survey-confirmed",
                             confirmed, !locked) { confirmed = it }
@@ -360,7 +392,7 @@ internal fun OsmSurveyEditor(
                             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("osm-survey-save")) { Text("Taslağı sakla") }
                     }
                 }
-                item { TextButton(onClick = { exit(onClose) }, enabled = !locked, modifier = Modifier.heightIn(min = 48.dp)) { Text("Kapat") } }
+                if (!editingHours) item { TextButton(onClick = { exit(onClose) }, enabled = !locked, modifier = Modifier.heightIn(min = 48.dp)) { Text("Kapat") } }
             }
         }
     }

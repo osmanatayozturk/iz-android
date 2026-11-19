@@ -54,6 +54,8 @@ internal class PostJourneyAnalysis private constructor(context: Context) {
     @Volatile private var batteryPercent: Int? = null
     @Volatile private var processing = false
     @Volatile private var daily: JSONObject? = null
+    private data class PeriodRequest(val revision: String, val mode: Transport?, val window: HeatmapWindow)
+    @Volatile private var periodRequest: PeriodRequest? = null
     private var lastAllowed = false
     private var failed = false
 
@@ -234,6 +236,20 @@ internal class PostJourneyAnalysis private constructor(context: Context) {
                     .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS).build())
         } }
     }
+    internal fun readHeatmap(analysis: AnalysisState, mode: Transport?, window: HeatmapWindow?): HeatmapRender? {
+        val revision = analysis.cacheRevision
+        if (window == null) return cache.heatmap(revision, mode?.name ?: "ALL")
+        val selection = selectHeatmap(analysis.entries.values.map { it.journey }, mode, window)
+        if (selection.cacheKey == "EMPTY") return HeatmapRender(HeatmapData(), emptyGeoJson, emptyList())
+        if (selection.cacheKey == (mode?.name ?: "ALL")) return cache.heatmap(revision, selection.cacheKey)
+        if (cache.hasHeatmap(revision, selection.cacheKey)) {
+            cache.heatmap(revision, selection.cacheKey)?.let { return it }
+        }
+        periodRequest = PeriodRequest(revision, mode, window)
+        request()
+        return null
+    }
+
     fun dailyTotals(day: DailyActivityDay): DailyJourneyTotals? {
         val result = if (!pending) AnalysisCache.daily(daily, day) else null
         if (result == null && !pending) request()
@@ -341,6 +357,22 @@ internal class PostJourneyAnalysis private constructor(context: Context) {
                     cache.saveHeatmap(revision, filter, prepareHeatmapRender(data, ::checkAllowed), ::checkAllowed)
                 }
                 checkAllowed()
+                periodRequest?.takeIf { it.revision == revision }?.let { request ->
+                    val selection = selectHeatmap(journeys, request.mode, request.window)
+                    if (selection.cacheKey != "EMPTY" && !cache.hasHeatmap(revision, selection.cacheKey)) {
+                        val selectedPoints = buildList {
+                            for (journey in selection.journeys) {
+                                checkAllowed()
+                                points[journey.id].orEmpty().forEachIndexed { index, point ->
+                                    if (index % 256 == 0) checkAllowed()
+                                    add(point)
+                                }
+                            }
+                        }
+                        val data = buildHeatmapData(selection.journeys, selectedPoints, request.mode, now, ::checkAllowed)
+                        cache.saveHeatmap(revision, selection.cacheKey, prepareHeatmapRender(data, ::checkAllowed), ::checkAllowed)
+                    }
+                }
                 val day = DailyActivityRules.day(now)
                 val totals = DailyActivityRules.totals(journeys, completedPoints, day, now, ::checkAllowed)
                 val dailyResult = AnalysisCache.daily(day, totals)

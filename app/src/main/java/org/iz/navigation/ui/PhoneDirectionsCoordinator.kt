@@ -352,6 +352,28 @@ internal class PhoneDirectionsCoordinator(
         mutableState.update { it.copy(via = it.via.filterIndexed { i, _ -> i != index }, message = null) }
     }
 
+    fun moveVia(from: Int, to: Int) {
+        val via = state.value.via
+        if (starting || from !in via.indices || to !in via.indices || from == to) return
+        val reordered = via.toMutableList()
+        val stop = reordered.removeAt(from)
+        reordered.add(to, stop)
+        invalidatePreview()
+        mutableState.update { it.copy(via = reordered, message = null) }
+    }
+
+    fun replaceVia(index: Int, stop: RouteStop) {
+        val previous = state.value.via.getOrNull(index) ?: return
+        val replacement = stop.copy(plannedBreakSeconds = previous.plannedBreakSeconds)
+        if (starting || replacement == previous) return
+        invalidatePreview()
+        mutableState.update { current ->
+            current.copy(via = current.via.mapIndexed { position, value ->
+                if (position == index) replacement else value
+            }, message = null)
+        }
+    }
+
     fun setPlannedBreakMinutes(viaIndex: Int, minutes: Int) {
         if (starting || minutes !in 0..240) return
         val via = state.value.via

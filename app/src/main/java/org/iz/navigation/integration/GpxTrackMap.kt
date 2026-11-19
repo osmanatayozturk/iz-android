@@ -76,9 +76,10 @@ internal fun GpxTrackMap(track: ImportedTrack, selection: TrackFollowSelection,
         OsmMapView(style, Modifier.fillMaxWidth().height(280.dp).testTag("gpx-map").onSizeChanged { size = it },
             onReady = { map = it },
             onLongClick = { if (enabled) onChooseStart(WeatherCoordinate(it.latitude, it.longitude)) })
-        Text("Yeşil: başlangıç → kahverengi: bölüm sonu", style = MaterialTheme.typography.labelMedium,
+        Text("Gri çizgi · Özgün iz    Yeşil çizgi · Seçili bölüm", style = MaterialTheme.typography.labelMedium,
             modifier = Modifier.padding(top = 8.dp))
-        Text("Başlangıcı seçmek için çizginin istediğin yerine uzun bas.", style = MaterialTheme.typography.bodySmall)
+        Text("Yeşil nokta başlangıcı, kahverengi nokta bitişi gösterir. Başlangıcı seçmek için çizgiye uzun bas.",
+            style = MaterialTheme.typography.bodySmall)
         OutlinedButton(onClick = { frameRequest++ }, modifier = Modifier.heightIn(min = 48.dp).testTag("gpx-fit-map")) {
             Text("Bölümü haritaya sığdır")
         }

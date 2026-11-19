@@ -85,20 +85,8 @@ internal class LeanCaptureController(context: Context, private val onCaptureChan
      */
     fun onLocation(journeyId: String, location: Location) {
         val session = active?.takeIf { it.token.journeyId == journeyId && it.accepting } ?: return
-        fun value(present: Boolean, value: Float, positive: Boolean = true): Double? = value.toDouble()
-            .takeIf { present && it.isFinite() && (!positive || it >= 0) }
-        val time = location.elapsedRealtimeNanos
-        if (time <= 0 || !location.latitude.isFinite() || !location.longitude.isFinite() ||
-            location.latitude !in -90.0..90.0 || location.longitude !in -180.0..180.0) {
-            session.dropped.incrementAndGet(); return
-        }
-        @Suppress("DEPRECATION") val mock = location.isFromMockProvider
-        offer(session, LeanGnssRecord(time, location.time, location.latitude, location.longitude,
-            value(location.hasAccuracy(), location.accuracy), value(location.hasSpeed(), location.speed),
-            value(location.hasBearing(), location.bearing), value(location.hasSpeedAccuracy(), location.speedAccuracyMetersPerSecond),
-            value(location.hasBearingAccuracy(), location.bearingAccuracyDegrees),
-            location.elapsedRealtimeUncertaintyNanos.takeIf { location.hasElapsedRealtimeUncertaintyNanos() && it.isFinite() && it >= 0 },
-            mock, location.provider?.take(64)))
+        val fix = location.toLeanFix()
+        if (fix == null) session.dropped.incrementAndGet() else offer(session, fix)
     }
 
     private suspend fun write(session: Capture) {

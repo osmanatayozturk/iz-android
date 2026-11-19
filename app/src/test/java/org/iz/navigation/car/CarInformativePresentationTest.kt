@@ -1,5 +1,11 @@
 package org.iz.navigation.car
 
+import org.iz.navigation.data.Journey
+import org.iz.navigation.data.JourneyHealthSummary
+import org.iz.navigation.data.JourneyStatistics
+import org.iz.navigation.power.AnalysisEntry
+import org.iz.navigation.power.AnalysisPhase
+import org.iz.navigation.power.AnalysisState
 import org.iz.navigation.data.SelectedOsmPlace
 import org.iz.navigation.data.Transport
 import org.iz.navigation.navigation.*
@@ -8,6 +14,21 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CarInformativePresentationTest {
+    @Test fun completedMetricsAreBoundToTheMatchingCompletedJourneyAndIdleSession() {
+        val journey = Journey(id = "car-stats", startedAt = 1_000L, endedAt = 61_000L, transport = Transport.CAR)
+        val stats = JourneyStatistics.calculate(journey, emptyList())
+        val health = JourneyHealthSummary(journey.id)
+        val entry = AnalysisEntry("fixture", stats, health, health, journey)
+        val ready = AnalysisState(phase = AnalysisPhase.READY, pending = false, entries = mapOf(journey.id to entry))
+
+        assertEquals(stats, carCompletedStatistics(false, journey, ready))
+        assertNull(carCompletedStatistics(true, journey, ready))
+        assertNull(carCompletedStatistics(false, journey, ready.copy(pending = true)))
+        assertNull(carCompletedStatistics(false, journey.copy(endedAt = null), ready))
+        assertNull(carCompletedStatistics(false, journey.copy(endedAt = 62_000L), ready))
+        assertNull(carCompletedStatistics(false, journey.copy(id = "other"), ready))
+    }
+
     private val now = 1_000_000L
     private val a = WeatherCoordinate(41.0, 29.0)
     private val b = WeatherCoordinate(41.001, 29.001)

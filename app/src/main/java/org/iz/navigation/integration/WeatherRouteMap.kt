@@ -29,6 +29,7 @@ import org.iz.navigation.navigation.hasSafeAdaptiveArea
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalDensity
@@ -59,9 +60,13 @@ import org.maplibre.android.gestures.RotateGestureDetector
 import org.maplibre.android.gestures.ShoveGestureDetector
 import org.maplibre.android.gestures.StandardScaleGestureDetector
 import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.style.layers.LineLayer
+import org.maplibre.android.style.layers.PropertyFactory.lineColor
 import kotlin.math.roundToInt
 
 private const val ROUTE_SOURCE = "weather-planned-route"
+private const val ROUTE_LAYER = "weather-route-layer"
+private const val ROUTE_CASING_LAYER = "weather-route-casing"
 private const val STOP_SOURCE = "weather-planned-stops"
 private const val SAMPLE_SOURCE = "weather-samples"
 private const val SAMPLE_LAYER = "weather-samples-layer"
@@ -177,10 +182,12 @@ private fun ColumnScope.WeatherRouteMapContent(
     }
     // A temporarily disabled callback while information is open must not erase map/list selection.
     val tileUrl = remember(context) { OsmServiceSettings(context).read().tileUrl }
+    val routeArgb = MaterialTheme.colorScheme.secondary.toArgb()
+    val routeCasingArgb = MaterialTheme.colorScheme.onSecondary.toArgb()
     val style = remember(tileUrl) {
         mapPlaceOutlineStyle(mapStyle(tileUrl, listOf(ROUTE_SOURCE, STOP_SOURCE, SAMPLE_SOURCE, FIX_SOURCE, PLACE_INFO_SOURCE), """
-            {"id":"weather-route-casing","type":"line","source":"$ROUTE_SOURCE","paint":{"line-color":"#FFFFFF","line-width":9,"line-opacity":0.9}},
-            {"id":"weather-route-layer","type":"line","source":"$ROUTE_SOURCE","paint":{"line-color":"#28604D","line-width":5,"line-opacity":0.95}},
+            {"id":"$ROUTE_CASING_LAYER","type":"line","source":"$ROUTE_SOURCE","paint":{"line-color":"#FFFFFF","line-width":9,"line-opacity":0.9}},
+            {"id":"$ROUTE_LAYER","type":"line","source":"$ROUTE_SOURCE","paint":{"line-color":"#28604D","line-width":5,"line-opacity":0.95}},
             {"id":"$PLACE_INFO_LAYER","type":"circle","source":"$PLACE_INFO_SOURCE","paint":{"circle-color":"#3989C9","circle-radius":7,"circle-stroke-color":"#FFFFFF","circle-stroke-width":2}},
             {"id":"$SAMPLE_LAYER","type":"circle","source":"$SAMPLE_SOURCE","paint":{"circle-color":["case",["get","complete"],["case",["get","hazard"],"#AD5D3E","#28604D"],"#6E7C73"],"circle-stroke-color":"#F7F7F2","circle-stroke-width":2,"circle-radius":8}},
             {"id":"weather-stops-layer","type":"circle","source":"$STOP_SOURCE","paint":{"circle-color":"#FFFFFF","circle-stroke-color":"#66746D","circle-stroke-width":1,"circle-radius":4}},
@@ -624,6 +631,12 @@ private fun ColumnScope.WeatherRouteMapContent(
     }
     // Source identities are independent: position changes never rebuild or re-upload static
     // geometry. A recreated style deliberately reloads every source.
+    // Restyle the ready native layers so switching appearance keeps the current map and camera.
+    LaunchedEffect(map, styleRevision, routeArgb, routeCasingArgb) {
+        val nativeStyle = map?.style ?: return@LaunchedEffect
+        nativeStyle.getLayerAs<LineLayer>(ROUTE_LAYER)?.setProperties(lineColor(routeArgb))
+        nativeStyle.getLayerAs<LineLayer>(ROUTE_CASING_LAYER)?.setProperties(lineColor(routeCasingArgb))
+    }
     LaunchedEffect(map, styleRevision, routeJson) { map?.updateMeasuredGeoJson(ROUTE_SOURCE, routeJson, PowerDiagnostics.Metric.MAP_ROUTE) }
     LaunchedEffect(map, styleRevision, stopJson) { map?.updateMeasuredGeoJson(STOP_SOURCE, stopJson, PowerDiagnostics.Metric.MAP_ROUTE) }
     LaunchedEffect(map, styleRevision, samplesJson) { map?.updateMeasuredGeoJson(SAMPLE_SOURCE, samplesJson, PowerDiagnostics.Metric.MAP_ROUTE) }

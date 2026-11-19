@@ -167,14 +167,28 @@ internal class AnalysisCache(private val directory: File, private val onReadFail
         return result.orEmpty()
     }
     @Synchronized fun hasHealthSamples(id: String, fingerprint: String) = asset("heart", id, fingerprint).let { it.isFile && it.length() > 0 }
+    private val heatmapModeKeys = Transport.entries.map { it.name } + "ALL"
+    private val periodKey = Regex("(WEEK|MONTH)_(${heatmapModeKeys.joinToString("|")})_[a-f0-9]{64}")
     private fun heatmapFile(revision: String, filter: String): File {
         require(revision.matches(Regex("[a-f0-9]{64}")))
-        require(filter == "ALL" || Transport.entries.any { it.name == filter })
+        require(filter in heatmapModeKeys || periodKey.matches(filter))
         return File(directory, "heatmap-$revision-$filter.json")
     }
     @Synchronized fun saveHeatmap(revision: String, filter: String, render: HeatmapRender, checkActive: () -> Unit = {}) {
         write(heatmapFile(revision, filter), JSONObject().put("json", render.json).put("count", render.data.journeyCount)
             .put("bounds", coordinates(render.bounds, checkActive)).toString(), checkActive)
+        if (periodKey.matches(filter)) {
+            // Discard obsolete membership for this period and mode after the replacement is durable.
+            val prefix = "heatmap-$revision-${filter.substringBeforeLast('_')}_"
+            val current = heatmapFile(revision, filter).name
+            directory.listFiles()?.forEach { file ->
+                val name = purgeBaseName(file.name)
+                if (name != current && name.startsWith(prefix) && name.endsWith(".json")) {
+                    checkActive()
+                    purgeDelete(File(directory, name))
+                }
+            }
+        }
     }
     @Synchronized fun heatmap(revision: String, filter: String): HeatmapRender? {
         if (revision.isEmpty()) return null

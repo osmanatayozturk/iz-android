@@ -17,16 +17,21 @@ import org.iz.navigation.integration.SurveyHoursInterval
 @Composable
 internal fun SurveyHoursDay(index: Int, day: SurveyDayHours, enabled: Boolean, onChange: (SurveyDayHours) -> Unit) {
     val title = listOf("Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar")[index]
+    val allDay = day.state == SurveyDayState.OPEN && day.intervals == listOf(SurveyHoursInterval("00:00", "24:00"))
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(title, Modifier.semantics { heading() }, style = MaterialTheme.typography.titleSmall)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             for ((state, label) in listOf(SurveyDayState.OPEN to "Açık", SurveyDayState.CLOSED to "Kapalı", SurveyDayState.UNKNOWN to "Bilmiyorum")) {
-                FilterChip(day.state == state, onClick = {
+                FilterChip(day.state == state && (state != SurveyDayState.OPEN || !allDay), onClick = {
                     onChange(day.copy(state = state, intervals = if (state == SurveyDayState.OPEN && day.intervals.isEmpty())
                         listOf(SurveyHoursInterval("", "")) else day.intervals))
                 }, enabled = enabled, label = { Text(label) },
                     modifier = Modifier.heightIn(min = 48.dp).testTag("osm-survey-hours-day-$index-${state.name}"))
             }
+            FilterChip(allDay, onClick = {
+                onChange(day.copy(state = SurveyDayState.OPEN, intervals = listOf(SurveyHoursInterval("00:00", "24:00"))))
+            }, enabled = enabled, label = { Text("24 saat") },
+                modifier = Modifier.heightIn(min = 48.dp).testTag("osm-survey-hours-day-$index-all-day"))
         }
         if (day.state == SurveyDayState.OPEN) {
             day.intervals.forEachIndexed { intervalIndex, interval ->

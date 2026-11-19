@@ -47,6 +47,7 @@ internal fun CommunityComposer(
     onClose: () -> Unit, onSend: () -> Unit, onDelete: () -> Unit, onOutbox: () -> Unit, onCopy: () -> Unit,
     liveEditor: () -> OsmCommunityEditorState?, accountKey: () -> String?,
     onDiscard: () -> Unit, liveBusy: () -> Boolean,
+    showHeader: Boolean = true,
 ) {
     val uncertain = draft.status == CommunityDraftStatus.UNKNOWN
     val editable = !busy && draft.status !in setOf(CommunityDraftStatus.UNKNOWN, CommunityDraftStatus.SENDING)
@@ -74,15 +75,19 @@ internal fun CommunityComposer(
         })
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).imePadding().padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        if (showHeader) Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { exit(onClose) }, enabled = !busy) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Mesaj taslağından geri dön") }
-            Text("Mesaj taslağı", style = MaterialTheme.typography.titleLarge)
+            Text("Mesaj yazma ve yanıt", style = MaterialTheme.typography.titleLarge)
         }
         when (draft.status) {
             CommunityDraftStatus.UNKNOWN -> Text("Gönderim sonucu belirsiz. Mesaj ulaşmış olabilir. Önce gönderilen kutunu kontrol et.", color = MaterialTheme.colorScheme.error)
             CommunityDraftStatus.SENDING -> Text("Gönderiliyor… Sonuç alınana kadar bu taslak kilitli.", color = Muted)
             CommunityDraftStatus.FAILED -> Text("Mesaj gönderilemedi. Bilgileri kontrol ederek yeniden gönderebilirsin.", color = MaterialTheme.colorScheme.error)
-            else -> Text("Düzenlemelerin bu cihazda taslak olarak saklanır.", color = Muted, style = MaterialTheme.typography.bodySmall)
+            else -> Text(when {
+                saving -> "Yerel taslak kaydediliyor…"
+                liveEditor()?.baseline == draft -> "Yerel taslak kaydedildi."
+                else -> "Düzenlemelerin bu cihazda taslak olarak saklanır."
+            }, color = Muted, style = MaterialTheme.typography.bodySmall)
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(!useId, onClick = { useId = false; onChange(draft.copy(recipientId = null, recipientName = "")) },
@@ -106,7 +111,8 @@ internal fun CommunityComposer(
             OutlinedButton(onClick = { copyWarning = true }, Modifier.fillMaxWidth(), enabled = !busy) { Text("Yeni taslağa kopyala") }
         } else {
             if (!canSend) Text("Göndermek için Hesabım bölümünden mesaj izni ver.", color = Muted)
-            Button(onClick = onSend, Modifier.fillMaxWidth(), enabled = canSend && editable && !saving && communityDraftCanSend(draft)) { Text("Gönder") }
+            Button(onClick = onSend, Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("community-send"),
+                enabled = canSend && editable && !saving && communityDraftCanSend(draft)) { Text("Gönder") }
         }
         if (saving) LinearProgressIndicator(Modifier.fillMaxWidth())
         TextButton(onClick = { deleteWarning = true }, enabled = !busy && draft.status != CommunityDraftStatus.SENDING) { Text("Taslağı sil") }
@@ -126,14 +132,16 @@ internal fun CommunityMessageView(
     detail: OsmMessageDetail, accountId: Long, busy: Boolean, onClose: () -> Unit,
     onReply: () -> Unit, onRead: () -> Unit, onDelete: () -> Unit,
     onProfile: (Long) -> Unit, onLink: (String) -> Unit,
+    showHeader: Boolean = true,
 ) {
     val summary = detail.summary
     var deleteWarning by remember(detail.summary.id) { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        if (showHeader) Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Mesaj listesine dön") }
-            Text(summary.title, style = MaterialTheme.typography.titleLarge)
+            Text("Mesaj ayrıntısı", style = MaterialTheme.typography.titleLarge)
         }
+        Text(summary.title, style = MaterialTheme.typography.titleLarge)
         TextButton(onClick = { onProfile(summary.fromId) }, enabled = !busy) { Text("Gönderen: ${summary.fromName}") }
         TextButton(onClick = { onProfile(summary.toId) }, enabled = !busy) { Text("Alıcı: ${summary.toName}") }
         Text(communityDate(summary.sentAt), style = MaterialTheme.typography.bodySmall, color = Muted)
@@ -192,7 +200,8 @@ internal fun CommunityProfileView(profile: OsmCommunityProfile, own: Boolean, ca
         profile.accountCreatedAt?.let { Text("Üyelik: ${communityDate(it)}", style = MaterialTheme.typography.bodySmall, color = Muted) }
         if (profile.description.isNotBlank()) CommunityPlainText(profile.description, onLink)
         else Text("Profil açıklaması eklenmemiş.", color = Muted)
-        if (!own) Button(onClick = onMessage, enabled = canMessage) { Text("Mesaj yaz") }
+        if (!own) Button(onClick = onMessage, enabled = canMessage,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("community-profile-compose")) { Text("Mesaj yaz") }
         OutlinedButton(onClick = { onLink(CommunityLinks.profile(profile.displayName)) }) { Text("Profil · OSM sitesinde aç") }
         if (own) OutlinedButton(onClick = { onLink(CommunityLinks.editProfile()) }) { Text("Profili düzenle · OSM sitesinde aç") }
         else {

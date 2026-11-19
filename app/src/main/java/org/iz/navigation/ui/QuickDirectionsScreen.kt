@@ -19,6 +19,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.DirectionsBoat
 import androidx.compose.material.icons.outlined.Remove
 import androidx.compose.material.icons.outlined.Route
@@ -298,7 +299,8 @@ internal fun QuickDirectionsDialog(
                         SharedRoutePreviewContent(prepared.request.destination.label, prepared.request.recordJourney,
                             error ?: if (!valid) "Hedef, yapılandırma veya oturum değişti. Geri dönüp yeniden önizle." else null,
                             startEnabled = valid && !completed && phase == null && !commandBusy,
-                            modifier = Modifier.weight(1f), previewMap = { previewMap(prepared.route) }, onStart = {
+                            modifier = Modifier.weight(1f), previewMap = { previewMap(prepared.route) },
+                            routeSummary = quickPreviewSummary(prepared.route), onStart = {
                             if (preview !== prepared || lastMode != prepared.request.transport || !valid ||
                                 prepared.request.targetOwner !== currentTargetOwner || prepared.request.destination != currentDestination ||
                                 completed || routeJob != null || phase != null) return@SharedRoutePreviewContent
@@ -370,7 +372,11 @@ private fun QuickDestinationPicker(state: OsmSearchUiState, places: List<Place>,
         item {
             CommonPlaceQuery(state.query, state.busy, onEdit, onSearch, "quick-search")
         }
-        item { QuickPreferenceButtons(choices, onPreference) }
+        item {
+            Text("Rota tercihleri", Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(4.dp))
+            QuickPreferenceButtons(choices, onPreference)
+        }
         if (state.busy) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
         state.error?.let { error -> item { Text(error, color = MaterialTheme.colorScheme.error) } }
         if (state.searched && state.results.isEmpty()) item { Text("Yer bulunamadı. Başka bir ad veya adres dene.") }
@@ -378,7 +384,7 @@ private fun QuickDestinationPicker(state: OsmSearchUiState, places: List<Place>,
             CommonPlaceResult(place) { choose(quickStop(it.name, it.latitude, it.longitude)) }
         }
         item { Text("Arama Nominatim üzerinden yapılır. Sonuçlar © OpenStreetMap katkıcıları.", style = MaterialTheme.typography.bodySmall) }
-        item { Text("Kayıtlı yerler", style = MaterialTheme.typography.titleMedium) }
+        item { Text("Kayıtlı yerler", Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium) }
     val located = places.filter { place ->
         place.latitude?.let { it in -90.0..90.0 } == true && place.longitude?.let { it in -180.0..180.0 } == true
     }
@@ -392,6 +398,13 @@ private fun QuickDestinationPicker(state: OsmSearchUiState, places: List<Place>,
 
 private fun quickStop(name: String, latitude: Double, longitude: Double) =
     RouteStop(name.trim().take(300).ifBlank { "Hedef" }, WeatherCoordinate(latitude, longitude))
+
+private fun quickPreviewSummary(route: PlannedRoute): String? {
+    if (!route.durationSeconds.isFinite() || !route.distanceMeters.isFinite() ||
+        route.durationSeconds < 0 || route.distanceMeters < 0) return null
+    return String.format(java.util.Locale.forLanguageTag("tr-TR"), "%d dk · %.1f km",
+        kotlin.math.ceil(route.durationSeconds / 60.0).toInt(), route.distanceMeters / 1_000.0)
+}
 
 @Composable
 private fun QuickPreferenceButtons(choices: Map<QuickRoutePreference, Boolean>, onPreference: (QuickRoutePreference) -> Unit) {
@@ -430,7 +443,9 @@ private fun QuickModePicker(destination: RouteStop, nav: NavigationState, choice
     shared: Boolean = false, selectedMode: Transport? = null) {
     LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(bottom = 16.dp),
         modifier = Modifier.fillMaxSize().testTag("quick-route-options")) {
-        item { Text(destination.label, style = MaterialTheme.typography.headlineMedium) }
+        item {
+            Text(destination.label, Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineMedium)
+        }
         val limited = choices.keys.filterNot { it.supports(Transport.WALK) }
         if (limited.isNotEmpty()) item {
             val names = limited.joinToString { it.label }
@@ -458,31 +473,23 @@ private fun QuickModePicker(destination: RouteStop, nav: NavigationState, choice
             }
         }
         item { Text(if (shared) "Ulaşım türünü seç" else "Ulaşım türüne dokun ve rotayı aç", style = MaterialTheme.typography.titleMedium) }
-        item {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                transportDisplayOrder.forEach { mode ->
-                    val visiblySelected = shared && selectedMode == mode
-                    OutlinedButton({ onMode(mode) }, enabled = !busy && nav.canQuickStart(mode),
-                        colors = if (visiblySelected) ButtonDefaults.outlinedButtonColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
-                        else ButtonDefaults.outlinedButtonColors(),
-                        border = if (visiblySelected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
-                            else ButtonDefaults.outlinedButtonBorder,
-                        modifier = Modifier.heightIn(min = 48.dp).testTag("quick-mode-${mode.name}")
-                            .semantics { selected = selectedMode == mode }) {
-                        if (shared) {
-                            Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) {
-                                if (visiblySelected) Icon(Icons.Outlined.Check, null, Modifier.size(20.dp)
-                                    .testTag("quick-mode-selected-${mode.name}"))
-                            }
-                            Spacer(Modifier.width(6.dp))
-                        }
-                        Icon(mode.icon(), null, Modifier.size(20.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(mode.label())
-                    }
-                }
+        items(transportDisplayOrder, key = { it.name }) { mode ->
+            val visiblySelected = shared && selectedMode == mode
+            OutlinedButton({ onMode(mode) }, enabled = !busy && nav.canQuickStart(mode),
+                colors = if (visiblySelected) ButtonDefaults.outlinedButtonColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
+                else ButtonDefaults.outlinedButtonColors(),
+                border = if (visiblySelected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+                    else ButtonDefaults.outlinedButtonBorder,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("quick-mode-${mode.name}")
+                    .semantics { selected = selectedMode == mode }) {
+                Icon(mode.icon(), null, Modifier.size(20.dp))
+                Spacer(Modifier.width(12.dp))
+                Text(mode.label(), Modifier.weight(1f))
+                if (visiblySelected) Icon(Icons.Outlined.Check, null, Modifier.size(20.dp)
+                    .testTag("quick-mode-selected-${mode.name}"))
+                else if (!shared) Icon(Icons.AutoMirrored.Outlined.ArrowForward, null, Modifier.size(20.dp))
             }
         }
     }

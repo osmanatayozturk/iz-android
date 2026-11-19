@@ -46,6 +46,78 @@ class HandlebarLeanEstimatorTest {
     private fun estimate(records: Iterable<LeanRecord>, input: LeanInputSession = session()) =
         HandlebarLeanEstimator().estimate(input, records.asSequence()) {}
 
+    private val mounts = listOf(calibration, calibration.copy(epoch = "body", bodyConfirmed = true, steeringAxis = emptyList()))
+
+    private data class LiveWindow(val first: LeanGnssRecord, val last: LeanGnssRecord, val imu: List<LeanImuRecord>) {
+        fun degrees(reference: LeanCalibration) = HandlebarLeanEstimator.liveDegrees(reference, first, last, imu)
+    }
+
+    private fun liveWindow(speed: Double = 12.0, yaw: Double = .30, steeringRate: Double = 0.0): LiveWindow {
+        val records = ride(speed, yaw, steeringRate)
+        val (first, last) = records.filterIsInstance<LeanGnssRecord>().take(2)
+        return LiveWindow(first, last, records.filterIsInstance<LeanImuRecord>()
+            .filter { it.elapsedNanos in first.elapsedNanos..<last.elapsedNanos })
+    }
+
+    @Test fun liveWindowReturnsSignedAnglesAndStraightZeroOnBothMounts() {
+        // Synthetic coordinated-turn expectations in degrees at the supplied speed and yaw rate.
+        val cases = listOf(Triple(12.0, -.30, -20.158), Triple(12.0, .30, 20.158),
+            Triple(4.0, -.45, -10.401), Triple(4.0, .45, 10.401), Triple(12.0, 0.0, 0.0))
+        for ((speed, yaw, expected) in cases) {
+            val window = liveWindow(speed, yaw)
+            for (mount in mounts) {
+                val actual = window.degrees(mount)
+                assertNotNull("mount=${mount.epoch} speed=$speed yaw=$yaw", actual)
+                assertEquals(expected, requireNotNull(actual), .01)
+            }
+        }
+    }
+
+    @Test fun liveWindowRejectsStaleImuAndGnssOrImuOutliersOnBothMounts() {
+        val window = liveWindow()
+        val mid = window.first.elapsedNanos + second / 2
+        val stale = window.copy(imu = window.imu.map { it.copy(elapsedNanos = it.elapsedNanos - second) })
+        val lateFix = window.copy(last = window.last.copy(elapsedNanos = window.first.elapsedNanos + 2 * second,
+            utcMillis = window.first.utcMillis + 2000))
+        val badPosition = window.copy(last = window.last.copy(latitude = window.last.latitude + .01))
+        val gyroSpike = window.copy(imu = window.imu.map {
+            if (it.elapsedNanos == mid && it.kind == LeanSensorKind.GYROSCOPE) it.copy(x = it.x + 1.0) else it
+        })
+        val forceSpike = window.copy(imu = window.imu.map {
+            if (it.elapsedNanos == mid && it.kind == LeanSensorKind.ACCELEROMETER) it.copy(z = it.z + 8.0) else it
+        })
+        for (mount in mounts) {
+            for ((reason, sample) in mapOf("stale IMU" to stale, "late fix" to lateFix, "position" to badPosition,
+                "gyro spike" to gyroSpike, "force spike" to forceSpike)) {
+                assertNull("${mount.epoch} $reason", sample.degrees(mount))
+            }
+        }
+    }
+
+    @Test fun liveWindowRejectsParkedAndMovingSteeringOnBothMounts() {
+        val parked = liveWindow(speed = 0.0, yaw = 0.0, steeringRate = 1.2)
+        val moving = liveWindow(steeringRate = .60)
+        for (mount in mounts) {
+            assertNull("${mount.epoch} parked", parked.degrees(mount))
+            assertNull("${mount.epoch} moving", moving.degrees(mount))
+        }
+    }
+
+    @Test fun liveWindowRequiresMeasuredQualityAtEachFixAndReliableImuOnBothMounts() {
+        val window = liveWindow()
+        fun withoutQuality(fix: LeanGnssRecord) = listOf(fix.copy(accuracyMeters = null),
+            fix.copy(speedAccuracyMps = null), fix.copy(bearingAccuracyDegrees = null),
+            fix.copy(elapsedUncertaintyNanos = null))
+        for (mount in mounts) {
+            for (first in withoutQuality(window.first)) assertNull(window.copy(first = first).degrees(mount))
+            for (last in withoutQuality(window.last)) assertNull(window.copy(last = last).degrees(mount))
+            for (kind in LeanSensorKind.entries) {
+                val unreliable = window.imu.map { if (it.kind == kind) it.copy(accuracy = 0) else it }
+                assertNull("${mount.epoch} $kind", window.copy(imu = unreliable).degrees(mount))
+            }
+        }
+    }
+
     @Test fun parkedSteeringDoesNotMakeCurvesOrInventPeaks() {
         val result = estimate(ride(speed = 0.0, yaw = .5, steeringRate = 1.2))
         assertTrue(result.curves.isEmpty())

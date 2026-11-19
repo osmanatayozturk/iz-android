@@ -54,8 +54,8 @@ class PhoneDirectionsUiTest {
             Content(state.value, preview = { state.value = state.value.copy(preview = route) },
                 start = { started++; state.value = state.value.copy(starting = true) })
         } }
-        compose.onNodeWithTag("navigation-screen").performScrollToNode(hasTestTag("start-guidance"))
-        compose.onNodeWithTag("start-guidance").assertIsNotEnabled()
+        compose.onNodeWithTag("navigation-screen").performScrollToNode(hasTestTag("preview-directions"))
+        compose.onNodeWithTag("start-guidance").assertDoesNotExist()
         compose.onNodeWithTag("preview-directions").performClick()
         compose.runOnIdle { assertEquals(0, started) }
         compose.onNodeWithTag("start-guidance").assertIsEnabled().performClick().assertIsNotEnabled()

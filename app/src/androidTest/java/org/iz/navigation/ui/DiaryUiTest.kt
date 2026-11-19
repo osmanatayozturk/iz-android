@@ -40,8 +40,14 @@ class DiaryUiTest {
 
     @Test fun settingsAndTransportChoiceAreAvailable() {
         compose.onNodeWithTag("home-menu").performClick()
-        compose.onNodeWithText("Ayarlar").performScrollTo().performClick()
+        compose.onNodeWithTag("menu-settings").performScrollTo().performClick()
+        compose.onNodeWithTag("settings").assertIsDisplayed()
+        compose.onNodeWithTag("settings").performScrollToNode(hasTestTag("settings-open-detection"))
+        compose.onNodeWithTag("settings-open-detection").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("settings-view-detection").assertIsDisplayed()
         compose.onNodeWithText("Hareketi fark et").assertIsDisplayed()
+        compose.onNodeWithTag("return-home-map").performClick()
+        compose.onNodeWithTag("settings").assertIsDisplayed()
         compose.onNodeWithTag("return-home-map").performClick()
         compose.onNodeWithTag("home-record").performClick()
         listOf("Araba", "Motosiklet", "Bisiklet", "Yürüyüş", "Koşu", "Yolcu").forEach { compose.onNodeWithText(it).performScrollTo().assertIsDisplayed() }

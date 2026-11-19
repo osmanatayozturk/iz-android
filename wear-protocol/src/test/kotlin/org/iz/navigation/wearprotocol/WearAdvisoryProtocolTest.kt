@@ -34,7 +34,7 @@ class WearAdvisoryProtocolTest {
     @Test fun futureVersionAndTrailingBytesAreRejected() {
         val bytes=WearProtocol.encodeSnapshot(snapshot(),6)
         assertNull(WearProtocol.decodeSnapshot(bytes+byteArrayOf(1)))
-        bytes[4]=8
+        bytes[4] = (WearProtocol.CURRENT_VERSION + 1).toByte()
         assertNull(WearProtocol.decodeSnapshot(bytes))
     }
 }

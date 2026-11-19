@@ -2,6 +2,10 @@ package org.iz.navigation.integration
 
 import kotlinx.coroutines.CancellationException
 import org.iz.navigation.data.GeoCoordinate
+import org.iz.navigation.data.Journey
+import org.iz.navigation.data.Transport
+import java.time.Instant
+import java.time.ZoneId
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -10,6 +14,30 @@ import org.junit.Test
 
 class HeatmapPresentationTest {
     private val route = listOf(GeoCoordinate(41.0, 29.0), GeoCoordinate(41.001, 29.002))
+
+    @Test fun lastSevenLocalDaysIntersectTransportAndChangeMembershipAtMidnight() {
+        val zone = ZoneId.of("Europe/Berlin")
+        fun time(value: String) = Instant.parse(value).toEpochMilli()
+        val window = heatmapWindow(HeatmapPeriod.WEEK, time("2026-03-30T21:59:59Z"), zone)!!
+        assertEquals(time("2026-03-23T23:00:00Z"), window.start)
+        assertEquals(time("2026-03-30T22:00:00Z"), window.endExclusive)
+        fun trip(id: String, end: Long?, mode: Transport = Transport.CAR) =
+            Journey(id = id, startedAt = window.start - 1000, endedAt = end, transport = mode)
+        val journeys = listOf(trip("old", window.start - 1), trip("boundary", window.start),
+            trip("recent", window.endExclusive - 1), trip("next", window.endExclusive),
+            trip("walking", window.start, Transport.WALK), trip("recording", null))
+        val selection = selectHeatmap(journeys, Transport.CAR, window)
+        assertEquals(listOf("boundary", "recent"), selection.journeys.map { it.id })
+        assertEquals(selection.cacheKey, selectHeatmap(journeys.reversed(), Transport.CAR, window).cacheKey)
+        val tomorrow = heatmapWindow(HeatmapPeriod.WEEK, window.endExclusive, zone)!!
+        val nextSelection = selectHeatmap(journeys, Transport.CAR, tomorrow)
+        assertEquals(listOf("recent", "next"), nextSelection.journeys.map { it.id })
+        assertFalse(nextSelection.cacheKey == selection.cacheKey)
+        assertEquals("WALK", selectHeatmap(journeys, Transport.WALK, window).cacheKey)
+        assertEquals("EMPTY", selectHeatmap(journeys, Transport.RUN, window).cacheKey)
+        val month = heatmapWindow(HeatmapPeriod.MONTH, window.endExclusive - 1, zone)!!
+        assertEquals(listOf("old", "boundary", "recent"), selectHeatmap(journeys, Transport.CAR, month).journeys.map { it.id })
+    }
 
     @Test fun renderedColorsHaveFixedCountMeaningEvenWhenAnotherJourneyIsMuchMoreFrequent() {
         val counts = listOf(1, 2, 3, 4, 7, 8, 100)

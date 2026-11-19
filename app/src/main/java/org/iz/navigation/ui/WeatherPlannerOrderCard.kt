@@ -19,18 +19,20 @@ import org.iz.navigation.weather.StopOrderProposal
 internal fun StopOrderProposalCard(proposal: StopOrderProposal, enabled: Boolean, apply: () -> Unit, dismiss: () -> Unit) {
     Card(Modifier.testTag("matrix-order-proposal")) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Daha hızlı durak sırası", style = MaterialTheme.typography.titleMedium)
+            Text("Durak sırası önerisi", style = MaterialTheme.typography.titleMedium)
+            Text("${formatDuration(proposal.originalRoute.durationSeconds)} → ${formatDuration(proposal.proposedRoute.durationSeconds)}",
+                style = MaterialTheme.typography.headlineSmall)
+            Text("${proposal.savedSeconds.toInt()} sn daha kısa", style = MaterialTheme.typography.bodySmall)
             if (proposal.heuristic) Text("Yaklaşık sıra önerisi. En kısa rota garantisi yok; süreler aynı koşullardaki gerçek rotalarla karşılaştırıldı.",
                 modifier = Modifier.testTag("heuristic-order-explanation"), style = MaterialTheme.typography.bodySmall)
             Text("Mevcut: " + proposal.originalStops.joinToString(" → ") { it.label })
             Text("Öneri: " + proposal.orderedStops.joinToString(" → ") { it.label })
-            Text("${formatDuration(proposal.originalRoute.durationSeconds)} → ${formatDuration(proposal.proposedRoute.durationSeconds)} · ${proposal.savedSeconds.toInt()} sn daha kısa")
             Text("Mesafe: ${formatDistance(proposal.originalRoute.distanceMeters)} → ${formatDistance(proposal.proposedRoute.distanceMeters)}",
                 modifier = Modifier.testTag("matrix-comparison-distances"), style = MaterialTheme.typography.bodySmall)
             Text("Karşılaştırma saati: ${weatherTime(proposal.comparisonDepartureAt)}. Başlangıç ve varış sabit; yalnızca durak sırası uygulanır.",
                 style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(apply, enabled = enabled, modifier = Modifier.testTag("matrix-apply-order")) { Text("Bu sırayı uygula") }
+                Button(apply, enabled = enabled, modifier = Modifier.testTag("matrix-apply-order")) { Text("Sırayı uygula") }
                 TextButton(dismiss, enabled = enabled) { Text("Mevcut sırayı koru") }
             }
         }

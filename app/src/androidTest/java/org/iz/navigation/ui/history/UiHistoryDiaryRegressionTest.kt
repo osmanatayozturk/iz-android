@@ -51,6 +51,7 @@ class UiHistoryDiaryRegressionTest {
         compose.waitUntil(10_000) { compose.onAllNodesWithText("Bitir").fetchSemanticsNodes().size == 1 }
         compose.onNodeWithTag("home-menu").performClick()
         compose.onNodeWithTag("menu-settings").performScrollTo().performClick()
+        compose.onNodeWithTag("settings").assertIsDisplayed()
         compose.onAllNodesWithText("Bitir").assertCountEquals(0)
         compose.onNodeWithTag("return-home-map").performClick()
         compose.onNodeWithText("Bitir").assertExists()
@@ -69,7 +70,7 @@ class UiHistoryDiaryRegressionTest {
         host.setContent { IzTheme { DiaryApp(incoming.value, { incoming.value = null }) } }
         compose.waitUntil(10_000) { compose.onAllNodesWithText("Bitir").fetchSemanticsNodes().size == 1 }
         compose.onNodeWithContentDescription("Yolculuğu düzenle").performClick()
-        compose.onNode(hasSetTextAction() and hasText("Ad")).performTextReplacement("Unsaved QA title")
+        compose.onNodeWithTag("journey-editor-title").performTextReplacement("Unsaved QA title")
         compose.runOnIdle { incoming.value = Intent().putExtra("openGpx", true) }
         compose.onNodeWithTag("ui-exit-keep").performClick()
         compose.onNodeWithText("Unsaved QA title").assertExists()

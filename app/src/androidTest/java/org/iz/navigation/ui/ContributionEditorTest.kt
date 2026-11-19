@@ -22,6 +22,8 @@ class ContributionEditorTest {
         } }
         compose.onNodeWithText("Gönderimi önizle").performScrollTo().performClick()
         compose.runOnIdle { assertNull(published) }
+        compose.onNodeWithText("OSM’ye gönder").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("osm-note-reviewed").performScrollTo().performClick()
         compose.onNodeWithText("OSM’ye gönder").performScrollTo().performClick()
         compose.runOnIdle { assertEquals(draft.text, published?.text); assertEquals(39.9, published!!.latitude, 0.0) }
     }

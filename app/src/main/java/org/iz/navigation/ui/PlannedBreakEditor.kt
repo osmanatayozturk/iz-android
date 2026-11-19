@@ -1,10 +1,12 @@
 package org.iz.navigation.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -22,7 +24,12 @@ import org.iz.navigation.weather.RouteStop
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun PlannedBreakEditor(stop: RouteStop, enabled: Boolean, onMinutesChanged: (Int) -> Unit) {
+internal fun PlannedBreakEditor(
+    stop: RouteStop,
+    enabled: Boolean,
+    arrivalAt: Long? = null,
+    onMinutesChanged: (Int) -> Unit,
+) {
     val plannedSeconds = stop.plannedBreakSeconds
     var editing by remember(stop) { mutableStateOf(false) }
     var draft by remember(stop) { mutableStateOf("") }
@@ -44,23 +51,31 @@ internal fun PlannedBreakEditor(stop: RouteStop, enabled: Boolean, onMinutesChan
     val minutes = draft.toIntOrNull()?.takeIf { it in 0..240 }
     AlertDialog(
         onDismissRequest = { editing = false },
-        title = { Text("${stop.label} · " + if (plannedSeconds == 0) "Mola ekle" else "Molayı düzenle") },
+        title = { Text("Planlı mola") },
         text = {
-            OutlinedTextField(
-                value = draft,
-                onValueChange = { value -> if (value.length <= 3 && value.all { it in '0'..'9' }) draft = value },
-                label = { Text("Mola süresi (dakika)") },
-                supportingText = { Text("0–240 dakika") },
-                singleLine = true,
-                isError = draft.isNotEmpty() && minutes == null,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(stop.label, style = MaterialTheme.typography.titleSmall)
+                Text(
+                    arrivalAt?.let { "Tahmini mola başlangıcı · ${weatherDateTime(it)}" }
+                        ?: "Tahmini başlangıç, rota hesaplandığında gösterilir.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = { value -> if (value.length <= 3 && value.all { it in '0'..'9' }) draft = value },
+                    label = { Text("Mola süresi (dakika)") },
+                    supportingText = { Text("0–240 dakika") },
+                    singleLine = true,
+                    isError = draft.isNotEmpty() && minutes == null,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                )
+            }
         },
         confirmButton = {
             TextButton(onClick = {
                 editing = false
                 minutes?.let(onMinutesChanged)
-            }, enabled = enabled && minutes != null) { Text("Uygula") }
+            }, enabled = enabled && minutes != null) { Text("Molayı uygula") }
         },
         dismissButton = { TextButton(onClick = { editing = false }) { Text("Vazgeç") } },
     )

@@ -37,5 +37,7 @@ fun Transport.icon(): ImageVector = when (this) {
     Transport.UNKNOWN -> Icons.Outlined.Route
 }
 
+@androidx.compose.runtime.Composable
 internal fun Transport.accentColor(): Color = if (this == Transport.RUN) Color(0xFF8D4F2D) else Forest
+@androidx.compose.runtime.Composable
 internal fun Transport.badgeColor(): Color = if (this == Transport.RUN) Color(0xFFF3E4D6) else Leaf

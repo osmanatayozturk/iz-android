@@ -29,11 +29,14 @@ class OsmContributionHubUiTest {
         showHub(onAction = { actions.add(it) })
 
         compose.onNodeWithText("Katkı Merkezi").assertIsDisplayed()
-        listOf("new-note", "new-place", "existing-place", "gps", "uploads", "refresh").forEach { action ->
+        listOf("new-note", "new-place", "existing-place", "gps", "community").forEach { action ->
             scrollTo("osm-contribution-$action").performClick()
         }
+        scrollTo("osm-contribution-activities").performClick()
+        compose.onNodeWithText("Etkinlikler ve taslaklar").assertIsDisplayed()
+        listOf("uploads", "refresh").forEach { action -> scrollTo("osm-contribution-$action").performClick() }
         compose.runOnIdle {
-            assertEquals(listOf("new-note", "new-place", "existing-place", "gps", "uploads", "refresh"), actions)
+            assertEquals(listOf("new-note", "new-place", "existing-place", "gps", "community", "uploads", "refresh"), actions)
         }
     }
 
@@ -41,9 +44,26 @@ class OsmContributionHubUiTest {
         var opened = 0
         showHub(onManageNotes = { opened++ })
 
+        scrollTo("osm-contribution-activities").performClick()
         scrollTo("osm-contribution-manage-notes").performClick()
 
         compose.runOnIdle { assertEquals(1, opened) }
+    }
+
+    @Test fun activitiesExposeOlderRowsAndBackReturnsToTheHub() {
+        val drafts = (1..6).map { index ->
+            MapEditDraft(id = "place-$index", latitude = 41.0, longitude = 29.0,
+                observedAt = index.toLong(), name = "Sentetik mekân $index")
+        }
+        showHub(rows = osmContributionHubRows(emptyList(), drafts, 7L, emptyList()))
+
+        scrollTo("osm-contribution-activities").performClick()
+        scrollTo("osm-contribution-place-place-1").assertIsDisplayed()
+        compose.onNodeWithTag("osm-contribution-back").performClick()
+
+        compose.onNodeWithText("Katkı Merkezi").assertIsDisplayed()
+        compose.onNodeWithTag("osm-contribution-place-place-1").assertDoesNotExist()
+        scrollTo("osm-contribution-new-note").assertIsDisplayed()
     }
 
     @Test fun localDraftsCanReopenWithTheirOriginalRecordsWhenHistoryFails() {
@@ -108,7 +128,7 @@ class OsmContributionHubUiTest {
                 onClose = {}, onNewNote = { onAction("new-note") }, onNewPlace = { onAction("new-place") },
                 onPickExistingPlace = { onAction("existing-place") }, onGps = { onAction("gps") },
                 onGpsHistory = { onAction("uploads") }, onRefresh = { onAction("refresh") }, onOpen = onOpen,
-                onManageNotes = onManageNotes)
+                onManageNotes = onManageNotes, onCommunity = { onAction("community") })
         }
     }
 

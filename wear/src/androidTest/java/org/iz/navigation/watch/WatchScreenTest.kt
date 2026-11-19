@@ -4,11 +4,14 @@ import android.graphics.Bitmap
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.test.platform.app.InstrumentationRegistry
 import org.iz.navigation.wearprotocol.*
@@ -33,12 +36,30 @@ class WatchScreenTest {
         useUnmergedTree = true,
     )
 
+    private fun openPage(label: String, page: String) {
+        val action = hasText(label) and hasClickAction()
+        watchList().performScrollToNode(action)
+        compose.onNode(action).assertIsDisplayed().performClick()
+        compose.onNodeWithTag(page).assertIsDisplayed()
+    }
+
+    private fun openStart() {
+        compose.onNodeWithTag("wdaily").assertIsDisplayed()
+        watchList().performScrollToNode(hasTestTag("open-record"))
+        compose.onNodeWithTag("open-record").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("wstart").assertIsDisplayed()
+    }
+
+    private fun openWeather() = openPage("Yolculuk havası", "wweather")
+
     @Test fun automaticHealthOffersOneTimeArmingAndExplicitDisarming() {
         val health = mutableStateOf(WatchLiveHealthState())
         var armed = false
         var disarmed = false
         compose.setContent { Box(Modifier.size(240.dp)) { WatchScreen(idle(), now, {}, {}, {}, health.value,
             onArmHealth = { armed = true }, onDisarmHealth = { disarmed = true }) } }
+        openPage("Bağlantı ve ayarlar", "wsettings")
+        openPage("Ölçümler ve izinler", "whealth")
         watchList().performScrollToNode(hasTestTag("arm-health"))
         compose.onNodeWithTag("arm-health").performClick()
         compose.runOnIdle { assertTrue(armed); health.value = WatchLiveHealthState(armed = true,
@@ -51,14 +72,18 @@ class WatchScreenTest {
         compose.runOnIdle { assertTrue(disarmed) }
     }
 
-    @Test fun staleLiveHeartIsLabelledAsOldInsteadOfCurrent() {
+    @Test fun healthShowsTheAgeOfTheLastSampleWithoutPresentingStaleHeartRateAsLive() {
         val health = WatchLiveHealthState(armed = true, onBody = true, capturing = true,
-            journeyId = "ride", latestHeartRate = 95.0, latestHeartAt = now - 31_000,
+            phoneId = "phone", journeyId = "ride", latestHeartRate = 95.0, latestHeartAt = now - 31_000,
+            latestSampleAt = now - 31_000,
             status = "Yolculuk ölçülüyor")
         compose.setContent { Box(Modifier.size(240.dp)) { WatchScreen(active(null), now, {}, {}, {}, health) } }
-        watchList().performScrollToNode(hasText("Son nabız · eski ölçüm"))
-        compose.onNodeWithText("Son nabız · eski ölçüm").assertIsDisplayed()
+        openPage("Ölçümler ve kaynak", "whealth")
+        val lastSample = "Saat sensörü · Son ölçüm ${WatchSurfacePolicy.age(now - 31_000, now)}"
+        watchList().performScrollToNode(hasText(lastSample))
+        compose.onNodeWithText(lastSample).assertIsDisplayed()
         compose.onNodeWithText("Canlı nabız").assertDoesNotExist()
+        compose.onNodeWithText("95", substring = true).assertDoesNotExist()
     }
 
     @Test fun candidateProgressUsesEvidenceWindowInsteadOfWholeRouteDistance() {
@@ -66,6 +91,7 @@ class WatchScreenTest {
             journeyId = "candidate", mode = WearMode.WALK, recording = true, temporary = true,
             startedAt = now - 600_000, deadlineAt = now + 300_000, distanceMeters = 900.0, candidateProgressMeters = 125.0))
         compose.setContent { Box(Modifier.size(240.dp)) { WatchScreen(state, now, {}, {}, {}) } }
+        compose.onNodeWithTag("wrecord").assertIsDisplayed()
         watchList().performScrollToNode(hasText("125 / 500 m"))
         compose.onNodeWithText("125 / 500 m").assertIsDisplayed()
         compose.onNodeWithText("500 / 500 m").assertDoesNotExist()
@@ -77,6 +103,7 @@ class WatchScreenTest {
             threshold = WearWeatherThreshold.EXCEEDED, headline = "Hava eşiği aşılıyor", detail = "Yağmur bekleniyor")
         val shown = mutableStateOf(active(ready))
         compose.setContent { Box(Modifier.size(240.dp)) { WatchScreen(shown.value, now, {}, {}, {}) } }
+        openWeather()
         val directory = File(requireNotNull(InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null)), "qa").apply { mkdirs() }
         fun capture(name: String, centerWeather: Boolean = false) {
             watchList().performScrollToNode(hasTestTag("weather-card"))
@@ -99,14 +126,17 @@ class WatchScreenTest {
     }
     @Test fun nullWeatherHidesTheCardOnSmallWatch() {
         compose.setContent { Box(Modifier.size(192.dp)) { WatchScreen(active(null), now, {}, {}, {}) } }
+        openWeather()
         compose.onNodeWithTag("weather-card").assertDoesNotExist()
-        compose.onNodeWithText("Yolculuk havası").assertDoesNotExist()
+        watchList().performScrollToNode(hasText("Telefondan bu yolculuk için hava bilgisi bekleniyor."))
+        compose.onNodeWithText("Telefondan bu yolculuk için hava bilgisi bekleniyor.").assertIsDisplayed()
     }
 
     @Test fun loadingWeatherShowsBoundedPhoneProgressOnSmallWatch() {
         val weather = WearRouteWeather(WearWeatherStatus.LOADING, now - 10_000L, now - 10_000L,
             headline = "Hava hazırlanıyor")
         compose.setContent { Box(Modifier.size(192.dp)) { WatchScreen(active(weather), now, {}, {}, {}) } }
+        openWeather()
         watchList().performScrollToNode(hasTestTag("weather-card"))
         compose.onNodeWithTag("weather-card").assertIsDisplayed()
         compose.onNodeWithText("Hava hazırlanıyor").assertIsDisplayed()
@@ -119,14 +149,17 @@ class WatchScreenTest {
             threshold = WearWeatherThreshold.EXCEEDED, headline = "Hava eşiği aşılıyor", detail = "Yağmur bekleniyor")
         var stopped: String? = null
         compose.setContent { Box(Modifier.size(240.dp)) { WatchScreen(active(weather), now, {}, { stopped = it }, {}) } }
-        for (text in listOf("Yolculuk havası", "Hava eşiği aşılıyor", "Yağmur bekleniyor")) {
+        openWeather()
+        for (text in listOf("Hava eşiği aşılıyor", "Yağmur bekleniyor")) {
             watchList().performScrollToNode(hasText(text))
             compose.onNodeWithText(text).assertIsDisplayed()
         }
         watchList().performScrollToNode(hasText("Eşik yaklaşık", substring = true))
         compose.onNodeWithText("Varış yaklaşık", substring = true).assertIsDisplayed()
+        openPage("Sürüşe dön", "wrecord")
         watchList().performScrollToNode(hasTestTag("stop"))
         compose.onNodeWithTag("stop").performClick()
+        compose.onNodeWithTag("wend").assertIsDisplayed()
         watchList().performScrollToNode(hasTestTag("confirm-stop"))
         compose.onNodeWithTag("confirm-stop").performClick()
         compose.runOnIdle { assertEquals("ride", stopped) }
@@ -136,6 +169,7 @@ class WatchScreenTest {
         val weather = WearRouteWeather(WearWeatherStatus.READY, now - 3_600_000L, now - 1L,
             arrivalAt = now + 600_000L, headline = "Eşiklerin altında")
         compose.setContent { Box(Modifier.size(192.dp)) { WatchScreen(active(weather), now, {}, {}, {}) } }
+        openWeather()
         watchList().performScrollToNode(hasText("Tahmin süresi doldu"))
         compose.onNodeWithText("Tahmin süresi doldu").assertIsDisplayed()
         compose.onNode(hasText("verisi", substring = true) and hasAnyAncestor(hasTestTag("weather-card"))).assertDoesNotExist()
@@ -145,6 +179,7 @@ class WatchScreenTest {
         val weather = WearRouteWeather(WearWeatherStatus.ERROR, now - 60_000L, now + 3_540_000L,
             headline = "Tahmin kısmen eksik", detail = "Bazı bölümlerde tahmin eksik.")
         compose.setContent { Box(Modifier.size(240.dp)) { WatchScreen(active(weather), now, {}, {}, {}) } }
+        openWeather()
         watchList().performScrollToNode(hasText("Tahmin kısmen eksik"))
         compose.onNodeWithText("Tahmin kısmen eksik").assertIsDisplayed()
         compose.onNodeWithText("Bazı bölümlerde tahmin eksik.").assertIsDisplayed()
@@ -156,6 +191,7 @@ class WatchScreenTest {
             threshold = WearWeatherThreshold.EXCEEDED, headline = "Hava eşiği aşılıyor")
         val shown = mutableStateOf(active(weather).copy(phoneId = null))
         compose.setContent { Box(Modifier.size(240.dp)) { WatchScreen(shown.value, now, {}, {}, {}) } }
+        openWeather()
         watchList().performScrollToNode(hasTestTag("weather-card"))
         compose.onNode(hasText("verisi", substring = true) and hasAnyAncestor(hasTestTag("weather-card")),
             useUnmergedTree = true).assertExists()
@@ -173,10 +209,13 @@ class WatchScreenTest {
     @Test fun roundIdleScreenOffersAllSixModesAndStartsTheChosenRun() {
         var requested: WearMode? = null
         compose.setContent { Box(Modifier.size(240.dp)) { WatchScreen(idle(), now, { requested = it }, {}, {}) } }
+        openStart()
         for (mode in WearMode.entries) {
-            watchList().performScrollToNode(hasText(mode.label()))
-            compose.onNodeWithText(mode.label()).assertIsDisplayed()
+            val label = if (mode == WearMode.MOTORCYCLE) "${mode.label()} · Seçili" else mode.label()
+            watchList().performScrollToNode(hasText(label))
+            compose.onNodeWithText(label).assertIsDisplayed()
         }
+        watchList().performScrollToNode(hasText("Koşu"))
         compose.onNodeWithText("Koşu").performClick()
         watchList().performScrollToNode(hasTestTag("start"))
         compose.onNodeWithTag("start").assertIsDisplayed().performClick()
@@ -185,19 +224,42 @@ class WatchScreenTest {
 
     @Test fun disconnectedScreenNeverEnablesStart() {
         var started = false
-        compose.setContent { Box(Modifier.size(240.dp)) { WatchScreen(WatchUiState(), now, { started = true }, {}, {}) } }
+        var refreshes = 0
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, 2f)) {
+                Box(Modifier.size(240.dp)) { WatchScreen(WatchUiState(), now, { started = true }, {}, { refreshes++ }) }
+            }
+        }
+        openStart()
         watchList().performScrollToNode(hasTestTag("start"))
         compose.onNodeWithTag("start").assertIsDisplayed().assertIsNotEnabled()
-        compose.runOnIdle { assertFalse(started) }
+        watchList().performScrollToNode(hasTestTag("refresh"))
+        compose.onNodeWithTag("refresh").assertIsDisplayed().performClick()
+        openPage("Geri", "wdaily")
+        compose.runOnIdle {
+            assertFalse(started)
+            assertEquals(1, refreshes)
+        }
     }
 
     @Test fun stopRequiresConfirmationAndTargetsExactlyTheDisplayedJourney() {
         var stopped: String? = null
         val state = idle().copy(snapshot = WearSnapshot(generatedAt = now, journeyId = "walk", mode = WearMode.WALK,
             startedAt = now - 120_000, recording = true, distanceMeters = 250.0, elapsedMillis = 120_000, stepCount = 318))
-        compose.setContent { Box(Modifier.size(240.dp)) { WatchScreen(state, now, {}, { stopped = it }, {}) } }
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, 2f)) {
+                Box(Modifier.size(240.dp)) { WatchScreen(state, now, {}, { stopped = it }, {}) }
+            }
+        }
+        compose.onNodeWithTag("wrecord").assertIsDisplayed()
         watchList().performScrollToNode(hasTestTag("stop"))
         compose.onNodeWithTag("stop").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("wend").assertIsDisplayed()
+        openPage("Vazgeç", "wrecord")
+        compose.runOnIdle { assertNull(stopped) }
+        watchList().performScrollToNode(hasTestTag("stop"))
+        compose.onNodeWithTag("stop").performClick()
+        compose.onNodeWithTag("wend").assertIsDisplayed()
         compose.runOnIdle { assertNull(stopped) }
         watchList().performScrollToNode(hasTestTag("confirm-stop"))
         compose.onNodeWithTag("confirm-stop").assertIsDisplayed().performClick()
@@ -211,7 +273,9 @@ class WatchScreenTest {
         compose.setContent { Box(Modifier.size(240.dp)) { WatchScreen(state.value, now, {}, { stopped = it }, {}) } }
         watchList().performScrollToNode(hasTestTag("stop"))
         compose.onNodeWithTag("stop").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("wend").assertIsDisplayed()
         compose.runOnIdle { state.value = state.value.copy(snapshot = state.value.snapshot!!.copy(journeyId = "new")) }
+        compose.onNodeWithTag("wrecord").assertIsDisplayed()
         compose.onNodeWithTag("confirm-stop").assertDoesNotExist()
         compose.runOnIdle { assertNull(stopped) }
     }
@@ -225,8 +289,22 @@ class WatchScreenTest {
         compose.onNodeWithText("Kalan 5:00").assertIsDisplayed()
     }
 
+    @Test fun deferredRecordingExplainsDistanceWithoutInventingMissingElapsedTime() {
+        val state = idle().copy(phoneVersion = WearProtocol.CURRENT_VERSION,
+            snapshot = WearSnapshot(generatedAt = now, journeyId = "deferred-ride", mode = WearMode.MOTORCYCLE,
+                recording = true, statsDeferred = true))
+        compose.setContent { Box(Modifier.size(240.dp)) { WatchScreen(state, now, {}, {}, {}) } }
+        compose.onNodeWithTag("wrecord").assertIsDisplayed()
+        val note = "Mesafe yolculuk sonunda hazırlanacak."
+        watchList().performScrollToNode(hasText(note))
+        compose.onNodeWithText(note).assertIsDisplayed()
+        compose.onNodeWithText("Başlangıçtan beri", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("0:00 ·", substring = true).assertDoesNotExist()
+    }
+
     @Test fun oldPhoneDisablesRunAndExplainsUpdate() {
         compose.setContent { Box(Modifier.size(192.dp)) { WatchScreen(idle().copy(phoneVersion = 1), now, {}, {}, {}) } }
+        openStart()
         watchList().performScrollToNode(hasText("Koşu"))
         compose.onNodeWithText("Koşu").assertIsDisplayed().assertIsNotEnabled()
         watchList().performScrollToNode(hasText("Koşu ve sağlık özeti için telefondaki İz'i güncelle."))
@@ -240,6 +318,8 @@ class WatchScreenTest {
             health = WearHealthSummary(latestHeartRateBpm = 128.0, latestHeartRateAt = now - 120_000,
                 heartRateSampleCount = 1, watchSteps = 1_150, lastCheckedAt = now - 10_000, partial = true)))
         compose.setContent { Box(Modifier.size(192.dp)) { WatchScreen(state, now, {}, {}, {}) } }
+        compose.onNodeWithTag("wrecord").assertIsDisplayed()
+        openPage("Ölçümler ve kaynak", "whealth")
         for (label in listOf("10:00 dk/km", "Telefonda ölçülen adımlar", "Saatte ölçülen adımlar", "Toplam enerji · gecikmeli",
             "Kısmi sağlık verisi. Eksik ölçümler sıfır sayılmaz.")) {
             watchList().performScrollToNode(hasText(label))

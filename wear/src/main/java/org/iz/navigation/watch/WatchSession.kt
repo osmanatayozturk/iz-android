@@ -37,6 +37,12 @@ internal data class WatchUiState(
         return copy(snapshot = value, snapshotAfter = null, message = if (messageIsConnectionIssue) null else message, messageIsConnectionIssue = false)
     }
 
+    fun deleted(source: String?, path: String?): WatchUiState {
+        if (phoneId == null || source != phoneId || path != WearProtocol.statePath(phoneVersion)) return this
+        return copy(snapshot = null, snapshotAfter = snapshot?.generatedAt ?: snapshotAfter, pending = null,
+            needsPhone = false, message = "Telefon durumu yenileniyor.", messageIsConnectionIssue = true)
+    }
+
     fun begin(command: WearCommand, now: Long): WatchUiState {
         val allowed = when (command.action) {
             WearAction.START -> command.mode?.let { canStart(now, it) } == true

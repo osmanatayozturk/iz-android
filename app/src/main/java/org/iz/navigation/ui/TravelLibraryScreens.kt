@@ -3,6 +3,7 @@ package org.iz.navigation.ui
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -12,6 +13,7 @@ import org.iz.navigation.ui.history.UiEditState
 import org.iz.navigation.ui.history.LocalUiEntryKey
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -22,8 +24,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import org.iz.navigation.IzApplication
 import org.iz.navigation.data.*
 import org.iz.navigation.gpx.ImportedTrack
+import org.iz.navigation.integration.WeatherRouteMap
+import org.iz.navigation.offline.OfflinePackStatus
+import org.iz.navigation.weather.PlannedRoute
+
+internal data class PreparedLibraryRoute(val route: PlannedRoute, val fingerprint: String, val mapStatus: String)
 
 /** Opens saved input in the coordinator's editor/preview; never starts navigation itself. */
 @Composable
@@ -31,6 +39,24 @@ fun TravelLibraryScreen(repository: TravelLibraryRepository, onOpenPlan: (SavedR
     onOpenTrack: (ImportedTrack) -> Unit, onDismiss: () -> Unit) {
     val plans by repository.savedPlans.collectAsStateWithLifecycle(emptyList())
     val tracks by repository.importedTracks.collectAsStateWithLifecycle(emptyList())
+    val application = LocalContext.current.applicationContext as? IzApplication
+    val preparedRoutes = remember(application) { application?.preparedRoutes }
+    val stored = preparedRoutes?.state?.collectAsStateWithLifecycle()?.value
+    val prepared = stored?.let { value ->
+        val route = value.route
+        val fingerprint = value.fingerprint
+        if (route == null || fingerprint == null) null else {
+            val mapStatus = when (value.pack?.status) {
+                OfflinePackStatus.DOWNLOADING -> "Harita indiriliyor"
+                OfflinePackStatus.PAUSED -> "Harita indirmesi duraklatıldı"
+                OfflinePackStatus.PARTIAL -> "Harita indirmesi yarım kaldı"
+                OfflinePackStatus.ERROR -> "Harita hazırlanamadı"
+                OfflinePackStatus.READY -> if (preparedRoutes?.mapReady() == true) "Çevrimdışı harita hazır" else "Harita doğrulanıyor"
+                OfflinePackStatus.PREPARED, null -> "Çevrimdışı harita hazırlanmadı"
+            }
+            PreparedLibraryRoute(route, fingerprint, mapStatus)
+        }
+    }
     val actions = rememberLibraryActions()
     val actionEntry = LocalUiEntryKey.current
     UiEditOwner(UiEditState(actionEntry + "/library-work", null, 0, 0, false, actions.busy),
@@ -39,7 +65,12 @@ fun TravelLibraryScreen(repository: TravelLibraryRepository, onOpenPlan: (SavedR
         { plan, name -> actions.run { repository.savePlan(plan.copy(name = name, updatedAt = System.currentTimeMillis().coerceAtLeast(plan.createdAt))) } },
         { plan -> actions.run { repository.deletePlan(plan.id) } },
         { track, name -> actions.run { repository.saveTrack(track.copy(name = name)) } },
-        { track -> actions.run { repository.deleteTrack(track.id) } }, onDismiss, actions.error, actions.busy)
+        { track -> actions.run { repository.deleteTrack(track.id) } },
+        onDismiss, actions.error, actions.busy, preparedRoute = prepared,
+        preparedMap = { route, modifier ->
+            WeatherRouteMap(route = route, assessment = null, preparedRoutes = preparedRoutes,
+                modifier = modifier, expandable = false)
+        })
 }
 
 @Composable
@@ -47,25 +78,51 @@ internal fun TravelLibraryContent(plans: List<SavedRoutePlan>, tracks: List<Impo
     onOpenPlan: (SavedRoutePlan) -> Unit, onOpenTrack: (ImportedTrack) -> Unit,
     onRenamePlan: (SavedRoutePlan, String) -> Unit, onDeletePlan: (SavedRoutePlan) -> Unit,
     onRenameTrack: (ImportedTrack, String) -> Unit, onDeleteTrack: (ImportedTrack) -> Unit,
-    onDismiss: () -> Unit, error: String? = null, busy: Boolean = false) {
+    onDismiss: () -> Unit, error: String? = null, busy: Boolean = false,
+    preparedRoute: PreparedLibraryRoute? = null,
+    preparedMap: @Composable (PlannedRoute, Modifier) -> Unit = { _, _ -> },
+) {
     var renamePlan by remember { mutableStateOf<SavedRoutePlan?>(null) }
     var renameTrack by remember { mutableStateOf<ImportedTrack?>(null) }
     var deletePlan by remember { mutableStateOf<SavedRoutePlan?>(null) }
     var deleteTrack by remember { mutableStateOf<ImportedTrack?>(null) }
-    LibraryWindow("Rotalarım", onDismiss) {
-        Text("Kaydettiğin planları düzenlemek veya GPX izlerini incelemek için aç.", style = MaterialTheme.typography.bodyMedium)
+    var previewFingerprint by rememberSaveable { mutableStateOf<String?>(null) }
+    val listState = rememberLazyListState()
+    val selected = preparedRoute?.takeIf { it.fingerprint == previewFingerprint }
+    LibraryWindow(if (selected != null) "Hazır rota" else "Rotalarım",
+        onDismiss = { if (selected != null) previewFingerprint = null else onDismiss() }, busy = busy) {
+        if (selected != null) {
+            Text(selected.route.stops.last().label, style = MaterialTheme.typography.titleLarge)
+            Text(selected.mapStatus, color = Muted)
+            preparedMap(selected.route, Modifier.fillMaxWidth().weight(1f).testTag("prepared-library-preview"))
+            return@LibraryWindow
+        }
         LibraryStatus(error, busy)
-        LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (plans.isEmpty() && tracks.isEmpty()) item {
+        LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("routes-list"), state = listState,
+            verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (preparedRoute == null && plans.isEmpty() && tracks.isEmpty()) item {
                 Text("Henüz kayıtlı rota yok. Rota planından veya GPX önizlemesinden kaydedebilirsin.")
             }
             items(plans, key = { "plan-${it.id}" }) { plan ->
-                LibraryCard(plan.name, "Rota planı", "${plan.stops.size} durak", "plan-${plan.id}", busy,
-                    { onOpenPlan(plan) }, { renamePlan = plan }, { deletePlan = plan })
+                val destination = plan.stops.lastOrNull()?.label?.takeIf { it.isNotBlank() } ?: "Hedef bilgisi yok"
+                LibraryCard(plan.name, "Rota planı", "$destination · ${plan.stops.size} durak", "plan-${plan.id}", busy,
+                    onOpen = { onOpenPlan(plan) }, onRename = { renamePlan = plan }, onDelete = { deletePlan = plan })
+            }
+            if (preparedRoute != null) item(key = "prepared") {
+                LibraryCard(preparedRoute.route.stops.last().label, "Hazır rota", preparedRoute.mapStatus, "prepared-route", busy,
+                    onOpen = { previewFingerprint = preparedRoute.fingerprint })
             }
             items(tracks, key = { "track-${it.id}" }) { track ->
-                LibraryCard(track.name, "GPX izi", "${track.segments.size} bölüm · ${track.segments.sumOf { it.points.size }} konum", "track-${track.id}", busy,
-                    { onOpenTrack(track) }, { renameTrack = track }, { deleteTrack = track })
+                val details = remember(track) {
+                    val target = track.segments.lastOrNull { it.points.isNotEmpty() }?.points?.last()
+                    val endpoint = target?.let {
+                        String.format(Locale.forLanguageTag("tr-TR"), "Bitiş: %.5f° / %.5f°", it.latitude, it.longitude)
+                    }
+                    listOfNotNull(endpoint, "${track.segments.size} bölüm · ${track.segments.sumOf { it.points.size }} konum")
+                        .joinToString(" · ")
+                }
+                LibraryCard(track.name, "GPX izi", details, "track-${track.id}", busy,
+                    onOpen = { onOpenTrack(track) }, onRename = { renameTrack = track }, onDelete = { deleteTrack = track })
             }
         }
     }
@@ -103,18 +160,18 @@ internal fun JourneyCollectionsContent(collections: List<JourneyCollection>, mem
     var renaming by remember { mutableStateOf<JourneyCollection?>(null) }
     var deleting by remember { mutableStateOf<JourneyCollection?>(null) }
     var selecting by remember { mutableStateOf<JourneyCollection?>(null) }
+    val collectionsListState = rememberLazyListState()
     val state = remember(snapshot, collections, memberships) { snapshot.copy(collections = collections, memberships = memberships) }
     val selected = collections.firstOrNull { it.id == selectedId }
-    LibraryWindow(selected?.name ?: "Geziler", { if (selectedId != null) selectedId = null else onDismiss() }) {
+    LibraryWindow(selected?.name ?: "Geziler", { if (selectedId != null) selectedId = null else onDismiss() }, busy = busy) {
         LibraryStatus(error, busy)
         if (selected == null) {
-            Text("Tamamlanan yolculuklarını bir gezide bir araya getir. Aynı yolculuk birden fazla gezide yer alabilir.")
-            Button(onClick = { creating = true }, enabled = !busy) { Text("Yeni gezi") }
-            LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Button(onClick = { creating = true }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Yeni gezi") }
+            LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = collectionsListState, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (collections.isEmpty()) item { Text("Henüz gezi yok.") }
                 items(collections, key = { it.id }) { collection ->
                     val summary = remember(collection.id, state, analysis) { preparedCollectionSummary(collection.id, state, analysis) }
-                    Card(Modifier.fillMaxWidth()) {
+                    OutlinedCard(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(collection.name, style = MaterialTheme.typography.titleMedium)
                             CollectionTotals(summary, if (analysis.phase == org.iz.navigation.power.AnalysisPhase.READY) "Ayrıntılar hazırlanıyor" else analysis.label)
@@ -126,7 +183,6 @@ internal fun JourneyCollectionsContent(collections: List<JourneyCollection>, mem
         } else {
             val journeys = remember(selected.id, state) { TravelLibraryRules.collectionJourneys(selected.id, state) }
             val summary = remember(selected.id, state, analysis) { preparedCollectionSummary(selected.id, state, analysis) }
-            TextButton(onClick = { selectedId = null }) { Text("Tüm geziler") }
             CollectionTotals(summary, if (analysis.phase == org.iz.navigation.power.AnalysisPhase.READY) "Ayrıntılar hazırlanıyor" else analysis.label)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { selecting = selected }, enabled = !busy) { Text("Yolculuk seç") }
@@ -135,15 +191,18 @@ internal fun JourneyCollectionsContent(collections: List<JourneyCollection>, mem
             LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (journeys.isEmpty()) item { Text("Henüz yolculuk eklenmedi.") }
                 items(journeys, key = { it.id }) { journey ->
-                    OutlinedCard(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(12.dp)) {
+                    OutlinedCard(onClick = { onOpenJourney(journey) },
+                        modifier = Modifier.fillMaxWidth().testTag("open-journey-${journey.id}")) {
+                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(journey.title.ifBlank { "Adsız yolculuk" }, style = MaterialTheme.typography.titleMedium)
-                            TextButton(onClick = { onOpenJourney(journey) }, modifier = Modifier.testTag("open-journey-${journey.id}")) { Text("Yolculuk ayrıntıları") }
+                            Text(journey.transport.label(), style = MaterialTheme.typography.bodySmall, color = Muted)
                         }
                     }
                 }
             }
-            TextButton(onClick = { deleting = selected }, enabled = !busy) { Text("Geziyi sil") }
+            TextButton(onClick = { deleting = selected }, enabled = !busy) {
+                Text("Geziyi sil", color = MaterialTheme.colorScheme.error)
+            }
         }
     }
     if (creating) LibraryNameDialog("Yeni gezi", "", { creating = false }) { onCreate(it); creating = false }
@@ -162,48 +221,56 @@ internal fun JourneyCollectionsContent(collections: List<JourneyCollection>, mem
 @Composable
 private fun CollectionJourneyPicker(collection: JourneyCollection, eligible: List<Journey>, initial: List<String>,
     onDismiss: () -> Unit, onSave: (List<String>) -> Unit) {
-    var ordered by remember(collection.id) { mutableStateOf(initial.distinct()) }
-    val byId = eligible.associateBy { it.id }
-    val back = rememberUiEditExit("collection-members-${collection.id}", ordered, initial.distinct(),
-        currentWorking = { ordered }, discardUnsaved = { ordered = initial.distinct() }, exit = onDismiss)
-    Dialog(onDismissRequest = back, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxSize().systemBarsPadding()) {
-            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("${collection.name}: yolculuklar", style = MaterialTheme.typography.titleLarge)
-                Text("Yalnız tamamlanmış ve kalıcı yolculuklar seçilebilir. Yukarı ve aşağı düğmeleri gezi sırasını değiştirir.")
-                LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(ordered, key = { "selected-$it" }) { id ->
-                        val journey = byId[id]
-                        val title = journey?.title?.ifBlank { "Adsız yolculuk" } ?: "Artık seçilemeyen yolculuk"
-                        val index = ordered.indexOf(id)
-                        OutlinedCard(Modifier.fillMaxWidth()) {
-                            Column(Modifier.padding(8.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Checkbox(true, { ordered = ordered - id }, Modifier.testTag("select-journey-$id").semantics { contentDescription = "$title yolculuğunu seç" })
-                                    Text(title, Modifier.weight(1f))
-                                }
-                                Row {
-                                    TextButton(onClick = { ordered = ordered.toMutableList().apply { add(index - 1, removeAt(index)) } }, enabled = index > 0,
-                                        modifier = Modifier.testTag("move-up-$id").semantics { contentDescription = "$title: yukarı taşı" }) { Text("Yukarı") }
-                                    TextButton(onClick = { ordered = ordered.toMutableList().apply { add(index + 1, removeAt(index)) } }, enabled = index < ordered.lastIndex,
-                                        modifier = Modifier.testTag("move-down-$id").semantics { contentDescription = "$title: aşağı taşı" }) { Text("Aşağı") }
-                                }
-                            }
-                        }
-                    }
-                    val selectedIds = ordered.toSet()
-                    items(eligible.filter { it.id !in selectedIds }, key = { "available-${it.id}" }) { journey ->
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(false, { checked -> if (checked) ordered = ordered + journey.id }, Modifier.testTag("select-journey-${journey.id}").semantics { contentDescription = "${journey.title.ifBlank { "Adsız yolculuk" }} yolculuğunu seç" })
-                            Text(journey.title.ifBlank { "Adsız yolculuk" })
-                        }
-                    }
-                    if (eligible.isEmpty()) item { Text("Eklenebilecek tamamlanmış yolculuk yok.") }
-                }
-                Button(onClick = { onSave(ordered.toList()) }, enabled = ordered.all { it in byId }, modifier = Modifier.fillMaxWidth()) { Text("Seçimi kaydet") }
-                TextButton(onClick = onDismiss) { Text("Vazgeç") }
-            }
+    val baseline = remember(initial) { initial.distinct() }
+    var ordered by remember(collection.id) { mutableStateOf(baseline) }
+    val byId = remember(eligible) { eligible.associateBy { it.id } }
+    val back = rememberUiEditExit("collection-members-${collection.id}", ordered, baseline,
+        currentWorking = { ordered }, discardUnsaved = { ordered = baseline }, exit = onDismiss)
+
+    fun move(id: String, offset: Int) {
+        val index = ordered.indexOf(id)
+        val target = index + offset
+        if (index >= 0 && target in ordered.indices) {
+            ordered = ordered.toMutableList().apply { add(target, removeAt(index)) }
         }
+    }
+
+    LibraryWindow("${collection.name}: yolculuklar", back) {
+        Text("Tamamlanmış yolculukları seç ve gezi sırasına diz.", style = MaterialTheme.typography.bodyMedium, color = Muted)
+        LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(ordered, key = { "selected-$it" }) { id ->
+                val journey = byId[id]
+                val title = journey?.title?.ifBlank { "Adsız yolculuk" } ?: "Artık seçilemeyen yolculuk"
+                val index = ordered.indexOf(id)
+                OutlinedCard(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(true, { ordered = ordered - id },
+                                Modifier.testTag("select-journey-$id").semantics { contentDescription = "$title: seçimden çıkar" })
+                            Text(title, Modifier.weight(1f))
+                        }
+                        Row {
+                            TextButton(onClick = { move(id, -1) }, enabled = index > 0,
+                                modifier = Modifier.testTag("move-up-$id").semantics { contentDescription = "$title: yukarı taşı" }) { Text("Yukarı") }
+                            TextButton(onClick = { move(id, 1) }, enabled = index < ordered.lastIndex,
+                                modifier = Modifier.testTag("move-down-$id").semantics { contentDescription = "$title: aşağı taşı" }) { Text("Aşağı") }
+                        }
+                    }
+                }
+            }
+            val selectedIds = ordered.toSet()
+            items(eligible.filter { it.id !in selectedIds }, key = { "available-${it.id}" }) { journey ->
+                val title = journey.title.ifBlank { "Adsız yolculuk" }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(false, { checked -> if (checked && journey.id !in ordered) ordered = ordered + journey.id },
+                        Modifier.testTag("select-journey-${journey.id}").semantics { contentDescription = "$title: yolculuğu seç" })
+                    Text(title)
+                }
+            }
+            if (eligible.isEmpty()) item { Text("Eklenebilecek tamamlanmış yolculuk yok.") }
+        }
+        Button(onClick = { if (ordered.all { it in byId }) onSave(ordered) }, enabled = ordered.all { it in byId },
+            modifier = Modifier.fillMaxWidth()) { Text("Seçimi kaydet") }
     }
 }
 
@@ -226,15 +293,16 @@ private fun CollectionTotals(summary: CollectionSummary?, waitingLabel: String) 
 }
 
 @Composable
-private fun LibraryWindow(title: String, onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+private fun LibraryWindow(title: String, onDismiss: () -> Unit, busy: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
+    Dialog(onDismissRequest = { if (!busy) onDismiss() },
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Surface(Modifier.fillMaxSize()) {
-            Column(Modifier.fillMaxSize().systemBarsPadding().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(title, Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall)
-                    TextButton(onClick = onDismiss) { Text("Kapat") }
+            Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+                TravelScreenHeader(title, onDismiss, enabled = !busy)
+                Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    content()
                 }
-                content()
             }
         }
     }
@@ -242,16 +310,29 @@ private fun LibraryWindow(title: String, onDismiss: () -> Unit, content: @Compos
 
 @Composable
 private fun LibraryCard(name: String, kind: String, detail: String, key: String, busy: Boolean,
-    onOpen: () -> Unit, onRename: () -> Unit, onDelete: () -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(kind, style = MaterialTheme.typography.labelLarge)
+    onOpen: () -> Unit, onRename: (() -> Unit)? = null, onDelete: (() -> Unit)? = null) {
+    OutlinedCard(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(kind, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
             Text(name, style = MaterialTheme.typography.titleMedium)
-            Text(detail, style = MaterialTheme.typography.bodySmall)
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                OutlinedButton(onClick = onOpen, modifier = Modifier.testTag("open-$key"), enabled = !busy) { Text("Aç") }
-                TextButton(onClick = onRename, modifier = Modifier.testTag("rename-$key"), enabled = !busy) { Text("Adı değiştir") }
-                TextButton(onClick = onDelete, modifier = Modifier.testTag("delete-$key"), enabled = !busy) { Text("Sil") }
+            Text(detail, color = Muted, style = MaterialTheme.typography.bodySmall)
+            LibraryCardActions(key, busy, onOpen, onRename, onDelete)
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun LibraryCardActions(key: String, busy: Boolean, onOpen: () -> Unit,
+    onRename: (() -> Unit)?, onDelete: (() -> Unit)?) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        TextButton(onClick = onOpen, modifier = Modifier.testTag("open-$key"), enabled = !busy) { Text("Rotayı aç") }
+        onRename?.let {
+            TextButton(onClick = it, modifier = Modifier.testTag("rename-$key"), enabled = !busy) { Text("Adı değiştir") }
+        }
+        onDelete?.let {
+            TextButton(onClick = it, modifier = Modifier.testTag("delete-$key"), enabled = !busy) {
+                Text("Sil", color = MaterialTheme.colorScheme.error)
             }
         }
     }

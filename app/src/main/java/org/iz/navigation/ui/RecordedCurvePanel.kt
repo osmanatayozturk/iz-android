@@ -7,6 +7,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -50,51 +53,68 @@ internal fun RecordedCurvePanel(journey: Journey, state: DiaryState) {
     }
     if (current == null) return
 
-    OutlinedCard(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("GPS viraj ayrıntıları", style = MaterialTheme.typography.titleLarge)
-            Text("Kaydedilmiş GPS noktalarından hazırlanır. Konum boşlukları ayrıntıya katılmaz.",
-                style = MaterialTheme.typography.bodySmall)
-            if (details == null) {
-                Text(when {
-                    current.endedAt == null -> "Yolculuk bittikten sonra hazırlanacak."
-                    state.analysis.phase == AnalysisPhase.READY -> "Viraj ayrıntıları bekleniyor."
-                    else -> state.analysisLabel
-                })
-                if (loaded?.key == key && loaded?.failed == true) Text("Hazır ayrıntılar okunamadı.")
-                Text("Ayrıntılar kayıt ve navigasyon bittikten sonra pil en az %20 olduğunda hazırlanır.",
-                    style = MaterialTheme.typography.bodySmall)
-                if (current.endedAt != null && !state.analysis.pending && state.analysis.phase != AnalysisPhase.RUNNING) {
-                    TextButton(onClick = { analysis.request() }) { Text("Ayrıntıları hazırla") }
-                }
+    StatisticsSurface {
+        Text("GPS virajları", Modifier.semantics { heading() }, style = MaterialTheme.typography.titleLarge)
+        if (details == null) {
+            Text(when {
+                current.endedAt == null -> "Yolculuk bittikten sonra hazırlanacak."
+                state.analysis.phase == AnalysisPhase.READY -> "Viraj ayrıntıları bekleniyor."
+                else -> state.analysisLabel
+            })
+            if (loaded?.key == key && loaded?.failed == true) Text("Hazır ayrıntılar okunamadı.")
+            Text(
+                "Ayrıntılar kayıt ve navigasyon bittikten sonra pil en az %20 olduğunda hazırlanır.",
+                style = MaterialTheme.typography.bodySmall, color = Muted,
+            )
+            if (current.endedAt != null && !state.analysis.pending && state.analysis.phase != AnalysisPhase.RUNNING) {
+                TextButton(onClick = { analysis.request() }) { Text("Ayrıntıları hazırla") }
+            }
+        } else {
+            val leftCount = details.curves.count { it.direction == RecordedCurveDirection.LEFT }
+            Text(
+                "${details.curves.size} viraj · $leftCount sol · ${details.curves.size - leftCount} sağ",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text("Geçerli ölçüm kapsamı", style = MaterialTheme.typography.labelLarge)
+            Text(
+                "${details.usablePointCount} kullanılabilir GPS örneği · ${details.excludedIntervalCount} aralık dışarıda",
+                style = MaterialTheme.typography.bodySmall, color = Muted,
+            )
+            if (details.truncated) Text(
+                "Ayrıntılar kısmi. Veri sınırı nedeniyle bazı bölümler gösterilmez.",
+                style = MaterialTheme.typography.bodySmall, color = Muted,
+            )
+            if (details.curves.isEmpty()) {
+                Text("Bu kayıtta gösterilecek viraj ayrıntısı yok.")
             } else {
-                Text("Kaynak: Kaydedilmiş GPS noktaları", style = MaterialTheme.typography.bodyMedium)
-                Text("${details.usablePointCount} kullanılabilir GPS örneği · ${details.excludedIntervalCount} aralık viraj çözümlemesine alınmadı",
-                    style = MaterialTheme.typography.bodySmall)
-                if (details.truncated) Text("Ayrıntılar kısmi. Veri sınırı nedeniyle bazı bölümler gösterilmez.", style = MaterialTheme.typography.bodySmall)
-                if (details.curves.isEmpty()) {
-                    Text("Bu kayıtta gösterilecek viraj ayrıntısı yok.")
-                } else {
-                    TextButton(onClick = { expanded = !expanded; if (!expanded) selectedId = null }) {
-                        Text(if (expanded) "Viraj ayrıntılarını gizle" else "Virajları göster (${details.curves.size})")
-                    }
-                    if (expanded) {
-                        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 260.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(details.curves, key = { it.id }) { curve ->
-                                OutlinedCard(onClick = { selectedId = curve.id }, modifier = Modifier.fillMaxWidth()) {
-                                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Text(curveDirection(curve.direction), style = MaterialTheme.typography.titleSmall)
-                                        Text("Başlangıç: ${curveTime(curve.start.at)}", style = MaterialTheme.typography.bodySmall)
-                                        Text("Süre: ${curveDuration(curve.end.at - curve.start.at)}", style = MaterialTheme.typography.bodySmall)
-                                    }
+                OutlinedButton(onClick = {
+                    expanded = !expanded
+                    if (!expanded) selectedId = null
+                }) {
+                    Text(if (expanded) "Viraj ayrıntılarını gizle" else "Virajları göster (${details.curves.size})")
+                }
+                if (expanded) {
+                    LazyColumn(
+                        Modifier.fillMaxWidth().heightIn(max = 260.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(details.curves, key = { it.id }) { curve ->
+                            Card(
+                                onClick = { selectedId = curve.id },
+                                modifier = Modifier.fillMaxWidth().semantics { this.selected = curve.id == selectedId },
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
+                            ) {
+                                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(curveDirection(curve.direction), style = MaterialTheme.typography.titleSmall)
+                                    Text(curveTime(curve.start.at), style = MaterialTheme.typography.bodySmall)
+                                    Text("Süre: ${curveDuration(curve.end.at - curve.start.at)}", style = MaterialTheme.typography.bodySmall)
                                 }
                             }
                         }
-                        selected?.let { curve ->
-                            RecordedCurveDetailValues(curve)
-                            TextButton(onClick = { selectedId = null }) { Text("Seçili ayrıntıyı kapat") }
-                        }
+                    }
+                    selected?.let { curve ->
+                        RecordedCurveDetailValues(curve)
+                        TextButton(onClick = { selectedId = null }) { Text("Seçili ayrıntıyı kapat") }
                     }
                 }
             }

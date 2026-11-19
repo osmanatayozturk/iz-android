@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -25,6 +24,7 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -52,6 +52,7 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
     initialGpsJourneyId: String? = null,
     gpsJourneys: List<Journey> = emptyList(),
     initialGpsPage: OsmGpsPage? = null,
+    initialSection: CommunitySection? = null,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val auth = remember { OsmAuthManager.get(context) }
@@ -63,10 +64,12 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
     val exitGuard = LocalUiExitGuard.current
     val entryKey = LocalUiEntryKey.current
     val gpsEntryPage = initialGpsPage ?: OsmGpsPage.AVAILABLE
+    val directGpsEntry = initialGpsJourneyId != null || initialGpsPage != null
     var gpsOpen by rememberSaveable(entryKey, initialGpsJourneyId, initialGpsPage) {
         mutableStateOf(initialGpsJourneyId != null || initialGpsPage != null)
     }
     var gpsPage by rememberSaveable(entryKey, initialGpsJourneyId, initialGpsPage) { mutableStateOf(gpsEntryPage) }
+    var sectionOwner by rememberSaveable(entryKey, initialSection) { mutableStateOf<String?>(null) }
     LaunchedEffect(gpsOpen, authState.user?.id) {
         if (!gpsOpen) {
             vm.gpsSelection.bind(authState.user?.id)
@@ -80,6 +83,21 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
     // Room/auth may emit before the VM observer: never render another account's detail for even one frame.
     val ui = if (rawUi.accountId == community.accountId && rawUi.cacheIdentity == community.cacheIdentity) rawUi
         else CommunityUiState(accountId = community.accountId, cacheIdentity = community.cacheIdentity)
+    val browsing = key(entryKey, community.accountId, community.cacheIdentity) { rememberSaveableStateHolder() }
+    val nestedPage = !gpsOpen && (ui.editor != null || ui.detail != null || ui.person != null)
+    val title = when {
+        gpsOpen -> when (gpsPage) {
+            OsmGpsPage.AVAILABLE -> "GPS izi adayları"
+            OsmGpsPage.HISTORY -> "Yüklenen GPS izleri"
+            OsmGpsPage.UNKNOWN -> "Belirsiz GPS yüklemeleri"
+        }
+        ui.editor != null -> "Mesaj yazma ve yanıt"
+        ui.detail != null -> "Mesaj ayrıntısı"
+        ui.person != null -> "Haritacı profili"
+        ui.section == CommunitySection.CONTACTS -> "Haritacılar ve arama"
+        ui.section == CommunitySection.ACCOUNT -> "OSM hesabı"
+        else -> "Topluluk ve posta kutuları"
+    }
     val notificationStatus = remember { CommunityNotifications(context) }
     var systemAllowed by remember { mutableStateOf(notificationStatus.permissionGranted()) }
     val permissionPreferences = remember { context.getSharedPreferences("osm-community-ui", Context.MODE_PRIVATE) }
@@ -93,6 +111,24 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
         if (vm.ui.value.busy || vm.editorState.value.saving || auth.state.value.busy ||
             vm.ui.value.accountId != vm.community.value.accountId || vm.ui.value.cacheIdentity != vm.community.value.cacheIdentity) return
         if (exitGuard == null) action() else exitGuard.requestExit(action)
+    }
+    LaunchedEffect(entryKey, initialSection, community.accountId, community.cacheIdentity, community.ready,
+        rawUi.accountId, rawUi.cacheIdentity, rawUi.busy, editorState.saving, authState.busy) {
+        if (initialSection == null || initialMessageId != null || directGpsEntry) return@LaunchedEffect
+        if (community.accountId != null && (!community.ready || rawUi.accountId != community.accountId ||
+                rawUi.cacheIdentity != community.cacheIdentity)) return@LaunchedEffect
+        val targetAccount = community.accountId
+        val targetCache = community.cacheIdentity
+        val owner = "$targetAccount:$targetCache"
+        if (sectionOwner == owner) return@LaunchedEffect
+        exit {
+            val current = vm.community.value
+            if (current.accountId == targetAccount && current.cacheIdentity == targetCache &&
+                !vm.ui.value.busy && !vm.editorState.value.saving && !auth.state.value.busy) {
+                vm.section(initialSection)
+                sectionOwner = owner
+            }
+        }
     }
     fun disconnectOwner() = vm.community.value.let {
         OsmConfirmationOwner(entryKey, it.accountId, it.cacheIdentity, auth.communitySessionSource.sessions.value, history)
@@ -135,7 +171,9 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
     fun close() { vm.closeEditor(); onClose() }
     fun back() = exit {
         if (gpsOpen && gpsPage != gpsEntryPage) gpsPage = gpsEntryPage
-        else if (gpsOpen || !vm.back()) close()
+        else if (gpsOpen) {
+            if (directGpsEntry) close() else gpsOpen = false
+        } else if (!vm.back()) close()
     }
     if (ui.editor == null) UiEditOwner(
         UiEditState(entryKey + "/community", accountKey(), 0, 0, false, ui.busy || authState.busy || editorState.saving),
@@ -184,16 +222,17 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = ::back) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "OSM topluluğundan geri dön") }
             Column(Modifier.weight(1f)) {
-                Text("OSM Topluluğu", style = MaterialTheme.typography.titleLarge)
-                if (!gpsOpen) Text(authState.user?.displayName ?: "OpenStreetMap insanlarıyla bağlantı kur",
+                Text(title, style = MaterialTheme.typography.titleLarge)
+                if (!gpsOpen && !nestedPage) Text(authState.user?.displayName ?: "OpenStreetMap insanlarıyla bağlantı kur",
                     style = MaterialTheme.typography.bodySmall, color = Muted)
             }
-            if (!gpsOpen) IconButton(onClick = vm::refresh, enabled = community.accountId != null && !ui.busy) {
+            if (!gpsOpen && !nestedPage) IconButton(onClick = vm::refresh, enabled = community.accountId != null && !ui.busy) {
                 Icon(Icons.Outlined.Refresh, "Topluluğu yenile")
             }
         }
-        TabRow(selectedTabIndex = if (gpsOpen) CommunitySection.entries.size else ui.section.ordinal) {
-            listOf("Mesajlar", "Kişiler", "Hesabım").forEachIndexed { index, label ->
+        HorizontalDivider()
+        if (!nestedPage && !gpsOpen) TabRow(selectedTabIndex = ui.section.ordinal) {
+            listOf("Posta", "Kişiler", "Hesabım").forEachIndexed { index, label ->
                 Tab(!gpsOpen && ui.section.ordinal == index, onClick = {
                     exit { gpsOpen = false; gpsPage = OsmGpsPage.AVAILABLE; vm.section(CommunitySection.entries[index]) }
                 }, text = { Text(label) })
@@ -221,12 +260,13 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
                 { exit { vm.folder(CommunityFolder.OUTBOX); vm.refresh() } }, vm::copyUncertainDraft,
                 liveEditor = { vm.editorState.value }, accountKey = ::accountKey, onDiscard = vm::discardEditorDelta,
                 liveBusy = { vm.ui.value.busy || auth.state.value.busy || vm.ui.value.editor?.id != ui.editor?.id ||
-                    vm.ui.value.accountId != vm.community.value.accountId || vm.ui.value.cacheIdentity != vm.community.value.cacheIdentity })
+                    vm.ui.value.accountId != vm.community.value.accountId || vm.ui.value.cacheIdentity != vm.community.value.cacheIdentity },
+                showHeader = false)
             ui.detail != null && community.accountId != null -> CommunityMessageView(ui.detail, community.accountId!!, ui.busy,
-                { vm.back() }, vm::reply, vm::markRead, vm::deleteMessage, vm::openProfile, ::openLink)
+                { vm.back() }, vm::reply, vm::markRead, vm::deleteMessage, vm::openProfile, ::openLink, showHeader = false)
             ui.person != null -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) {
                 CommunityProfileView(ui.person, ui.person.id == community.accountId, community.accountId != null && !ui.busy,
-                    { vm.compose(ui.person.id) }, ::openLink, { vm.back() })
+                    { vm.compose(ui.person.id) }, ::openLink)
             }
             ui.section == CommunitySection.ACCOUNT -> CommunityAccount(community, systemAllowed, ui.busy || authState.busy,
                 authState.clientIdConfigured, authState.user?.displayName, ::login, ::requestDisconnect,
@@ -235,14 +275,18 @@ internal fun OsmCommunityScreen(onClose: () -> Unit, initialMessageId: Long? = n
                     context.startActivity(intent)
                 }, ::openLink)
             community.accountId == null -> CommunityConnect(authState.clientIdConfigured, authState.busy, ::login, onOpenSettings)
-            ui.section == CommunitySection.CONTACTS -> CommunityContacts(community.contacts, ui.busy,
-                vm::openProfile, {
-                    runCatching { CommunityLinks.profile(it) }.onSuccess(::openLink)
-                        .onFailure { vm.reportError("Geçerli bir OSM kullanıcı adı yaz.") }
-                }, ::openLink)
-            else -> CommunityMailboxes(community, ui, { folder -> exit { vm.folder(folder) } },
-                { id -> exit { vm.openMessage(id) } }, { draft -> exit { vm.editDraft(draft) } },
-                { exit { vm.compose() } }, vm::loadMore, ::login)
+            ui.section == CommunitySection.CONTACTS -> browsing.SaveableStateProvider("contacts") {
+                CommunityContacts(community.contacts, ui.busy,
+                    vm::openProfile, {
+                        runCatching { CommunityLinks.profile(it) }.onSuccess(::openLink)
+                            .onFailure { vm.reportError("Geçerli bir OSM kullanıcı adı yaz.") }
+                    }, ::openLink)
+            }
+            else -> browsing.SaveableStateProvider("mail-${ui.folder.name}") {
+                CommunityMailboxes(community, ui, { folder -> exit { vm.folder(folder) } },
+                    { id -> exit { vm.openMessage(id) } }, { draft -> exit { vm.editDraft(draft) } },
+                    { exit { vm.compose() } }, vm::loadMore, ::login)
+            }
         }
     }
     pendingDisconnect?.let { request ->
@@ -295,26 +339,30 @@ private fun CommunityMailboxes(state: CommunityState, ui: CommunityUiState,
             }
         }
         val messages = if (ui.folder == CommunityFolder.OUTBOX) state.outbox else state.inbox
-        LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LazyColumn(Modifier.testTag("community-mail-list"), contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)) {
             if (ui.folder == CommunityFolder.DRAFTS) {
                 if (state.drafts.isEmpty()) item { Text("Henüz taslağın yok. Yeni mesaj yazarak başlayabilirsin.", color = Muted) }
                 items(state.drafts, key = { it.id }) { draft ->
-                    Surface(onClick = { onDraft(draft) }, enabled = !ui.busy, shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-                        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Surface(onClick = { onDraft(draft) }, enabled = !ui.busy, color = MaterialTheme.colorScheme.surface,
+                        modifier = Modifier.testTag("community-draft-${draft.id}")) {
+                        Column(Modifier.fillMaxWidth().padding(vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(draft.title.ifBlank { "Konusuz taslak" }, style = MaterialTheme.typography.titleMedium)
                             Text(draft.recipientId?.let { "Alıcı kimliği: $it" } ?: draft.recipientName.ifBlank { "Alıcı seçilmedi" }, style = MaterialTheme.typography.bodySmall)
                             Text(when (draft.status) { CommunityDraftStatus.DRAFT -> "Taslak"; CommunityDraftStatus.SENDING -> "Gönderiliyor"; CommunityDraftStatus.UNKNOWN -> "Gönderim belirsiz · Kontrol gerekli"; CommunityDraftStatus.FAILED -> "Gönderilemedi" },
                                 color = if (draft.status == CommunityDraftStatus.UNKNOWN) MaterialTheme.colorScheme.error else Muted, style = MaterialTheme.typography.bodySmall)
                         }
                     }
+                    HorizontalDivider()
                 }
             } else {
                 if (messages.isEmpty() && state.canConsume) item {
                     Text(if (ui.busy) "Mesajlar yükleniyor…" else if (ui.folder == CommunityFolder.INBOX) "Gelen kutun boş." else "Henüz gönderilmiş mesajın yok.", color = Muted)
                 }
                 items(messages, key = { it.id }) { message ->
-                    Surface(onClick = { onMessage(message.id) }, enabled = !ui.busy, shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-                        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Surface(onClick = { onMessage(message.id) }, enabled = !ui.busy, color = MaterialTheme.colorScheme.surface,
+                        modifier = Modifier.testTag("community-message-${message.id}")) {
+                        Column(Modifier.fillMaxWidth().padding(vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(if (ui.folder == CommunityFolder.OUTBOX) message.toName else message.fromName, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                                 if (ui.folder == CommunityFolder.INBOX && !message.read) Text("Yeni", color = Forest, style = MaterialTheme.typography.labelSmall)
@@ -324,6 +372,7 @@ private fun CommunityMailboxes(state: CommunityState, ui: CommunityUiState,
                             Text(communityDate(message.sentAt), style = MaterialTheme.typography.bodySmall, color = Muted)
                         }
                     }
+                    HorizontalDivider()
                 }
                 val more = if (ui.folder == CommunityFolder.OUTBOX) state.nextOutboxFromId else state.nextInboxFromId
                 if (more != null) item { OutlinedButton(onClick = onMore, enabled = !ui.busy, modifier = Modifier.fillMaxWidth()) { Text("Daha eski mesajları yükle") } }
@@ -333,34 +382,46 @@ private fun CommunityMailboxes(state: CommunityState, ui: CommunityUiState,
 }
 
 @Composable
-private fun CommunityContacts(contacts: List<OsmCommunityProfile>, busy: Boolean,
+internal fun CommunityContacts(contacts: List<OsmCommunityProfile>, busy: Boolean,
     onProfile: (Long) -> Unit, onName: (String) -> Unit, onLink: (String) -> Unit,
 ) {
     var search by rememberSaveable { mutableStateOf("") }
     var byId by rememberSaveable { mutableStateOf(false) }
-    LazyColumn(contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    val query = search.trim()
+    val matches = contacts.filter { if (byId) it.id.toString().contains(query) else it.displayName.contains(query, ignoreCase = true) }
+    val namedContact = contacts.firstOrNull { it.displayName.equals(query, ignoreCase = true) }
+    LazyColumn(Modifier.testTag("community-contacts-list"), contentPadding = PaddingValues(20.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
-            Text("Bir haritacı bul", style = MaterialTheme.typography.titleLarge)
+            Text("Kullanıcı adı veya OSM kimliği", style = MaterialTheme.typography.titleMedium)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(!byId, { byId = false; search = "" }, { Text("Kullanıcı adı") })
                 FilterChip(byId, { byId = true; search = "" }, { Text("Kullanıcı kimliği") })
             }
-            OutlinedTextField(search, { search = it }, Modifier.fillMaxWidth(), label = { Text(if (byId) "OSM kullanıcı kimliği" else "OSM kullanıcı adı") }, singleLine = true)
-            OutlinedButton(onClick = { if (byId) search.toLongOrNull()?.let(onProfile) else onName(search.trim()) },
-                enabled = !busy && if (byId) (search.toLongOrNull() ?: 0) > 0 else search.isNotBlank()) {
-                Text(if (byId) "Profili göster" else "Profili OSM sitesinde aç")
+            OutlinedTextField(search, { search = it }, Modifier.fillMaxWidth().testTag("community-contact-search"),
+                label = { Text(if (byId) "OSM kullanıcı kimliği" else "OSM kullanıcı adı") }, singleLine = true)
+            OutlinedButton(onClick = {
+                if (byId) query.toLongOrNull()?.let(onProfile)
+                else if (namedContact != null) onProfile(namedContact.id)
+                else onName(query)
+            }, modifier = Modifier.heightIn(min = 48.dp).testTag("community-contact-open"),
+                enabled = !busy && if (byId) (query.toLongOrNull() ?: 0) > 0 else query.isNotBlank()) {
+                Text(if (byId || namedContact != null) "Profili göster" else "Profili OSM sitesinde aç")
             }
         }
         item {
             OutlinedButton(onClick = { onLink(CommunityLinks.following()) }) { Text("Takip ettiklerim · OSM sitesinde aç") }
-            Text("Mesajlaştığın kişiler", style = MaterialTheme.typography.titleMedium)
+            Text(if (query.isBlank()) "Mesajlaşılan kişiler" else "Arama sonuçları", style = MaterialTheme.typography.titleMedium)
             Text("Bu liste mesaj kutularından oluşur. Takip listesi OSM sitesinde yönetilir.", style = MaterialTheme.typography.bodySmall, color = Muted)
         }
         if (contacts.isEmpty()) item { Text("Mesaj kutularını yeniledikçe kişiler burada görünür.", color = Muted) }
-        items(contacts, key = { it.id }) { person ->
+        if (query.isNotBlank() && matches.isEmpty()) item { Text("Bu cihazdaki kişilerde eşleşme yok.", color = Muted) }
+        items(matches, key = { it.id }) { person ->
             ListItem(headlineContent = { Text(person.displayName) }, supportingContent = { Text("OSM ${person.id}") },
                 leadingContent = { Icon(Icons.Outlined.Person, null) }, trailingContent = { Icon(Icons.Outlined.ChevronRight, null) },
-                modifier = Modifier.clickable(enabled = !busy) { onProfile(person.id) })
+                modifier = Modifier.heightIn(min = 48.dp).testTag("community-contact-${person.id}")
+                    .clickable(enabled = !busy) { onProfile(person.id) })
+            HorizontalDivider()
         }
     }
 }
@@ -382,13 +443,16 @@ private fun CommunityAccount(state: CommunityState, systemAllowed: Boolean, busy
             Text("Mesajları okumak ve göndermek için ek OSM izni gerekiyor.", color = Muted)
             Button(onClick = onLogin, enabled = !busy) { Text("Mesaj izinlerini ver") }
         }
+        Text("Bağlı hesap ve izinler", style = MaterialTheme.typography.titleMedium)
+        Text("Mesaj okuma · ${if (state.canConsume) "İzin verildi" else "İzin gerekiyor"}", style = MaterialTheme.typography.bodyMedium)
+        Text("Mesaj gönderme · ${if (state.canSend) "İzin verildi" else "İzin gerekiyor"}", style = MaterialTheme.typography.bodyMedium)
         OutlinedButton(onClick = { onLink(CommunityLinks.following()) }) { Text("Takip ettiklerim · OSM sitesinde aç") }
         TextButton(onClick = { onLink(CommunityLinks.mutedInbox()) }) { Text("Sessize alınanlar · OSM sitesinde aç") }
         HorizontalDivider()
         CommunityNotificationSettings(state.notificationsEnabled, systemAllowed, state.canConsume, onNotifications, onSystemSettings)
         HorizontalDivider()
         Text("Hesap bağlantısını kesince bu cihazdaki mesajlar, kişiler ve taslaklar temizlenir. Günlüğün korunur.", style = MaterialTheme.typography.bodySmall, color = Muted)
-        TextButton(onClick = onDisconnect, enabled = !busy) { Text("Hesap bağlantısını kes") }
+        TextButton(onClick = onDisconnect, enabled = !busy) { Text("Hesabı ayır") }
         TextButton(onClick = onSettings) { Text("OSM bağlantı ayarlarını aç") }
     }
 }

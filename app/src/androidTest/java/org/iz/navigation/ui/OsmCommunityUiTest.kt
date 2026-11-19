@@ -105,4 +105,32 @@ class OsmCommunityUiTest {
         compose.onNodeWithTag("community-notifications").assertIsOn().performClick()
         compose.runOnIdle { assertEquals(false, preference) }
     }
+
+    @Test fun knownUsernameOpensItsNativeProfileAndUnknownNameUsesTheLabelledExternalRoute() {
+        val opened = mutableListOf<Long>()
+        val externalNames = mutableListOf<String>()
+        compose.setContent { MaterialTheme {
+            CommunityContacts(listOf(OsmCommunityProfile(8, "Synthetic Mapper")), false,
+                onProfile = { opened += it }, onName = { externalNames += it }, onLink = {})
+        } }
+        val list = compose.onNodeWithTag("community-contacts-list")
+        list.performScrollToNode(hasTestTag("community-contact-search"))
+        compose.onNodeWithTag("community-contact-search").performTextReplacement("synthetic mapper")
+        list.performScrollToNode(hasTestTag("community-contact-open"))
+        compose.onNodeWithTag("community-contact-open").performClick()
+        compose.runOnIdle {
+            assertEquals(listOf(8L), opened)
+            assertTrue(externalNames.isEmpty())
+        }
+
+        list.performScrollToNode(hasTestTag("community-contact-search"))
+        compose.onNodeWithTag("community-contact-search").performTextReplacement("Unknown Mapper")
+        compose.onNodeWithText("Profili OSM sitesinde aç").assertExists()
+        list.performScrollToNode(hasTestTag("community-contact-open"))
+        compose.onNodeWithTag("community-contact-open").performClick()
+        compose.runOnIdle {
+            assertEquals(listOf(8L), opened)
+            assertEquals(listOf("Unknown Mapper"), externalNames)
+        }
+    }
 }

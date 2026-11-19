@@ -1,5 +1,8 @@
 package org.iz.navigation.car
 
+import org.iz.navigation.data.Journey
+import org.iz.navigation.data.JourneyStats
+import org.iz.navigation.power.AnalysisState
 import org.iz.navigation.data.SelectedOsmPlace
 import org.iz.navigation.data.Transport
 import org.iz.navigation.navigation.NavigationState
@@ -24,6 +27,12 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import org.iz.navigation.navigation.PreparedRouteState
 import org.iz.navigation.offline.OfflinePackStatus
+
+/** A completed-cache entry can be displayed only while it still describes this exact diary row. */
+internal fun carCompletedStatistics(active: Boolean, latest: Journey?, analysis: AnalysisState): JourneyStats? {
+    if (active || latest?.endedAt == null) return null
+    return analysis.ready(latest.id)?.takeIf { it.matches(latest) }?.stats
+}
 
 internal data class CarPreparedPresentation(val route: String, val map: String)
 

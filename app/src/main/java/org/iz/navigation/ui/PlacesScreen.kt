@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package org.iz.navigation.ui
 
 import androidx.activity.compose.BackHandler
@@ -17,7 +19,6 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -26,14 +27,18 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import org.iz.navigation.data.DestinationShortcut
+import org.iz.navigation.data.DestinationShortcutKind
 import org.iz.navigation.data.Place
 import kotlin.math.abs
 
 @Composable
 internal fun PlacesScreen(state: DiaryState, onPlace: (Place) -> Unit, onAdd: () -> Unit,
     onReorder: suspend (List<String>, List<String>) -> Unit,
-    shortcuts: List<org.iz.navigation.data.DestinationShortcut> = emptyList(),
-    onShortcut: (org.iz.navigation.data.DestinationShortcutKind, Place?) -> Unit = { _, _ -> }) {
+    shortcuts: List<DestinationShortcut> = emptyList(),
+    onShortcut: (DestinationShortcutKind, Place?) -> Unit = { _, _ -> },
+    onAddressSearch: (() -> Unit)? = null,
+) {
     var query by rememberSaveable { mutableStateOf("") }
     var original by remember { mutableStateOf<List<String>?>(null) }
     var draft by remember { mutableStateOf(emptyList<String>()) }
@@ -48,7 +53,13 @@ internal fun PlacesScreen(state: DiaryState, onPlace: (Place) -> Unit, onAdd: ()
         currentBusy = { saving }, discardUnsaved = ::cancel, exit = ::cancel)
     BackHandler(sorting) { back() }
     val byId = remember(state.places) { state.places.associateBy { it.id } }
-    val visible = if (sorting) draft.mapNotNull(byId::get) else state.places.filter { it.name.contains(query, ignoreCase = true) }
+    val shortcutsByPlace = remember(shortcuts) { shortcuts.groupBy { it.place.id } }
+    val visitCounts = remember(state.visits) { state.visits.groupingBy { it.placeId }.eachCount() }
+    val search = query.trim()
+    val visible = if (sorting) draft.mapNotNull(byId::get) else state.places.filter { place ->
+        place.name.contains(search, ignoreCase = true) ||
+            shortcutsByPlace[place.id].orEmpty().any { it.kind.placeLabel().contains(search, ignoreCase = true) }
+    }
     fun move(id: String, direction: Int) {
         if (!sorting || saving) return
         val from = draft.indexOf(id)
@@ -60,15 +71,15 @@ internal fun PlacesScreen(state: DiaryState, onPlace: (Place) -> Unit, onAdd: ()
         val targetIndex = to + 1 // The header is one lazy item.
         if (list.layoutInfo.visibleItemsInfo.none { it.index == targetIndex }) scope.launch { list.animateScrollToItem(targetIndex) }
     }
-    LazyColumn(state = list, contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp),
+    LazyColumn(state = list, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier.testTag("places-list")) {
         item(key = "places-controls") {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Biriktirdiğin yerler", style = MaterialTheme.typography.headlineMedium)
-                Text("Bir kahve molası, bir manzara, bir anı.", color = Muted, style = MaterialTheme.typography.bodyMedium)
+                Text("Kayıtlı yerler", style = MaterialTheme.typography.headlineMedium)
                 OutlinedTextField(query, { query = it.take(256) }, Modifier.fillMaxWidth().testTag("places-search"),
-                    enabled = !sorting, placeholder = { Text("Günlüğünde yer ara") }, leadingIcon = { Icon(Icons.Outlined.Search, null) },
-                    singleLine = true, shape = RoundedCornerShape(18.dp))
+                    enabled = !sorting, label = { Text("Kayıtlı yer ara") }, leadingIcon = { Icon(Icons.Outlined.Search, null) },
+                    singleLine = true)
                 if (sorting) {
                     Text("Tutamacı sürükle veya okları kullan. Bu sıra rota noktası seçiminde de kullanılır.", style = MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -87,19 +98,32 @@ internal fun PlacesScreen(state: DiaryState, onPlace: (Place) -> Unit, onAdd: ()
                     }
                     if (state.places.map { it.id } != original) Text("Yer listesi değişti. Kaydetmeden önce iptal edip sıralamayı yeniden aç.", color = MaterialTheme.colorScheme.error)
                 } else {
-                    OutlinedButton(onClick = {
-                        original = state.places.map { it.id }; draft = original.orEmpty(); error = null
-                    }, enabled = query.isBlank() && state.places.size > 1, modifier = Modifier.testTag("places-sort")) {
-                        Icon(Icons.Outlined.Sort, null); Spacer(Modifier.width(8.dp)); Text("Sırala")
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = onAdd) {
+                            Icon(Icons.Outlined.Add, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Yeni yer")
+                        }
+                        OutlinedButton(onClick = {
+                            original = state.places.map { it.id }; draft = original.orEmpty(); error = null
+                        }, enabled = query.isBlank() && state.places.size > 1, modifier = Modifier.testTag("places-sort")) {
+                            Icon(Icons.Outlined.Sort, null); Spacer(Modifier.width(8.dp)); Text("Sırala")
+                        }
+                        onAddressSearch?.let { searchAddress ->
+                            TextButton(onClick = searchAddress) { Text("Adres ara") }
+                        }
                     }
                     if (query.isNotBlank()) Text("Sıralamak için aramayı temizle.", style = MaterialTheme.typography.bodySmall)
                 }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("places-sort-error")) }
-                if (visible.isEmpty()) Text(if (query.isBlank()) "Burada senin yerlerin olacak. Haritadan bir nokta seç veya bir yer kaydet." else "Aramana uygun yer bulunamadı.")
+                if (visible.isEmpty()) Text(
+                    if (query.isBlank()) "Henüz kayıtlı yer yok." else "Aramana uygun yer bulunamadı.",
+                    color = Muted,
+                )
             }
         }
         itemsIndexed(visible, key = { _, place -> place.id }) { index, place ->
-            Surface(shape = RoundedCornerShape(22.dp), color = Color.White,
+            Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLow,
                 modifier = Modifier.fillMaxWidth().testTag("place-row-${place.id}").then(if (sorting) Modifier else Modifier.clickable { onPlace(place) })) {
                 Row(Modifier.fillMaxWidth().padding(if (sorting) 8.dp else 18.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (sorting) PlaceOrderHandle(place, !saving, { move(place.id, it) })
@@ -107,15 +131,16 @@ internal fun PlacesScreen(state: DiaryState, onPlace: (Place) -> Unit, onAdd: ()
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
                         Text(place.name, style = MaterialTheme.typography.titleMedium)
-                        Text(if (sorting) "${index + 1}. sıra" else "${state.visits.count { it.placeId == place.id }} ziyaret · ${if (place.osmId == null) "Kişisel yer" else "OSM ile eşleşti"}",
+                        val aliases = shortcutsByPlace[place.id].orEmpty().map { it.kind.placeLabel() }
+                        Text(if (sorting) "${index + 1}. sıra" else (aliases + "${visitCounts[place.id] ?: 0} ziyaret").joinToString(" · "),
                             style = MaterialTheme.typography.bodySmall, color = Muted)
-                        if (!sorting && shortcutRouteStop(place) != null) Row {
-                            org.iz.navigation.data.DestinationShortcutKind.entries.forEach { kind ->
-                                val assigned = shortcuts.any { it.kind == kind && it.place.id == place.id }
+                        if (!sorting && shortcutRouteStop(place) != null) FlowRow {
+                            DestinationShortcutKind.entries.forEach { kind ->
+                                val assigned = shortcutsByPlace[place.id].orEmpty().any { it.kind == kind }
                                 TextButton(onClick = { onShortcut(kind, if (assigned) null else place) },
                                     modifier = Modifier.testTag("assign-${kind.name}-${place.id}")) {
-                                    Text(if (kind == org.iz.navigation.data.DestinationShortcutKind.HOME)
-                                        if (assigned) "Ev'i kaldır" else "Ev yap" else if (assigned) "İş'i kaldır" else "İş yap")
+                                    val label = kind.placeLabel()
+                                    Text(if (assigned) "$label kısayolunu kaldır" else "$label yap")
                                 }
                             }
                         }
@@ -129,8 +154,12 @@ internal fun PlacesScreen(state: DiaryState, onPlace: (Place) -> Unit, onAdd: ()
                 }
             }
         }
-        if (!sorting) item(key = "add-place") { Button(onClick = onAdd, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Add, null); Text("Bir yer kaydet") } }
     }
+}
+
+internal fun DestinationShortcutKind.placeLabel(): String = when (this) {
+    DestinationShortcutKind.HOME -> "Ev"
+    DestinationShortcutKind.WORK -> "İş"
 }
 
 @Composable

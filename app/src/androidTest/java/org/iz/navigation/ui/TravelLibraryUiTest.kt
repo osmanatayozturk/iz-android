@@ -1,5 +1,6 @@
 package org.iz.navigation.ui
 
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -7,7 +8,9 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.iz.navigation.data.*
 import org.iz.navigation.gpx.ImportedTrack
 import org.iz.navigation.gpx.TrackSegment
+import org.iz.navigation.weather.PlannedRoute
 import org.iz.navigation.weather.RouteStop
+import org.iz.navigation.weather.RouteVertex
 import org.iz.navigation.weather.WeatherCoordinate
 import org.junit.Assert.*
 import org.junit.Rule
@@ -42,6 +45,29 @@ class TravelLibraryUiTest {
         compose.runOnIdle { assertEquals("plan" to "Yeni ad", renamed) }
         compose.onNodeWithTag("open-track-track").performScrollTo().performClick()
         compose.runOnIdle { assertEquals(track, openedTrack) }
+    }
+
+    @Test fun preparedRouteOpensItsOwnPreviewAndBackReturnsToTheLibrary() {
+        val route = PlannedRoute("prepared", listOf(RouteStop("Başlangıç", a), RouteStop("Hedef", b)),
+            listOf(RouteVertex(a, 0.0), RouteVertex(b, 60.0)), 120.0, 60.0, 1L)
+        var dismissed = false
+        compose.setContent {
+            IzTheme {
+                TravelLibraryContent(emptyList(), emptyList(), {}, {}, { _, _ -> }, {}, { _, _ -> }, {},
+                    onDismiss = { dismissed = true },
+                    preparedRoute = PreparedLibraryRoute(route, "prepared-fingerprint", "Çevrimdışı harita hazır"),
+                    preparedMap = { shownRoute, modifier -> Text(shownRoute.id, modifier) })
+            }
+        }
+        compose.onNodeWithText("Hedef").assertIsDisplayed()
+        compose.onNodeWithTag("prepared-library-preview").assertDoesNotExist()
+        compose.onNodeWithTag("open-prepared-route").performClick()
+        compose.onNodeWithTag("prepared-library-preview").assertIsDisplayed()
+        compose.onNodeWithText("Çevrimdışı harita hazır").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Geri").performClick()
+        compose.onNodeWithText("Rotalarım").assertIsDisplayed()
+        compose.onNodeWithTag("open-prepared-route").assertIsDisplayed()
+        compose.runOnIdle { assertFalse(dismissed) }
     }
 
     @Test fun collectionSelectionExcludesActiveTemporaryAndExpiringJourneysAndOrdersTheRest() {

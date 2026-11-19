@@ -66,7 +66,11 @@ internal class WearPhoneBridge(private val context: Context) {
     @Volatile private var resumed = 0
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    private var unsubscribeAppearance: (() -> Unit)? = null
+
     fun initialize(application: Application) {
+        unsubscribeAppearance?.invoke()
+        unsubscribeAppearance = org.iz.navigation.ui.observePaletteChanges(context) { scope.launch { publish() } }
         scope.launch {
             // App-lifetime listener; no additional service or polling timer.
             // https://developers.google.com/android/reference/com/google/android/gms/wearable/CapabilityClient
@@ -201,6 +205,17 @@ internal class WearPhoneBridge(private val context: Context) {
             WearProtocol.isFreshCommand(it.command, System.currentTimeMillis()) }?.command
     }
 
+    suspend fun requestingWatchName(key: String): String? {
+        val source = mutex.withLock { store.get(key)?.source } ?: return null
+        return try {
+            withTimeoutOrNull(1_500) {
+                Wearable.getNodeClient(context).connectedNodes.await()
+                    .firstOrNull { it.id == source }?.displayName?.take(80)
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { null }
+    }
+
     suspend fun confirmOnPhone(key: String): WearResult = completePending(key, cancel = false)
     suspend fun cancelOnPhone(key: String): WearResult = completePending(key, cancel = true)
     private suspend fun completePending(key: String, cancel: Boolean): WearResult {
@@ -272,11 +287,13 @@ internal class WearPhoneBridge(private val context: Context) {
                 else -> state.label
             }
             return WearSnapshotFactory.deferred(active, now, TrackingService.runningJourneyId.takeIf { TrackingService.isRunning },
-                status, active?.let { app.weatherManager.wearWeather(it.id) }, navigation).copy(advisory = advisory)
+                status, active?.let { app.weatherManager.wearWeather(it.id) }, navigation).copy(advisory = advisory,
+                    paletteId = org.iz.navigation.ui.selectedPaletteId(context))
         }
         val entry = state.entries.values.filter { it.journey.endedAt != null }.maxByOrNull { it.journey.endedAt!! }
         // These values are already prepared. Never call snapshot()/journeyPoints()/healthSummaries here.
         return WearSnapshot(generatedAt = now, navigation = navigation, advisory = advisory,
+            paletteId = org.iz.navigation.ui.selectedPaletteId(context),
             daily = org.iz.navigation.health.DailyActivityManager.get(context).currentDataFlow.value,
             statisticsStatus = if (entry != null) "İstatistikler hazır" else "",
             completed = entry?.let { WearSnapshotFactory.completed(it.journey, it.stats, it.health, it.watch) })
@@ -410,7 +427,7 @@ internal class WearPhoneBridge(private val context: Context) {
         private const val MAX_PEERS = 32
         private val WATCH_CAPABILITIES = listOf(WearProtocol.WATCH_CAPABILITY, WearProtocol.V2_WATCH_CAPABILITY,
             WearProtocol.V3_WATCH_CAPABILITY, WearProtocol.V4_WATCH_CAPABILITY, WearProtocol.V5_WATCH_CAPABILITY,
-            WearProtocol.V6_WATCH_CAPABILITY, WearProtocol.V7_WATCH_CAPABILITY)
+            WearProtocol.V6_WATCH_CAPABILITY, WearProtocol.V7_WATCH_CAPABILITY, WearProtocol.V8_WATCH_CAPABILITY)
         private const val CHANNEL = "watch_start"
         private const val NOTIFICATION_ID = 4050
         fun get(context: Context): WearPhoneBridge = (context.applicationContext as org.iz.navigation.IzApplication).wearBridge

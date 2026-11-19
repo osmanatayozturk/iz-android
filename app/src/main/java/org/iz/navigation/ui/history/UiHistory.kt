@@ -7,7 +7,10 @@ import kotlin.properties.ReadWriteProperty
 import kotlin.reflect.KProperty
 
 enum class UiPage { MAP, JOURNEYS, JOURNEY, PLACES, PLACE, STATISTICS, COLLECTIONS, ROUTES,
-    DIRECTIONS, GPX, WEATHER, GROUP, COMMUNITY, CONTRIBUTIONS, MAP_EDITS, OSM_ACTIONS, OSM_SURVEY, SETTINGS, HEATMAP }
+    DIRECTIONS, GPX, WEATHER, GROUP, COMMUNITY, CONTRIBUTIONS, MAP_EDITS, OSM_ACTIONS, OSM_SURVEY, SETTINGS, HEATMAP, TRACK_MAP, JOURNEY_VISITS, JOURNEY_PHOTOS, JOURNEY_STATS, JOURNEY_REPORTS, PUBLIC_PLACE, COMPARISON }
+
+internal val journeyPages = setOf(UiPage.JOURNEY, UiPage.TRACK_MAP, UiPage.JOURNEY_VISITS, UiPage.JOURNEY_PHOTOS,
+    UiPage.JOURNEY_STATS, UiPage.JOURNEY_REPORTS)
 
 data class UiBrowseState(val query: String = "", val filter: String = "", val sort: String = "",
     val anchorId: String = "", val offset: Int = 0)
@@ -23,7 +26,7 @@ class UiHistory private constructor(initial: List<UiEntry>, private var next: Lo
     val current: UiEntry get() = mutableEntries.value.last()
     fun isRestoredEntry(key: String) = key in restoredKeys
     fun push(page: UiPage, entityId: String? = null, accountKey: String? = null): UiEntry {
-        require(entityId == null || entityId.length <= ID_LIMIT)
+        require(entityId == null || entityId.length <= ENTITY_ID_LIMIT)
         require(accountKey == null || accountKey.length <= ID_LIMIT)
         val entry = UiEntry("entry-${next++}", current.key, page, entityId, accountKey)
         val all = mutableEntries.value + entry
@@ -65,6 +68,7 @@ class UiHistory private constructor(initial: List<UiEntry>, private var next: Lo
         const val MAX_ENTRIES = 24
         private const val VERSION = 1
         private const val ID_LIMIT = 160
+        private const val ENTITY_ID_LIMIT = 200
         private const val TEXT_LIMIT = 256
         /** Unknown/legacy/malformed shape is a cold map, never a command to reconstruct old activity work. */
         fun restore(payload: Any?): UiHistory = runCatching {
@@ -79,7 +83,7 @@ class UiHistory private constructor(initial: List<UiEntry>, private var next: Lo
                 require(row.size == 10)
                 val strings = row.take(9).mapIndexed { index, value ->
                     (value as? String ?: error("Invalid entry field")).also {
-                        require(it.length <= if (index == 5) TEXT_LIMIT else ID_LIMIT)
+                        require(it.length <= when (index) { 3 -> ENTITY_ID_LIMIT; 5 -> TEXT_LIMIT; else -> ID_LIMIT })
                     }
                 }
                 val offset = row[9] as? Int ?: error("Invalid browse offset")

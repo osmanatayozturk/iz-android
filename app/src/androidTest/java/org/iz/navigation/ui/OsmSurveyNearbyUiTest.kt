@@ -78,6 +78,8 @@ class OsmSurveyNearbyUiTest {
         var refreshes = 0
         show(onRefresh = { refreshes++ }, onOpen = { opened += it })
         compose.onNodeWithText("Harita işareti 700").assertHasClickAction().performClick()
+        compose.onNodeWithTag("osm-survey-list-view").performClick()
+        compose.onNodeWithText("Harita işareti 700").assertDoesNotExist()
         val row = hasTestTag("osm-survey-venue-NODE-700")
         compose.onNodeWithTag("osm-survey-venues").performScrollToNode(row)
         compose.onAllNodes(row).assertCountEquals(1)

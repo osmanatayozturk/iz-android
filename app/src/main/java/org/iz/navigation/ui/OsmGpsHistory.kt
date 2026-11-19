@@ -18,18 +18,21 @@ internal fun ColumnScope.OsmGpsHistoryList(entries: List<OsmGpxHistoryEntry>, on
         entries.sortedWith(compareByDescending<OsmGpxHistoryEntry> { it.timestampMillis }.thenByDescending { it.id })
     }
     LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("osm-gps-history-list"),
-        contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        item { Text("Hesaba ait GPS izleri", style = MaterialTheme.typography.titleMedium) }
         if (ordered.isEmpty()) item { Text("Bu OSM hesabında yüklenmiş iz bulunamadı.") }
         items(ordered, key = { it.id }) { trace ->
-            OutlinedCard(onClick = { onOpen(trace) }, modifier = Modifier.fillMaxWidth()
+            Surface(onClick = { onOpen(trace) }, color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()
                 .heightIn(min = 48.dp).testTag("osm-gps-history-${trace.id}")) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(Modifier.padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(trace.fileName, style = MaterialTheme.typography.titleMedium)
                     Text(osmGpsDate(trace.timestampMillis), style = MaterialTheme.typography.bodySmall)
-                    if (trace.pending) Text("İşleniyor", style = MaterialTheme.typography.bodySmall)
-                    Text("OSM’de aç", color = MaterialTheme.colorScheme.primary)
+                    Text(if (trace.pending) "GPS izi · OSM'de işleniyor" else "GPS izi · Yüklendi",
+                        style = MaterialTheme.typography.bodySmall)
+                    Text("İz ayrıntısı ve görünürlük · OSM'de aç", color = MaterialTheme.colorScheme.primary)
                 }
             }
+            HorizontalDivider()
         }
     }
 }
@@ -44,11 +47,11 @@ internal fun ColumnScope.OsmGpsUnknownList(
     onRetry: (OsmGpxReceipt) -> Unit,
 ) {
     LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("osm-gps-unknown-list"),
-        contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (receipts.isEmpty()) item { Text("Kontrol bekleyen iz bulunamadı.") }
         items(receipts, key = { it.key.journeyId }) { receipt ->
-            OutlinedCard(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface) {
+                Column(Modifier.padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(receipt.key.fileName, style = MaterialTheme.typography.titleMedium)
                     Text("Gönderim sonucu doğrulanamadı. Yeniden göndermeden önce OSM’de kontrol et.",
                         Modifier.testTag("osm-gps-result-${receipt.key.journeyId}"), style = MaterialTheme.typography.bodySmall)
@@ -62,6 +65,7 @@ internal fun ColumnScope.OsmGpsUnknownList(
                     }
                 }
             }
+            HorizontalDivider()
         }
     }
 }

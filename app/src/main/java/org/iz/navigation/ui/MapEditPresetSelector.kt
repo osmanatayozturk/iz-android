@@ -5,6 +5,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -88,8 +89,10 @@ internal fun MapEditPresetSelector(
 ) {
     var open by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
+    var pendingId by rememberSaveable { mutableStateOf<String?>(null) }
     val selectedId = snapshot?.let { runCatching { OsmPresetRuleSnapshot.fromJson(it).presetId }.getOrNull() }
-    OutlinedButton(onClick = { open = true }, enabled = enabled && catalog != null,
+    val pendingPreset = catalog?.resolve(pendingId.orEmpty())?.takeIf { it.selectable && geometry in it.geometry && !it.requiresLocationValidation }
+    OutlinedButton(onClick = { pendingId = selectedId; open = true }, enabled = enabled && catalog != null,
         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("osm-map-type")) {
         Text(mapEditPresetLabel(snapshot) ?: "Tür seç")
     }
@@ -99,31 +102,36 @@ internal fun MapEditPresetSelector(
             catalog?.search(query, geometry, favoriteIds).orEmpty()
         }
         AlertDialog(onDismissRequest = { open = false },
-            title = { Text("Tür seç") },
+            title = { Text("Tür kataloğu ve favoriler") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(query, { query = it }, singleLine = true,
                         label = { Text("Tür ara") }, modifier = Modifier.fillMaxWidth())
                     if (results.isEmpty()) Text("Tür bulunamadı. Başka bir ad veya etiket dene.")
-                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 360.dp)) {
+                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 360.dp).testTag("osm-map-preset-results")) {
                         val favorites = results.filter { it.id in favoriteIds }
                         if (favorites.isNotEmpty()) item { Text("Favoriler", style = MaterialTheme.typography.titleSmall) }
                         items(favorites, key = { it.id }) { option ->
-                            PresetChoice(option, option.id == selectedId, true, enabled,
-                                { onSelect(requireNotNull(catalog).snapshot(option.id, geometry)); open = false },
+                            PresetChoice(option, option.id == pendingId, true, enabled,
+                                { pendingId = option.id },
                                 { onFavorite(option.id, false) })
                         }
                         val others = results.filterNot { it.id in favoriteIds }
-                        if (favorites.isNotEmpty() && others.isNotEmpty()) item { Text("Diğer türler", style = MaterialTheme.typography.titleSmall) }
+                        if (others.isNotEmpty()) item { Text("Tüm özellik türleri", style = MaterialTheme.typography.titleSmall) }
                         items(others, key = { it.id }) { option ->
-                            PresetChoice(option, option.id == selectedId, false, enabled,
-                                { onSelect(requireNotNull(catalog).snapshot(option.id, geometry)); open = false },
+                            PresetChoice(option, option.id == pendingId, false, enabled,
+                                { pendingId = option.id },
                                 { onFavorite(option.id, true) })
                         }
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { open = false }) { Text("Kapat") } })
+            confirmButton = { TextButton(enabled = enabled && pendingPreset != null, onClick = {
+                val selected = pendingPreset?.id ?: return@TextButton
+                onSelect(requireNotNull(catalog).snapshot(selected, geometry))
+                open = false
+            }, modifier = Modifier.testTag("osm-map-preset-use")) { Text("Türü kullan") } },
+            dismissButton = { TextButton(onClick = { open = false }) { Text("Kapat") } })
     }
 }
 
@@ -133,7 +141,11 @@ private fun PresetChoice(option: OsmPresetDefinition, chosen: Boolean, favorite:
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         TextButton(onClick = onChoose, enabled = enabled,
             modifier = Modifier.weight(1f).heightIn(min = 48.dp).semantics { selected = chosen }) {
-            Text(if (chosen) "✓ ${option.name}" else option.name)
+            if (chosen) {
+                Icon(Icons.Filled.Check, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+            }
+            Text(option.name)
         }
         IconToggleButton(checked = favorite, onCheckedChange = { onFavorite() }, enabled = enabled,
             modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).semantics {

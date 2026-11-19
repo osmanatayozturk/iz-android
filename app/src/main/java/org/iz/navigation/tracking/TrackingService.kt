@@ -27,6 +27,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.withLock
 import org.iz.navigation.power.PostJourneyAnalysis
 import org.iz.navigation.power.PowerDiagnostics
+import org.iz.navigation.lean.LiveLeanCapture
 import org.iz.navigation.lean.LeanCaptureController
 import org.iz.navigation.lean.LeanSettingsStore
 import kotlinx.coroutines.flow.combine
@@ -67,6 +68,7 @@ class TrackingService : Service() {
                         val now = System.currentTimeMillis()
                         for (location in result.locations.sortedBy { it.time }) {
                             if (location.time < session.startedAt) continue
+                            LiveLeanCapture.accept(session.id, location)
                             val accepted = sessionFilter.accept(PositionSample(location.latitude, location.longitude, location.time,
                                 if (location.hasAccuracy()) location.accuracy else Float.POSITIVE_INFINITY,
                                 if (location.hasSpeed()) location.speed else null), now) ?: continue
@@ -90,6 +92,8 @@ class TrackingService : Service() {
                     for (location in result.locations.sortedBy { it.time }) {
                         leanCapture.onLocation(journey.id, location)
                         if (location.time < journey.startedAt) continue
+                        val nav = (applicationContext as org.iz.navigation.IzApplication).navigation.state.value
+                        if (nav.journey?.id == journey.id || nav.sessionId == journey.id) LiveLeanCapture.accept(nav.sessionId, location)
                         if (TrackingPolicy.automaticCandidateDeadline(journey)?.let { location.time >= it } == true) continue
                         val sample = PositionSample(
                             location.latitude, location.longitude, location.time,
@@ -152,6 +156,14 @@ class TrackingService : Service() {
             settings.lastError = "Konum servisi açılamadı. Konum izinlerini kontrol edip uygulama içinden başlat."
             stopSelf()
             return
+        }
+        scope.launch {
+            LiveLeanCapture.demand.collect {
+                TrackingCoordinator.mutex.withLock {
+                    val current = runningJourneyId?.let { repository.getJourney(it) }
+                    if (!destroyed && (current != null || sessionDemand != null)) syncLocationDemand(current)
+                }
+            }
         }
         scope.launch {
             LeanSettingsStore.get(this@TrackingService).state.combine(repository.journeys) { _, trips -> trips }
@@ -361,7 +373,7 @@ class TrackingService : Service() {
             stopSelf()
             return
         }
-        val high = leanCapture.captures(journey?.id) || session?.highFrequency == true || navigationJourneyId == journey?.id && journey != null && journey.status == JourneyStatus.CONFIRMED
+        val high = LiveLeanCapture.demand.value != null || leanCapture.captures(journey?.id) || session?.highFrequency == true || navigationJourneyId == journey?.id && journey != null && journey.status == JourneyStatus.CONFIRMED
         val interval = if (high) 1000L else 5000L
         // Notification ownership changes even when cadence does not.
         if (journey == null) updateSessionNotification()

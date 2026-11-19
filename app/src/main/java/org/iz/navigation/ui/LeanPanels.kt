@@ -10,6 +10,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -31,7 +34,11 @@ import kotlin.math.roundToInt
 internal fun LeanSetupPanel(onMessage: (String) -> Unit) {
     val app = LocalContext.current.applicationContext
     val settings = remember(app) { LeanSettingsStore.get(app) }
+    val liveDisplay = remember(app) { LiveLeanDisplaySettings.get(app) }
+    val liveEnabled by liveDisplay.enabled.collectAsStateWithLifecycle()
     val config by settings.state.collectAsStateWithLifecycle()
+    val liveOptionVisible = LiveLeanGate.allows(LeanMount.BODY) || LiveLeanGate.allows(LeanMount.HANDLEBAR)
+    val liveAllowed = LiveLeanGate.allows(config.mount)
     val scope = rememberCoroutineScope()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var upright by remember { mutableStateOf(false) }
@@ -49,23 +56,38 @@ internal fun LeanSetupPanel(onMessage: (String) -> Unit) {
     }
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Motosiklet · Deneysel yatış raporu", style = MaterialTheme.typography.titleLarge)
-            Text("Rapor sürüş bittikten sonra hazırlanır. Canlı yatış göstergesi değildir; doğruluk garantisi vermez.")
-            Row { Text("Ölçüm için sensör verisi kaydet", Modifier.weight(1f)); Switch(config.enabled,
-                { enabled -> cancel(); save { settings.enabled(enabled) } }) }
-            if (config.enabled) {
+            Text("Motosiklet montajı ve kalibrasyon", Modifier.semantics { heading() }, style = MaterialTheme.typography.titleLarge)
+            Text("Kalibrasyonu park hâlinde yap. Yatış tahmini deneysel bir ölçümdür.")
+            Row(Modifier.heightIn(min = 48.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text("Sürüş sonrası rapor için sensör verisi kaydet", Modifier.weight(1f))
+                Switch(config.enabled, { enabled -> cancel(); save { settings.enabled(enabled) } },
+                    modifier = Modifier.semantics { contentDescription = "Yatış raporu için sensör verisi kaydet" })
+            }
+            if (config.enabled || liveOptionVisible) {
                 Text("Telefonun bağlantısı", style = MaterialTheme.typography.titleMedium)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf(LeanMount.UNKNOWN to "Belirsiz", LeanMount.HANDLEBAR to "Gidon", LeanMount.BODY to "Gövde").forEach { (mount, label) ->
                         FilterChip(config.mount == mount, { cancel(); upright = false; save { settings.mount(mount) } }, { Text(label) })
                     }
                 }
+            }
+            if (liveOptionVisible) {
+                Row(Modifier.heightIn(min = 48.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Text("Canlı tahmin", Modifier.weight(1f))
+                    Switch(liveEnabled && liveAllowed, { enabled -> cancel(); liveDisplay.setEnabled(enabled) },
+                        enabled = liveAllowed,
+                        modifier = Modifier.testTag("live-lean-setting").semantics { contentDescription = "Canlı yatış tahmini" })
+                }
+                if (!liveAllowed) Text("Canlı tahmin için gidon veya gövde montajını seç.", style = MaterialTheme.typography.bodySmall)
+            }
+            if (config.enabled || liveEnabled && liveAllowed) {
                 if (config.mount == LeanMount.HANDLEBAR && HandlebarLeanGate.enabled) {
                     HandlebarCalibrationControl(
                         hasProfile = validHandlebarReference(config.calibration),
                         canCalibrate = {
                             val live = settings.state.value
-                            HandlebarLeanGate.enabled && live.enabled && live.mount == LeanMount.HANDLEBAR
+                            HandlebarLeanGate.enabled && live.mount == LeanMount.HANDLEBAR &&
+                                (live.enabled || LiveLeanGate.allows(live.mount) && liveDisplay.enabled.value)
                         },
                         onSave = { profile ->
                             settings.reference(profile)
@@ -84,7 +106,8 @@ internal fun LeanSetupPanel(onMessage: (String) -> Unit) {
                         calibrationJob = scope.launch {
                             try {
                                 val reference = LeanSensorCapture.calibrate(app)
-                                if (reference != null && generation == calibrationGeneration && settings.state.value.enabled &&
+                                if (reference != null && generation == calibrationGeneration &&
+                                    (settings.state.value.enabled || LiveLeanGate.allows(LeanMount.BODY) && liveDisplay.enabled.value) &&
                                     settings.state.value.mount == LeanMount.BODY && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
                                     settings.reference(reference)
                                     onMessage("Dik referans kaydedildi. Eksen uygunluğu sürüş sonrası doğrulanacak.")
@@ -100,7 +123,10 @@ internal fun LeanSetupPanel(onMessage: (String) -> Unit) {
                         TextButton(onClick = { cancel(); upright = false; save { settings.clearCalibration() } }) { Text("Bağlantı değişti · Referansı sıfırla") }
                     }
                 }
-                Text("Yalnız onaylanmış motosiklet kaydında ölçülür. Ayrıntılı analiz, kayıt ve navigasyon kapalıyken pil en az %20 olduğunda yapılır. Ham veri sınırı dolarsa sensör ölçümü durur; GPS kaydı devam eder.", style = MaterialTheme.typography.bodySmall)
+                if (config.enabled) Text(
+                    "Rapor için yalnız onaylanmış motosiklet kaydında ölçülür. Ayrıntılı analiz, kayıt ve navigasyon kapalıyken pil en az %20 olduğunda yapılır. Ham veri sınırı dolarsa sensör ölçümü durur; GPS kaydı devam eder.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
         }
     }
@@ -140,6 +166,7 @@ internal fun LeanJourneyReportPanel(journey: Journey) {
 private fun LeanReportSection(journey: Journey, report: LeanJourneyReport, title: String?, description: String,
     mountLabel: String, reportTag: String) {
     var curves by remember { mutableStateOf(false) }
+    var coverage by remember { mutableStateOf(false) }
     if (title != null) Text(title, style = MaterialTheme.typography.titleMedium)
     Text(description, Modifier.testTag(reportTag), style = MaterialTheme.typography.bodySmall)
     if (journey.endedAt == null) Text("Rapor yolculuk bittikten sonra hazırlanır.")
@@ -163,10 +190,17 @@ private fun LeanReportSection(journey: Journey, report: LeanJourneyReport, title
             }
         }
     }
-    if (journey.endedAt != null && !report.pending) {
-        Text("Geçerli kapsam ${report.validMillis / 1000} sn / gözlenen ${report.observedMillis / 1000} sn", style = MaterialTheme.typography.bodySmall)
+    val completed = journey.endedAt != null && !report.pending
+    if (completed || report.partialReasons.isNotEmpty()) {
+        TextButton(onClick = { coverage = !coverage }, modifier = Modifier.testTag("$reportTag-coverage")) {
+            Text(if (coverage) "Ölçüm kapsamını gizle" else "Ölçüm kapsamı ve sınırlamalar")
+        }
+        if (coverage) {
+            if (completed) Text("Geçerli kapsam ${report.validMillis / 1000} sn / gözlenen ${report.observedMillis / 1000} sn",
+                style = MaterialTheme.typography.bodySmall)
+            report.partialReasons.map(::leanPartialLabel).distinct().forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+        }
     }
-    report.partialReasons.map(::leanPartialLabel).distinct().forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
 }
 
 private fun leanPartialLabel(reason: String): String {

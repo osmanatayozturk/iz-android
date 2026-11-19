@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -156,7 +157,7 @@ internal fun OsmSurveyScreen(repository: DiaryRepository, onClose: () -> Unit, o
     val visible = surveyVisibleSnapshot(snapshot, drafts, accountId)
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("Yerinde tamamla", Modifier.weight(1f).padding(vertical = 12.dp).semantics { heading() },
+            Text("Yerinde tamamlama görevleri", Modifier.weight(1f).padding(vertical = 12.dp).semantics { heading() },
                 style = MaterialTheme.typography.headlineSmall)
             TextButton(onClick = onClose, modifier = Modifier.heightIn(min = 48.dp)) { Text("Geri") }
         }
@@ -201,9 +202,10 @@ internal fun OsmSurveyNearbyContent(
     },
 ) {
     val venues = snapshot?.venues.orEmpty().filter { it.tasks(today).isNotEmpty() }
+    var showMap by rememberSaveable { mutableStateOf(true) }
     Column(Modifier.fillMaxSize().testTag("osm-survey-nearby")) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-            Text("1 km içindeki yerler", Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.titleMedium)
+            Text("1 km çevrede görevler · ${venues.size} mekân", Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.titleMedium)
             TextButton(onClick = onRefresh, enabled = !loading, modifier = Modifier.heightIn(min = 48.dp)
                 .testTag(if (error == null) "osm-survey-refresh" else "osm-survey-retry")) {
                 Text(if (error == null) "Yenile" else "Yeniden dene")
@@ -217,7 +219,13 @@ internal fun OsmSurveyNearbyContent(
                 style = MaterialTheme.typography.bodySmall)
         }
         error?.let { Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error) }
-        mapContent(venues, onOpen)
+        Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(selected = !showMap, onClick = { showMap = false }, label = { Text("Liste") },
+                modifier = Modifier.heightIn(min = 48.dp).testTag("osm-survey-list-view"))
+            FilterChip(selected = showMap, onClick = { showMap = true }, label = { Text("Harita") },
+                modifier = Modifier.heightIn(min = 48.dp).testTag("osm-survey-map-view"))
+        }
+        if (showMap) mapContent(venues, onOpen)
         LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("osm-survey-venues"),
             contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (venues.isEmpty()) item { Text(if (snapshot == null) "Konum alıp yakındaki yerleri yenileyebilirsin." else "Yakında kontrol bekleyen yer bulunamadı.") }

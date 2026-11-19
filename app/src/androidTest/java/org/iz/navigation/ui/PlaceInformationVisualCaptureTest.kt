@@ -32,6 +32,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.*
@@ -123,14 +127,18 @@ class PlaceInformationVisualCaptureTest {
                         PublicCard(true, Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp))
                     }
                     1 -> {
-                        val scroll = rememberLazyListState()
-                        SideEffect { list.set(scroll) }
+                        var public by remember { mutableStateOf(false) }
+                        val personalScroll = rememberLazyListState()
+                        val publicScroll = rememberLazyListState()
+                        SideEffect { list.set(publicScroll) }
                         val place = Place(id = "00000000-0000-4000-8000-000000001001", name = PRIVATE_NAME,
                             osmType = OsmType.NODE, osmId = 1001, source = PlaceSource.OSM)
                         PlaceDetail(place, DiaryState(places = listOf(place)), noAction, noAction, noAction,
                             noAction, noAction, { noAction() }, { noAction() }, { noAction() }, noAction,
                             { noAction() }, { noAction() }, { noAction() }, onSurvey = noAction,
-                            publicInformation = { PublicCard() }, listState = scroll)
+                            publicInformation = { PublicCard() },
+                            listState = if (public) publicScroll else personalScroll,
+                            isPublicPage = public, onOpenPublic = { public = true })
                     }
                     2 -> PlaceInformationHoursDetail(BasicPlaceOpeningHours.evaluate(HOURS, instant, zone.zone),
                         zone, onClose = noAction)
@@ -172,16 +180,16 @@ class PlaceInformationVisualCaptureTest {
             active.onActivity { it.setContent { Frame(index) } }
             compose.waitForIdle()
             if (index == 1) {
-                var height = 0; var density = 0f
-                active.onActivity { height = it.window.decorView.height; density = it.resources.displayMetrics.density }
-                // Real LazyColumn scroll; keep the personal boundary near the bottom of its actual viewport.
-                val state = checkNotNull(list.get())
-                instrumentation.runOnMainSync {
-                    runBlocking { state.scrollToItem(1, -(height - (190 * density).toInt()).coerceAtLeast(0)) }
-                }
-                compose.waitForIdle()
                 compose.onNodeWithText(PRIVATE_NAME).assertIsDisplayed()
                 compose.onNodeWithText("Kişisel yer günlüğü", useUnmergedTree = true).assertIsDisplayed()
+                compose.onNodeWithTag("place-information-card").assertDoesNotExist()
+                val publicLink = hasText("OSM yer bilgisi") and hasClickAction()
+                compose.onNode(hasScrollToIndexAction()).performScrollToNode(publicLink)
+                compose.onNode(publicLink).assertIsDisplayed().performClick()
+                compose.onNodeWithTag("place-information-card").assertExists()
+                compose.onNodeWithText(PRIVATE_NAME).assertDoesNotExist()
+                compose.onNodeWithTag("place-info-contribute").performScrollTo()
+                metadata.put("publicPageOpenedFromPersonalFixture", true)
             }
             if (index == 3) {
                 compose.onNodeWithTag("place-info-zone-input").performTextInput("Istanbul")
@@ -216,8 +224,6 @@ class PlaceInformationVisualCaptureTest {
                 geometry.put(probe("public-source", compose.onNodeWithText("node 1001", substring = true)))
             }
             if (index == 1) {
-                geometry.put(probe("personal-heading", compose.onNodeWithText("Kişisel yer günlüğü", useUnmergedTree = true)))
-                geometry.put(probe("personal-name", compose.onNodeWithText(PRIVATE_NAME)))
                 compose.runOnIdle { metadata.put("lazyScrollIndex", list.get()!!.firstVisibleItemIndex)
                     .put("lazyScrollOffsetPx", list.get()!!.firstVisibleItemScrollOffset) }
             }

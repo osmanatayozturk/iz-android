@@ -52,11 +52,20 @@ fun TrafficSettingsDialog(onDismiss: () -> Unit) {
         title = { Text("Trafik ve hız sınırı") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("TomTom", style = MaterialTheme.typography.titleMedium)
+                Text(when {
+                    busy -> "Sağlayıcı ayarları okunuyor…"
+                    !current.hasKey -> "Bağlantı bilgisi eklenmedi"
+                    !current.enabled -> "Kayıtlı bağlantı · Trafik kapalı"
+                    else -> "Kayıtlı bağlantı · Trafik açık"
+                }, style = MaterialTheme.typography.bodySmall)
+                Text("Desteklenen özellikler", style = MaterialTheme.typography.titleSmall)
                 Text("TomTom otomobil ve yolcu rotalarında trafiği hesaba katar. Motosiklet yönlendirmesi beta; bölgesel kısıtlama bilgisi eksik olabilir.")
                 Text("Hareket saati seçenekleri bir temel rotadan yaklaşık hesaplanır. Seçtiğin saatin rotası ayrıca doğrulanır. Yürüyüş, koşu ve bisiklet Valhalla kullanır.")
                 TextButton(onClick = { uriHandler.openUri("https://docs.tomtom.com/pricing") }) { Text("Ücretsiz plan ve güncel sınırlar") }
                 TextButton(onClick = { uriHandler.openUri("https://my.tomtom.com/") }) { Text("TomTom hesabı ve API erişimi") }
                 TextButton(onClick = { uriHandler.openUri("https://docs.tomtom.com/legal/terms-and-conditions") }) { Text("TomTom kullanım koşulları") }
+                Text("Bağlantı bilgileri", style = MaterialTheme.typography.titleSmall)
                 OutlinedTextField(
                     value = key, onValueChange = {
                         key = it.take(256)

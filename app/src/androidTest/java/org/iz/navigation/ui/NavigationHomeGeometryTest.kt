@@ -129,7 +129,7 @@ class NavigationHomeGeometryTest {
             val attribution = compose.onNodeWithText("© OpenStreetMap contributors").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
             listOf(left, right).forEach { slot ->
                 assertFalse(slot.overlaps(attribution))
-                listOf("directions-recenter", "home-record", "home-group", "home-menu").forEach { tag ->
+                listOf("directions-recenter", "home-record", "home-menu").forEach { tag ->
                     compose.onNodeWithTag(tag).assertIsDisplayed()
                     assertFalse("A shortcut covers $tag", slot.overlaps(bounds(tag)))
                 }
@@ -240,7 +240,13 @@ class NavigationHomeGeometryTest {
         val attribution = compose.onNodeWithText("© OpenStreetMap contributors").fetchSemanticsNode().boundsInRoot
         assertTrue("Brand must finish above search", brand.bottom <= search.top)
         assertFalse("Weather covers map attribution", weather.overlaps(attribution))
-        listOf("directions-recenter", "home-record", "home-group", "home-menu").forEach { tag ->
+        val record = compose.onNodeWithTag("home-record").assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
+            .fetchSemanticsNode().boundsInRoot
+        val menu = compose.onNodeWithTag("home-menu").assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
+            .fetchSemanticsNode().boundsInRoot
+        assertEquals(record.width, menu.width, 1f)
+        assertEquals(record.height, menu.height, 1f)
+        listOf("directions-recenter", "home-record", "home-menu").forEach { tag ->
             compose.onNodeWithTag(tag).assertIsDisplayed()
             val control = compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
             assertTrue("$tag must remain within the home viewport", home.contains(control.topLeft) && home.contains(control.bottomRight - androidx.compose.ui.geometry.Offset(1f, 1f)))
@@ -250,7 +256,7 @@ class NavigationHomeGeometryTest {
         }
         listOf("directions-recenter").forEach { mapTag ->
             val mapControl = compose.onNodeWithTag(mapTag).fetchSemanticsNode().boundsInRoot
-            listOf("home-record", "home-group", "home-menu").forEach { actionTag ->
+            listOf("home-record", "home-menu").forEach { actionTag ->
                 val action = compose.onNodeWithTag(actionTag).fetchSemanticsNode().boundsInRoot
                 assertFalse("$mapTag covers $actionTag", mapControl.overlaps(action))
             }

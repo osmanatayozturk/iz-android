@@ -269,6 +269,16 @@ internal class WeatherPlannerCoordinator(
         setStops(stops.filterIndexed { candidate, _ -> candidate != index })
     }
 
+    fun moveVia(from: Int, to: Int) {
+        val snapshot = mutableState.value
+        val vias = 1 until snapshot.stops.lastIndex
+        if (snapshot.starting || from !in vias || to !in vias || from == to) return
+        val reordered = snapshot.stops.toMutableList()
+        val stop = reordered.removeAt(from)
+        reordered.add(to, stop)
+        setStops(reordered)
+    }
+
     fun setDeparture(value: Long) {
         if (mutableState.value.starting) return
         generation++
@@ -303,6 +313,42 @@ internal class WeatherPlannerCoordinator(
 
     fun selectDeparture(value: Long) {
         verifyDeparture(value, trafficFree = false)
+    }
+
+    fun retrySelectedWeather() {
+        refreshCredentials()
+        val snapshot = mutableState.value
+        val route = snapshot.route ?: return
+        val requestedAt = snapshot.selectedDepartureAt ?: return
+        if (snapshot.starting || snapshot.busy || snapshot.ordering || snapshot.loadingAlternatives) return
+        val departure = snapshot.effectiveDepartureAt ?: route.effectiveDepartureAt ?: requestedAt
+        val token = ++generation
+        val revision = services.credentialRevision()
+        val storedSettings = services.readSettings(snapshot.transport)
+        selectionJob?.cancel()
+        mutableState.value = snapshot.copy(busy = true, error = null)
+        selectionJob = scope.launch {
+            try {
+                requireRequestSettings(snapshot, storedSettings)
+                val coordinates = WeatherEngine.sampleVertices(route).map { it.coordinate }
+                val until = RouteTravelTime.plannedArrival(RouteSchedule.planned(route, departure).arrivalAt, 3_600.0)
+                val forecasts = services.weatherProvider(snapshot.settings).hourly(coordinates,
+                    (departure - 3_600_000L).coerceAtLeast(0L), until)
+                val assessment = WeatherEngine.assess(route, departure, forecasts, snapshot.settings.thresholds)
+                if (token != generation) return@launch
+                requireRequestSettings(snapshot, storedSettings)
+                if (revision != services.credentialRevision()) { refreshCredentials(); return@launch }
+                commitDeparture(requestedAt, WeatherDepartureBundle(route, forecasts, assessment, services.clock()))
+            } catch (cancelled: CancellationException) {
+                refreshCredentials()
+                throw cancelled
+            } catch (_: Exception) {
+                if (token == generation) mutableState.value = mutableState.value.copy(
+                    error = "Tahmin alınamadı. Seçilen kalkış ve rota korunuyor.")
+            } finally {
+                if (token == generation) mutableState.value = mutableState.value.copy(busy = false)
+            }
+        }
     }
 
     fun continueTrafficFree() {
@@ -758,9 +804,11 @@ internal class WeatherPlannerViewModel(application: Application) : AndroidViewMo
     fun setCurrentOrigin(value: WeatherCoordinate) = coordinator.setCurrentOrigin(value)
     fun addVia(stop: RouteStop) = coordinator.addVia(stop)
     fun removeStop(index: Int) = coordinator.removeStop(index)
+    fun moveVia(from: Int, to: Int) = coordinator.moveVia(from, to)
     fun setDeparture(value: Long) = coordinator.setDeparture(value)
     fun departNow() = coordinator.departNow()
     fun selectDeparture(value: Long) = coordinator.selectDeparture(value)
+    fun retrySelectedWeather() = coordinator.retrySelectedWeather()
     fun continueTrafficFree() = coordinator.continueTrafficFree()
     fun refreshCredentials() = coordinator.refreshCredentials()
     fun suggestStopOrder() = coordinator.suggestStopOrder()

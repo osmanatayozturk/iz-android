@@ -4,9 +4,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
@@ -166,10 +168,13 @@ internal fun MapEditCorrectionEditor(
         latitude = initial.latitude, longitude = initial.longitude, osmType = ref.type, osmId = ref.id)
     Dialog(onDismissRequest = { if (!locked) { if (review != null) clearReview() else exit(onClose) } },
         properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnBackPress = !locked, dismissOnClickOutside = !locked)) {
-        Surface(Modifier.padding(16.dp).widthIn(max = 560.dp).fillMaxWidth(), shape = MaterialTheme.shapes.extraLarge, tonalElevation = 6.dp) {
+        Surface(Modifier.fillMaxSize().systemBarsPadding().imePadding(), color = MaterialTheme.colorScheme.background) {
             Column(Modifier.verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(if (activeReview == null) "OSM mekânını düzelt" else "OSM'de yayımlamadan önce", style = MaterialTheme.typography.headlineSmall)
-                Text("OSM ${ref.type.apiName()}/${ref.id}")
+                OsmEditorHeading(if (activeReview == null) "Mevcut mekânı düzelt" else "OSM gönderim önizlemesi", !locked) {
+                    if (review != null) clearReview() else exit(onClose)
+                }
+                Text("Seçili OSM nesnesi", style = MaterialTheme.typography.labelLarge)
+                Text("OSM ${ref.type.apiName()}/${ref.id} · sürüm ${current?.version ?: "bekleniyor"}")
                 (error ?: authError)?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 rebaseNotice?.let { Text(it) }
                 OutlinedButton(enabled = !locked && availableCatalog != null, modifier = Modifier.fillMaxWidth()
@@ -231,6 +236,8 @@ internal fun MapEditCorrectionEditor(
                 } else if (unsupported) {
                     Text("Bu OSM nesnesinin geometrisi İz'de düzenlenemiyor. OSM düzenleyicisini kullan.")
                 } else {
+                    Text("Mevcut tür: ${mapEditPresetLabel(originalSnapshot) ?: "Tanımlanamayan tür"}",
+                        style = MaterialTheme.typography.bodyMedium)
                     if (base.legacyAddressIntent) {
                         Text("Eski taslaktaki adres değişiklikleri korunuyor ve önce/sonra listesinde gösterilecek.")
                         if (base.street.isNotBlank()) Text("addr:street: ${base.street}")

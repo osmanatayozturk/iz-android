@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -31,6 +32,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -46,6 +48,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
@@ -62,7 +65,10 @@ import org.iz.navigation.data.SelectedOsmPlace
 import org.iz.navigation.data.Transport
 import org.iz.navigation.ui.history.rememberUiEditExit
 import org.iz.navigation.integration.FullscreenMapDialog
+import org.iz.navigation.integration.MapPlaceCandidate
+import org.iz.navigation.integration.OsmPlaces
 import org.iz.navigation.integration.WeatherRouteMap
+import org.iz.navigation.integration.rankMapCandidates
 import org.iz.navigation.weather.RideWeatherSettings
 import org.iz.navigation.weather.RoutePreferences
 import org.iz.navigation.navigation.trackReplacementKey
@@ -78,6 +84,7 @@ import com.google.android.gms.tasks.CancellationTokenSource
 import java.util.Calendar
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -158,7 +165,10 @@ private fun WeatherPlannerScreenContent(
             target == 0 -> {
                 if (state.stops.isEmpty()) vm.setStops(listOf(stop)) else vm.setStop(0, stop)
             }
-            target in 1 until state.stops.lastIndex -> vm.setStop(target, stop)
+            target in 1 until state.stops.lastIndex -> {
+                val breakSeconds = state.stops[target].plannedBreakSeconds
+                vm.setStop(target, stop.copy(plannedBreakSeconds = breakSeconds))
+            }
             else -> localError = "Önce başlangıç noktasını seç."
         }
     }
@@ -338,6 +348,7 @@ private fun WeatherPlannerScreenContent(
             },
             useCurrentOrigin = { requestLocation(WeatherLocationAction.ORIGIN) },
             removeStop = vm::removeStop,
+            moveVia = vm::moveVia,
             setPlannedBreakMinutes = vm::setPlannedBreakMinutes,
             addVia = {
                 if (state.stops.size in 2 until MAX_PLANNED_STOPS) {
@@ -350,6 +361,7 @@ private fun WeatherPlannerScreenContent(
             departNow = vm::departNow,
             calculate = { vm.calculate() },
             selectDeparture = vm::selectDeparture,
+            retrySelectedWeather = vm::retrySelectedWeather,
             continueTrafficFree = vm::continueTrafficFree,
             suggestStopOrder = { vm.suggestStopOrder() },
             acceptStopOrder = vm::acceptStopOrder,
@@ -406,11 +418,12 @@ private fun WeatherPlannerScreenContent(
             },
             onSearch = { showStopPicker = false; showSearch = true },
             onMap = { showStopPicker = false; showMapPicker = true },
+            title = weatherStopPickerTitle(pickerTarget),
         )
     }
     if (showSearch) {
         OsmSearchDialog(
-            onDismiss = { showSearch = false },
+            onDismiss = { showSearch = false; showStopPicker = true },
             onSelect = { value ->
                 applyStop(pickerTarget, value.routeStop())
                 showSearch = false
@@ -418,31 +431,14 @@ private fun WeatherPlannerScreenContent(
         )
     }
     if (showMapPicker) {
-        FullscreenMapDialog(
-            title = "Haritadan nokta seç",
-            onDismiss = { showMapPicker = false },
-            bottomBar = {
-                Text(
-                    "Noktayı seçmek için haritaya uzun bas.",
-                    modifier = Modifier.padding(16.dp),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+        WeatherStopMapPicker(
+            title = weatherStopPickerTitle(pickerTarget),
+            onDismiss = { showMapPicker = false; showStopPicker = true },
+            onChoose = { stop ->
+                applyStop(pickerTarget, stop)
+                showMapPicker = false
             },
-        ) { mapModifier ->
-            WeatherRouteMap(
-                route = null,
-                assessment = null,
-                modifier = mapModifier,
-                expandable = false,
-                onMapLongClick = { value ->
-                    applyStop(
-                        pickerTarget,
-                        RouteStop("Harita noktası", WeatherCoordinate(value.latitude, value.longitude)),
-                    )
-                    showMapPicker = false
-                },
-            )
-        }
+        )
     }
     if (showSettings) {
         key(state.transport, state.settings) {
@@ -473,11 +469,14 @@ internal fun WeatherStopSourceDialog(
     onSaved: (Place) -> Unit,
     onSearch: () -> Unit,
     onMap: () -> Unit,
+    title: String = "Durak ve kaynak seçimi",
 ) {
     val located = places.filter { it.latitude != null && it.longitude != null }
+    var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    val selected = located.firstOrNull { it.id == selectedId }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Rota noktası seç") },
+        title = { Text(title) },
         text = {
             Column(
                 Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
@@ -490,15 +489,89 @@ internal fun WeatherStopSourceDialog(
                     Text("Koordinatı olan kayıtlı yer bulunmuyor.", color = Muted)
                 }
                 located.forEach { place ->
-                    TextButton(onClick = { onSaved(place) }, modifier = Modifier.fillMaxWidth()) {
-                        Text(place.name, modifier = Modifier.fillMaxWidth())
+                    OutlinedButton(onClick = { selectedId = place.id }, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (place.id == selectedId) "${place.name} · Seçildi" else place.name,
+                            modifier = Modifier.fillMaxWidth())
                     }
                 }
             }
         },
-        confirmButton = {},
+        confirmButton = {
+            Button(onClick = { selected?.let(onSaved) }, enabled = selected != null) { Text("Durağı kullan") }
+        },
         dismissButton = { TextButton(onDismiss) { Text("Vazgeç") } },
     )
+}
+
+private fun weatherStopPickerTitle(target: Int): String = when (target) {
+    0 -> "Başlangıç noktasını seç"
+    WEATHER_TARGET_DESTINATION -> "Varış noktasını seç"
+    WEATHER_TARGET_NEW_VIA -> "Yeni ara durak seç"
+    else -> "$target. ara durağı seç"
+}
+
+@Composable
+internal fun WeatherStopMapPicker(title: String, onDismiss: () -> Unit, onChoose: (RouteStop) -> Unit) {
+    val context = LocalContext.current
+    val places = remember(context) { OsmPlaces(context) }
+    var selected by remember { mutableStateOf<RouteStop?>(null) }
+    var nearbyAt by remember { mutableStateOf<WeatherCoordinate?>(null) }
+    var nearbyResults by remember(nearbyAt) { mutableStateOf<List<MapPlaceCandidate>?>(null) }
+    var nearbyFailed by remember(nearbyAt) { mutableStateOf(false) }
+    LaunchedEffect(places, nearbyAt) {
+        val point = nearbyAt ?: return@LaunchedEffect
+        try {
+            val found = places.nearbyCandidates(point.latitude, point.longitude)
+            if (nearbyAt == point) nearbyResults = rankMapCandidates(found, point.latitude, point.longitude).candidates
+        } catch (_: CancellationException) {
+            currentCoroutineContext().ensureActive()
+            if (nearbyAt == point) nearbyFailed = true
+        } catch (_: Exception) {
+            if (nearbyAt == point) nearbyFailed = true
+        }
+    }
+    FullscreenMapDialog(title = title, onDismiss = onDismiss, bottomBar = {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            val point = selected
+            Text(point?.let { "${it.label} · ${it.coordinate.latitude}, ${it.coordinate.longitude}" }
+                ?: "Noktayı seçmek için haritaya uzun bas.")
+            point?.let {
+                TextButton(onClick = { nearbyAt = it.coordinate }) { Text("Yakındaki yerleri ara") }
+            }
+            Button(onClick = { selected?.let(onChoose) }, enabled = selected != null,
+                modifier = Modifier.fillMaxWidth()) { Text("Bu noktayı kullan") }
+        }
+    }) { mapModifier ->
+        WeatherRouteMap(route = null, assessment = null, modifier = mapModifier, expandable = false,
+            stops = listOfNotNull(selected), onMapLongClick = { value ->
+                selected = RouteStop("Harita noktası", WeatherCoordinate(value.latitude, value.longitude))
+            })
+    }
+    if (nearbyAt != null) {
+        AlertDialog(
+            onDismissRequest = { nearbyAt = null },
+            title = { Text("Yakındaki yerler") },
+            text = {
+                Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
+                    val results = nearbyResults
+                    when {
+                        nearbyFailed -> Text("Yakındaki yerler alınamadı. Yeniden aramak için haritaya dön.")
+                        results == null -> LinearProgressIndicator(Modifier.fillMaxWidth())
+                        results.isEmpty() -> Text("Bu noktanın yakınında yer bulunamadı.")
+                        else -> results.forEach { result ->
+                            TextButton(onClick = {
+                                selected = result.place.routeStop()
+                                nearbyAt = null
+                            }, modifier = Modifier.fillMaxWidth()) {
+                                Text("${result.place.name} · ${result.typeLabel}")
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { nearbyAt = null }) { Text("Haritaya dön") } },
+        )
+    }
 }
 
 @Composable

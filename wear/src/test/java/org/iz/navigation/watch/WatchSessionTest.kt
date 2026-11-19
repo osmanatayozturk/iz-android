@@ -148,4 +148,15 @@ class WatchSessionTest {
         val acknowledged = ready().begin(start(), now).result("phone", WearResult("request", WearResultCode.STARTED, "OK", "trip"))
         assertNotNull(acknowledged.receive("phone", idle.copy(generatedAt = correctedNow, journeyId = "trip", recording = true), correctedNow).snapshot)
     }
+    @Test fun deletionOnlyInvalidatesTheBoundPhoneAndProtocolAndRequiresANewerReport() {
+        val initial = ready().begin(start(), now)
+        val path = WearProtocol.statePath(initial.phoneVersion)
+        assertEquals(initial, initial.deleted("other", path))
+        assertEquals(initial, initial.deleted("phone", WearProtocol.statePath(1)))
+        val removed = initial.deleted("phone", path)
+        assertNull(removed.pending)
+        assertFalse(removed.canStart(now))
+        assertEquals(removed, removed.receive("phone", idle, now))
+        assertTrue(removed.receive("phone", idle.copy(generatedAt = now + 1), now + 1).canStart(now + 1))
+    }
 }

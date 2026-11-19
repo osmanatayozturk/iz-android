@@ -122,6 +122,7 @@ data class WearSnapshot(
     val statisticsStatus: String = "",
     val completed: WearCompletedSummary? = null,
     val advisory: WearGuidanceAdvisory? = null,
+    val paletteId: String? = null,
 )
 
 /** Prepared once on the phone after both recording and navigation end; never an active estimate. */
@@ -203,7 +204,12 @@ object WearProtocol {
     const val V7_STATE_PATH = "/iz/v7/state"
     const val V7_PHONE_CAPABILITY = "iz_phone_v7"
     const val V7_WATCH_CAPABILITY = "iz_watch_v7"
-    const val CURRENT_VERSION = 7
+    const val V8_COMMAND_PATH = "/iz/v8/command"
+    const val V8_RESULT_PATH = "/iz/v8/result"
+    const val V8_STATE_PATH = "/iz/v8/state"
+    const val V8_PHONE_CAPABILITY = "iz_phone_v8"
+    const val V8_WATCH_CAPABILITY = "iz_watch_v8"
+    const val CURRENT_VERSION = 8
     const val COMMAND_TTL_MS = 120_000L
     const val STATE_TTL_MS = 30_000L
 
@@ -220,19 +226,19 @@ object WearProtocol {
     private const val MAX_CLOCK_SKEW_MS = 5_000L
 
     fun commandPath(version: Int): String = when (version) {
-        1 -> COMMAND_PATH; 2 -> V2_COMMAND_PATH; 3 -> V3_COMMAND_PATH; 4 -> V4_COMMAND_PATH; 5 -> V5_COMMAND_PATH; 6 -> V6_COMMAND_PATH; 7 -> V7_COMMAND_PATH; else -> error("Unsupported version")
+        1 -> COMMAND_PATH; 2 -> V2_COMMAND_PATH; 3 -> V3_COMMAND_PATH; 4 -> V4_COMMAND_PATH; 5 -> V5_COMMAND_PATH; 6 -> V6_COMMAND_PATH; 7 -> V7_COMMAND_PATH; 8 -> V8_COMMAND_PATH; else -> error("Unsupported version")
     }
     fun resultPath(version: Int): String = when (version) {
-        1 -> RESULT_PATH; 2 -> V2_RESULT_PATH; 3 -> V3_RESULT_PATH; 4 -> V4_RESULT_PATH; 5 -> V5_RESULT_PATH; 6 -> V6_RESULT_PATH; 7 -> V7_RESULT_PATH; else -> error("Unsupported version")
+        1 -> RESULT_PATH; 2 -> V2_RESULT_PATH; 3 -> V3_RESULT_PATH; 4 -> V4_RESULT_PATH; 5 -> V5_RESULT_PATH; 6 -> V6_RESULT_PATH; 7 -> V7_RESULT_PATH; 8 -> V8_RESULT_PATH; else -> error("Unsupported version")
     }
     fun statePath(version: Int): String = when (version) {
-        1 -> STATE_PATH; 2 -> V2_STATE_PATH; 3 -> V3_STATE_PATH; 4 -> V4_STATE_PATH; 5 -> V5_STATE_PATH; 6 -> V6_STATE_PATH; 7 -> V7_STATE_PATH; else -> error("Unsupported version")
+        1 -> STATE_PATH; 2 -> V2_STATE_PATH; 3 -> V3_STATE_PATH; 4 -> V4_STATE_PATH; 5 -> V5_STATE_PATH; 6 -> V6_STATE_PATH; 7 -> V7_STATE_PATH; 8 -> V8_STATE_PATH; else -> error("Unsupported version")
     }
     fun phoneCapability(version: Int): String = when (version) {
-        1 -> PHONE_CAPABILITY; 2 -> V2_PHONE_CAPABILITY; 3 -> V3_PHONE_CAPABILITY; 4 -> V4_PHONE_CAPABILITY; 5 -> V5_PHONE_CAPABILITY; 6 -> V6_PHONE_CAPABILITY; 7 -> V7_PHONE_CAPABILITY; else -> error("Unsupported version")
+        1 -> PHONE_CAPABILITY; 2 -> V2_PHONE_CAPABILITY; 3 -> V3_PHONE_CAPABILITY; 4 -> V4_PHONE_CAPABILITY; 5 -> V5_PHONE_CAPABILITY; 6 -> V6_PHONE_CAPABILITY; 7 -> V7_PHONE_CAPABILITY; 8 -> V8_PHONE_CAPABILITY; else -> error("Unsupported version")
     }
     fun commandVersion(path: String): Int? = when (path) {
-        COMMAND_PATH -> 1; V2_COMMAND_PATH -> 2; V3_COMMAND_PATH -> 3; V4_COMMAND_PATH -> 4; V5_COMMAND_PATH -> 5; V6_COMMAND_PATH -> 6; V7_COMMAND_PATH -> 7; else -> null
+        COMMAND_PATH -> 1; V2_COMMAND_PATH -> 2; V3_COMMAND_PATH -> 3; V4_COMMAND_PATH -> 4; V5_COMMAND_PATH -> 5; V6_COMMAND_PATH -> 6; V7_COMMAND_PATH -> 7; V8_COMMAND_PATH -> 8; else -> null
     }
     fun frameVersion(bytes: ByteArray): Int? {
         if (bytes.size !in HEADER_BYTES..MAX_PAYLOAD_BYTES || ByteBuffer.wrap(bytes).int != MAGIC) return null
@@ -315,6 +321,7 @@ object WearProtocol {
             if (version >= 7) {
                 writeOptional(value.advisory) { writeAdvisory(it) }
             }
+            if (version >= 8) writeOptional(value.paletteId) { writeText(it, 24) }
         }
     }
 
@@ -343,6 +350,7 @@ object WearProtocol {
             statisticsStatus = if (version >= 6) readText(MAX_WEATHER_DETAIL_BYTES) else "",
             completed = if (version >= 6) readOptional { readCompleted() } else null,
             advisory = if (version >= 7) readOptional { readAdvisory() } else null,
+            paletteId = if (version >= 8) readOptional { readText(24) } else null,
         ).also(::validate)
     }
 

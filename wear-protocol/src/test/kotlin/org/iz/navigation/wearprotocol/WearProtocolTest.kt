@@ -5,6 +5,16 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class WearProtocolTest {
+    @Test fun v8CarriesAppearanceAndOlderWatchesReadTheUnchangedSnapshot() {
+        val value = WearSnapshot(100_000L, paletteId = "graphite_amber")
+        assertEquals(value, WearProtocol.decodeSnapshot(WearProtocol.encodeSnapshot(value)))
+        for (version in 1..7) {
+            val bytes = WearProtocol.encodeSnapshot(value, version)
+            assertEquals(value.copy(paletteId = null), WearProtocol.decodeSnapshot(bytes))
+            assertArrayEquals(WearProtocol.encodeSnapshot(value.copy(paletteId = null), version), bytes)
+        }
+    }
+
     @Test fun v6DeferredRecordingRetainsControlStateAndRejectsFalseMeasurements() {
         val value = WearSnapshot(100_000L, journeyId = "trip", mode = WearMode.WALK,
             startedAt = 1_000L, recording = true, statsDeferred = true,

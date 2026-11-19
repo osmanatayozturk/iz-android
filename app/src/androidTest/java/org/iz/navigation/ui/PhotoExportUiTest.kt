@@ -61,13 +61,16 @@ class PhotoExportUiTest {
         }
 
         compose.onNodeWithText("Fotoğraflarını paylaş").assertIsDisplayed()
+        compose.onNodeWithTag("photo-share-count").assertTextEquals("0 fotoğraf seçili")
+        compose.onNodeWithTag("photo-share-preview").assertDoesNotExist()
         val disclosure = compose.onNodeWithText("kopyalarda dosyaya ekli konum ve çekim bilgileri kaldırılır", substring = true)
         disclosure.assertIsDisplayed()
         compose.onNodeWithText("Özgün fotoğraflar İz’de korunur", substring = true).assertIsDisplayed()
         compose.onNodeWithText("Büyük fotoğraflar küçültülebilir", substring = true).assertIsDisplayed()
         captureDialog("photo-share-disclosure")
-        compose.onNodeWithText("Seçilen fotoğrafları paylaş").performScrollTo().assertIsNotEnabled()
-        compose.onNodeWithText("Galeriye kaydet").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithText("Seçimi incele").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithText("Seçilen fotoğrafları paylaş").assertDoesNotExist()
+        compose.onNodeWithText("Galeriye kaydet").assertDoesNotExist()
         compose.runOnIdle {
             assertTrue(sharedSelections.isEmpty())
             assertTrue(gallerySelections.isEmpty())
@@ -77,6 +80,17 @@ class PhotoExportUiTest {
         // Select out of order: callbacks must retain the input photo order.
         compose.onAllNodes(isToggleable())[2].performScrollTo().performClick()
         compose.onAllNodes(isToggleable())[0].performScrollTo().performClick()
+        compose.onNodeWithText("Seçimi incele").performScrollTo().assertIsEnabled().performClick()
+        compose.onAllNodes(isToggleable()).assertCountEquals(0)
+        compose.onNodeWithTag("photo-share-count").assertTextEquals("2 fotoğraf seçili")
+        compose.onNodeWithTag("photo-share-preview-${photos[0].id}").assertExists()
+        compose.onNodeWithTag("photo-share-preview-${photos[1].id}").assertDoesNotExist()
+        compose.onNodeWithTag("photo-share-preview-${photos[2].id}").assertExists()
+        compose.onNodeWithText("Seçimi değiştir").performScrollTo().performClick()
+        compose.onNodeWithTag("photo-share-select-${photos[0].id}").assertIsOn()
+        compose.onNodeWithTag("photo-share-select-${photos[1].id}").assertIsOff()
+        compose.onNodeWithTag("photo-share-select-${photos[2].id}").assertIsOn()
+        compose.onNodeWithText("Seçimi incele").performScrollTo().performClick()
         compose.onNodeWithText("Seçilen fotoğrafları paylaş").performScrollTo().assertIsEnabled()
         compose.onNodeWithText("Galeriye kaydet").performScrollTo().assertIsEnabled()
         captureDialog("photo-share-selected")
@@ -93,8 +107,24 @@ class PhotoExportUiTest {
     }
 
     @Test
+    fun photoGalleryDispatchesOnlyTheTappedRecord() {
+        val first = syntheticPhoto("Birinci fotoğraf", 0)
+        val second = syntheticPhoto("İkinci fotoğraf", 1)
+        var edited: Photo? = null
+        var deleted: Photo? = null
+        compose.setContent {
+            IzTheme { DiaryPhotoGallery(listOf(first, second), onDelete = { deleted = it }, onEdit = { edited = it }) }
+        }
+        compose.onNodeWithTag("diary-photo-edit-${second.id}").performClick()
+        compose.runOnIdle { assertEquals(second, edited); assertEquals(null, deleted) }
+        compose.onNodeWithTag("diary-photo-delete-${first.id}").performClick()
+        compose.runOnIdle { assertEquals(second, edited); assertEquals(first, deleted) }
+    }
+
+    @Test
     fun editorExplainsRecordOnlyEditsAndClearingCoordinatesPreservesOriginalExifBytes() {
-        val photo = syntheticPhoto("Sentetik düzenleme fotoğrafı", 0).copy(latitude = 12.345678, longitude = 45.678901)
+        val photo = syntheticPhoto("Sentetik düzenleme fotoğrafı", 0)
+            .copy(takenAt = 1_760_123_456_789L, latitude = 12.345678, longitude = 45.678901)
         val source = sources.single()
         val originalBytes = source.readBytes()
         assertNotNull(ExifInterface(source).latLong)

@@ -1,39 +1,26 @@
 package org.iz.navigation.watch
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.focusable
-import androidx.compose.foundation.gestures.scrollBy
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.rotary.onRotaryScrollEvent
-import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
-import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
-import androidx.wear.compose.material.*
+import androidx.compose.ui.semantics.semantics
 import org.iz.navigation.wearprotocol.*
-import java.util.Locale
-import java.text.SimpleDateFormat
-import java.util.Date
-import kotlinx.coroutines.launch
 
-private val Pine = Color(0xFF091B15)
-private val Leaf = Color(0xFFB0D998)
-private val Surface = Color(0xFF163328)
-private val Cream = Color(0xFFF0F4DF)
-private val Quiet = Color(0xFFB5C7BB)
+internal enum class WatchPage(val id: String, val title: String) {
+    DAILY("wdaily", "Bugün"), START("wstart", "Vasıta ve kayıt"), RECORD("wrecord", "Yolculuk kaydı"),
+    NAV("wnav", "Yönlendirme"), WEATHER("wweather", "Yolculuk havası"), SUMMARY("wsummary", "Yolculuk özeti"),
+    END("wend", "Kayıt bitsin mi?"), HEALTH("whealth", "Saat ölçümleri"), SETTINGS("wsettings", "Bağlantı ve ayarlar")
+}
+
+private fun WatchSurfaceRoute.page() = when (this) {
+    WatchSurfaceRoute.DAILY -> WatchPage.DAILY
+    WatchSurfaceRoute.RECORDING -> WatchPage.RECORD
+    WatchSurfaceRoute.NAVIGATION -> WatchPage.NAV
+    WatchSurfaceRoute.SUMMARY -> WatchPage.SUMMARY
+}
 
 @Composable
 internal fun WatchScreen(
@@ -46,268 +33,224 @@ internal fun WatchScreen(
     onArmHealth: () -> Unit = {},
     onDisarmHealth: () -> Unit = {},
     onHealthSettings: () -> Unit = {},
-    onRebindHealth: () -> Unit = {},
+    onRebindPhone: () -> Unit = {},
     surfaceData: WatchSurfaceData? = null,
-    onSurface: (WatchSurfaceRoute) -> Unit = {},
+    entry: WatchSurfaceRoute? = null,
+    onOpenSettings: (() -> Unit)? = null,
 ) {
-    val list = rememberScalingLazyListState()
-    val focusRequester = remember { FocusRequester() }
-    val scope = rememberCoroutineScope()
-    var selectedMode by rememberSaveable { mutableStateOf(WearMode.WALK.name) }
-    var confirmingId by rememberSaveable { mutableStateOf<String?>(null) }
-    var confirmingRebind by rememberSaveable { mutableStateOf(false) }
-    val snapshot = state.snapshot
-    val fresh = state.fresh(now)
-    val activeId = snapshot?.journeyId?.takeIf { snapshot.recording }
-    LaunchedEffect(activeId, state.phoneId) {
-        if (confirmingId != activeId) confirmingId = null
+    // A cached report may explain a disconnected screen. It never authorizes a command.
+    val cached = surfaceData?.takeIf { state.snapshotAfter == null &&
+        (state.phoneId == null || state.phoneId == it.phoneId && state.phoneVersion == it.version) }
+    val snapshot = state.snapshot ?: cached?.snapshot
+    val connected = if (state.snapshot != null) state.phoneId != null else cached?.connected == true
+    val fresh = WatchSurfacePolicy.phoneState(snapshot, connected, now) == WatchPhoneState.CURRENT
+    val frame = WatchSurfacePolicy.frame(snapshot, connected, now)
+    val root = entry?.page() ?: when (frame.route) {
+        WatchSurfaceRoute.NAVIGATION -> WatchPage.NAV
+        WatchSurfaceRoute.RECORDING -> WatchPage.RECORD
+        else -> WatchPage.DAILY
     }
-    LaunchedEffect(Unit) { focusRequester.requestFocus() }
-    LaunchedEffect(confirmingId) { if (confirmingId != null) list.scrollToItem(2) }
+    var history by rememberSaveable { mutableStateOf(arrayListOf<String>()) }
+    val page = history.lastOrNull()?.let(WatchPage::valueOf) ?: root
+    fun open(next: WatchPage) {
+        if (next == page) return
+        val current = history.ifEmpty { listOf(page.name) }
+        val prior = current.indexOf(next.name)
+        history = ArrayList(if (prior >= 0) current.take(prior + 1) else current + next.name)
+    }
+    fun back() { history = ArrayList(history.dropLast(1)) }
+    val canBack = history.size > 1
+    var resetConfirm by rememberSaveable { mutableStateOf(false) }
+    BackHandler(enabled = canBack || resetConfirm) { if (resetConfirm) resetConfirm = false else back() }
 
-    MaterialTheme(colors = Colors(primary = Leaf, onPrimary = Pine, secondary = Color(0xFFDADBA1),
-        onSecondary = Pine, background = Pine, onBackground = Cream, surface = Surface, onSurface = Cream,
-        error = Color(0xFFF0ADA2), onError = Pine)) {
-        Scaffold(
-            modifier = Modifier.fillMaxSize().background(Pine),
-            timeText = { TimeText(modifier = Modifier.scrollAway(list)) },
-            positionIndicator = { PositionIndicator(scalingLazyListState = list) },
-            vignette = { Vignette(vignettePosition = VignettePosition.TopAndBottom) },
-        ) {
-            ScalingLazyColumn(
-                state = list,
-                modifier = Modifier.fillMaxSize().testTag("watch-list")
-                    .onRotaryScrollEvent { event ->
-                        scope.launch { list.scrollBy(event.verticalScrollPixels) }
-                        true
-                    }.focusRequester(focusRequester).focusable(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 36.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                item {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("İz", color = Leaf, fontSize = 29.sp, fontWeight = FontWeight.Bold)
-                        Text(WatchSurfacePolicy.phoneLabel(snapshot, state.phoneId != null, now),
-                            color = if (fresh) Leaf else Quiet, textAlign = TextAlign.Center, fontSize = 12.sp)
-                        snapshot?.let { Text(WatchSurfacePolicy.phoneAge(it, now),
-                            fontSize = 10.sp, color = Quiet, textAlign = TextAlign.Center) }
-                        state.phoneName?.let { Text(it, fontSize = 10.sp, color = Quiet, maxLines = 2, textAlign = TextAlign.Center) }
-                    }
-                }
-                surfaceData?.let { data ->
-                    val frame = WatchSurfacePolicy.frame(data.snapshot, data.connected, now)
-                    item { Chip(onClick = { onSurface(frame.route) }, label = { Text(frame.title) },
-                        secondaryLabel = { Text(frame.lines.firstOrNull().orEmpty(), maxLines = 2) },
-                        modifier = Modifier.fillMaxWidth().testTag("open-surface")) }
-                    if (frame.route != WatchSurfaceRoute.DAILY) item { Chip(onClick = { onSurface(WatchSurfaceRoute.DAILY) },
-                        label = { Text("Bugünün özeti") }, modifier = Modifier.fillMaxWidth()) }
-                }
-                if (!fresh) item {
-                    Note(if (snapshot == null) "Başlatmadan önce telefonun güncel durumu bekleniyor. Telefonda İz’i kontrol et."
-                        else "Son alınan bilgi gösteriliyor. Güncel telefon bilgisi gelene kadar başlatma ve bitirme kapalı.")
-                }
-                state.message?.let { message -> item { Note(message, highlighted = state.needsPhone) } }
-                if (state.pending != null) item {
-                    Note(if (state.needsPhone) "Devam etmek için telefonda İz bildirimine dokun. Telefon onayı bekleniyor."
-                        else if (now - state.pending.requestedAt >= 15_000) "Telefon sonucu henüz doğrulanmadı. Telefonu kontrol et veya durumu yenile."
-                        else "İstek gönderildi. Telefonun yanıtı bekleniyor.", highlighted = true)
-                }
-                if (confirmingId != null) {
-                    item { Text("Yolculuk bitsin mi?", textAlign = TextAlign.Center, fontWeight = FontWeight.Bold) }
-                    item { Note(if (snapshot?.temporary == true)
-                        "Geçici ölçüm duracak. Kalıcı saklamak için telefonda Sakla’yı seçmelisin."
-                        else "Bu yolculuğun telefon kaydı durdurulacak.") }
-                    item {
-                        Chip(onClick = { confirmingId?.let(onStop); confirmingId = null },
-                            label = { Text("Evet, bitir") }, enabled = confirmingId?.let { state.canStop(it, now) } == true,
-                            colors = ChipDefaults.primaryChipColors(), modifier = Modifier.fillMaxWidth().testTag("confirm-stop"))
-                    }
-                    item {
-                        Chip(onClick = { confirmingId = null }, label = { Text("Vazgeç") },
-                            colors = ChipDefaults.secondaryChipColors(), modifier = Modifier.fillMaxWidth())
-                    }
-                } else if (snapshot?.journeyId != null) {
-                    item { Text(snapshot.mode?.label() ?: "Yolculuk", fontSize = 20.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center) }
-                    if (fresh && !snapshot.recording) item { Note("Telefonun kaydı etkin değil. Telefonda İz'i kontrol et.") }
-                    item { Note(if (!fresh) "Son kayıt durumu · Güncel bilgi için bağlantıyı yenile"
-                        else if (!snapshot.recording) "Telefon kaydı etkin değil · İstatistikler yolculuk sonunda hazırlanacak"
-                        else if (snapshot.temporary) "Algılama sürüyor · İstatistikler yolculuk sonunda hazırlanacak"
-                        else "Kayıt sürüyor · İstatistikler yolculuk sonunda hazırlanacak", highlighted = true) }
-                    snapshot.weather?.let { weather -> item { WeatherCard(weather, now, fresh, WatchSurfacePolicy.ownerAdvisory(snapshot)?.paused == true) } }
-                    if (snapshot.temporary) item { Note("Kesinleşen yolculukta ham ölçümler korunur. Algılama durumunu telefonda görebilirsin.") }
-                    item {
-                        Chip(onClick = { confirmingId = activeId }, label = { Text("Yolculuğu bitir") },
-                            enabled = activeId?.let { state.canStop(it, now) } == true,
-                            colors = ChipDefaults.primaryChipColors(), modifier = Modifier.fillMaxWidth().testTag("stop"))
-                    }
-                } else {
-                    if (WatchSurfacePolicy.statisticsDeferred(snapshot)) item {
-                        Note(if (fresh) snapshot?.statisticsStatus?.ifBlank { "İstatistikler hazırlanacak" } ?: "İstatistikler hazırlanacak"
-                            else "Son alınan bilgi · İstatistiklerin güncel durumu bilinmiyor.", highlighted = true)
-                    }
-                    snapshot?.completed?.takeUnless { WatchSurfacePolicy.statisticsDeferred(snapshot) }?.let { summary ->
-                        item { Text(if (fresh) "İstatistikler hazır" else "Son hazırlanmış yolculuk",
-                            color = if (fresh) Leaf else Quiet, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center) }
-                        item { Metric("Tamamlanan yolculuk", "${duration(summary.elapsedMillis)} · ${WatchSurfacePolicy.km(summary.distanceMeters)}") }
-                        item { Chip(onClick = { onSurface(WatchSurfaceRoute.SUMMARY) }, label = { Text("Yolculuk özetini aç") },
-                            modifier = Modifier.fillMaxWidth().testTag("completed-summary")) }
-                    }
-                    item { Text("Nasıl gidiyorsun?", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center) }
-                    WearMode.entries.forEach { mode ->
-                        item {
-                            val chosen = selectedMode == mode.name
-                            Chip(onClick = { selectedMode = mode.name },
-                                label = { Text(mode.label()) },
-                                secondaryLabel = if (chosen) ({ Text("Seçili") }) else null,
-                                enabled = state.pending == null && state.supports(mode),
-                                colors = if (chosen) ChipDefaults.primaryChipColors() else ChipDefaults.secondaryChipColors(),
-                                modifier = Modifier.fillMaxWidth().semantics { selected = chosen })
-                        }
-                    }
-                    if (state.phoneVersion < 2) item { Note("Koşu ve sağlık özeti için telefondaki İz'i güncelle.") }
-                    item {
-                        Chip(onClick = { onStart(WearMode.valueOf(selectedMode)) }, label = { Text("Başlat") },
-                            enabled = state.canStart(now, WearMode.valueOf(selectedMode)), colors = ChipDefaults.primaryChipColors(),
-                            modifier = Modifier.fillMaxWidth().testTag("start"))
-                    }
-                }
-                item { Text("İz · Yolculukta saat ölçümü", textAlign = TextAlign.Center, fontWeight = FontWeight.Bold) }
-                item { Note(liveHealth.status, highlighted = liveHealth.capturing) }
-                if (liveHealth.armed) {
-                    item { Note("Nabız ve adım yalnızca kesinleşen yolculuklarda ölçülür. Kayıt dışında bilek sensörü de kapalıdır. Sessiz bildirim, sonraki kayda hazır olduğunu gösterir.") }
-                    if (snapshot?.recording == true) item { Note("Ham saat ölçümleri saklanıyor. Nabız ve adım özeti yolculuk sonunda hazırlanacak.") }
-                    if (liveHealth.buffered > 0) item { Note("Telefona aktarılmayı bekleyen ${liveHealth.buffered} ölçüm") }
-                    item { Chip(onClick = onDisarmHealth, label = { Text("Otomatik ölçümü kapat") },
-                        colors = ChipDefaults.secondaryChipColors(), modifier = Modifier.fillMaxWidth().testTag("disarm-health")) }
-                } else {
-                    item { Note("Bir kez aç: kayıt başlayınca ölçüm otomatik açılır, bitince sensörler kapanır. Kayıt beklerken sessiz bildirim kalır. Sistem başlatmayı engellerse saatte İz'i açabilirsin.") }
-                    item { Chip(onClick = onArmHealth, label = { Text("Otomatik ölçümü aç") },
-                        colors = ChipDefaults.primaryChipColors(), modifier = Modifier.fillMaxWidth().testTag("arm-health")) }
-                }
-                item { Chip(onClick = onHealthSettings, label = { Text("Saat uygulama izinleri") },
-                    colors = ChipDefaults.secondaryChipColors(), modifier = Modifier.fillMaxWidth()) }
-                if (confirmingRebind) {
-                    item { Note("Bekleyen saat ölçümleri silinecek ve telefon bağlantısı yeniden kurulacak. Telefona ulaşmış kayıtlar korunur.") }
-                    item { Chip(onClick = { confirmingRebind = false; onRebindHealth() }, label = { Text("Evet, bağlantıyı sıfırla") },
-                        colors = ChipDefaults.primaryChipColors(), modifier = Modifier.fillMaxWidth().testTag("confirm-health-rebind")) }
-                    item { Chip(onClick = { confirmingRebind = false }, label = { Text("Vazgeç") },
-                        colors = ChipDefaults.secondaryChipColors(), modifier = Modifier.fillMaxWidth()) }
-                } else item { Chip(onClick = { confirmingRebind = true }, label = { Text("Telefon sağlık bağlantısını sıfırla") },
-                    colors = ChipDefaults.secondaryChipColors(), modifier = Modifier.fillMaxWidth().testTag("health-rebind")) }
-                item {
-                    Chip(onClick = onRefresh, label = { Text("Durumu yenile") },
-                        colors = ChipDefaults.secondaryChipColors(), modifier = Modifier.fillMaxWidth().testTag("refresh"))
-                }
-                snapshot?.let { value -> item {
-                    val age = ((now - value.generatedAt).coerceAtLeast(0) / 1_000).coerceAtMost(99_999)
-                    Text("Son veri: ${age} sn önce", fontSize = 10.sp, textAlign = TextAlign.Center, color = Quiet)
+    val holder = rememberSaveableStateHolder()
+    var mode by rememberSaveable { mutableStateOf(WearMode.MOTORCYCLE.name) }
+    var confirmId by rememberSaveable { mutableStateOf<String?>(null) }
+    var confirmPhone by rememberSaveable { mutableStateOf<String?>(null) }
+    var stopRequested by rememberSaveable { mutableStateOf(false) }
+    var summaryFor by rememberSaveable { mutableStateOf<String?>(null) }
+    val activeId = state.snapshot?.takeIf { it.recording }?.journeyId
+    val active = snapshot?.journeyId != null
+    val nav = frame.route == WatchSurfaceRoute.NAVIGATION
+    val phoneLabel = WatchSurfacePolicy.phoneLabel(snapshot, connected, now)
+    val age = snapshot?.let { WatchSurfacePolicy.phoneAge(it, now) }
+
+    LaunchedEffect(page, activeId, state.phoneId, state.pending, state.snapshot?.generatedAt, fresh) {
+        if (page == WatchPage.START && state.fresh(now) && activeId != null) {
+            history = arrayListOf(if (nav) WatchPage.NAV.name else WatchPage.RECORD.name)
+        }
+        if (page == WatchPage.END && state.fresh(now) && state.pending == null &&
+            (state.phoneId != confirmPhone || activeId != confirmId)) {
+            val showSummary = stopRequested && state.phoneId == confirmPhone && state.snapshot?.journeyId == null
+            if (showSummary) summaryFor = confirmId
+            history = arrayListOf(if (showSummary) WatchPage.SUMMARY.name else root.name)
+            confirmId = null
+            stopRequested = false
+        }
+        if (page != WatchPage.SETTINGS) resetConfirm = false
+    }
+
+    holder.SaveableStateProvider(page.id) {
+        WatchPageLayout(page.id, page.title, WatchPalette.from(snapshot?.paletteId),
+            if (entry != null) "surface-detail" else "watch-list") {
+            if (page != WatchPage.SETTINGS && !fresh) item {
+                Note(listOfNotNull(phoneLabel, age).joinToString(" · "), highlighted = true)
+            }
+            if (state.pending != null || page == WatchPage.START || page == WatchPage.END || page == WatchPage.SETTINGS) {
+                state.message?.let { item { Note(it, highlighted = state.needsPhone) } }
+                state.pending?.let { request -> item {
+                    Note(when {
+                        state.needsPhone -> "Devam etmek için telefonda İz bildirimini aç. Onay bekleniyor."
+                        now - request.requestedAt >= 15_000 -> "Sonuç bekleniyor. Telefonda İz’i kontrol et veya durumu yenile."
+                        else -> "İstek gönderildi. Telefonun yanıtı bekleniyor."
+                    }, highlighted = true)
                 } }
             }
+            when (page) {
+                WatchPage.DAILY -> {
+                    val daily = WatchSurfacePolicy.day(snapshot, now)
+                    item { WatchValue(daily?.samsungSteps?.let { "$it adım" }
+                        ?: if (daily != null) WatchSurfacePolicy.missing(daily.stepsStatus) else "Özet bekleniyor") }
+                    if (fresh) item { Note(listOfNotNull(phoneLabel, age).joinToString(" · ")) }
+                    if (nav) item { WatchAction("Yönlendirmeyi aç", { open(WatchPage.NAV) }, primary = true) }
+                    item { WatchAction(if (active) "Kaydı aç" else "Kaydı başlat",
+                        { open(if (active) WatchPage.RECORD else WatchPage.START) }, primary = !nav, tag = "open-record") }
+                    item { WatchAction("Son yolculuk", { summaryFor = null; open(WatchPage.SUMMARY) }, tag = "completed-summary") }
+                    item { WatchAction("Bağlantı ve ayarlar", { open(WatchPage.SETTINGS) }) }
+                    if (daily != null) dailyDetails(daily)
+                }
+                WatchPage.START -> {
+                    item { WatchValue(WearMode.valueOf(mode).label()) }
+                    if (fresh) item { Note(listOfNotNull(phoneLabel, age).joinToString(" · ")) }
+                    item { WatchAction("Telefonda kaydı başlat", { onStart(WearMode.valueOf(mode)) },
+                        primary = true, enabled = state.canStart(now, WearMode.valueOf(mode)), tag = "start") }
+                    (listOf(WearMode.MOTORCYCLE) + WearMode.entries.filter { it != WearMode.MOTORCYCLE }).forEach { value ->
+                        val chosen = value.name == mode
+                        item { WatchAction(value.label() + if (chosen) " · Seçili" else "", { mode = value.name },
+                            enabled = state.pending == null && state.supports(value), modifier = Modifier.semantics { selected = chosen }) }
+                    }
+                    if (state.phoneId != null && state.phoneVersion < 2) item { Note("Koşu ve sağlık özeti için telefondaki İz'i güncelle.") }
+                    item { WatchAction("Durumu yenile", onRefresh, tag = "refresh") }
+                }
+                WatchPage.RECORD -> {
+                    item { WatchValue(when {
+                        !active -> "Etkin kayıt yok"
+                        !fresh -> "Son kayıt durumu"
+                        snapshot?.recording != true -> "Kayıt etkin değil"
+                        snapshot.temporary -> "Algılama sürüyor"
+                        else -> "Kayıt sürüyor"
+                    }) }
+                    if (snapshot != null && active) {
+                        if (fresh) age?.let { item { Note(it) } }
+                        snapshot.mode?.let { item { Note(it.label()) } }
+                        if (snapshot.statsDeferred) {
+                            snapshot.startedAt?.let { start ->
+                                val observed = if (fresh && snapshot.recording) now else snapshot.generatedAt
+                                if (observed >= start) item { Note("Başlangıçtan beri ${duration(observed - start)}") }
+                            }
+                            item { Note("Mesafe yolculuk sonunda hazırlanacak.") }
+                        } else {
+                            item { Note("${duration(snapshot.elapsedMillis)} · ${WatchSurfacePolicy.km(snapshot.distanceMeters)}") }
+                            if (snapshot.temporary) {
+                                val progress = snapshot.candidateProgressMeters
+                                    ?: snapshot.distanceMeters.takeIf { state.phoneVersion < 4 }
+                                progress?.let { item { Note("${it.coerceIn(0.0, 500.0).toInt()} / 500 m") } }
+                                if (fresh) snapshot.deadlineAt?.let { item { Note("Kalan ${duration(it - now)}") } }
+                            }
+                        }
+                        item { WatchAction("Yolculuğu bitir", {
+                            confirmId = activeId
+                            confirmPhone = state.phoneId
+                            stopRequested = false
+                            open(WatchPage.END)
+                        }, enabled = activeId?.let { state.canStop(it, now) } == true, tag = "stop") }
+                    } else item { WatchAction("Vasıta ve kayıt", { open(WatchPage.START) }, primary = true) }
+                    if (nav) item { WatchAction("Yönlendirmeyi aç", { open(WatchPage.NAV) }) }
+                    item { WatchAction("Ölçümler ve kaynak", { open(WatchPage.HEALTH) }) }
+                    item { WatchAction("Yolculuk havası", { open(WatchPage.WEATHER) }) }
+                    item { WatchAction("Bağlantı ve ayarlar", { open(WatchPage.SETTINGS) }) }
+                    item { WatchAction("Bugün", { open(WatchPage.DAILY) }) }
+                }
+                WatchPage.NAV -> {
+                    if (nav) {
+                        item { WatchValue(frame.title) }
+                        frame.lines.take(2).filter { it.isNotBlank() }.forEach { item { Note(it) } }
+                    } else item { WatchValue("Etkin yönlendirme yok") }
+                    item { WatchAction(if (active) "Yolculuk kaydı" else "Vasıta ve kayıt",
+                        { open(if (active) WatchPage.RECORD else WatchPage.START) }, primary = true) }
+                    item { WatchAction("Kayıt ve ayarlar", { onOpenSettings?.invoke() ?: open(WatchPage.SETTINGS) }, tag = "surface-controls") }
+                    item { WatchAction("Yolculuk havası", { open(WatchPage.WEATHER) }) }
+                    if (nav) frame.lines.drop(2).filter { it.isNotBlank() }.forEach { item { Note(it) } }
+                    item { WatchAction("Bugün", { open(WatchPage.DAILY) }) }
+                }
+                WatchPage.WEATHER -> {
+                    snapshot?.weather?.let { weather -> item { WeatherCard(weather, now, fresh,
+                        WatchSurfacePolicy.ownerAdvisory(snapshot)?.paused == true) } }
+                        ?: item { Note("Telefondan bu yolculuk için hava bilgisi bekleniyor.") }
+                    age?.let { item { Note(it) } }
+                    item { WatchAction("Sürüşe dön", { if (canBack) back() else open(if (nav) WatchPage.NAV else WatchPage.RECORD) }) }
+                }
+                WatchPage.SUMMARY -> {
+                    val deferred = WatchSurfacePolicy.statisticsDeferred(snapshot)
+                    val summary = snapshot?.completed?.takeIf { !deferred && (summaryFor == null || summaryFor == it.journeyId) }
+                    if (summary != null) {
+                        item { Note(if (fresh) "İstatistikler hazır" else "Son hazırlanmış yolculuk") }
+                        completedDetails(summary)
+                    } else item { WatchValue(if (deferred || summaryFor != null || snapshot == null) "Özet hazırlanıyor" else "Hazır yolculuk özeti yok") }
+                    item { WatchAction("Bugüne dön", { open(WatchPage.DAILY) }, primary = true) }
+                }
+                WatchPage.END -> {
+                    item { Note(if (snapshot?.temporary == true) "Geçici ölçüm duracak. Saklamak için telefonda Sakla’yı seç."
+                        else "Bu yolculuğun telefon kaydı durdurulacak.") }
+                    snapshot?.mode?.let { item { Note(it.label()) } }
+                    confirmId?.let { id -> item { WatchAction("Evet, bitir", { stopRequested = true; onStop(id) },
+                        primary = true, enabled = state.phoneId == confirmPhone && state.canStop(id, now), tag = "confirm-stop") } }
+                    item { WatchAction("Vazgeç", { back() }, enabled = state.pending == null) }
+                    if (!fresh) item { WatchAction("Durumu yenile", onRefresh) }
+                }
+                WatchPage.HEALTH -> {
+                    item { WatchValue(if (liveHealth.armed) "Otomatik ölçüm açık" else "Otomatik ölçüm kapalı") }
+                    item { Note(liveHealth.status, highlighted = liveHealth.capturing) }
+                    if (liveHealth.capturing && liveHealth.phoneId == state.phoneId && activeId != null &&
+                        liveHealth.journeyId == activeId) item {
+                        Note(liveHealth.latestSampleAt?.let { "Saat sensörü · Son ölçüm ${WatchSurfacePolicy.age(it, now)}" }
+                            ?: "Saat sensöründen ilk ölçüm bekleniyor.")
+                    }
+                    item { Note("Saat sensörleri kesinleşen kayıtta nabız ve adımı ölçer. İz, kayıtlar arasında sensörleri kapatır.") }
+                    if (snapshot != null && active && !snapshot.statsDeferred && state.phoneVersion < 6) {
+                        snapshot.averagePaceSecondsPerKm?.let { item { Note(pace(it)) } }
+                        snapshot.stepCount?.let { item { Measurement("Telefonda ölçülen adımlar", it.toString()) } }
+                        snapshot.health?.let { report ->
+                            item { Note("Samsung Health · Saat") }
+                            item { Measurement("Saatte ölçülen adımlar", report.watchSteps?.toString() ?: "Ölçüm yok") }
+                            item { Measurement("Toplam enerji · gecikmeli", report.totalCaloriesKcal?.let { "${it.toInt()} kcal" } ?: "Ölçüm yok") }
+                            if (report.partial) item { Note("Kısmi sağlık verisi. Eksik ölçümler sıfır sayılmaz.") }
+                            report.lastCheckedAt?.let { item { Note("Son aktarım kontrolü ${WatchSurfacePolicy.age(it, now)}. Saat verisi gecikmeli gelebilir.") } }
+                        }
+                    }
+                    if (liveHealth.buffered > 0) item { Note("Telefona aktarılmayı bekleyen ${liveHealth.buffered} ölçüm") }
+                    if (liveHealth.armed) item { WatchAction("Otomatik ölçümü kapat", onDisarmHealth, tag = "disarm-health") }
+                    else item { WatchAction("Otomatik ölçümü aç", onArmHealth, primary = true, tag = "arm-health") }
+                    item { Note("Otomatik ölçüm için saatte sensör, fiziksel etkinlik ve arka plan ölçüm izni gerekir. Konumu telefon kaydeder.") }
+                    item { WatchAction("Saat uygulama izinleri", onHealthSettings) }
+                }
+                WatchPage.SETTINGS -> {
+                    item { WatchValue(phoneLabel) }
+                    state.phoneName?.let { item { Note(it) } }
+                    age?.let { item { Note(it) } }
+                    item { WatchAction("Durumu yenile", onRefresh, primary = true, tag = "refresh") }
+                    item { WatchAction("Ölçümler ve izinler", { open(WatchPage.HEALTH) }) }
+                    item { WatchAction(if (active) "Yolculuk kaydı" else "Vasıta ve kayıt",
+                        { open(if (active) WatchPage.RECORD else WatchPage.START) }) }
+                    if (resetConfirm) {
+                        item { Note("İz bu telefona ait bağlantı bilgisini ve aktarılmamış saat ölçümlerini silecek. Telefona ulaşmış kayıtlar korunur.") }
+                        item { WatchAction("Evet, bağlantıyı sıfırla", { resetConfirm = false; onRebindPhone() },
+                            primary = true, enabled = state.pending == null, tag = "confirm-health-rebind") }
+                        item { WatchAction("Vazgeç", { resetConfirm = false }) }
+                    } else item { WatchAction("Telefon eşleşmesini sıfırla", { resetConfirm = true }, enabled = state.pending == null, tag = "health-rebind") }
+                }
+            }
+            if (canBack && page != WatchPage.END && page != WatchPage.WEATHER) item { WatchAction("Geri", ::back) }
         }
     }
 }
-
-@Composable
-private fun WeatherCard(weather: WearRouteWeather, now: Long, connectionFresh: Boolean, paused: Boolean) {
-    val readyAndFresh = connectionFresh && weather.status == WearWeatherStatus.READY && now < weather.validUntil
-    val accent = if (readyAndFresh && weather.threshold == WearWeatherThreshold.EXCEEDED) {
-        MaterialTheme.colors.error
-    } else if (readyAndFresh) Leaf else Quiet
-    Column(
-        Modifier.fillMaxWidth().background(Surface, RoundedCornerShape(20.dp)).padding(12.dp)
-            .testTag("weather-card"),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text("Yolculuk havası", color = accent, fontSize = 12.sp, fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center)
-        when {
-            !connectionFresh -> {
-                Text("Telefon bağlantısı/verisi güncel değil", color = Quiet, fontSize = 11.sp,
-                    textAlign = TextAlign.Center)
-                if (weather.headline.isNotBlank()) Text(weather.headline, color = Quiet, fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
-                Text("Tahmin: ${measurementTime(weather.calculatedAt)}", color = Quiet,
-                    fontSize = 10.sp, textAlign = TextAlign.Center)
-                Text("Geçerlilik: ${measurementTime(weather.validUntil)}", color = Quiet,
-                    fontSize = 10.sp, textAlign = TextAlign.Center)
-            }
-            paused && weather.status == WearWeatherStatus.LOADING -> {
-                Text(weather.headline.ifBlank { "Yönlendirme duraklatıldı" }, color = Quiet,
-                    fontSize = 15.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
-                Text(weather.detail.ifBlank { "Varış zamanı ve yol havası bekletiliyor." }, color = Quiet,
-                    fontSize = 11.sp, textAlign = TextAlign.Center)
-            }
-            weather.status == WearWeatherStatus.LOADING -> {
-                Text(weather.headline.ifBlank { "Hava hazırlanıyor" }, color = Quiet,
-                    fontSize = 15.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
-                Text("Tahmin telefonda hesaplanıyor.", color = Quiet, fontSize = 11.sp,
-                    textAlign = TextAlign.Center)
-            }
-            weather.status == WearWeatherStatus.ERROR -> {
-                Text(weather.headline.ifBlank { "Hava verisi alınamadı" }, color = Quiet,
-                    fontSize = 15.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
-                if (weather.detail.isNotBlank()) Text(weather.detail, color = Quiet, fontSize = 11.sp,
-                    textAlign = TextAlign.Center)
-                Text("Tahmin kullanılamıyor", color = Quiet, fontSize = 11.sp, textAlign = TextAlign.Center)
-                Text("Tahmin: ${measurementTime(weather.calculatedAt)}", color = Quiet,
-                    fontSize = 10.sp, textAlign = TextAlign.Center)
-            }
-            !readyAndFresh -> {
-                Text(weather.headline, color = Quiet, fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
-                Text("Tahmin süresi doldu", color = Quiet, fontSize = 11.sp, textAlign = TextAlign.Center)
-                Text("Tahmin: ${measurementTime(weather.calculatedAt)}", color = Quiet,
-                    fontSize = 10.sp, textAlign = TextAlign.Center)
-            }
-            paused -> {
-                Text("Duraklama nedeniyle ilerideki varış saatleri belirsiz.", color = Quiet,
-                    fontSize = 12.sp, textAlign = TextAlign.Center)
-                Text("Son tahmin: ${measurementTime(weather.calculatedAt)}", color = Quiet,
-                    fontSize = 10.sp, textAlign = TextAlign.Center)
-            }
-            else -> {
-                Text(weather.headline, color = accent, fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
-                if (weather.detail.isNotBlank()) Text(weather.detail, color = Quiet, fontSize = 11.sp,
-                    textAlign = TextAlign.Center)
-                if (weather.remainingMeters > 0) Text(
-                    "Kalan rota: ${String.format(Locale.forLanguageTag("tr"), "%.1f km", weather.remainingMeters / 1_000.0)}",
-                    color = Cream, fontSize = 11.sp, textAlign = TextAlign.Center)
-                if (weather.threshold == WearWeatherThreshold.EXCEEDED) weather.hazardStartsAt?.let {
-                    Text("Eşik yaklaşık ${measurementTime(it)}", color = accent, fontSize = 11.sp,
-                        textAlign = TextAlign.Center)
-                }
-                weather.arrivalAt?.let {
-                    Text("Varış yaklaşık ${measurementTime(it)}", color = Quiet, fontSize = 11.sp,
-                        textAlign = TextAlign.Center)
-                }
-                Text("Tahmin: ${measurementTime(weather.calculatedAt)}", color = Quiet,
-                    fontSize = 10.sp, textAlign = TextAlign.Center)
-            }
-        }
-    }
-}
-
-@Composable
-private fun Metric(label: String, value: String, large: Boolean = false) {
-    Column(Modifier.fillMaxWidth().background(Surface, RoundedCornerShape(20.dp)).padding(horizontal = 12.dp, vertical = 10.dp),
-        horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(label, color = Quiet, fontSize = 11.sp, textAlign = TextAlign.Center)
-        Text(value, color = Cream, fontSize = if (large) 26.sp else 21.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
-    }
-}
-
-@Composable
-private fun Note(text: String, highlighted: Boolean = false) {
-    Text(text, color = if (highlighted) Leaf else Quiet, fontSize = 12.sp, textAlign = TextAlign.Center,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 5.dp, vertical = 3.dp))
-}
-
-
-private fun speed(value: Double?): String = value?.let { String.format(Locale.forLanguageTag("tr"), "%.1f km/sa", it) } ?: "Ölçüm yok"
-
-private fun bpm(value: Double?): String = value?.let { String.format(Locale.forLanguageTag("tr"), "%.0f atım/dk", it) } ?: "Ölçüm yok"
-private fun measurementTime(value: Long?): String = value?.let {
-    SimpleDateFormat("dd.MM HH:mm", Locale.forLanguageTag("tr")).format(Date(it))
-} ?: "Ölçüm yok"

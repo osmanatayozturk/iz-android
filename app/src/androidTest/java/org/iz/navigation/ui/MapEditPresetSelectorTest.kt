@@ -40,6 +40,8 @@ class MapEditPresetSelectorTest {
         compose.waitForIdle()
         OsmLightEditorNativeCapture.capture("02-search-favorites")
         compose.onNodeWithText(cafe.name).performClick()
+        compose.runOnIdle { assertNull(selected); assertEquals(1, toggles) }
+        compose.onNodeWithTag("osm-map-preset-use").performClick()
         compose.runOnIdle { assertEquals("amenity/cafe", selected?.presetId); assertEquals(1, toggles) }
     }
 

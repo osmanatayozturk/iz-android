@@ -41,6 +41,10 @@ internal object WatchSurfaceReader {
             storage.finishWrite(stream)
         } catch (failure: Exception) { storage.failWrite(stream); throw failure }
     }
+    suspend fun forgetPhone(context: Context) = withContext(Dispatchers.IO) {
+        mutex.withLock { file(context).delete() }
+    }
+
     suspend fun deleted(context: Context, source: String?, path: String?) = withContext(Dispatchers.IO) {
         mutex.withLock {
             val prior = cached(context)
@@ -94,7 +98,7 @@ class WatchSurfaceListener : WearableListenerService() {
                 val s = data.snapshot
                 val advisory = s?.takeIf { data.connected && WearProtocol.isFreshSnapshot(it, System.currentTimeMillis()) }
                     ?.let { WatchSurfacePolicy.ownerAdvisory(it) }
-                val transition = "${data.phoneId}:${s?.journeyId}:${s?.recording}:${s?.temporary}:${s?.navigation?.sessionId}:${s?.navigation?.guidance}:${s?.navigation?.gpsStale}:${s?.navigation?.arrived}:${s?.navigation?.offRoute}:${s?.daily?.localDate}:${s?.statsDeferred}:${s?.statisticsStatus}:${s?.completed?.journeyId}:${s?.navigation?.loading}:$advisory"
+                val transition = "${data.phoneId}:${s?.journeyId}:${s?.recording}:${s?.temporary}:${s?.navigation?.sessionId}:${s?.navigation?.guidance}:${s?.navigation?.gpsStale}:${s?.navigation?.arrived}:${s?.navigation?.offRoute}:${s?.daily?.localDate}:${s?.statsDeferred}:${s?.statisticsStatus}:${s?.completed?.journeyId}:${s?.navigation?.loading}:${s?.paletteId}:$advisory"
                 WatchSurfaceUpdates.request(this@WatchSurfaceListener, transition)
             }
         }

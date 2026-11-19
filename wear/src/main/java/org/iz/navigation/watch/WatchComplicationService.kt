@@ -55,7 +55,7 @@ class WatchComplicationService : SuspendingTimelineComplicationDataSourceService
         val text = PlainComplicationText.Builder(value).build()
         val desc = PlainComplicationText.Builder(description).build()
         if (type == ComplicationType.MONOCHROMATIC_IMAGE) return MonochromaticImageComplicationData.Builder(
-            MonochromaticImage.Builder(Icon.createWithResource(this, R.drawable.ic_watch)).build(), desc).setTapAction(tap).build()
+            MonochromaticImage.Builder(Icon.createWithResource(this, R.drawable.ic_watch_complication)).build(), desc).setTapAction(tap).build()
         return if (type == ComplicationType.LONG_TEXT) LongTextComplicationData.Builder(text, desc)
             .setTitle(PlainComplicationText.Builder(title).build()).setTapAction(tap).build()
         else ShortTextComplicationData.Builder(text, desc).setTitle(PlainComplicationText.Builder(title).build()).setTapAction(tap).build()

@@ -108,11 +108,11 @@ internal fun GpxTrackScreen(
     val enabled = !busy && !selecting
     BackHandler(onBack = onDismiss)
 
-    Surface(Modifier.fillMaxSize().testTag("gpx-screen"), color = Paper) {
+    Surface(Modifier.fillMaxSize().testTag("gpx-screen"), color = MaterialTheme.colorScheme.surface) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp).testTag("gpx-close")) { Text("Kapat") }
-            Text("GPX çizgi takibi", style = MaterialTheme.typography.headlineMedium)
+            Text("GPX içe alma ve çizgi takibi", style = MaterialTheme.typography.headlineMedium)
             if (interrupted) Card(Modifier.fillMaxWidth().testTag("gpx-interrupted")) {
                 Column(Modifier.padding(12.dp)) {
                     Text("Önceki GPX takibi kesildi.", style = MaterialTheme.typography.titleMedium)
@@ -188,7 +188,7 @@ internal fun GpxTrackScreen(
                     else onStart(request.track, request.selection, request.transport, false, request.expectedReplacementKey)
                 }, enabled = enabled && preview != null && preview!!.distance > 0.0,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("gpx-start")) {
-                    Text(if (matchingActive != null) "Seçilen başlangıçla yeniden başlat" else "Çizgiyi takip et")
+                    Text(if (matchingActive != null) "Seçilen başlangıçla yeniden başlat" else "Takibi başlat")
                 }
                 OutlinedButton(onClick = { saveName = displayed.name; saveDialog = true }, enabled = enabled,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("gpx-save")) { Text("İzi sakla…") }

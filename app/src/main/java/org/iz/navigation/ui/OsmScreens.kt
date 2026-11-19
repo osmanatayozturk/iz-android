@@ -186,13 +186,15 @@ internal fun ContributionLocationPicker(initial: SelectedOsmPlace?, placeId: Str
 }
 
 @Composable
-private fun OsmPopup(onDismiss: () -> Unit, busy: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
+private fun OsmPopup(onDismiss: () -> Unit, busy: Boolean = false, fullScreen: Boolean = false,
+    content: @Composable ColumnScope.() -> Unit) {
     Dialog(
         onDismissRequest = { if (!busy) onDismiss() },
         properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnBackPress = !busy, dismissOnClickOutside = !busy),
     ) {
         Surface(
-            modifier = Modifier.padding(16.dp).widthIn(max = 560.dp).fillMaxWidth(),
+            modifier = if (fullScreen) Modifier.fillMaxSize().systemBarsPadding().imePadding()
+                else Modifier.padding(16.dp).widthIn(max = 560.dp).fillMaxWidth(),
             shape = MaterialTheme.shapes.extraLarge,
             tonalElevation = 6.dp,
         ) {
@@ -210,25 +212,41 @@ internal fun ContributionEditor(initial: ContributionDraft, connected: Boolean, 
     var text by rememberSaveable(initial.id) { mutableStateOf(initial.text) }
     var kind by rememberSaveable(initial.id) { mutableStateOf(initial.kind) }
     var preview by remember(initial.id) { mutableStateOf(false) }
+    var reviewed by remember(initial.id) { mutableStateOf(false) }
+    var previewAccount by remember(initial.id) { mutableStateOf<org.iz.navigation.integration.osm.OsmCredentials?>(null) }
     val draft = initial.copy(text = text.trim(), kind = kind)
     val valid = draft.text.isNotBlank() && draft.text.length <= 2000
     val context = LocalContext.current
     val auth = remember(context) { OsmAuthManager.get(context) }
+    val account by auth.communitySessionSource.sessions.collectAsStateWithLifecycle()
+    val authState by auth.state.collectAsStateWithLifecycle()
+    LaunchedEffect(account) { preview = false; reviewed = false }
     val exit = OsmDraftExitOwner("osm-contribution/" + initial.id,
         accountKey = { auth.communitySessionSource.sessions.value?.let { it.userId.toString() + ":" + it.generation } },
         working = { listOf(text.trim(), kind) },
         baseline = { liveBaseline().let { listOf(it.text, it.kind) } },
         busy = { liveBusy() || auth.state.value.busy },
         discard = { liveBaseline().let { text = it.text; kind = it.kind } })
-    OsmPopup(onDismiss = { if (preview) preview = false else exit(onDismiss) }, busy = busy) {
-            Text(if (preview) "Herkese açık bildirim" else "Haritaya bir gözlem ekle", style = MaterialTheme.typography.headlineSmall)
+    OsmPopup(onDismiss = { if (preview) preview = false else exit(onDismiss) }, busy = busy, fullScreen = true) {
+            OsmEditorHeading(if (preview) "OSM gönderim önizlemesi" else "Harita notu ve konum seçimi", !busy) {
+                if (preview) preview = false else exit(onDismiss)
+            }
             authError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            Text("Bağlı hesap", style = MaterialTheme.typography.labelLarge)
+            Text(authState.user?.displayName ?: if (connected) "OSM hesabı bağlı" else "Hesap bağlanmadı")
             if (preview) {
                 Text(kind.label(), style = MaterialTheme.typography.titleMedium)
                 Text(draft.text)
+                DiaryMap(emptyList(), listOf(Place(name = "Harita notu", latitude = draft.latitude, longitude = draft.longitude)),
+                    Modifier.fillMaxWidth().height(160.dp).testTag("osm-note-preview-map"), expandable = false)
                 Text("Konum: ${draft.latitude}, ${draft.longitude}")
                 Text("Bu metin ve konum OSM hesabınla yayımlanacak. Harita gönüllüleri bildirimi inceleyebilir. Özel günlük notların ve fotoğrafların gönderilmez.", color = Muted)
-                if (connected) Button(onClick = { onPublish(draft) }, enabled = valid && !busy, modifier = Modifier.fillMaxWidth()) { Text("OSM’ye gönder") }
+                CorrectionConfirmationRow("Herkese açık metni, konumu ve OSM hesabımı kontrol ettim.",
+                    "osm-note-reviewed", reviewed, !busy) { reviewed = it }
+                if (connected) Button(onClick = {
+                    if (reviewed && auth.currentCredentials() === previewAccount) { reviewed = false; onPublish(draft) }
+                    else { preview = false; reviewed = false }
+                }, enabled = valid && reviewed && !busy && !authState.busy, modifier = Modifier.fillMaxWidth()) { Text("OSM’ye gönder") }
                 else Button(onClick = { onLogin(draft) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("OSM hesabını bağla") }
                 TextButton(onClick = { preview = false }, enabled = !busy) { Text("Düzenlemeye dön") }
             } else {
@@ -239,7 +257,8 @@ internal fun ContributionEditor(initial: ContributionDraft, connected: Boolean, 
                     isError = text.length > 2000, minLines = 4, enabled = !busy, modifier = Modifier.fillMaxWidth().testTag("osm-observation"))
                 Text("Konum: ${draft.latitude}, ${draft.longitude}", style = MaterialTheme.typography.bodySmall)
                 Text("Gözlem: ${SimpleDateFormat("d MMM yyyy HH:mm", Locale.forLanguageTag("tr-TR")).format(Date(initial.observedAt))}", style = MaterialTheme.typography.bodySmall)
-                Button(onClick = { preview = true }, enabled = valid && !busy, modifier = Modifier.fillMaxWidth()) { Text("Gönderimi önizle") }
+                Button(onClick = { previewAccount = auth.currentCredentials(); reviewed = false; preview = true },
+                    enabled = valid && !busy, modifier = Modifier.fillMaxWidth()) { Text("Gönderimi önizle") }
                 OutlinedButton(onClick = { onSave(draft) }, enabled = text.length <= 2000 && !busy, modifier = Modifier.fillMaxWidth()) { Text("Taslağı sakla") }
             }
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -252,8 +271,8 @@ internal fun ContributionsScreen(drafts: List<ContributionDraft>, busy: Boolean,
     onEdit: (ContributionDraft) -> Unit, onCheck: (ContributionDraft) -> Unit, onDelete: (ContributionDraft) -> Unit) {
     val context = LocalContext.current
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        item { Text("OSM katkılarım", style = MaterialTheme.typography.headlineMedium); Text("Gittiğin yerlerde gördüklerin haritayı geliştirsin.", color = Muted) }
-        item { Button(onClick = onNew, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Yeni harita bildirimi") } }
+        item { Text("Harita notları", Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineMedium); Text("Yerel taslaklarını ve OSM’ye gönderdiğin notları yönet.", color = Muted) }
+        item { Button(onClick = onNew, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Yeni not") } }
         if (drafts.isEmpty()) item { Text("Henüz bir bildirim yok. Eksik veya yanlış bir yeri gözlemleyerek başlayabilirsin.") }
         items(drafts.sortedByDescending { it.observedAt }, key = { it.id }) { draft ->
             OutlinedCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -275,7 +294,7 @@ internal fun ContributionsScreen(drafts: List<ContributionDraft>, busy: Boolean,
 }
 
 @Composable
-internal fun OsmSettingsPanel(onContributions: () -> Unit, onMessage: (String) -> Unit) {
+internal fun OsmSettingsPanel(onContributions: () -> Unit, onMessage: (String) -> Unit, onAccount: (() -> Unit)? = null) {
     val context = LocalContext.current
     val auth = remember { OsmAuthManager.get(context) }
     val state by auth.state.collectAsStateWithLifecycle()
@@ -283,17 +302,21 @@ internal fun OsmSettingsPanel(onContributions: () -> Unit, onMessage: (String) -
     var showClient by remember { mutableStateOf(false) }
     var clientId by remember { mutableStateOf("") }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("OpenStreetMap", style = MaterialTheme.typography.titleLarge)
+        Text("OSM ve harita servisleri", Modifier.semantics { heading() }, style = MaterialTheme.typography.titleLarge)
         Text("Harita, Nominatim araması ve OSM katkıları. İnternet olmadan yolculuk kaydı sürer.", color = Muted)
         Text(state.user?.let { "Bağlı hesap: ${it.displayName}" } ?: "Haritayı hesapsız kullanabilirsin. Bildirim göndermek için hesabını bağla.")
+        if (onAccount != null) TextButton(onClick = onAccount, enabled = !state.busy,
+            modifier = Modifier.heightIn(min = 48.dp).testTag("osm-settings-account")) { Text("Bağlı hesabı yönet") }
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        if (state.user == null) OutlinedButton(enabled = !state.busy, onClick = {
+        if (onAccount == null && state.user == null) OutlinedButton(enabled = !state.busy, onClick = {
             runCatching { auth.startLogin(context.findActivity() ?: error("Giriş ekranı açılamadı.")) }.onFailure { onMessage(it.message ?: "Giriş başlatılamadı.") }
         }) { Text("OSM hesabını bağla") }
-        else TextButton(onClick = { auth.disconnect() }, enabled = !state.busy) { Text("Hesap bağlantısını kes") }
+        else if (onAccount == null) TextButton(onClick = { auth.disconnect() }, enabled = !state.busy) { Text("Hesap bağlantısını kes") }
         if (!state.clientIdConfigured) Text("OSM uygulama kimliği henüz tanımlanmadı. Harita ve yerel taslaklar kullanılabilir.", color = Muted, style = MaterialTheme.typography.bodySmall)
         OutlinedButton(onClick = onContributions) { Text("Katkılarım") }
-        TextButton(onClick = { showServices = true }) { Text("Harita servisleri") }
+        HorizontalDivider()
+        Text("Bağlantı ayarları", style = MaterialTheme.typography.titleMedium)
+        TextButton(onClick = { showServices = true }) { Text("Harita, arama ve Overpass adresleri") }
         TextButton(onClick = { showClient = true }) { Text("OSM uygulama kimliği") }
         TextButton(onClick = { MediaShare.openUrl(context, "https://www.openstreetmap.org/copyright") }) { Text("© OpenStreetMap katkıcıları · Lisans") }
     }
@@ -319,27 +342,38 @@ private fun OsmServiceEditor(onDismiss: () -> Unit, onSaved: () -> Unit) {
     val context = LocalContext.current
     val settings = remember { OsmServiceSettings(context) }
     val saved = remember { settings.read() }
-    var tiles by remember { mutableStateOf(saved.tileUrl) }
-    var search by remember { mutableStateOf(saved.nominatim) }
-    var nearby by remember { mutableStateOf(saved.overpass) }
+    var tiles by rememberSaveable { mutableStateOf(saved.tileUrl) }
+    var search by rememberSaveable { mutableStateOf(saved.nominatim) }
+    var nearby by rememberSaveable { mutableStateOf(saved.overpass) }
     var error by remember { mutableStateOf<String?>(null) }
     val exit = OsmDraftExitOwner("osm-service-settings", { null },
         { listOf(tiles, search, nearby) }, { listOf(saved.tileUrl, saved.nominatim, saved.overpass) },
         { false }, { tiles = saved.tileUrl; search = saved.nominatim; nearby = saved.overpass })
-    AlertDialog(onDismissRequest = { exit(onDismiss) }, title = { Text("Harita servisleri") }, text = {
-        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Kişisel kullanım için çevrimiçi OSM servisleri. Arama yalnızca Ara düğmesiyle çalışır; çevrimdışı harita paketi indirilmez.")
-            OutlinedTextField(tiles, { tiles = it }, label = { Text("Harita adresi · {z}/{x}/{y}") })
-            OutlinedTextField(search, { search = it }, label = { Text("Nominatim arama adresi") })
-            OutlinedTextField(nearby, { nearby = it }, label = { Text("Overpass sorgu adresi") })
-            Text("Bu servislere arama metni veya seçilen harita alanı gönderilir. OSM hesap bilgileri gönderilmez.", style = MaterialTheme.typography.bodySmall)
-            TextButton(onClick = { val defaults = OsmServiceEndpoints(); tiles = defaults.tileUrl; search = defaults.nominatim; nearby = defaults.overpass }) { Text("Varsayılanları kullan") }
-            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        }
-    }, confirmButton = { TextButton(onClick = {
-        runCatching { settings.save(OsmServiceEndpoints(tileUrl = tiles.trim(), nominatim = search.trim(), overpass = nearby.trim())) }
-            .onSuccess { onSaved() }.onFailure { error = it.message ?: "Geçerli HTTPS adresleri gir." }
-    }) { Text("Kaydet") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Vazgeç") } })
+    OsmPopup(onDismiss = { exit(onDismiss) }, fullScreen = true) {
+        OsmEditorHeading("OSM ve harita servisleri", true) { exit(onDismiss) }
+        Text("Harita, arama ve Overpass adresleri", style = MaterialTheme.typography.titleMedium)
+        Text("Arama ve harita sorguları aşağıdaki servisleri kullanır.")
+        OutlinedTextField(tiles, { tiles = it }, label = { Text("Harita adresi · {z}/{x}/{y}") },
+            modifier = Modifier.fillMaxWidth(), singleLine = true)
+        OutlinedTextField(search, { search = it }, label = { Text("Nominatim arama adresi") },
+            modifier = Modifier.fillMaxWidth(), singleLine = true)
+        OutlinedTextField(nearby, { nearby = it }, label = { Text("Overpass sorgu adresi") },
+            modifier = Modifier.fillMaxWidth(), singleLine = true)
+        Text("Bu servislere arama metni veya seçilen harita alanı gönderilir. OSM hesap bilgileri gönderilmez.",
+            style = MaterialTheme.typography.bodySmall)
+        OutlinedButton(onClick = {
+            val defaults = OsmServiceEndpoints()
+            tiles = defaults.tileUrl
+            search = defaults.nominatim
+            nearby = defaults.overpass
+        }, modifier = Modifier.fillMaxWidth().testTag("osm-service-defaults")) { Text("Varsayılanlara dön") }
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        Button(onClick = {
+            runCatching { settings.save(OsmServiceEndpoints(tileUrl = tiles.trim(), nominatim = search.trim(), overpass = nearby.trim())) }
+                .onSuccess { onSaved() }.onFailure { error = it.message ?: "Geçerli HTTPS adresleri gir." }
+        }, modifier = Modifier.fillMaxWidth().testTag("osm-service-save")) { Text("Kaydet") }
+        TextButton(onClick = { exit(onDismiss) }) { Text("Vazgeç") }
+    }
 }
 
 private data class GpxExportSource(val request: Any, val segments: List<List<TrackPoint>>, val count: Int, val error: String? = null)

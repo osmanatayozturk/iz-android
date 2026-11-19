@@ -20,7 +20,7 @@ class NavigationHomeShellTest {
         compose.onNodeWithTag("navigation-home-map").assertIsDisplayed()
         compose.onNodeWithTag("home-menu").performClick()
         compose.onNodeWithTag("menu-journeys").performClick()
-        compose.onNodeWithText("Yolculukların").assertIsDisplayed()
+        compose.onNode(hasText("Yolculuklar") and !hasClickAction()).assertIsDisplayed()
         compose.onNodeWithTag("return-home-map").performClick()
         compose.onNodeWithTag("navigation-home-map").assertIsDisplayed()
         assertEquals(before.journey?.id, navigation.state.value.journey?.id)

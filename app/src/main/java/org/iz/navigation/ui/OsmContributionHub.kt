@@ -1,5 +1,6 @@
 package org.iz.navigation.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -10,10 +11,16 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -23,6 +30,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -56,6 +64,8 @@ internal fun OsmContributionHub(
     onGpsHistory: () -> Unit,
     onManageNotes: (() -> Unit)? = null,
     onSurvey: () -> Unit = {},
+    onCommunity: (() -> Unit)? = null,
+    onManagePlaces: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val auth = remember(context) { OsmAuthManager.get(context) }
@@ -83,7 +93,8 @@ internal fun OsmContributionHub(
     OsmContributionHubContent(rows, history, canRefresh = historySession != null,
         onClose = onClose, onNewNote = onNewNote, onNewPlace = onNewPlace,
         onPickExistingPlace = onPickExistingPlace, onGps = onGps, onGpsHistory = onGpsHistory,
-        onRefresh = { refreshRevision++ }, onManageNotes = onManageNotes, onSurvey = onSurvey, onOpen = { row ->
+        onRefresh = { refreshRevision++ }, onManageNotes = onManageNotes, onSurvey = onSurvey,
+        onCommunity = onCommunity, onManagePlaces = onManagePlaces, onOpen = { row ->
             val current = session != null && auth.currentGpxSession() === session
             when (row) {
                 is OsmContributionHubRow.Note -> if (row.draft.status == ContributionStatus.DRAFT || current) {
@@ -114,34 +125,48 @@ internal fun OsmContributionHubContent(
     onOpen: (OsmContributionHubRow) -> Unit,
     onManageNotes: (() -> Unit)? = null,
     onSurvey: () -> Unit = {},
+    onCommunity: (() -> Unit)? = null,
+    onManagePlaces: (() -> Unit)? = null,
 ) {
+    var activities by rememberSaveable { mutableStateOf(false) }
+    val hubList = rememberLazyListState()
+    val activityList = rememberLazyListState()
+    fun back() { if (activities) activities = false else onClose() }
+    BackHandler(enabled = activities) { activities = false }
     Column(Modifier.fillMaxSize().testTag("osm-contribution-hub")) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            Text("Katkı Merkezi", Modifier.weight(1f).semantics { heading() },
-                style = MaterialTheme.typography.headlineSmall)
-            TextButton(onClick = onClose, modifier = Modifier.heightIn(min = 48.dp)) { Text("Kapat") }
+            IconButton(onClick = ::back, modifier = Modifier.testTag("osm-contribution-back")) {
+                Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Geri")
+            }
+            Text(if (activities) "Etkinlikler ve taslaklar" else "Katkı Merkezi",
+                Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.titleLarge)
         }
+        HorizontalDivider()
         LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("osm-contribution-list"),
+            state = if (activities) activityList else hubList,
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            item { ContributionHubAction("Harita notu yaz", "new-note", onNewNote) }
-            item { ContributionHubAction("Yeni mekân ekle", "new-place", onNewPlace) }
-            item { ContributionHubAction("Mevcut mekânı düzelt", "existing-place", onPickExistingPlace) }
-            item { ContributionHubAction("Yerinde tamamla", "survey", onSurvey) }
-            item { ContributionHubAction("GPS izi gönder", "gps", onGps) }
-            item { ContributionHubAction("Yüklenenler", "uploads", onGpsHistory) }
+            verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (!activities) {
+                item { ContributionHubAction("Harita notu", "new-note", onNewNote) }
+                item { ContributionHubAction("Mekân ekle", "new-place", onNewPlace) }
+                item { ContributionHubAction("Mekânı düzelt", "existing-place", onPickExistingPlace) }
+                item { ContributionHubAction("Yerinde tamamla", "survey", onSurvey) }
+                item { ContributionHubAction("GPS izi paylaş", "gps", onGps) }
+                item { ContributionHubAction("Etkinlikler", "activities") { activities = true } }
+                onCommunity?.let { open -> item { ContributionHubAction("Topluluk", "community", open) } }
+            } else {
+                onManageNotes?.let { open -> item { ContributionHubAction("Notlarım", "manage-notes", open) } }
+                onManagePlaces?.let { open -> item { ContributionHubAction("Mekân taslaklarım", "manage-places", open) } }
+                item { ContributionHubAction("Yüklenen GPS izleri", "uploads", onGpsHistory) }
+            }
             item {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Katkılarım", Modifier.weight(1f).semantics { heading() },
-                        style = MaterialTheme.typography.titleLarge)
+                    Text(if (activities) "Tüm etkinlikler" else "Son etkinlikler",
+                        Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.titleMedium)
                     if (canRefresh) TextButton(onClick = onRefresh, enabled = history != null,
                         modifier = Modifier.heightIn(min = 48.dp).testTag("osm-contribution-refresh")) { Text("Yenile") }
                 }
-            }
-            if (onManageNotes != null) item {
-                TextButton(onClick = onManageNotes, modifier = Modifier.heightIn(min = 48.dp)
-                    .testTag("osm-contribution-manage-notes")) { Text("Harita notlarını yönet") }
             }
             if (canRefresh && history == null) item {
                 LinearProgressIndicator(Modifier.fillMaxWidth().testTag("osm-contribution-history-loading"))
@@ -153,15 +178,21 @@ internal fun OsmContributionHubContent(
             if (rows.isEmpty() && (!canRefresh || history is OsmContributionHubHistoryResult.Ready)) item {
                 Text("Henüz katkı kaydı yok.", style = MaterialTheme.typography.bodyMedium)
             }
-            items(rows, key = { it.key }) { row -> ContributionHubRow(row) { onOpen(row) } }
+            items(if (activities) rows else rows.take(3), key = { it.key }) { row -> ContributionHubRow(row) { onOpen(row) } }
         }
     }
 }
 
 @Composable
 private fun ContributionHubAction(label: String, key: String, onClick: () -> Unit) {
-    OutlinedButton(onClick = onClick,
-        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("osm-contribution-$key")) { Text(label) }
+    Surface(onClick = onClick, color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("osm-contribution-$key")) {
+        Row(Modifier.fillMaxWidth().padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+            Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.primary)
+        }
+    }
+    HorizontalDivider()
 }
 
 @Composable
@@ -196,12 +227,13 @@ private fun ContributionHubRow(row: OsmContributionHubRow, onClick: () -> Unit) 
             enabled = true
         }
     }
-    OutlinedCard(onClick = onClick, enabled = enabled,
+    Surface(onClick = onClick, enabled = enabled, color = MaterialTheme.colorScheme.surface,
         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("osm-contribution-${row.key}")) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(Modifier.padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text("$type · $status", style = MaterialTheme.typography.bodyMedium)
             Text(osmGpsDate(row.timestamp), style = MaterialTheme.typography.bodySmall)
         }
     }
+    HorizontalDivider()
 }

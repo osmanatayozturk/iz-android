@@ -91,7 +91,9 @@ class OsmGpsBatchUiTest {
                 )
             }
         }
+        compose.onNodeWithText("GPS önizleme ve toplu onay").assertIsDisplayed()
         compose.onNodeWithText("2 GPS izini OSM'ye gönder?").assertIsDisplayed()
+        compose.onNodeWithText("Seçilileri gönder · 2 iz").assertIsDisplayed()
         compose.onNodeWithText("Fixture user", substring = true).assertExists()
         compose.onNodeWithText("noktaları ve kayıt zamanlarını", substring = true).assertExists()
         compose.onNodeWithText("herkese açık iz listesinde", substring = true).assertExists()

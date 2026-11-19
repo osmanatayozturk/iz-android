@@ -27,8 +27,8 @@ import org.iz.navigation.car.SharedMapLinks
 import org.iz.navigation.car.SharedMapStop
 import androidx.compose.runtime.saveable.rememberSaveable
 import org.iz.navigation.data.*
-import org.iz.navigation.integration.FullscreenMapDialog
-import org.iz.navigation.integration.WeatherRouteMap
+import org.iz.navigation.lean.LeanSettingsStore
+import org.iz.navigation.lean.LiveLeanGate
 import org.iz.navigation.weather.*
 import org.iz.navigation.navigation.TrackReplacementConsent
 import org.iz.navigation.navigation.NavigationState
@@ -345,6 +345,13 @@ internal class PhoneNavigationViewModel(application: Application) : AndroidViewM
 
 private data class QuickDirectionsEntry(val destination: RouteStop? = null, val shared: Boolean = false)
 
+private sealed interface DirectionsStopTarget {
+    data object Origin : DirectionsStopTarget
+    data object Destination : DirectionsStopTarget
+    data object NewVia : DirectionsStopTarget
+    data class EditVia(val index: Int, val stop: RouteStop) : DirectionsStopTarget
+}
+
 @Composable
 internal fun NavigationScreen(
     onClose: () -> Unit,
@@ -371,11 +378,19 @@ internal fun NavigationScreen(
     layersRequest: Int = 0,
     onAssignShortcut: (DestinationShortcutKind) -> Unit = {},
     onOsmPlaceClick: ((SelectedOsmPlace) -> Unit)? = null,
+    liveLeanReadings: StateFlow<LiveLeanReading?>? = null,
 ) {
     val context = LocalContext.current
     val ui by vm.ui.collectAsStateWithLifecycle()
     androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) { vm.directions.refreshCredentials() }
     val nav by vm.navigation.state.collectAsStateWithLifecycle()
+    val liveLeanEnabled by remember(context) { LiveLeanDisplaySettings.get(context) }.enabled.collectAsStateWithLifecycle()
+    val leanSettings by remember(context) { LeanSettingsStore.get(context) }.state.collectAsStateWithLifecycle()
+    val leanReading = liveLeanReadings?.collectAsStateWithLifecycle()?.value
+    val leanSession = nav.sessionId?.takeIf {
+        liveLeanEnabled && LiveLeanGate.allows(leanSettings.mount) && !nav.simulation && nav.sessionTransport == Transport.MOTORCYCLE &&
+            (nav.guidance || nav.recording)
+    }
     val routeEdits by vm.navigation.edits.collectAsStateWithLifecycle()
     // Live recording and simulation intentionally publish position only, never a colored trail.
     val points = emptyList<TrackPoint>()
@@ -484,8 +499,15 @@ internal fun NavigationScreen(
             currentNavigation.routeRevision == dashboardRouteRevision && !vm.commandBusy.value && !vm.ui.value.starting
     }
     val dashboardAnalysis by remember(app) { org.iz.navigation.power.PostJourneyAnalysis.get(app).state }.collectAsStateWithLifecycle()
-    var addingVia by remember(entryId) { mutableStateOf(false) }
     var recordDialog by remember { mutableStateOf(false) }
+    var confirmedRecordingMode by rememberSaveable { mutableStateOf<Transport?>(null) }
+    LaunchedEffect(nav.sessionTransport, nav.guidance, nav.journey?.status, nav.simulation) {
+        val selected = nav.sessionTransport
+        if (!nav.simulation && selected != null && selected in transportDisplayOrder &&
+            (nav.guidance || nav.journey?.status == JourneyStatus.CONFIRMED)) {
+            confirmedRecordingMode = selected
+        }
+    }
     var sessionActions by remember { mutableStateOf(false) }
     var pendingEnd by remember(entryId) { mutableStateOf<PhoneSessionEndRequest?>(null) }
     fun requestEnd(action: PhoneSessionEnd) {
@@ -494,12 +516,22 @@ internal fun NavigationScreen(
         sessionActions = false
         pendingEnd = request
     }
-    var pickerOrigin by remember(entryId) { mutableStateOf(false) }
+    var stopTarget by remember(entryId) { mutableStateOf<DirectionsStopTarget>(DirectionsStopTarget.Destination) }
     var showSource by remember(entryId) { mutableStateOf(false) }
     var showSearch by remember(entryId) { mutableStateOf(false) }
     var showPickerMap by remember(entryId) { mutableStateOf(false) }
     var showTrafficSettings by remember { mutableStateOf(false) }
     var incomingQuery by remember(entryId) { mutableStateOf("") }
+    val stopPickerTitle = when (val target = stopTarget) {
+        DirectionsStopTarget.Origin -> ui.origin?.let { "A · Başlangıç · ${it.label}" } ?: "A · Başlangıç seç"
+        DirectionsStopTarget.Destination -> ui.destination?.let { "B · Varış · ${it.label}" } ?: "B · Varış seç"
+        DirectionsStopTarget.NewVia -> "Yeni ara durak seç"
+        is DirectionsStopTarget.EditVia -> "Ara durak · ${target.stop.label}"
+    }
+    fun openStopSource(target: DirectionsStopTarget) {
+        stopTarget = target
+        showSource = true
+    }
     var trackReplacementDialog by remember(entryId, nav.trackReplacementKey(), vm.directions.revisionToken) {
         mutableStateOf<String?>(null)
     }
@@ -594,8 +626,19 @@ internal fun NavigationScreen(
         }
     }
     fun select(stop: RouteStop) {
-        if (addingVia) { vm.directions.addVia(stop); addingVia = false }
-        else if (pickerOrigin) vm.directions.setOrigin(stop) else vm.directions.setDestination(stop)
+        if (!quickEntryCurrent()) return
+        when (val target = stopTarget) {
+            DirectionsStopTarget.Origin -> vm.directions.setOrigin(stop)
+            DirectionsStopTarget.Destination -> vm.directions.setDestination(stop)
+            DirectionsStopTarget.NewVia -> vm.directions.addVia(stop)
+            is DirectionsStopTarget.EditVia -> {
+                if (vm.ui.value.via.getOrNull(target.index) === target.stop) {
+                    vm.directions.replaceVia(target.index, stop)
+                } else {
+                    vm.directions.reportMessage("Ara durak değişti. Düzenlemek istediğin durağı yeniden seç.")
+                }
+            }
+        }
     }
     val uiExit = org.iz.navigation.ui.history.LocalUiExitGuard.current
     fun closePlanner() { val exit = { showPlanning = false; onClose() }; if (uiExit == null) exit() else uiExit.requestExit(exit) }
@@ -637,7 +680,7 @@ internal fun NavigationScreen(
             vm.target(target)
             if (target.coordinate == null && target.query.isNotBlank()) {
                 incomingQuery = target.query
-                pickerOrigin = false
+                stopTarget = DirectionsStopTarget.Destination
                 showSearch = true
             }
         }
@@ -782,17 +825,26 @@ internal fun NavigationScreen(
         },
         onRecord = {
             if (nav.recording) sessionActions = true
-            else if (nav.sessionId != null) {
-                vm.directions.transport(nav.sessionTransport ?: ui.transport)
-                vm.directions.setRecordJourney(true)
-                requestAction(DirectionsAction.FREE_DRIVE)
-            } else recordDialog = true
+            else {
+                val chosen = nav.sessionTransport?.takeIf { it in transportDisplayOrder } ?: confirmedRecordingMode
+                if (chosen == null) recordDialog = true
+                else {
+                    vm.directions.transport(chosen)
+                    vm.directions.setRecordJourney(true)
+                    requestAction(DirectionsAction.FREE_DRIVE)
+                }
+            }
         },
         onGroup = onGroup, onMenu = onMenu, onWeather = onWeather,
         onMute = { vm.navigation.setMuted(!nav.muted) }, onManageSession = { showPlanning = true; onPlannerOpened() },
         onLocate = { requestAction(DirectionsAction.CURRENT_ORIGIN) }, onPin = onPin,
         onOsmPlaceClick = onOsmPlaceClick,
         placeInformationIdentity = entryId,
+        leanInstrument = leanSession?.let { session -> @Composable {
+            LiveLeanDial(session, leanReading.takeUnless {
+                nav.fix == null || nav.gpsStale || nav.paused || nav.plannedBreak != null || nav.approximateOrigin != null
+            })
+        } },
         onResumePlannedBreak = resumePlannedBreak, plannedBreakResumeEnabled = plannedBreakResumeEnabled,
         layersRequest = layersRequest,
         onRecoverRecording = {
@@ -809,8 +861,8 @@ internal fun NavigationScreen(
             }
         },
         onClose = ::closePlanner, onMap = ::goToMap,
-        chooseOrigin = { addingVia = false; pickerOrigin = true; showSource = true },
-        chooseDestination = { addingVia = false; pickerOrigin = false; showSource = true },
+        chooseOrigin = { openStopSource(DirectionsStopTarget.Origin) },
+        chooseDestination = { openStopSource(DirectionsStopTarget.Destination) },
         currentOrigin = { requestAction(DirectionsAction.CURRENT_ORIGIN) },
         transport = vm.directions::transport,
         preview = { requestAction(DirectionsAction.PREVIEW) }, start = { requestAction(DirectionsAction.START) },
@@ -821,7 +873,11 @@ internal fun NavigationScreen(
         lastDestination = if (vm.navigation.lastRoute != null) vm::lastDestination else null,
         permissions = { requestPermissions(permissionNames(), forAction = false) },
         showMap = false, recordJourney = vm.directions::setRecordJourney, stopRecording = { requestEnd(PhoneSessionEnd.RECORDING) },
-        addVia = { addingVia = true; pickerOrigin = false; showSource = true }, removeVia = vm.directions::removeVia,
+        addVia = { openStopSource(DirectionsStopTarget.NewVia) }, removeVia = vm.directions::removeVia,
+        moveVia = vm.directions::moveVia,
+        editVia = { index ->
+            ui.via.getOrNull(index)?.let { stop -> openStopSource(DirectionsStopTarget.EditVia(index, stop)) }
+        },
         onPlannedBreakMinutesChanged = vm.directions::setPlannedBreakMinutes,
         onResumePlannedBreak = resumePlannedBreak, plannedBreakResumeEnabled = plannedBreakResumeEnabled,
         suggestStopOrder = { vm.directions.suggestStopOrder() }, acceptStopOrder = vm.directions::acceptStopOrder,
@@ -869,6 +925,7 @@ internal fun NavigationScreen(
         )
     }
     if (recordDialog) TransportDialog(ui.transport, "Yolculuğu kaydet", onDismiss = { recordDialog = false }) { selected ->
+        confirmedRecordingMode = selected.takeIf { it in transportDisplayOrder }
         vm.directions.transport(selected)
         vm.directions.setRecordJourney(true)
         recordDialog = false
@@ -892,27 +949,21 @@ internal fun NavigationScreen(
         },
         onSearch = { incomingQuery = ""; showSource = false; showSearch = true },
         onMap = { showSource = false; showPickerMap = true },
+        title = stopPickerTitle,
     )
     if (showSearch) OsmSearchDialog(
         onDismiss = { showSearch = false },
         onSelect = { value -> select(RouteStop(value.name, WeatherCoordinate(value.latitude, value.longitude))); showSearch = false },
         initialQuery = incomingQuery,
     )
-    if (showPickerMap) FullscreenMapDialog(
-        title = if (addingVia) "Ara durak seç" else if (pickerOrigin) "A · Başlangıç seç" else "B · Varış seç",
-        onDismiss = { showPickerMap = false },
-        bottomBar = { Text("Noktayı seçmek için haritaya uzun bas.", Modifier.padding(16.dp)) },
-    ) { mapModifier ->
-        WeatherRouteMap(
-            route = ui.preview, assessment = null, modifier = mapModifier, expandable = false,
-            stops = ui.stops, liveCoordinate = nav.fix?.coordinate ?: ui.origin?.takeIf { ui.originCurrent }?.coordinate,
-            singleStopLabel = if (ui.origin == null && ui.destination != null) "B" else "A",
-            onMapLongClick = { coordinate ->
-                select(RouteStop("Harita noktası", WeatherCoordinate(coordinate.latitude, coordinate.longitude)))
-                showPickerMap = false
-            },
-        )
-    }
+    if (showPickerMap) WeatherStopMapPicker(
+        title = stopPickerTitle,
+        onDismiss = { showPickerMap = false; showSource = true },
+        onChoose = { stop ->
+            select(stop)
+            showPickerMap = false
+        },
+    )
     if (showTrafficSettings) TrafficSettingsDialog(onDismiss = { showTrafficSettings = false; vm.directions.showLiveRoute() })
 }
 

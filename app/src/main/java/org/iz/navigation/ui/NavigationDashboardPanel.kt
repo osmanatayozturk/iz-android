@@ -7,6 +7,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 
 /** Supplied display values only: no producer, clock, saved action or map owner. */
@@ -35,16 +37,20 @@ internal fun NavigationDashboardPanel(data: NavigationDashboardViewData, locked:
     Surface(modifier.testTag("navigation-dashboard"), tonalElevation = 3.dp) {
         Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Gösterge", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                Text("Gösterge", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f).semantics { heading() })
                 TextButton(onClick = onClose, modifier = Modifier.sizeIn(minHeight = 48.dp).testTag("close-navigation-dashboard")) { Text("Kapat") }
             }
-            // The immediate riding context does not leave the viewport when details scroll.
-            Column(Modifier.fillMaxWidth().testTag("dashboard-critical-context"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(data.status, style = MaterialTheme.typography.labelSmall)
-                data.maneuver?.let { Text(it, style = MaterialTheme.typography.titleSmall) }
-                data.warnings.forEach { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-            }
             LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                item(key = "context") {
+                    Surface(Modifier.fillMaxWidth().testTag("dashboard-critical-context"),
+                        shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant) {
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(data.status, style = MaterialTheme.typography.labelLarge)
+                            data.maneuver?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
+                            data.warnings.forEach { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
+                        }
+                    }
+                }
                 item(key = "speed") {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         DashboardSpeed("Hızım", data.speed, "GPS", Modifier.weight(1f))

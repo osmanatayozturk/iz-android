@@ -41,7 +41,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -49,6 +48,7 @@ import org.iz.navigation.data.Place
 import org.iz.navigation.data.Transport
 import org.iz.navigation.weather.RideWeatherLiveState
 import org.iz.navigation.weather.RideWeatherStatus
+import org.iz.navigation.weather.RideWeatherTiming
 import org.iz.navigation.weather.RouteStop
 import org.iz.navigation.weather.RoutePreferences
 import org.iz.navigation.weather.RouteSchedule
@@ -88,6 +88,8 @@ internal data class WeatherPlannerActions(
     val selectAlternative: (String) -> Unit = {},
     val saveRoute: () -> Unit = {},
     val setPlannedBreakMinutes: (Int, Int) -> Unit = { _, _ -> },
+    val retrySelectedWeather: () -> Unit = {},
+    val moveVia: (Int, Int) -> Unit = { _, _ -> },
 )
 
 @Composable
@@ -103,6 +105,8 @@ internal fun WeatherPlannerContent(
 ) {
     val recommendation = recommendedAssessment(state.comparisons)
     val displayRoute = state.route
+    val departureAt = state.effectiveDepartureAt ?: state.selectedDepartureAt ?: state.departureAt
+    val stopTimings = displayRoute?.let { RouteSchedule.stops(it, departureAt.coerceAtLeast(0)) }
     val interactionLocked = state.starting || locationBusy
     LazyColumn(
         modifier = Modifier.testTag("weather_planner"),
@@ -111,11 +115,16 @@ internal fun WeatherPlannerContent(
     ) {
         item {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Yolculuk havası", style = MaterialTheme.typography.headlineMedium)
-                Text(
-                    "Rotandaki tahmini varış saatlerine göre sıcaklık, yağış ve rüzgârı karşılaştır.",
-                    color = Muted,
-                )
+                Text("Yolculuk havası ve kalkış", style = MaterialTheme.typography.headlineMedium)
+                Text("Seçilen kalkış · ${weatherDateTime(departureAt)}", style = MaterialTheme.typography.titleSmall)
+                state.selectedAssessment?.let { assessment ->
+                    WeatherSummaryCard(assessment)
+                    if (!assessment.complete && !state.busy && !state.ordering && !state.loadingAlternatives && !interactionLocked) {
+                        TextButton(onClick = actions.retrySelectedWeather) {
+                            Text("Bu kalkışın tahminini yeniden dene")
+                        }
+                    }
+                }
             }
         }
         item {
@@ -151,17 +160,24 @@ internal fun WeatherPlannerContent(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Rota tercihleri", style = MaterialTheme.typography.titleMedium)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(preferences.avoidHighways, { actions.setPreferences(preferences.copy(avoidHighways = !preferences.avoidHighways)) },
-                        enabled = !interactionLocked, label = { Text(if (activeMode) "Otoyola girme" else "Otoyoldan kaçın") },
-                        modifier = Modifier.testTag("route_avoid_highways"))
-                    if (!activeMode) FilterChip(preferences.avoidTolls, { actions.setPreferences(preferences.copy(avoidTolls = !preferences.avoidTolls)) },
-                        enabled = !interactionLocked, label = { Text("Ücretli yoldan kaçın") }, modifier = Modifier.testTag("route_avoid_tolls"))
-                    if (state.transport in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE))
-                        FilterChip(preferences.avoidUnpaved, { actions.setPreferences(preferences.copy(avoidUnpaved = !preferences.avoidUnpaved)) },
-                            enabled = !interactionLocked, label = { Text("Toprak yollardan kaçın") }, modifier = Modifier.testTag("route_avoid_unpaved"))
-                    FilterChip(preferences.avoidFerries, { actions.setPreferences(preferences.copy(avoidFerries = !preferences.avoidFerries)) },
-                        enabled = !interactionLocked, label = { Text("Feribottan kaçın") }, modifier = Modifier.testTag("route_avoid_ferries"))
+                    RoutePreferenceChip(if (activeMode) "Otoyola girme" else "Otoyoldan kaçın", preferences.avoidHighways,
+                        !interactionLocked, "route_avoid_highways") {
+                        actions.setPreferences(preferences.copy(avoidHighways = !preferences.avoidHighways))
+                    }
+                    RoutePreferenceChip("Ücretli yoldan kaçın", !activeMode && preferences.avoidTolls,
+                        !interactionLocked && !activeMode, "route_avoid_tolls") {
+                        actions.setPreferences(preferences.copy(avoidTolls = !preferences.avoidTolls))
+                    }
+                    RoutePreferenceChip("Feribottan kaçın", preferences.avoidFerries, !interactionLocked, "route_avoid_ferries") {
+                        actions.setPreferences(preferences.copy(avoidFerries = !preferences.avoidFerries))
+                    }
+                    RoutePreferenceChip("Toprak yollardan kaçın", !activeMode && preferences.avoidUnpaved,
+                        !interactionLocked && !activeMode, "route_avoid_unpaved") {
+                        actions.setPreferences(preferences.copy(avoidUnpaved = !preferences.avoidUnpaved))
+                    }
                 }
+                if (activeMode) Text("${state.transport.label()} rotalarında ücretli yol ve toprak yol tercihleri desteklenmiyor.",
+                    style = MaterialTheme.typography.bodySmall)
                 if (activeMode && preferences.avoidHighways) Text("Otoyolsuz rota servis haritasından doğrulanır; doğrulanamazsa başlatılmaz. Harita verileri eksik olabilir.", style = MaterialTheme.typography.bodySmall)
                 Text(if (activeMode) "Feribottan kaçınma tercihi mümkün olduğunda uygulanır; kesin feribot yasağı değildir."
                     else if (state.transport == Transport.MOTORCYCLE) "Otoyol, ücretli yol, feribot ve toprak yoldan kaçınma tercihleri mümkün olduğunda uygulanır; kesin yol veya yüzey yasağı değildir."
@@ -193,17 +209,27 @@ internal fun WeatherPlannerContent(
         val vias = if (state.stops.size >= 3) state.stops.subList(1, state.stops.lastIndex) else emptyList()
         vias.forEachIndexed { viaIndex, stop ->
             item(key = "via-${viaIndex + 1}") {
+                val stopIndex = viaIndex + 1
                 WeatherStopEditor(
-                    title = "Ara durak ${viaIndex + 1}",
+                    title = "Ara durak $stopIndex",
                     stop = stop,
                     showCurrent = false,
-                enabled = !interactionLocked,
+                    enabled = !interactionLocked,
                     onCurrent = {},
-                    onChoose = { actions.chooseStop(viaIndex + 1) },
-                    onRemove = { actions.removeStop(viaIndex + 1) },
+                    onChoose = { actions.chooseStop(stopIndex) },
+                    onRemove = { actions.removeStop(stopIndex) },
                 )
-                PlannedBreakEditor(stop, enabled = !interactionLocked) { minutes ->
-                    actions.setPlannedBreakMinutes(viaIndex + 1, minutes)
+                if (vias.size > 1) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = { actions.moveVia(stopIndex, stopIndex - 1) },
+                            enabled = !interactionLocked && viaIndex > 0) { Text("Yukarı taşı") }
+                        TextButton(onClick = { actions.moveVia(stopIndex, stopIndex + 1) },
+                            enabled = !interactionLocked && viaIndex < vias.lastIndex) { Text("Aşağı taşı") }
+                    }
+                }
+                PlannedBreakEditor(stop, enabled = !interactionLocked,
+                    arrivalAt = stopTimings?.getOrNull(stopIndex)?.arrivalAt) { minutes ->
+                    actions.setPlannedBreakMinutes(stopIndex, minutes)
                 }
             }
         }
@@ -229,7 +255,8 @@ internal fun WeatherPlannerContent(
             }
         }
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(20.dp)) {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                shape = MaterialTheme.shapes.large) {
                 Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Kalkış", style = MaterialTheme.typography.titleMedium)
                     Text(weatherDateTime(state.departureAt), fontWeight = FontWeight.SemiBold)
@@ -261,7 +288,7 @@ internal fun WeatherPlannerContent(
             ) {
                 Icon(Icons.Outlined.Cloud, null)
                 Spacer(Modifier.width(8.dp))
-                Text(if (state.busy) "Rota ve tahmin hesaplanıyor…" else "7 kalkış seçeneğini karşılaştır")
+                Text(if (state.busy) "Rota ve tahmin hesaplanıyor…" else "Kalkışları karşılaştır")
             }
         }
         if (org.iz.navigation.weather.RoutingPolicy.supportsStopOrder(state.transport, state.stops.size)) item {
@@ -296,9 +323,10 @@ internal fun WeatherPlannerContent(
                 displayRoute.providerWarnings.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
             }
             item {
-                Surface(shape = RoundedCornerShape(24.dp), color = Color.White) {
+                Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainer,
+                    contentColor = MaterialTheme.colorScheme.onSurface) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("Planlanan rota", style = MaterialTheme.typography.titleLarge)
+                        Text("Tahmin haritası", style = MaterialTheme.typography.titleLarge)
                         Text(
                             formatDistance(displayRoute.distanceMeters),
                             color = Muted,
@@ -341,9 +369,6 @@ internal fun WeatherPlannerContent(
                         }, style = MaterialTheme.typography.bodySmall)
                     }
                 }
-            }
-            state.selectedAssessment?.let { selected ->
-                item { WeatherSummaryCard(selected) }
             }
         }
         if (state.trafficFreeDeparture != null) item {
@@ -400,7 +425,8 @@ private fun WeatherStopEditor(
     onRemove: (() -> Unit)? = null,
     locationBusy: Boolean = false,
 ) {
-    Card(colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(20.dp)) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        shape = MaterialTheme.shapes.large) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row {
                 Column(Modifier.weight(1f)) {
@@ -481,6 +507,9 @@ private fun WeatherSummaryCard(value: WeatherAssessment) {
                 if (value.complete) "Seçilen kalkışın özeti" else "Bu seçenekte tahmin eksik",
                 style = MaterialTheme.typography.titleMedium,
             )
+            val hazards = value.samples.flatMap { it.hazards }.distinct()
+            if (hazards.isNotEmpty()) Text(hazards.joinToString(transform = ::hazardLabel),
+                style = MaterialTheme.typography.titleSmall)
             Text("Sıcaklık ${formatTemperature(value.minTemperatureC)} – ${formatTemperature(value.maxTemperatureC)}")
             Text("En yüksek yağış olasılığı %${value.maxPrecipitationProbabilityPercent?.roundToInt() ?: "-"}")
             Text("Rüzgâr ${value.maxWindKmh?.roundToInt() ?: "-"} · hamle ${value.maxGustKmh?.roundToInt() ?: "-"} km/sa")
@@ -496,9 +525,14 @@ private fun WeatherLiveCard(
     onStop: () -> Unit,
     enabled: Boolean,
 ) {
-    val staleForecast = live.assessment?.fetchedAt?.let {
-        System.currentTimeMillis() - it > 60L * 60L * 1_000L
-    } ?: false
+    val now = System.currentTimeMillis()
+    val assessment = live.assessment
+    val staleForecast = assessment != null && !RideWeatherTiming.forecastFresh(assessment.fetchedAt, now)
+    val nextEvent = assessment?.takeIf {
+        it.complete && !staleForecast && !live.gpsStale && !live.paused &&
+            live.route != null && live.status == RideWeatherStatus.READY
+    }?.samples?.filter { it.complete && it.hazards.isNotEmpty() && it.arrivalAt in now..(now + 3_600_000L) }
+        ?.minByOrNull { it.arrivalAt }
     Surface(
         color = if (live.status == RideWeatherStatus.ERROR || live.gpsStale || staleForecast) {
             MaterialTheme.colorScheme.errorContainer
@@ -507,7 +541,11 @@ private fun WeatherLiveCard(
         modifier = Modifier.fillMaxWidth().testTag("weather_live"),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(live.route?.transport?.let { "${it.label()} · Canlı rota havası" } ?: "Canlı rota havası", style = MaterialTheme.typography.titleMedium)
+            Text("Aktif sürüş havası", style = MaterialTheme.typography.titleMedium)
+            nextEvent?.let {
+                Text(it.hazards.joinToString(transform = ::hazardLabel), style = MaterialTheme.typography.titleSmall)
+                Text("Tahmini geçiş · ${weatherDateTime(it.arrivalAt)}")
+            }
             Text(
                 when (live.status) {
                     RideWeatherStatus.LOADING -> "Tahmin hazırlanıyor…"
@@ -523,7 +561,7 @@ private fun WeatherLiveCard(
                 assessment.fetchedAt?.let { Text("Tahmin alındı: ${weatherDateTime(it)}", style = MaterialTheme.typography.bodySmall) }
             }
             if (live.gpsStale) Text("Konum güncel değil; konuma bağlı uyarılar duraklatıldı.")
-            if (staleForecast) Text("Tahmin bir saatten eski; yeni hava uyarıları duraklatıldı.")
+            if (staleForecast) Text("Son tahmin gösteriliyor. Güncel veri bekleniyor.")
             live.message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = onRefresh, enabled = enabled) {
@@ -546,9 +584,12 @@ internal fun WeatherSampleDialog(
 ) {
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(weatherTime(sample.arrivalAt) + " varış tahmini") },
+        title = { Text("Seçili noktanın tahmini") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(weatherDateTime(sample.arrivalAt), style = MaterialTheme.typography.titleSmall)
+                Text(String.format(Locale.ROOT, "%.5f, %.5f", sample.coordinate.latitude, sample.coordinate.longitude),
+                    style = MaterialTheme.typography.bodySmall)
                 Text("Sıcaklık: ${formatTemperature(sample.reading.temperatureC)}")
                 Text("Yağış: %${sample.reading.precipitationProbabilityPercent?.roundToInt() ?: "-"} · ${sample.reading.precipitationMm?.let { String.format(Locale.forLanguageTag("tr-TR"), "%.1f", it) } ?: "-"} mm")
                 Text("Rüzgâr: ${sample.reading.windKmh?.roundToInt() ?: "-"} · hamle ${sample.reading.gustKmh?.roundToInt() ?: "-"} km/sa")

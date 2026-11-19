@@ -61,7 +61,7 @@ class WatchTileRenderTest {
             val renderer = TileRenderer(context, ContextCompat.getMainExecutor(context)) { }
             val root = WatchTileLayout.build(instrumentation.targetContext.packageName, frame, sizeDp) as LayoutElementBuilders.Box
             val open = root.modifiers!!.clickable!!.onClick as ActionBuilders.LaunchAction
-            assertEquals("org.iz.navigation", open.androidActivity!!.packageName)
+            assertEquals(instrumentation.targetContext.packageName, open.androidActivity!!.packageName)
             assertEquals(WatchActivity::class.java.name, open.androidActivity!!.className)
             future = renderer.inflateAsync(LayoutElementBuilders.Layout.Builder().setRoot(root).build(),
                 ResourceBuilders.Resources.Builder().setVersion("1").build(), host)

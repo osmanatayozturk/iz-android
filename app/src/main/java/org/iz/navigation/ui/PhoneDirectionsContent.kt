@@ -8,9 +8,11 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -75,6 +77,8 @@ internal fun PhoneDirectionsContent(
     onPlannedBreakMinutesChanged: (Int, Int) -> Unit = { _, _ -> },
     onResumePlannedBreak: () -> Unit = {},
     plannedBreakResumeEnabled: Boolean = false,
+    moveVia: ((Int, Int) -> Unit)? = null,
+    editVia: ((Int) -> Unit)? = null,
 ) {
     val listState = rememberLazyListState()
     val shownRoute = ui.preview ?: nav.route
@@ -95,7 +99,8 @@ internal fun PhoneDirectionsContent(
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Yol tarifi", style = MaterialTheme.typography.headlineSmall)
+                    Text(if (live) "Yol tarifi" else "Çok duraklı planlayıcı",
+                        style = MaterialTheme.typography.headlineSmall)
                     Text(when {
                         nav.simulation -> "Simülasyon · Günlüğe kaydedilmez"
                         nav.guidance && nav.recording -> "Yol tarifi açık · Kayıt açık"
@@ -128,7 +133,6 @@ internal fun PhoneDirectionsContent(
             if (ui.preview != null) TextButton(showLive) { Text("Canlı rotaya dön") }
             if (nav.guidance) OutlinedButton(mute) { Text(if (nav.muted) "Sesi aç" else "Sesi kapat") }
         }
-        if (voiceControls != null) item(key = "navigation-voice") { voiceControls() }
         if (showMap) item {
             WeatherRouteMap(
                 route = shownRoute, assessment = null,
@@ -186,18 +190,41 @@ internal fun PhoneDirectionsContent(
             TextButton(currentOrigin, enabled = !locked && !ui.locating, modifier = Modifier.testTag("directions-current-origin")) {
                 Text("Mevcut konumumu kullan")
             }
-            DirectionEndpoint("B", "Varış", ui.destination, null, chooseDestination, !locked, "directions-destination")
-            ui.destination?.let { Text("Hedef: ${it.label}", style = MaterialTheme.typography.bodySmall) }
+            if (ui.via.isNotEmpty()) Text("Ara duraklar", style = MaterialTheme.typography.titleSmall)
+            val stopTimings = ui.preview?.let { route ->
+                RouteSchedule.stops(route, (route.effectiveDepartureAt ?: route.createdAt).coerceAtLeast(0))
+            }
             ui.via.forEachIndexed { index, stop ->
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("${index + 1}. ${stop.label}", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                    TextButton({ removeVia(index) }, enabled = !locked) { Text("Kaldır") }
-                }
-                PlannedBreakEditor(stop, enabled = !locked) { minutes ->
-                    onPlannedBreakMinutesChanged(index, minutes)
+                key(stop, ui.via.take(index).count { it == stop }) {
+                    if (editVia != null) {
+                        DirectionEndpoint("${index + 1}", "Ara durak", stop, null,
+                            { editVia(index) }, !locked, "directions-via-$index")
+                    } else {
+                        Text("${index + 1}. ${stop.label}", style = MaterialTheme.typography.titleSmall)
+                    }
+                    var showActions by rememberSaveable { mutableStateOf(false) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TextButton({ showActions = true }, enabled = !locked,
+                            modifier = Modifier.testTag("directions-via-actions-$index")) { Text("Durak işlemleri") }
+                        DropdownMenu(expanded = showActions, onDismissRequest = { showActions = false }) {
+                            if (moveVia != null) {
+                                DropdownMenuItem(text = { Text("Yukarı taşı") }, enabled = !locked && index > 0,
+                                    onClick = { showActions = false; moveVia(index, index - 1) })
+                                DropdownMenuItem(text = { Text("Aşağı taşı") }, enabled = !locked && index < ui.via.lastIndex,
+                                    onClick = { showActions = false; moveVia(index, index + 1) })
+                            }
+                            DropdownMenuItem(text = { Text("Durağı kaldır") }, enabled = !locked,
+                                onClick = { showActions = false; removeVia(index) })
+                        }
+                    }
+                    val scheduledBreak = stopTimings?.getOrNull(index + 1)?.arrivalAt
+                    PlannedBreakEditor(stop, enabled = !locked, arrivalAt = scheduledBreak) { minutes ->
+                        onPlannedBreakMinutesChanged(index, minutes)
+                    }
                 }
             }
             TextButton(addVia, enabled = !locked && ui.via.size < MAX_PLANNED_STOPS - 2, modifier = Modifier.testTag("directions-add-via")) { Text("Ara durak ekle") }
+            DirectionEndpoint("B", "Varış", ui.destination, null, chooseDestination, !locked, "directions-destination")
             if (ui.via.size >= MAX_PLANNED_STOPS - 2) Text("Başlangıç ve varış dahil en fazla $MAX_PLANNED_STOPS durak.",
                 style = MaterialTheme.typography.bodySmall)
             if (!ui.originCurrent) Text("Başlatınca önce A noktasına, ardından planlanan duraklara gidilir.", style = MaterialTheme.typography.bodySmall)
@@ -206,16 +233,25 @@ internal fun PhoneDirectionsContent(
             val activeMode = ui.transport in setOf(Transport.WALK, Transport.RUN, Transport.BICYCLE)
             Text("Rota tercihleri", style = MaterialTheme.typography.titleMedium)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(ui.preferences.avoidHighways, { setPreferences(ui.preferences.copy(avoidHighways = !ui.preferences.avoidHighways)) },
-                    enabled = !locked, label = { Text(if (activeMode) "Otoyola girme" else "Otoyoldan kaçın") }, modifier = Modifier.testTag("directions-avoid-highways"))
-                if (!activeMode) FilterChip(ui.preferences.avoidTolls, { setPreferences(ui.preferences.copy(avoidTolls = !ui.preferences.avoidTolls)) },
-                    enabled = !locked, label = { Text("Ücretli yoldan kaçın") }, modifier = Modifier.testTag("directions-avoid-tolls"))
-                if (ui.transport in setOf(Transport.CAR, Transport.PASSENGER, Transport.MOTORCYCLE))
-                    FilterChip(ui.preferences.avoidUnpaved, { setPreferences(ui.preferences.copy(avoidUnpaved = !ui.preferences.avoidUnpaved)) },
-                        enabled = !locked, label = { Text("Toprak yollardan kaçın") }, modifier = Modifier.testTag("directions-avoid-unpaved"))
-                FilterChip(ui.preferences.avoidFerries, { setPreferences(ui.preferences.copy(avoidFerries = !ui.preferences.avoidFerries)) },
-                    enabled = !locked, label = { Text("Feribottan kaçın") }, modifier = Modifier.testTag("directions-avoid-ferries"))
+                RoutePreferenceChip(if (activeMode) "Otoyola girme" else "Otoyoldan kaçın", ui.preferences.avoidHighways,
+                    !locked, "directions-avoid-highways") {
+                    setPreferences(ui.preferences.copy(avoidHighways = !ui.preferences.avoidHighways))
+                }
+                RoutePreferenceChip("Ücretli yoldan kaçın", !activeMode && ui.preferences.avoidTolls,
+                    !locked && !activeMode, "directions-avoid-tolls") {
+                    setPreferences(ui.preferences.copy(avoidTolls = !ui.preferences.avoidTolls))
+                }
+                RoutePreferenceChip("Feribottan kaçın", ui.preferences.avoidFerries,
+                    !locked, "directions-avoid-ferries") {
+                    setPreferences(ui.preferences.copy(avoidFerries = !ui.preferences.avoidFerries))
+                }
+                RoutePreferenceChip("Toprak yollardan kaçın", !activeMode && ui.preferences.avoidUnpaved,
+                    !locked && !activeMode, "directions-avoid-unpaved") {
+                    setPreferences(ui.preferences.copy(avoidUnpaved = !ui.preferences.avoidUnpaved))
+                }
             }
+            if (activeMode) Text("${ui.transport.label()} rotalarında ücretli yol ve toprak yol tercihleri desteklenmiyor.",
+                style = MaterialTheme.typography.bodySmall)
             if (activeMode && ui.preferences.avoidHighways) Text("Otoyolsuz rota servis haritasından doğrulanır; doğrulanamazsa başlatılmaz. Harita verileri eksik olabilir.", style = MaterialTheme.typography.bodySmall)
             Text(if (activeMode) "Feribottan kaçınma tercihi mümkün olduğunda uygulanır; kesin feribot yasağı değildir."
                 else if (ui.transport == Transport.MOTORCYCLE) "Otoyol, ücretli yol, feribot ve toprak yoldan kaçınma tercihleri mümkün olduğunda uygulanır; kesin yol veya yüzey yasağı değildir."
@@ -247,13 +283,19 @@ internal fun PhoneDirectionsContent(
             }
             if (nav.recording && !ui.recordJourney) Text("Kayıt açık. Kayıtsız başlamak için önce Yolculuk kaydını bitir'i seç.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(preview, enabled = ui.canPreview && !commandBusy,
-                    modifier = Modifier.weight(1f).testTag("preview-directions")) { Text("Rota önizle") }
-                Button(start, enabled = ui.preview != null && !ui.busy && !commandBusy,
-                    modifier = Modifier.weight(1f).testTag("start-guidance")) { Text(if (ui.starting) "Başlatılıyor…" else "Başlat") }
+            if (ui.preview == null) {
+                Button(preview, enabled = ui.canPreview && !commandBusy,
+                    modifier = Modifier.fillMaxWidth().testTag("preview-directions")) {
+                    Text(if (ui.busy) "Rota hesaplanıyor…" else "Rota önizle")
+                }
+            } else {
+                Button(start, enabled = !ui.busy && !commandBusy,
+                    modifier = Modifier.fillMaxWidth().testTag("start-guidance")) {
+                    Text(if (ui.starting) "Başlatılıyor…" else "Yol tarifini başlat")
+                }
+                TextButton(preview, enabled = ui.canPreview && !commandBusy,
+                    modifier = Modifier.testTag("preview-directions")) { Text("Rotayı yeniden hesapla") }
             }
-            Text("Önizleme oturum başlatmaz. Başlat, seçtiğin kayıt tercihiyle sesli yönlendirmeyi açar.", style = MaterialTheme.typography.bodySmall)
         }
         if (ui.origin != null && ui.destination != null && RoutingPolicy.supportsStopOrder(ui.transport, ui.stops.size)) item {
             val matrixReason = RoutingPolicy.stopOrderIssue(ui.transport, ui.stops.size, ui.preferences)
@@ -277,6 +319,7 @@ internal fun PhoneDirectionsContent(
             }
         } }
         if (ui.busy || ui.locating || nav.loading || commandBusy) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+        if (voiceControls != null) item(key = "navigation-voice") { voiceControls() }
         item {
             TextButton(trafficSettings, enabled = !locked, modifier = Modifier.testTag("directions-traffic-settings")) {
                 Text(if (ui.transport == Transport.MOTORCYCLE) "Hız sınırı ayarları" else "Trafik ayarları")
@@ -310,6 +353,20 @@ internal fun PhoneDirectionsContent(
             confirmButton = { TextButton(onClick = { turnsRoute = null }) { Text("Kapat") } },
         )
     }
+}
+
+@Composable
+internal fun RoutePreferenceChip(
+    label: String,
+    selected: Boolean,
+    enabled: Boolean,
+    tag: String,
+    onClick: () -> Unit,
+) {
+    FilterChip(selected = selected, onClick = onClick, enabled = enabled,
+        label = { Text(label) },
+        leadingIcon = if (selected) { { Icon(Icons.Filled.Check, contentDescription = null) } } else null,
+        modifier = Modifier.testTag(tag))
 }
 
 @Composable

@@ -30,7 +30,7 @@ internal object WatchSurfacePolicy {
     fun phoneAge(snapshot: WearSnapshot, now: Long) = "Telefon bilgisi: ${age(snapshot.generatedAt, now)}"
     private fun gpsAge(nav: WearNavigationSummary, now: Long) =
         "GPS konumu: ${nav.fixAt?.let { age(it, now) } ?: "ölçüm yok"}"
-    private fun age(timestamp: Long, now: Long): String {
+    fun age(timestamp: Long, now: Long): String {
         if (timestamp < 0 || now < timestamp) return "zamanı doğrulanıyor"
         val seconds = (now - timestamp) / 1_000
         return when {
@@ -156,7 +156,7 @@ internal object WatchSurfacePolicy {
                     mapStatus(advisory), voiceStatus(advisory)),
                 if (live && eta != null) eta else "İz’i aç", until, until)
         }
-        if (deferred) {
+        if (deferred || recording) {
             val lines = if (recording) listOf(
                 if (!s.recording) "Telefon kaydı etkin değil" else if (s.temporary) "Algılama sürüyor" else "Kayıt sürüyor",
                 "İstatistikler yolculuk", "sonunda hazırlanacak", phoneAge(s, now))

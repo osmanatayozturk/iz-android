@@ -10,7 +10,6 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import org.iz.navigation.BuildConfig
 import org.iz.navigation.IzApplication
-import org.iz.navigation.data.DiaryRepository
 import org.iz.navigation.navigation.NavigationSpeech
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -34,7 +33,7 @@ internal class IzCarSession : Session() {
         val app = carContext.applicationContext as IzApplication
         val coordinator = app.navigation
         val manager = carContext.getCarService(NavigationManager::class.java)
-        surface = CarMapSurface(carContext)
+        surface = CarMapSurface(carContext) { if (::home.isInitialized) home.safeInvalidate() }
         home = CarHomeScreen(carContext, surface)
         displayUpdate { carContext.getCarService(AppManager::class.java).setSurfaceCallback(surface) }
         displayUpdate { manager.setNavigationManagerCallback(object : NavigationManagerCallback {
@@ -56,8 +55,8 @@ internal class IzCarSession : Session() {
                 displayUpdate { home.refresh(state) }
             }
         }
-        // Auto shares the phone CPU: neither real nor simulated recording subscribes to full tracks.
-        scope.launch { app.weatherManager.state.collect { displayUpdate { home.safeInvalidate() } } }
+        // Keep the phone weather owner active for the session. Only the visible weather screen observes its UI state.
+        app.weatherManager
         // Observe the existing phone owner; reading status never prepares TTS or acquires focus.
         scope.launch { NavigationSpeech.get(app).status.collect { displayUpdate { home.refreshSpeech(it) } } }
         lifecycle.addObserver(object : DefaultLifecycleObserver {

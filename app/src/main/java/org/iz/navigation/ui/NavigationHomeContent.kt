@@ -84,6 +84,7 @@ internal fun NavigationHomeContent(
     onRecoverRecording: (() -> Unit)? = null,
     onOsmPlaceClick: ((org.iz.navigation.data.SelectedOsmPlace) -> Unit)? = null,
     placeInformationIdentity: Any? = null,
+    leanInstrument: (@Composable () -> Unit)? = null,
     planner: @Composable () -> Unit,
 ) {
     val plannerPresentation = navigationMapPresentation(ui, nav, points, showPlanner, editPreview)
@@ -126,6 +127,10 @@ internal fun NavigationHomeContent(
         val dashboardButtonKey = listOf(maxWidth, maxHeight, density.density, density.fontScale, dashboardEpoch)
         val dashboardButtonHeight = if (dashboardButtonInMap) dashboardButtonMeasurement?.takeIf { it.first == dashboardButtonKey }?.second ?: 48.dp else 0.dp
         val shortLandscape = maxWidth > maxHeight && maxHeight < 480.dp
+        val showLean = leanInstrument != null && !showPlanner && !dashboardVisible && !multiSelectionOpen
+        val inlineLean = showLean && shortLandscape && maxWidth >= 480.dp
+        val dockAttributionInset = if (inlineLean) maxOf(92.dp, bottomActionsHeight + 8.dp) else 92.dp
+        val dockCameraInset = if (inlineLean) maxOf(112.dp, bottomActionsHeight + 28.dp) else 112.dp
         // At 320dp, leave 192dp for the native map. Its existing local top/bottom margins then leave 56dp.
         val headerBudget = if (shortLandscape) minOf(maxHeight * .60f, (maxHeight - 192.dp).coerceAtLeast(maxHeight * .40f))
             else maxHeight * .60f
@@ -224,11 +229,11 @@ internal fun NavigationHomeContent(
             navigationControlsTopInset = if (compactSelection) selectionTopInset else if (presentation.editPreviewLabel != null)
                 panelsHeight + 24.dp else controlsTopInset,
             navigationControlsHorizontal = horizontalMapControls,
-            attributionBottomInset = if (dashboardBottomHeight > 0.dp) dashboardBottomHeight + 92.dp else if (showPlanner && !dashboardVisible) maxHeight * .64f + 4.dp else 92.dp,
+            attributionBottomInset = if (dashboardBottomHeight > 0.dp) dashboardBottomHeight + 92.dp else if (showPlanner && !dashboardVisible) maxHeight * .64f + 4.dp else dockAttributionInset,
             cameraViewportInsets = PaddingValues(start = 28.dp,
                 top = if (externalHeader) 24.dp else if (compactSelection) selectionTopInset else if (shortIdle) controlsTopInset else panelsHeight + 24.dp,
                 end = if (externalHeader) 28.dp else if (horizontalMapControls) 124.dp else 84.dp,
-                bottom = if (dashboardBottomHeight > 0.dp) dashboardBottomHeight + 112.dp else if (showPlanner && !dashboardVisible) maxHeight * .64f + 24.dp else 112.dp + dashboardButtonHeight),
+                bottom = if (dashboardBottomHeight > 0.dp) dashboardBottomHeight + 112.dp else if (showPlanner && !dashboardVisible) maxHeight * .64f + 24.dp else dockCameraInset + dashboardButtonHeight),
             navigationHeader = if (externalHeader) navigationHeader else null, layersRequest = layersRequest,
             onOsmPlaceClick = onOsmPlaceClick, placeInformationIdentity = placeInformationIdentity,
             selectionPanelInsets = PaddingValues(top = if (externalHeader) 0.dp else selectionTopInset,
@@ -271,31 +276,53 @@ internal fun NavigationHomeContent(
             else Modifier.align(Alignment.BottomCenter).padding(bottom = 88.dp).fillMaxWidth().height(desiredBottomHeight)
             Box(panelModifier.onSizeChanged { dashboardMeasurement = dashboardKey to it }) { dashboard?.invoke() }
         }
-        if (dashboardButtonInMap && onDashboard != null) Box(Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 92.dp)) {
+        if (dashboardButtonInMap && onDashboard != null && leanInstrument == null) Box(Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 92.dp)) {
             HomeDashboardButton(onDashboard, Modifier.onSizeChanged {
                 dashboardButtonMeasurement = dashboardButtonKey to with(density) { it.height.toDp() }
             })
         }
-        Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-            .onSizeChanged { bottomActionsHeight = with(density) { it.height.toDp() } }
-            .testTag("home-bottom-actions")
-            .padding(end = dashboardSideWidth).padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
-            shape = RoundedCornerShape(24.dp), shadowElevation = 6.dp, color = MaterialTheme.colorScheme.surface) {
-            Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalButton(onRecord, Modifier.weight(1f).height(56.dp).testTag("home-record"),
-                    enabled = !nav.recordingPending, contentPadding = PaddingValues(6.dp)) {
-                    Icon(if (nav.recording) Icons.Outlined.StopCircle else Icons.Outlined.FiberManualRecord, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(5.dp)); Text(when {
-                        nav.recording -> "Kayıt açık"
-                        nav.recordingPending -> "Kayıt bekliyor"
-                        else -> "Kaydet"
-                    }, maxLines = 1)
+        if (showLean && !inlineLean && leanInstrument != null) {
+            Box(Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = maxOf(bottomActionsHeight, 56.dp) + 12.dp)) {
+                leanInstrument()
+            }
+        }
+        if (!live && !showPlanner && !dashboardVisible) {
+            Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .onSizeChanged { bottomActionsHeight = with(density) { it.height.toDp() } }
+                .testTag("home-bottom-actions").padding(horizontal = 12.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween) {
+                FilledTonalIconButton(onRecord, Modifier.size(52.dp).testTag("home-record"),
+                    enabled = !nav.recordingPending) {
+                    Icon(Icons.Outlined.FiberManualRecord, "Yolculuk kaydını başlat")
                 }
-                TextButton(onGroup, Modifier.weight(1f).height(56.dp).testTag("home-group"), contentPadding = PaddingValues(6.dp)) {
-                    Icon(Icons.Outlined.Groups, null, Modifier.size(20.dp)); Spacer(Modifier.width(5.dp)); Text("Grup")
+                FilledTonalIconButton(onMenu, Modifier.size(52.dp).testTag("home-menu")) {
+                    Icon(Icons.Outlined.Menu, "Harita menüsü")
                 }
-                TextButton(onMenu, Modifier.weight(1f).height(56.dp).testTag("home-menu"), contentPadding = PaddingValues(6.dp)) {
-                    Icon(Icons.Outlined.Menu, null, Modifier.size(20.dp)); Spacer(Modifier.width(5.dp)); Text("Menü")
+            }
+        } else {
+            Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .onSizeChanged { bottomActionsHeight = with(density) { it.height.toDp() } }
+                .testTag("home-bottom-actions")
+                .padding(end = dashboardSideWidth).padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                shape = RoundedCornerShape(24.dp), shadowElevation = 6.dp, color = MaterialTheme.colorScheme.surface) {
+                Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    FilledTonalButton(onRecord, Modifier.weight(1f).height(56.dp).testTag("home-record"),
+                        enabled = !nav.recordingPending, contentPadding = PaddingValues(6.dp)) {
+                        Icon(if (nav.recording) Icons.Outlined.StopCircle else Icons.Outlined.FiberManualRecord, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(5.dp)); Text(when {
+                            nav.recording -> "Kayıt açık"
+                            nav.recordingPending -> "Kayıt bekliyor"
+                            else -> "Kaydet"
+                        }, maxLines = 1)
+                    }
+                    TextButton(onGroup, Modifier.weight(1f).height(56.dp).testTag("home-group"), contentPadding = PaddingValues(6.dp)) {
+                        Icon(Icons.Outlined.Groups, null, Modifier.size(20.dp)); Spacer(Modifier.width(5.dp)); Text("Grup")
+                    }
+                    TextButton(onMenu, Modifier.weight(1f).height(56.dp).testTag("home-menu"), contentPadding = PaddingValues(6.dp)) {
+                        Icon(Icons.Outlined.Menu, null, Modifier.size(20.dp)); Spacer(Modifier.width(5.dp)); Text("Menü")
+                    }
+                    if (inlineLean && leanInstrument != null) leanInstrument()
                 }
             }
         }

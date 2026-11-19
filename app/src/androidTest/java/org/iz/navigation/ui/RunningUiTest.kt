@@ -7,8 +7,11 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.unit.Density
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.iz.navigation.data.Journey
+import org.iz.navigation.data.JourneyStatistics
 import org.iz.navigation.data.TrackPoint
 import org.iz.navigation.data.Transport
+import org.iz.navigation.integration.HeatmapData
+import org.iz.navigation.integration.prepareHeatmapRender
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -48,17 +51,23 @@ class RunningUiTest {
             TrackPoint(journeyId = "run", latitude = Math.toDegrees(100.0 / 6_371_000.0), longitude = 0.0, accuracy = 5f, recordedAt = 30_000),
             TrackPoint(journeyId = "run", latitude = Math.toDegrees(100.0 / 6_371_000.0), longitude = 0.0, accuracy = 5f, recordedAt = 60_000),
         )
-        compose.setContent { IzTheme { JourneyStatsPanel(journey, points, now = 60_000) } }
+        val stats = JourneyStatistics.calculate(journey, points)
+        compose.setContent { IzTheme { JourneyStatsPanel(journey, stats, "Hazırlanıyor") } }
         compose.onNodeWithText("Ortalama tempo").assertExists()
         compose.onNodeWithText("10:00 dk/km").assertExists()
         compose.onNodeWithText("120 adım").assertExists()
     }
 
     @Test fun runningHeatmapFilterHasItsOwnEmptyState() {
-        compose.setContent { IzTheme { HeatmapScreen(DiaryState(), now = 100_000) } }
-        compose.onNodeWithTag("heatmap_filter_RUN").performClick().assertIsSelected()
+        val empty = prepareHeatmapRender(HeatmapData())
+        compose.setContent { IzTheme { HeatmapScreenContent(DiaryState()) { empty } } }
+        compose.onNodeWithTag("heatmap_show_filters").performClick()
+        compose.onNodeWithTag("heatmap_filter_RUN").performScrollTo().performClick().assertIsSelected()
+        compose.onNodeWithTag("heatmap_apply_filters").performScrollTo().performClick()
         compose.onNodeWithText("Koşu için henüz iz yok").assertIsDisplayed()
-        compose.onNodeWithTag("heatmap_filter_WALK").performClick()
+        compose.onNodeWithTag("heatmap_show_filters").performClick()
+        compose.onNodeWithTag("heatmap_filter_WALK").performScrollTo().performClick()
+        compose.onNodeWithTag("heatmap_apply_filters").performScrollTo().performClick()
         compose.onNodeWithText("Yürüyüş için henüz iz yok").assertIsDisplayed()
     }
 }

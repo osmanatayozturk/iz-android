@@ -211,6 +211,10 @@ internal fun HandlebarCalibrationControl(
                     }) { Text(if (error == null) "Kalibrasyonu başlat" else "Yeniden dene") }
                 }
                 val retryRequest = retry
+                step?.let { current ->
+                    Text("Adım ${current.ordinal + 1} / ${HandlebarCalibrationStep.entries.size}",
+                        style = MaterialTheme.typography.labelLarge)
+                }
                 if (retryRequest != null) {
                     Text(step?.retryInstruction.orEmpty(), Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                         color = MaterialTheme.colorScheme.error)
@@ -226,7 +230,11 @@ internal fun HandlebarCalibrationControl(
                 error?.let { Text(it, Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                     color = MaterialTheme.colorScheme.error) }
                 result?.let { profile ->
-                    Text("Gidon hareketleri doğrulandı. Kalibrasyonu kaydedebilirsin.")
+                    Surface(shape = MaterialTheme.shapes.medium,
+                        color = MaterialTheme.colorScheme.primaryContainer) {
+                        Text("Gidon hareketleri doğrulandı. Kalibrasyonu kaydedebilirsin.",
+                            Modifier.fillMaxWidth().padding(12.dp))
+                    }
                     Button(onClick = {
                         if (result === profile && resumed && currentAllowed()) {
                             try { onSave(profile); close() }

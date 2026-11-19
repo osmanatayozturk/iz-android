@@ -41,8 +41,15 @@ class OsmPlaceEditorTest {
     @Test fun visitEditorReturnsEditedPrivateNote() {
         val visit = Visit(placeId = "local", note = "Eski not", rating = 4)
         var saved: String? = null
-        compose.setContent { MaterialTheme { VisitEditor(visit, {}) { saved = it } } }
+        var photoRequests = 0
+        compose.setContent { MaterialTheme {
+            VisitEditor(visit, {}, placeName = "Örnek durak", onPhoto = { photoRequests++ }) { saved = it }
+        } }
+        compose.onNodeWithText("Örnek durak").assertIsDisplayed()
+        compose.onNodeWithTag("visit-date").assertIsDisplayed()
         compose.onNodeWithText("Yalnızca sana özel").performTextReplacement("Yeni not")
+        compose.onNodeWithText("Fotoğraf ekle").performScrollTo().performClick()
+        compose.runOnIdle { assertNull(saved); assertEquals(1, photoRequests) }
         compose.onNodeWithText("Kaydet").performClick()
         compose.runOnIdle { assertEquals("Yeni not", saved) }
     }

@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 internal class WatchViewModel(application: Application) : AndroidViewModel(application) {
     private val dataClient = Wearable.getDataClient(application)
@@ -21,13 +23,28 @@ internal class WatchViewModel(application: Application) : AndroidViewModel(appli
     private val mutableSurfaceState = MutableStateFlow(WatchSurfaceData())
     val surfaceState = mutableSurfaceState.asStateFlow()
     private var visible = false
+    private val refreshLock = Mutex()
 
     /** Called only while the activity is STARTED; cancellation removes every Data Layer listener. */
     suspend fun observePhone() = coroutineScope {
         visible = true
         val dataListener = DataClient.OnDataChangedListener { events ->
             // The buffer is released by Google after this callback; copy bytes before launching work.
-            events.filter { it.type == DataEvent.TYPE_CHANGED }.forEach { receiveItem(it.dataItem) }
+            for (event in events) {
+                val item = event.dataItem
+                when (event.type) {
+                    DataEvent.TYPE_CHANGED -> receiveItem(item)
+                    DataEvent.TYPE_DELETED -> {
+                        val source = item.uri.host
+                        val path = item.uri.path
+                        mutableState.update { it.deleted(source, path) }
+                        mutableSurfaceState.update {
+                            if (source == it.phoneId && path == WearProtocol.statePath(it.version)) it.copy(snapshot = null)
+                            else it
+                        }
+                    }
+                }
+            }
         }
         val messageListener = MessageClient.OnMessageReceivedListener { event ->
             val expectedVersion = mutableState.value.let { if (it.pending != null) it.pendingVersion else it.phoneVersion }
@@ -87,7 +104,7 @@ internal class WatchViewModel(application: Application) : AndroidViewModel(appli
         viewModelScope.launch {
             try {
                 val reachable = capabilityClient.getCapability(WearProtocol.phoneCapability(version), CapabilityClient.FILTER_REACHABLE).await().nodes
-                if (!visible || reachable.none { it.id == phone } || mutableState.value.phoneId != phone) {
+                if (!visible || reachable.none { it.id == phone } || mutableState.value.phoneId != phone || mutableState.value.pending?.id != command.id) {
                     mutableState.update { it.failed(command.id, "Telefon bağlı değil. İstek gönderilmedi.") }
                     return@launch
                 }
@@ -101,7 +118,31 @@ internal class WatchViewModel(application: Application) : AndroidViewModel(appli
         }
     }
 
-    private suspend fun refreshNow() {
+    fun rebindPhone() {
+        if (mutableState.value.pending != null) return
+        viewModelScope.launch {
+            refreshLock.withLock {
+                if (mutableState.value.pending != null) return@withLock
+                mutableState.value = WatchUiState(message = "Telefon bağlantısı kuruluyor.", messageIsConnectionIssue = true)
+                mutableSurfaceState.value = WatchSurfaceData()
+                val app = getApplication<Application>()
+                try {
+                    WatchHealthRuntime.rebindPhone(app)
+                    WatchSurfaceReader.forgetPhone(app)
+                    WatchSurfaceUpdates.request(app, forceTile = true)
+                    if (visible) refreshFromPhone()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    mutableState.update { it.copy(message = "Bağlantı sıfırlanamadı. Durumu yenile.", messageIsConnectionIssue = true) }
+                }
+            }
+        }
+    }
+
+    private suspend fun refreshNow() = refreshLock.withLock { refreshFromPhone() }
+
+    private suspend fun refreshFromPhone() {
         mutableSurfaceState.value = WatchSurfaceReader.read(getApplication())
         try {
             val capabilities = capabilityClient.getAllCapabilities(CapabilityClient.FILTER_REACHABLE).await()
@@ -120,7 +161,10 @@ internal class WatchViewModel(application: Application) : AndroidViewModel(appli
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
-            mutableState.update { it.copy(message = "Telefon yanıt vermiyor. Son verinin zamanını kontrol et.", messageIsConnectionIssue = true) }
+            mutableState.update { current ->
+                val connection = if (mutableSurfaceState.value.connected) current else current.phone(null, null)
+                connection.copy(message = "Telefon yanıt vermiyor. Son verinin zamanını kontrol et.", messageIsConnectionIssue = true)
+            }
         }
     }
 

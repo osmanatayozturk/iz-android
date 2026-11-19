@@ -1,8 +1,12 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package org.iz.navigation.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.TravelExplore
@@ -15,122 +19,227 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import org.iz.navigation.data.Transport
 import org.iz.navigation.integration.ExpandableMap
 import org.iz.navigation.integration.HeatmapMapContent
+import org.iz.navigation.integration.HeatmapRender
+import org.iz.navigation.integration.HeatmapFilter
+import org.iz.navigation.integration.HeatmapPeriod
+import org.iz.navigation.integration.rememberHeatmapWindow
 import org.iz.navigation.integration.heatmapFrequencyBands
 import org.iz.navigation.integration.rememberHeatmapRender
+import org.iz.navigation.power.AnalysisPhase
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun HeatmapScreen(state: DiaryState, now: Long = System.currentTimeMillis()) {
+fun HeatmapScreen(
+    state: DiaryState,
+    now: Long? = null,
+    onOpenJourneys: (() -> Unit)? = null,
+) {
+    HeatmapScreenContent(state, onOpenJourneys) { filter ->
+        rememberHeatmapRender(state.analysis, filter.mode, rememberHeatmapWindow(filter.period, now))
+    }
+}
+
+@Composable
+internal fun HeatmapScreenContent(
+    state: DiaryState,
+    onOpenJourneys: (() -> Unit)? = null,
+    preparedRender: @Composable (HeatmapFilter) -> HeatmapRender?,
+) {
     var filter by rememberSaveable { mutableStateOf<String?>(null) }
-    var showMapFilters by remember { mutableStateOf(false) }
+    var period by rememberSaveable { mutableStateOf(HeatmapPeriod.ALL) }
+    var showFilters by rememberSaveable { mutableStateOf(false) }
     var mapShown by remember { mutableStateOf(false) }
     val selected = Transport.entries.firstOrNull { it.name == filter }
-    val render = rememberHeatmapRender(state.analysis, selected)
-    LaunchedEffect(render) { if (render?.hasGeometry == true) mapShown = true }
-    Column(Modifier.fillMaxSize().testTag("heatmap_screen")) {
-        Column(Modifier.padding(horizontal = 24.dp, vertical = 12.dp)) {
-            Text("Isı haritan", style = MaterialTheme.typography.headlineLarge)
-            Spacer(Modifier.height(6.dp))
-            Text("Sık geçtiğin yolları keşfet.", color = Muted)
-            Spacer(Modifier.height(10.dp))
+    val selection = HeatmapFilter(selected, period)
+    val render = preparedRender(selection)
+    fun apply(filterValue: HeatmapFilter) {
+        filter = filterValue.mode?.name
+        period = filterValue.period
+    }
+    val hasGeometry = render?.hasGeometry == true
+    LaunchedEffect(hasGeometry) {
+        if (hasGeometry) mapShown = true
+    }
+
+    Column(
+        Modifier.fillMaxSize().testTag("heatmap_screen").padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text("Yoğunluk haritası", Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineSmall)
+        ExpandableMap(
+            Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(20.dp)),
+            title = "Yoğunluk haritası",
+            expandable = mapShown || hasGeometry,
+            actions = {
+                var open by rememberSaveable { mutableStateOf(false) }
+                IconButton(onClick = { open = true }) {
+                    Icon(Icons.Outlined.Tune, contentDescription = "Isı haritasını filtrele")
+                }
+                if (open) HeatmapFilterSheet(selection, onDismiss = { open = false }) { applied ->
+                    apply(applied)
+                    open = false
+                }
+            },
+        ) { mapModifier ->
+            Column(mapModifier) {
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    // Keep the map mounted during filter changes so it retains its camera.
+                    if (mapShown || hasGeometry) {
+                        HeatmapMapContent(render, "${period.name}_${filter ?: "ALL"}", Modifier.fillMaxSize())
+                    }
+                    if (render == null) {
+                        Surface(Modifier.fillMaxSize().testTag("heatmap_loading"), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+                            Column(
+                                Modifier.fillMaxSize().padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                if (state.analysis.phase == AnalysisPhase.RUNNING) {
+                                    CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
+                                }
+                                Text(
+                                    if (state.analysis.pending || state.analysis.phase == AnalysisPhase.WAITING_END)
+                                        state.analysis.label else "İzler hazırlanıyor",
+                                    color = Muted, textAlign = TextAlign.Center,
+                                )
+                            }
+                        }
+                    } else if (!hasGeometry) {
+                        HeatmapEmptyState(selection, Modifier.fillMaxSize())
+                    }
+                }
+                if (render?.hasGeometry == true) HeatmapLegend(selection, render.data.journeyCount)
+            }
+        }
+        StatisticsSurface {
+            FilledTonalButton(
+                onClick = { showFilters = true },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("heatmap_show_filters"),
+            ) {
+                Icon(Icons.Outlined.Tune, contentDescription = null, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Filtreler")
+            }
+            Text(
+                "${period.label} · ${selected?.label() ?: "Tüm ulaşım türleri"}",
+                style = MaterialTheme.typography.bodySmall, color = Muted,
+            )
+            if (render != null && !hasGeometry) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (selection != HeatmapFilter()) TextButton(onClick = { apply(HeatmapFilter()) }) { Text("Filtreyi temizle") }
+                    if (onOpenJourneys != null) TextButton(onClick = onOpenJourneys) { Text("Yolculuklara dön") }
+                }
+            }
+        }
+    }
+    if (showFilters) HeatmapFilterSheet(selection, onDismiss = { showFilters = false }) { applied ->
+        apply(applied)
+        showFilters = false
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HeatmapFilterSheet(applied: HeatmapFilter, onDismiss: () -> Unit, onApply: (HeatmapFilter) -> Unit) {
+    var draft by rememberSaveable { mutableStateOf(applied.mode) }
+    var period by rememberSaveable { mutableStateOf(applied.period) }
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
+        Column(
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("Filtreler", Modifier.semantics { heading() }, style = MaterialTheme.typography.titleLarge)
+            Text("Dönem", style = MaterialTheme.typography.labelLarge)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                HeatmapPeriod.entries.forEach { option ->
+                    FilterChip(
+                        selected = period == option, onClick = { period = option }, label = { Text(option.label) },
+                        modifier = Modifier.testTag("heatmap_period_${option.name}"),
+                    )
+                }
+            }
+            Text("Ulaşım türü", style = MaterialTheme.typography.labelLarge)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 FilterChip(
-                    selected = selected == null, onClick = { filter = null }, label = { Text("Tümü") },
-                    leadingIcon = { Icon(Icons.Outlined.Layers, null, Modifier.size(18.dp)) },
+                    selected = draft == null, onClick = { draft = null }, label = { Text("Tümü") },
+                    leadingIcon = { Icon(Icons.Outlined.Layers, contentDescription = null, Modifier.size(18.dp)) },
                     modifier = Modifier.testTag("heatmap_filter_all"),
                 )
                 transportDisplayOrder.forEach { mode ->
                     FilterChip(
-                        selected = selected == mode, onClick = { filter = mode.name },
+                        selected = draft == mode, onClick = { draft = mode },
                         label = { Text(mode.label()) },
-                        leadingIcon = { Icon(mode.icon(), null, Modifier.size(18.dp)) },
-                        colors = if (mode == Transport.RUN) FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = mode.badgeColor(), selectedLabelColor = mode.accentColor(),
-                            selectedLeadingIconColor = mode.accentColor(),
-                        ) else FilterChipDefaults.filterChipColors(),
+                        leadingIcon = { Icon(mode.icon(), contentDescription = null, Modifier.size(18.dp)) },
                         modifier = Modifier.testTag("heatmap_filter_${mode.name}"),
                     )
                 }
             }
-        }
-        Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(28.dp))) {
-            ExpandableMap(Modifier.fillMaxSize(), title = "Isı haritası", actions = {
-                IconButton(onClick = { showMapFilters = true }) { Icon(Icons.Outlined.Tune, "Isı haritasını filtrele") }
-                if (showMapFilters) AlertDialog(onDismissRequest = { showMapFilters = false },
-                    title = { Text("Ulaşım türü") }, text = {
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            FilterChip(selected == null, { filter = null }, { Text("Tümü") })
-                            transportDisplayOrder.forEach { mode ->
-                                FilterChip(selected == mode, { filter = mode.name }, { Text(mode.label()) })
-                            }
-                        }
-                    }, confirmButton = { TextButton(onClick = { showMapFilters = false }) { Text("Haritaya dön") } })
-            }) { mapModifier ->
-                Column(mapModifier) {
-                    Box(Modifier.weight(1f).fillMaxWidth()) {
-                        // Retain the native map across empty/loading results to preserve the camera.
-                        if (mapShown || render?.hasGeometry == true) {
-                            HeatmapMapContent(render, filter ?: "ALL", Modifier.fillMaxSize())
-                        }
-                        if (render == null) {
-                            Surface(Modifier.fillMaxSize().testTag("heatmap_loading")) {
-                                Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center,
-                                    horizontalAlignment = Alignment.CenterHorizontally) {
-                                    if (state.analysis.phase == org.iz.navigation.power.AnalysisPhase.RUNNING)
-                                        CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
-                                    Spacer(Modifier.height(12.dp))
-                                    Text(if (state.analysis.pending || state.analysis.phase == org.iz.navigation.power.AnalysisPhase.WAITING_END) state.analysis.label else "İzler hazırlanıyor…", color = Muted)
-                                }
-                            }
-                        } else if (!render.hasGeometry) {
-                            HeatmapEmptyState(selected, Modifier.fillMaxSize())
-                        }
-                    }
-                    if (render?.hasGeometry == true) HeatmapLegend(selected, render.data.journeyCount)
-                }
+            Text(
+                "Her yolculuk yaklaşık 30 metrelik bölgede bir kez sayılır. Beklemek veya aynı yolculukta geri dönmek sıklığı artırmaz.",
+                style = MaterialTheme.typography.bodySmall, color = Muted,
+            )
+            Button(
+                onClick = { onApply(HeatmapFilter(draft, period)) },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("heatmap_apply_filters"),
+            ) {
+                Text("Filtreleri uygula")
             }
         }
-        Text(
-            "Her yolculuk yaklaşık 30 metrelik bölgede bir kez sayılır. Beklemek veya aynı yolculukta geri dönmek sıklığı artırmaz.",
-            Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
-            style = MaterialTheme.typography.bodySmall, color = Muted,
-        )
     }
 }
 
 @Composable
-private fun HeatmapEmptyState(selected: Transport?, modifier: Modifier) {
-    Surface(modifier.testTag("heatmap_empty"), color = MaterialTheme.colorScheme.surface) {
-        Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(Icons.Outlined.TravelExplore, null, Modifier.size(44.dp), tint = Forest)
-            Spacer(Modifier.height(16.dp))
-            Text(if (selected == null) "İzlerin burada birikecek" else "${selected.label()} için henüz iz yok",
-                style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
-            Spacer(Modifier.height(8.dp))
-            Text("Konum içeren bir yolculuk kaydettiğinde geçtiğin yollar burada görünecek.",
-                color = Muted, textAlign = TextAlign.Center)
+private fun HeatmapEmptyState(selection: HeatmapFilter, modifier: Modifier) {
+    val selected = selection.mode
+    Surface(modifier.testTag("heatmap_empty"), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Icon(Icons.Outlined.TravelExplore, contentDescription = null, Modifier.size(32.dp), tint = Forest)
+            Text(
+                when {
+                    selection.period != HeatmapPeriod.ALL -> "Bu dönemde seçimine uygun iz yok"
+                    selected != null -> "${selected.label()} için henüz iz yok"
+                    else -> "İzlerin burada birikecek"
+                },
+                style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center,
+            )
+            if (selection == HeatmapFilter()) Text(
+                "Konum içeren bir yolculuk kaydettiğinde geçtiğin yollar burada görünür.",
+                style = MaterialTheme.typography.bodySmall, color = Muted, textAlign = TextAlign.Center,
+            )
         }
     }
 }
 
 @Composable
-private fun HeatmapLegend(selected: Transport?, journeyCount: Int) {
-    Surface(Modifier.fillMaxWidth().testTag("heatmap_legend"), color = MaterialTheme.colorScheme.surface) {
-        Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+private fun HeatmapLegend(selection: HeatmapFilter, journeyCount: Int) {
+    Surface(Modifier.fillMaxWidth().testTag("heatmap_legend"), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("Geçiş sıklığı", style = MaterialTheme.typography.labelLarge)
-            Text("${selected?.label() ?: "Tüm ulaşım türleri"} · $journeyCount yolculuk",
-                style = MaterialTheme.typography.labelSmall, color = Muted)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(
+                "${selection.period.label} · ${selection.mode?.label() ?: "Tüm ulaşım türleri"} · $journeyCount yolculuk",
+                style = MaterialTheme.typography.labelSmall, color = Muted,
+            )
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 heatmapFrequencyBands.forEach { band ->
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                        Box(Modifier.width(24.dp).height(3.dp).background(
-                            Color(band.color.drop(1).toLong(16) or 0xFF000000), RoundedCornerShape(2.dp)))
+                        Box(
+                            Modifier.width(20.dp).height(4.dp).background(
+                                Color(band.color.drop(1).toLong(16) or 0xFF000000), RoundedCornerShape(2.dp),
+                            )
+                        )
                         Text(band.label, style = MaterialTheme.typography.labelSmall)
                     }
                 }

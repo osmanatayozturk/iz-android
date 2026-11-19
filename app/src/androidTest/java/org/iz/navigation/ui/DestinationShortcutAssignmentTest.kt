@@ -33,8 +33,12 @@ class DestinationShortcutAssignmentTest {
         compose.onNodeWithText(missing.name).assertDoesNotExist()
         val list = compose.onNodeWithTag("shortcut-assignment-list")
         val row = hasTestTag("shortcut-assignment-place-located")
+        val save = compose.onNodeWithTag("shortcut-assignment-save")
+        save.assertIsNotEnabled()
         list.performScrollToNode(row)
         compose.onNode(row).performClick()
+        compose.runOnIdle { assertEquals(emptyList<String>(), actions) }
+        save.assertIsEnabled().performClick()
         compose.onNodeWithTag("shortcut-assignment-new").performClick()
         compose.onNodeWithTag("shortcut-assignment-cancel").performClick()
         compose.runOnIdle { assertEquals(listOf("located", "new", "cancel"), actions) }
@@ -52,6 +56,7 @@ class DestinationShortcutAssignmentTest {
         compose.onNodeWithText("Adres kaydedilemedi.").assertIsDisplayed()
         compose.onNodeWithTag("shortcut-assignment-new").assertIsNotEnabled()
         compose.onNodeWithTag("shortcut-assignment-cancel").assertIsNotEnabled()
+        compose.onNodeWithTag("shortcut-assignment-save").assertIsNotEnabled()
     }
 
     @Test fun newAddressRequiresLocationAndOmitsVisitInput() {

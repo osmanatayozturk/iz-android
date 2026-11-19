@@ -8,6 +8,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -26,6 +28,7 @@ class WearStartActivity : ComponentActivity() {
     private var busy by mutableStateOf(false)
     private var finished by mutableStateOf(false)
     private var permissionBlocked by mutableStateOf(false)
+    private var watchName by mutableStateOf<String?>(null)
     private var requestKey = ""
     private val bridge get() = WearPhoneBridge.get(this)
     private val permissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -39,20 +42,38 @@ class WearStartActivity : ComponentActivity() {
         lifecycleScope.launch {
             command = bridge.pending(requestKey)
             message = if (command == null) "Bu isteğin süresi dolmuş veya işlem tamamlanmış. Saatten tekrar deneyebilirsin."
-                else "Saatindeki ${command?.mode?.label()} yolculuğunu bu telefonda kaydetmek için Başlat’a bas."
+                else "Konum kaydı bu telefonda tutulacak."
+            if (command != null) watchName = bridge.requestingWatchName(requestKey)
         }
         setContent {
+            LaunchedEffect(command?.id, busy, finished) {
+                val current = command ?: return@LaunchedEffect
+                if (!busy && !finished) {
+                    val remaining = WearProtocol.COMMAND_TTL_MS - (System.currentTimeMillis() - current.requestedAt)
+                    kotlinx.coroutines.delay(remaining.coerceAtLeast(0L))
+                    if (command?.id == current.id && !busy && !finished) {
+                        command = null
+                        message = "İsteğin süresi doldu. Saatten yeni bir istek gönderebilirsin."
+                    }
+                }
+            }
             BackHandler(enabled = command != null && !finished && !busy) {
                 busy = true
                 lifecycleScope.launch { bridge.cancelOnPhone(requestKey); finish() }
             }
             IzTheme {
                 Surface(Modifier.fillMaxSize()) {
-                    Column(Modifier.fillMaxSize().systemBarsPadding().padding(24.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
-                        Text("Saatten yolculuk", style = MaterialTheme.typography.headlineMedium)
+                    Column(Modifier.fillMaxSize().systemBarsPadding().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                        Text("Saatten gelen kayıt isteği", style = MaterialTheme.typography.headlineMedium)
+                        command?.let { pending ->
+                            Text(watchName ?: "Eşleşmiş saat", style = MaterialTheme.typography.labelLarge)
+                            pending.mode?.let { Text(it.label(), style = MaterialTheme.typography.titleLarge) }
+                        }
                         Text(message)
                         if (command != null && !finished) {
-                            Text("Konum kaydı telefonda tutulur. Yürüyüşte adımlar, telefonun sensöründen ölçülür.", style = MaterialTheme.typography.bodyMedium)
+                            if (!TrackingController.hasFineLocation(this@WearStartActivity)) {
+                                Text("Başlatmak için telefonda hassas konum izni gerekir.")
+                            }
                             Button(onClick = { requestPermissionsAndBegin() }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
                                 Text(if (busy) "Başlatılıyor…" else "Başlat")
                             }

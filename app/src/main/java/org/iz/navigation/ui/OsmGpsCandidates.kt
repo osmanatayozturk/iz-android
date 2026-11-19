@@ -95,34 +95,34 @@ internal fun ColumnScope.OsmGpsCandidates(
         }
     }
     LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("osm-gps-list"),
-        contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        item { Text("Paylaşılabilecek izler", style = MaterialTheme.typography.titleMedium) }
         if (candidates.isEmpty()) item { Text("Yüklenebilir iz bulunamadı.") }
         items(candidates, key = { it.key.journeyId }) { candidate ->
             val selectedHere = candidate.key in selected
-            OutlinedCard(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("osm-gps-journey-${candidate.key.journeyId}")
-                        .toggleable(value = selectedHere, enabled = enabled, role = Role.Checkbox,
-                            onValueChange = { onToggle(candidate.key) }),
-                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Checkbox(checked = selectedHere, onCheckedChange = null, enabled = enabled)
-                        Column(Modifier.weight(1f)) {
-                            val date = osmGpsDate(candidate.startedAt)
-                            Text(candidate.title.ifBlank { date }, style = MaterialTheme.typography.titleMedium)
-                            if (candidate.title.isNotBlank()) Text(date, style = MaterialTheme.typography.bodySmall)
-                            Text(osmGpsDistance(candidate.distanceMeters), style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                    TextButton(onClick = { onPreview(candidate.key) }, enabled = enabled,
-                        modifier = Modifier.heightIn(min = 48.dp).testTag("osm-gps-preview-open-${candidate.key.journeyId}")) {
-                        Text("Önizle")
-                    }
-                    rowStatus(candidate.key)?.let {
-                        Text(it, Modifier.testTag("osm-gps-result-${candidate.key.journeyId}")
-                            .semantics { liveRegion = LiveRegionMode.Polite }, style = MaterialTheme.typography.bodySmall)
+            Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("osm-gps-journey-${candidate.key.journeyId}")
+                    .toggleable(value = selectedHere, enabled = enabled, role = Role.Checkbox,
+                        onValueChange = { onToggle(candidate.key) }),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Checkbox(checked = selectedHere, onCheckedChange = null, enabled = enabled)
+                    Column(Modifier.weight(1f)) {
+                        val date = osmGpsDate(candidate.startedAt)
+                        Text(candidate.title.ifBlank { date }, style = MaterialTheme.typography.titleMedium)
+                        if (candidate.title.isNotBlank()) Text(date, style = MaterialTheme.typography.bodySmall)
+                        Text(osmGpsDistance(candidate.distanceMeters), style = MaterialTheme.typography.bodySmall)
                     }
                 }
+                TextButton(onClick = { onPreview(candidate.key) }, enabled = enabled,
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("osm-gps-preview-open-${candidate.key.journeyId}")) {
+                    Text("Önizle")
+                }
+                rowStatus(candidate.key)?.let {
+                    Text(it, Modifier.testTag("osm-gps-result-${candidate.key.journeyId}")
+                        .semantics { liveRegion = LiveRegionMode.Polite }, style = MaterialTheme.typography.bodySmall)
+                }
             }
+            HorizontalDivider()
         }
     }
 }

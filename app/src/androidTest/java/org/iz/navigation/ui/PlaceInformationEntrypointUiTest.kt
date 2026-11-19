@@ -214,17 +214,24 @@ class PlaceInformationEntrypointUiTest {
                 compose.waitUntil(10_000) { compose.onAllNodesWithTag(row).fetchSemanticsNodes().size == 1 }
                 compose.onNodeWithTag("places-list").performScrollToNode(hasTestTag(row))
                 compose.onNodeWithTag(row).performClick()
+                compose.onNodeWithText("Kişisel yer günlüğü", useUnmergedTree = true).assertIsDisplayed()
+                compose.onNodeWithText(privateName).assertIsDisplayed()
+                compose.onNodeWithTag("place-information-card").assertDoesNotExist()
+                val publicLink = hasText("OSM yer bilgisi") and hasClickAction()
+                compose.onNode(hasScrollToIndexAction()).performScrollToNode(publicLink)
+                compose.onNode(publicLink).assertIsDisplayed().performClick()
                 awaitPublicCard(publicName, ref)
                 compose.onNodeWithTag("place-info-route").assertIsNotEnabled()
-                // Real PlaceDetail lazy items; verify public first, then actual private heading/name.
+                compose.onNodeWithText(privateName).assertDoesNotExist()
+                compose.onNodeWithTag("return-home-map").performClick()
+                compose.onNodeWithTag("place-information-card").assertDoesNotExist()
                 compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Kişisel yer günlüğü"))
                 compose.onNodeWithText("Kişisel yer günlüğü", useUnmergedTree = true).assertIsDisplayed()
-                compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText(privateName))
                 compose.onNodeWithText(privateName).assertIsDisplayed()
                 compose.onNodeWithTag("return-home-map").performClick()
                 compose.waitUntil(5_000) { compose.onAllNodesWithTag(row).fetchSemanticsNodes().size == 1 }
                 compose.onNodeWithTag("place-information-card").assertDoesNotExist()
-                receipt.put("entryPath", "actual menu-places -> Room place-row -> DiaryApp public card -> actual personal section -> back")
+                receipt.put("entryPath", "actual menu-places -> Room place-row -> personal detail -> OSM public page -> personal detail -> places")
             }
             check(SystemClock.elapsedRealtime() - started < 90_000)
             assertIdle()
@@ -466,7 +473,7 @@ class PlaceInformationEntrypointUiTest {
 
     companion object {
         private val QA_PACKAGE = BuildConfig.APPLICATION_ID
-        private const val CAPTURE_SHA = "8b36e4339e1cb910973e0cf4582239b196eaebe2c3fd77ea3f4b73578f3889af"
+        private const val CAPTURE_SHA = "8f88d93f0a336d84e3b5dbde79b95e864142f684bbc80e0ec30e5b55fb3f0989"
         private const val MAX_SEED = 4 * 1024
         private const val MAX_PUBLIC = 16 * 1024
         private const val MAX_JSON = 64 * 1024

@@ -35,9 +35,9 @@ import org.iz.navigation.integration.osm.OsmGpxReceiptStatus
 import org.iz.navigation.integration.osm.OsmGpxStop
 
 internal enum class OsmGpsPage(val label: String, val tag: String) {
-    AVAILABLE("Yüklenebilir izler", "available"),
+    AVAILABLE("Adaylar", "available"),
     HISTORY("Yüklenenler", "history"),
-    UNKNOWN("Kontrol bekleyenler", "unknown"),
+    UNKNOWN("Belirsiz yüklemeler", "unknown"),
 }
 
 private data class OsmGpsPendingConsent(
@@ -341,7 +341,7 @@ internal fun OsmGpsScreen(
                 page == OsmGpsPage.AVAILABLE -> Button(enabled = canAct && available.any { it.key in selected },
                     modifier = action.testTag("osm-gps-review"), onClick = {
                         review(available.map { it.key }.filter { it in selected }.distinctBy { it.fileName })
-                    }) { Text("Gönderimi incele") }
+                    }) { Text("Önizle · ${selected.size} iz") }
             }
         }
     }

@@ -26,6 +26,8 @@ internal data class RouteAvoidUiTarget(val id: String, val instruction: String)
 internal data class RouteStopUiTarget(val id: String, val stop: RouteStop)
 internal data class RouteOperationUiPreview(
     val owner: RouteOperationsUiToken, val requestId: String, val route: PlannedRoute, val reason: RoutePreviewUiReason,
+    val currentRemainingMeters: Double? = null,
+    val currentDrivingSeconds: Double? = null,
 )
 internal enum class RoutePoiUiKind { FUEL, REST }
 internal enum class RoutePoiUiState { IDLE, LOADING, RESULTS, EMPTY, ERROR, CACHED }
@@ -90,7 +92,7 @@ internal fun RouteOperationsPanel(data: RouteOperationsPanelData, callbacks: Rou
 
     OutlinedCard(modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Rota işlemleri", style = MaterialTheme.typography.titleLarge)
+            Text("Aktif rotayı değiştir", style = MaterialTheme.typography.titleLarge)
             if (route == null) Text("Geçerli rota bilgisi bekleniyor.")
             else Text("Mevcut hedef: ${route.stops.last().label}")
             Text(when (data.online) {
@@ -141,7 +143,7 @@ internal fun RouteOperationsPanel(data: RouteOperationsPanelData, callbacks: Rou
                 }
             }
             Text("Bu işlemler yolculuğun kayıt durumunu değiştirmez.", style = MaterialTheme.typography.bodySmall)
-            OperationChoice("Kullanılmayacak bölüm", segmentId,
+            OperationChoice("Yoldan kaçın", segmentId,
                 if (route == null) emptyList() else data.maneuvers.map { it.id to it.instruction }) { segmentId = it }
             OutlinedButton(onClick = {
                 val id = segment?.id ?: return@OutlinedButton
@@ -149,7 +151,7 @@ internal fun RouteOperationsPanel(data: RouteOperationsPanelData, callbacks: Rou
                     if (current.maneuvers.any { it.id == id }) callbacks.onAvoid(token, id)
                 }
             }, enabled = segment != null && routeOperationAllowed(data, RouteOperationUiAction.AVOID),
-                modifier = Modifier.sizeIn(minHeight = 48.dp)) { Text("Bu bölümü kullanma") }
+                modifier = Modifier.sizeIn(minHeight = 48.dp)) { Text("Kaçınmayı önizle") }
             OperationChoice("Atlanacak ara durak", stopId,
                 if (route == null) emptyList() else data.intermediateStops.map { it.id to it.stop.label }) { stopId = it }
             if (data.intermediateStops.isEmpty()) Text("Atlanacak ara durak yok.", style = MaterialTheme.typography.bodySmall)
@@ -159,7 +161,7 @@ internal fun RouteOperationsPanel(data: RouteOperationsPanelData, callbacks: Rou
                     if (current.intermediateStops.any { it.id == id }) callbacks.onSkip(token, id)
                 }
             }, enabled = stop != null && routeOperationAllowed(data, RouteOperationUiAction.SKIP),
-                modifier = Modifier.sizeIn(minHeight = 48.dp)) { Text("Bu durağı atla") }
+                modifier = Modifier.sizeIn(minHeight = 48.dp)) { Text("Durak atlamayı önizle") }
             Text("Değişiklik önce önizlenir. Onaylayana kadar mevcut rota korunur.", style = MaterialTheme.typography.bodySmall)
             HorizontalDivider()
             Text("Rotaya yakın yerler", style = MaterialTheme.typography.titleMedium)
@@ -208,15 +210,27 @@ internal fun RouteOperationsPanel(data: RouteOperationsPanelData, callbacks: Rou
                                 callbacks.onSelectPoi(token, poi.requestId, item.id)
                         }
                     }, enabled = routeOperationAllowed(data, RouteOperationUiAction.SELECT_POI),
-                        modifier = Modifier.sizeIn(minHeight = 48.dp)) { Text("Rotada önizle") }
+                        modifier = Modifier.sizeIn(minHeight = 48.dp)) { Text("Değişikliği önizle") }
                 }
             } else if (data.poi != null) Text("Bu rotanın yer bilgisi bekleniyor.")
             if (preview != null) {
                 HorizontalDivider()
-                Text("Yeni rota önizlemesi", style = MaterialTheme.typography.titleMedium)
+                Text("Değişikliği karşılaştır", style = MaterialTheme.typography.titleMedium)
                 Text("Hedef: ${preview.route.stops.last().label}")
-                Text("Planlanan mesafe: ${routeOperationDistance(preview.route.distanceMeters)}")
-                Text("Planlanan süre: ${routeOperationDuration(preview.route.durationSeconds)}")
+                val distance = preview.route.distanceMeters
+                val duration = preview.route.durationSeconds
+                Text("Yeni rota · ${routeOperationDistance(distance)} · ${routeOperationDuration(duration)} sürüş")
+                val currentMeters = preview.currentRemainingMeters
+                val currentSeconds = preview.currentDrivingSeconds
+                if (currentMeters != null && currentSeconds != null) {
+                    Text("Mevcut rotada kalan · ${routeOperationDistance(currentMeters)} · ${routeOperationDuration(currentSeconds)} sürüş")
+                    val difference = distance - currentMeters
+                    val differenceLabel = if (kotlin.math.abs(difference) < 5.0) "Benzer mesafe"
+                        else "${routeOperationDistance(kotlin.math.abs(difference))} " +
+                            if (difference > 0) "daha uzun" else "daha kısa"
+                    Text("Yaklaşık mesafe farkı · $differenceLabel",
+                        style = MaterialTheme.typography.titleSmall)
+                }
                 Text(if (preview.route.transport == org.iz.navigation.data.Transport.MOTORCYCLE && preview.route.provider == RouteProvider.VALHALLA)
                     org.iz.navigation.weather.MOTORCYCLE_ROUTE_CONTEXT
                 else "Sağlayıcı: ${if (preview.route.provider == RouteProvider.TOMTOM) "TomTom" else "Valhalla"}")

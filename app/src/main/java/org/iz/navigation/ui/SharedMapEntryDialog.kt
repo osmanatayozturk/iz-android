@@ -88,8 +88,8 @@ internal fun SharedMapEntryDialog(input: SharedMapInput, onClose: () -> Unit,
         Surface(Modifier.fillMaxWidth().fillMaxHeight(.9f).padding(12.dp), shape = MaterialTheme.shapes.extraLarge) {
             LazyColumn(Modifier.padding(20.dp).testTag("shared-map-entry"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 item {
-                    Text("Paylaşılan yer", Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineSmall)
-                    Text("Paylaşımı almak veya önizlemek yolculuğu başlatmaz.")
+                    Text("Paylaşılan konum ve bağlantı", Modifier.semantics { heading() },
+                        style = MaterialTheme.typography.headlineSmall)
                     TextButton(onClose, modifier = Modifier.heightIn(min = 48.dp)) { Text("Geri") }
                 }
                 if (loading) item { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("Bağlantı çözümleniyor…") }
@@ -123,11 +123,16 @@ internal fun SharedMapEntryDialog(input: SharedMapInput, onClose: () -> Unit,
                     itemsIndexed(candidate.stops) { index, stop ->
                         OutlinedButton(onClick = { choosing = index }, enabled = !loading && !handedOff,
                             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("shared-stop-$index")) {
-                            Text("${index + 1}. ${stop.name} · ${if (stop.coordinate == null) "Yerini seç" else "Seçildi"}")
+                            val label = when {
+                                candidate.single || index == candidate.stops.lastIndex -> "Hedef"
+                                index == 0 && !candidate.dynamicOrigin -> "Başlangıç"
+                                else -> "Ara durak ${index + if (candidate.dynamicOrigin) 1 else 0}"
+                            }
+                            Text("$label · ${stop.name}" + if (stop.coordinate == null) " · Adres ara" else "")
                         }
                     }
                     item {
-                        Text("Adı olan ama konumu eksik her durağı Ara ile ayrı seç. Sıra ve yinelenen duraklar korunur.")
+                        if (!candidate.complete) Text("Devam etmek için konumu eksik durakları seç.")
                         Button(onClick = {
                             if (!currentOwner() || handedOff || !candidate.complete) return@Button
                             handedOff = true
@@ -135,7 +140,7 @@ internal fun SharedMapEntryDialog(input: SharedMapInput, onClose: () -> Unit,
                             if (candidate.single) onSingle(stops.single()) else onItinerary(stops, candidate.dynamicOrigin)
                         }, enabled = candidate.complete && !loading && !handedOff,
                             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("shared-map-continue")) {
-                            Text(if (candidate.single) "Hedefi ve aracı kontrol et" else "Planlayıcıda aç")
+                            Text(if (candidate.single) "Vasıtayı seç" else "Planlayıcıda aç")
                         }
                     }
                 }

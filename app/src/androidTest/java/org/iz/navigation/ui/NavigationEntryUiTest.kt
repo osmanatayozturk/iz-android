@@ -34,7 +34,8 @@ class NavigationEntryUiTest {
         val before = owner.state.value
         val activity = compose.activity
         val launchIntent = Intent(activity.intent)
-        compose.onNodeWithTag("home-group").performClick()
+        compose.onNodeWithTag("home-menu").performClick()
+        compose.onNodeWithTag("menu-group").performScrollTo().performClick()
         compose.onNodeWithTag("navigation-home-map").assertDoesNotExist()
         try {
             compose.runOnUiThread {

@@ -20,7 +20,7 @@ import java.util.UUID
 internal data class WatchLiveHealthState(val armed: Boolean = false, val onBody: Boolean? = null,
     val phoneId: String? = null, val sessionId: String? = null, val journeyId: String? = null, val capturing: Boolean = false, val latestHeartRate: Double? = null,
     val latestHeartAt: Long? = null, val steps: Long? = null, val buffered: Int = 0,
-    val status: String = "Otomatik saat ölçümü kapalı")
+    val status: String = "Otomatik saat ölçümü kapalı", val latestSampleAt: Long? = null)
 
 internal object WatchHealthRuntime {
     var running = false
@@ -100,6 +100,7 @@ class WatchHealthService : Service() {
     private var capabilityListening = false
     private var lock: PowerManager.WakeLock? = null
     private var phone: String? = null
+    private var lastSampleAt: Long? = null
     private var anchor: HealthClockAnchor? = null
     private var pendingHello: Pair<String, Long>? = null
     private var lastHello = -30_000L
@@ -268,7 +269,7 @@ class WatchHealthService : Service() {
                     prefs.edit().remove("sessionId").commit(); detach(); hello(force = true); return
                 }
                 val stored = old ?: WatchHealthOutbox.Session(sessionId, value.journeyId!!, value.createdAt!!, clock, WatchHealthRuntime.boot(this), 0).also(outbox::saveSession)
-                if (capture.sessionId != stored.id) { detach(); WatchHealthRuntime.mutableState.value = WatchHealthRuntime.mutableState.value.copy(phoneId = null, sessionId = null, latestHeartRate = null, latestHeartAt = null, steps = null) }
+                if (capture.sessionId != stored.id) { detach(); WatchHealthRuntime.mutableState.value = WatchHealthRuntime.mutableState.value.copy(phoneId = null, sessionId = null, latestHeartRate = null, latestHeartAt = null, steps = null, latestSampleAt = null) }
                 anchor = stored.anchor; prefs.edit().putString("sessionId", stored.id).commit()
                 capture.attach(stored.id, stored.journeyId, stored.createdAt, SystemClock.elapsedRealtime() + WatchHealthProtocol.LEASE_MILLIS, stored.sequence)
                 updateCollection(); startHeartbeat(); sendNext()
@@ -328,13 +329,14 @@ class WatchHealthService : Service() {
     private fun updateState() {
         WatchHealthRuntime.mutableState.value = WatchHealthRuntime.mutableState.value.copy(armed = observing,
             phoneId = phone, sessionId = capture.sessionId, onBody = capture.worn, journeyId = capture.journeyId, capturing = collecting,
-            steps = null, buffered = outbox.count(), latestHeartRate = null, latestHeartAt = null)
+            steps = null, buffered = outbox.count(), latestHeartRate = null, latestHeartAt = null, latestSampleAt = lastSampleAt)
     }
     private fun clearSessionState() {
+        lastSampleAt = null
         val hadHeart = WatchHealthRuntime.mutableState.value.latestHeartAt != null
         pendingHello = null; anchor = null
         prefs.edit().remove("sessionId").commit()
-        WatchHealthRuntime.mutableState.value = WatchHealthRuntime.mutableState.value.copy(phoneId = null, sessionId = null, latestHeartRate = null, latestHeartAt = null, steps = null)
+        WatchHealthRuntime.mutableState.value = WatchHealthRuntime.mutableState.value.copy(phoneId = null, sessionId = null, latestHeartRate = null, latestHeartAt = null, steps = null, latestSampleAt = null)
         if (hadHeart) WatchSurfaceUpdates.request(this, forceTile = true)
     }
     private fun detach() { capture.detach(); clearSessionState(); updateCollection() }
@@ -361,6 +363,7 @@ class WatchHealthService : Service() {
         } ?: return
         try {
             outbox.add(capture.sessionId ?: return, reading, System.currentTimeMillis())
+            lastSampleAt = maxOf(lastSampleAt ?: measuredAt, measuredAt)
             if (reading.sequence % 100L == 0L) outbox.prune(System.currentTimeMillis())
             // Preserve the raw reading and its sequence; summaries are prepared by the phone after the trip.
             // Heart/step totals and surface refreshes are deliberately absent from this sensor callback.

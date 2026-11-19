@@ -24,6 +24,7 @@ class WatchActivity : ComponentActivity() {
     private val model: WatchViewModel by viewModels()
     // Tile and complication taps can reuse a running activity; routing is owned by its lifecycle.
     private var surface by mutableStateOf<WatchSurfaceRoute?>(null)
+    private var entryGeneration by mutableIntStateOf(0)
     private fun route(value: String?): WatchSurfaceRoute? = value?.let {
         runCatching { WatchSurfaceRoute.valueOf(it) }.getOrNull()
     }
@@ -31,9 +32,11 @@ class WatchActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         surface = route(intent.getStringExtra("surface"))
+        entryGeneration++
         model.refresh()
     }
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putInt("watch_entry_generation", entryGeneration)
         outState.putString("watch_surface_route", surface?.name)
         super.onSaveInstanceState(outState)
     }
@@ -74,6 +77,7 @@ class WatchActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        entryGeneration = savedInstanceState?.getInt("watch_entry_generation") ?: 0
         surface = route(if (savedInstanceState?.containsKey("watch_surface_route") == true)
             savedInstanceState.getString("watch_surface_route") else intent.getStringExtra("surface"))
         lifecycleScope.launch {
@@ -93,14 +97,15 @@ class WatchActivity : ComponentActivity() {
             LaunchedEffect(Unit) {
                 while (true) { now = System.currentTimeMillis(); delay(1_000) }
             }
-            if (surface != null) WatchSurfaceDetail(surfaceData, surface!!, now, { surface = null })
-            else WatchScreen(state, now, model::start, model::stop, model::refresh, health,
-                surfaceData = surfaceData, onSurface = { surface = it },
-                onArmHealth = ::requestHealth,
-                onDisarmHealth = { WatchHealthRuntime.disarm(this) },
-                onRebindHealth = { WatchHealthRuntime.rebindPhone(this) },
-                onHealthSettings = { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                    Uri.parse("package:$packageName"))) })
+            key(entryGeneration) {
+                WatchScreen(state, now, model::start, model::stop, model::refresh, health,
+                    surfaceData = surfaceData, entry = surface,
+                    onArmHealth = ::requestHealth,
+                    onDisarmHealth = { WatchHealthRuntime.disarm(this) },
+                    onRebindPhone = model::rebindPhone,
+                    onHealthSettings = { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.parse("package:$packageName"))) })
+            }
         }
     }
 }

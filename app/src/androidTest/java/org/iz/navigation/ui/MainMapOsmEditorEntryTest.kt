@@ -696,7 +696,7 @@ class MainMapOsmEditorEntryTest {
                 compose.onNodeWithTag("osm-map-survey").performScrollTo().performClick().assertIsOff()
                 Espresso.pressBack()
                 compose.onNodeWithTag("osm-map-name").assertDoesNotExist()
-                compose.onNodeWithText("OSM mekânlarım").assertIsDisplayed()
+                compose.onNodeWithText("Mekân taslakları").assertIsDisplayed()
                 Espresso.pressBack()
                 compose.onNodeWithTag("navigation-home-map").assertIsDisplayed()
                 assertEquals(created, repository.getMapEdit(created.id))

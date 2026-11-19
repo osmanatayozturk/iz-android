@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.RectF
 import android.view.View
 import androidx.test.espresso.Espresso.onView
+import androidx.test.espresso.Espresso.pressBack
 import androidx.test.espresso.matcher.RootMatchers.isDialog
 import androidx.test.espresso.matcher.ViewMatchers.isAssignableFrom
 import androidx.compose.ui.test.*
@@ -13,6 +14,9 @@ import androidx.test.platform.app.InstrumentationRegistry
 import org.iz.navigation.data.Journey
 import org.iz.navigation.data.TrackPoint
 import org.iz.navigation.data.Transport
+import org.iz.navigation.integration.HeatmapData
+import org.iz.navigation.integration.buildHeatmapData
+import org.iz.navigation.integration.prepareHeatmapRender
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -27,61 +31,76 @@ import java.util.concurrent.atomic.AtomicReference
 class HeatmapUiTest {
     @get:Rule val compose = createComposeRule()
 
-    @Test fun passengerAndAllFiltersHaveSeparateEmptyStates() {
-        compose.setContent { IzTheme { HeatmapScreen(DiaryState(), now = 100_000) } }
-        compose.onNodeWithTag("heatmap_filter_PASSENGER").performClick()
-        compose.waitUntil(10_000) {
-            compose.onAllNodesWithText("Yolcu için henüz iz yok").fetchSemanticsNodes().isNotEmpty()
+    @Test fun passengerFilterAppliesOnlyWhenConfirmedAndCanBeCleared() {
+        val empty = prepareHeatmapRender(HeatmapData())
+        var journeyListOpened = false
+        compose.setContent {
+            IzTheme { HeatmapScreenContent(DiaryState(), onOpenJourneys = { journeyListOpened = true }) { empty } }
         }
-        compose.onNodeWithText("Yolcu için henüz iz yok").assertIsDisplayed()
-        compose.onNodeWithTag("heatmap_filter_PASSENGER").assertIsSelected()
-        compose.onNodeWithTag("heatmap_filter_all").performClick()
-        compose.waitUntil(10_000) {
-            compose.onAllNodesWithText("İzlerin burada birikecek").fetchSemanticsNodes().isNotEmpty()
-        }
+        compose.onNodeWithTag("heatmap_show_filters").performClick()
+        compose.onNodeWithTag("heatmap_filter_PASSENGER").performScrollTo().performClick().assertIsSelected()
+        pressBack()
         compose.onNodeWithText("İzlerin burada birikecek").assertIsDisplayed()
-        compose.onNodeWithTag("heatmap_filter_all").assertIsSelected()
+
+        applyFilter("heatmap_filter_PASSENGER")
+        compose.onNodeWithText("Yolcu için henüz iz yok").assertIsDisplayed()
+        compose.onNodeWithText("Filtreyi temizle").performClick()
+        compose.onNodeWithText("İzlerin burada birikecek").assertIsDisplayed()
+        compose.onNodeWithText("Yolculuklara dön").performClick()
+        compose.runOnIdle { assertTrue(journeyListOpened) }
     }
 
-    @Test fun latestRapidFilterOwnsResultAndLegendAppearsInPreviewAndFullscreen() {
+    @Test fun periodAndTransportApplyTogetherAndClearTogether() {
+        val empty = prepareHeatmapRender(HeatmapData())
+        compose.setContent { IzTheme { HeatmapScreenContent(DiaryState()) { empty } } }
+        compose.onNodeWithTag("heatmap_show_filters").performClick()
+        compose.onNodeWithTag("heatmap_period_WEEK").performClick()
+        pressBack()
+        compose.onNodeWithText("Tüm kayıtlar · Tüm ulaşım türleri").assertIsDisplayed()
+        compose.onNodeWithTag("heatmap_show_filters").performClick()
+        compose.onNodeWithTag("heatmap_period_MONTH").performClick()
+        compose.onNodeWithTag("heatmap_filter_WALK").performScrollTo().performClick()
+        compose.onNodeWithTag("heatmap_apply_filters").performScrollTo().performClick()
+        compose.onNodeWithText("Son 30 gün · ${Transport.WALK.label()}").assertIsDisplayed()
+        compose.onNodeWithText("Bu dönemde seçimine uygun iz yok").assertIsDisplayed()
+        compose.onNodeWithText("Filtreyi temizle").performClick()
+        compose.onNodeWithText("Tüm kayıtlar · Tüm ulaşım türleri").assertIsDisplayed()
+    }
+
+    @Test fun latestAppliedFilterOwnsResultAndLegendAppearsInPreviewAndFullscreen() {
         val carJourneys = (1..8).map { index ->
             Journey(id = "car-$index", transport = Transport.CAR, startedAt = 0, endedAt = 90_000)
         }
         val walk = Journey(id = "walk", transport = Transport.WALK, startedAt = 0, endedAt = 90_000)
-        val carPoints = carJourneys.flatMapIndexed { journeyIndex, journey ->
-            List(2_000) { pointIndex ->
+        val journeys = carJourneys + walk
+        val points = journeys.flatMap { journey ->
+            val latitude = if (journey.transport == Transport.CAR) 39.90 else 41.02
+            listOf(
                 TrackPoint(
-                    id = "${journey.id}-$pointIndex",
-                    journeyId = journey.id,
-                    latitude = 39.90 + journeyIndex * .00001,
-                    longitude = 32.80 + pointIndex * .000002,
-                    recordedAt = pointIndex * 1_000L,
-                    accuracy = 5f,
-                )
-            }
+                    id = "${journey.id}-a", journeyId = journey.id,
+                    latitude = latitude, longitude = 32.8000, recordedAt = 0, accuracy = 5f,
+                ),
+                TrackPoint(
+                    id = "${journey.id}-b", journeyId = journey.id,
+                    latitude = latitude + .001, longitude = 32.801, recordedAt = 60_000, accuracy = 5f,
+                ),
+            )
         }
-        val walkPoints = listOf(
-            TrackPoint(id = "walk-a", journeyId = walk.id, latitude = 41.0200, longitude = 29.0000,
-                recordedAt = 0, accuracy = 5f),
-            TrackPoint(id = "walk-b", journeyId = walk.id, latitude = 41.0210, longitude = 29.0020,
-                recordedAt = 60_000, accuracy = 5f),
-        )
+        val renders = listOf(null, Transport.CAR, Transport.WALK).associateWith { mode ->
+            prepareHeatmapRender(buildHeatmapData(journeys, points, mode, now = 100_000))
+        }
         compose.setContent {
-            IzTheme { HeatmapScreen(DiaryState(carJourneys + walk, carPoints + walkPoints), now = 100_000) }
+            IzTheme { HeatmapScreenContent(DiaryState(journeys = journeys)) { filter -> renders[filter.mode] } }
         }
 
-        // Exercise cancellation/publication ordering while the much larger car result can still be computing.
-        compose.onNodeWithTag("heatmap_filter_CAR").performClick()
-        compose.onNodeWithTag("heatmap_filter_WALK").performClick()
-        compose.onNodeWithTag("heatmap_filter_WALK").assertIsSelected()
-        compose.waitUntil(20_000) {
-            compose.onAllNodesWithTag("heatmap_legend").fetchSemanticsNodes().isNotEmpty() &&
-                compose.onAllNodesWithText("1 yolculuk", substring = true).fetchSemanticsNodes().isNotEmpty()
-        }
+        applyFilter("heatmap_filter_CAR")
+        compose.onNodeWithText("8 yolculuk", substring = true).assertExists()
+        applyFilter("heatmap_filter_WALK")
         compose.onNodeWithTag("heatmap_legend").assertIsDisplayed()
-        listOf("Geçiş sıklığı", "1", "2–3", "4–7", "8+").forEach { label ->
+        listOf("Geçiş sıklığı", "1", "2-3", "4-7", "8+").forEach { label ->
             compose.onNodeWithText(label, substring = false, useUnmergedTree = true).assertExists()
         }
+        compose.onNodeWithText("1 yolculuk", substring = true).assertExists()
         compose.onAllNodesWithText("8 yolculuk", substring = true).assertCountEquals(0)
         assertTrue(saveScreen("heatmap-preview.png").length() > 0)
 
@@ -97,6 +116,13 @@ class HeatmapUiTest {
         waitForFullscreenTrace()
         assertTrue(saveScreen("heatmap-fullscreen.png").length() > 0)
     }
+
+    private fun applyFilter(tag: String) {
+        compose.onNodeWithTag("heatmap_show_filters").performClick()
+        compose.onNodeWithTag(tag).performScrollTo().performClick().assertIsSelected()
+        compose.onNodeWithTag("heatmap_apply_filters").performScrollTo().performClick()
+    }
+
 
     private fun waitForFullscreenTrace() {
         val mapView = AtomicReference<MapView>()

@@ -83,7 +83,8 @@ internal fun PreparedRoutePanel(data: PreparedRoutePanelData, callbacks: Prepare
 
     OutlinedCard(modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Hazır rota ve harita alanı", style = MaterialTheme.typography.titleLarge)
+            Text("Hazır rota ve çevrimdışı harita", style = MaterialTheme.typography.titleLarge)
+            Text("Rota durumu", style = MaterialTheme.typography.titleSmall)
             Text(when (data.routeReady) {
                 true -> "Rota hazır."
                 false -> "Rota çevrimdışı kullanım için hazırlanmadı."
@@ -94,18 +95,29 @@ internal fun PreparedRoutePanel(data: PreparedRoutePanelData, callbacks: Prepare
                 Text("Planlanan mesafe: ${preparedDistance(route.distanceMeters)}",
                     style = MaterialTheme.typography.bodySmall)
             }
+            HorizontalDivider()
+            Text("Harita kapsamı", style = MaterialTheme.typography.titleSmall)
             Text(preparedMapLabel(data.mapState))
+            data.corridor?.let { corridor ->
+                Text("Rota üzerinde ${preparedDistance(corridor.fromMeters)} – ${preparedDistance(corridor.toMeters)}",
+                    style = MaterialTheme.typography.bodySmall)
+            }
             Text("Kaynak: ${data.source?.takeIf { it.isNotBlank() } ?: "Bilinmiyor"}",
                 style = MaterialTheme.typography.bodySmall)
             Text(data.verifiedAt?.takeIf { it >= 0 }?.let { "Doğrulama: ${preparedTime(it)}" }
                 ?: "Doğrulama zamanı bilinmiyor.", style = MaterialTheme.typography.bodySmall)
-            if (data.downloadedBytes != null || data.totalBytes != null || data.mapState == PreparedMapUiState.DOWNLOADING)
-                Text("Boyut: ${preparedBytes(data.downloadedBytes)} / ${preparedBytes(data.totalBytes)}")
+            if (data.mapState == PreparedMapUiState.DOWNLOADING || data.mapState == PreparedMapUiState.VERIFYING) {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+            }
+            if (data.downloadedBytes != null || data.totalBytes != null) {
+                Text(data.totalBytes?.let { "İndirilen · ${preparedBytes(data.downloadedBytes)} / ${preparedBytes(it)}" }
+                    ?: "İndirilen · ${preparedBytes(data.downloadedBytes)}")
+            }
             if (data.downloadedTiles != null || data.totalTiles != null)
                 Text("Harita parçası: ${preparedCount(data.downloadedTiles)} / ${preparedCount(data.totalTiles)}",
                     style = MaterialTheme.typography.bodySmall)
             data.error?.takeIf { it.isNotBlank() }?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            Text("Seçili koridor", style = MaterialTheme.typography.titleMedium)
+            Text("Koridor genişliği ve sınırları", style = MaterialTheme.typography.titleMedium)
             Text("Başlangıç ve bitiş, rotanın başlangıcından uzaklıktır. Genişlik yolun her iki yanında uygulanır.",
                 style = MaterialTheme.typography.bodySmall)
             if (matchingRoute == null) Text("Alan seçimi için rota bilgisi gerekiyor.", style = MaterialTheme.typography.bodySmall)
