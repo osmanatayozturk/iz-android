@@ -420,8 +420,14 @@ class CompactNavigationCardTest {
     private fun Rect.overlapsVertically(other: Rect) = top < other.bottom && bottom > other.top
 
     private fun capture(name: String, ownedWindowPng: Boolean = false, textSamples: JSONObject? = null): Throwable? {
-        val directory = File(requireNotNull(InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null)),
-            "qa/compact-navigation-card/$name-${SystemClock.uptimeMillis()}").apply { check(mkdirs()) }
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val target = instrumentation.targetContext
+        val root = if (ownedWindowPng) target.cacheDir else requireNotNull(target.getExternalFilesDir(null))
+        val relativePath = "qa/compact-navigation-card/$name-${SystemClock.uptimeMillis()}"
+        val directory = File(root, relativePath).apply { check(mkdirs()) }
+        if (ownedWindowPng) {
+            instrumentation.addResults(android.os.Bundle().apply { putString("hudEvidence-$name", "cache/$relativePath") })
+        }
         val evidenceType = "OWNED_COMPOSE_SEMANTICS_NOT_PLATFORM_TALKBACK"
         val home = compose.onNodeWithTag("navigation-home", useUnmergedTree = true).fetchSemanticsNode()
         val (nodes, window) = compose.runOnIdle {
@@ -514,7 +520,8 @@ class CompactNavigationCardTest {
             }
             image.exceptionOrNull()?.let { metadata.put("pngError", it.toString()) }
             geometry.writeText(metadata.toString(2))
-            return route.exceptionOrNull() ?: image.exceptionOrNull()
+            // Route visibility is recorded independently of HUD layout and the map viewport bounds.
+            return image.exceptionOrNull()
         } else png.outputStream().use {
             check(compose.onNodeWithTag("navigation-home").captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it))
         }
