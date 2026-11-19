@@ -220,9 +220,18 @@ class NavigationHomeGeometryTest {
         val layouts = mutableListOf<TextLayoutResult>()
         text.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
         val layout = layouts.single()
-        assertEquals(1, layout.lineCount)
-        assertFalse("$visible has visual overflow", layout.hasVisualOverflow)
-        assertFalse("$visible is ellipsized", layout.isLineEllipsized(0))
+        val constraints = layout.layoutInput.constraints
+        val details = "$visible size=${layout.size} constraints=$constraints " +
+            "paragraph=${layout.multiParagraph.width}×${layout.multiParagraph.height} " +
+            "widthOverflow=${layout.didOverflowWidth} heightOverflow=${layout.didOverflowHeight}"
+        assertEquals(details, 1, layout.lineCount)
+        assertEquals(details, constraints.maxWidth, layout.size.width)
+        assertFalse(details, layout.didOverflowWidth)
+        assertFalse(details, layout.didOverflowHeight)
+        assertFalse("$details has visual overflow", layout.hasVisualOverflow)
+        assertFalse("$details is ellipsized", layout.isLineEllipsized(0))
+        assertEquals(details, visible.length, layout.getLineEnd(0, visibleEnd = true))
+        assertTrue(details, layout.getLineBottom(0) <= layout.size.height)
         return button
     }
 

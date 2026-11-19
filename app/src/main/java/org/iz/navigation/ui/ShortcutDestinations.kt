@@ -16,6 +16,7 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
@@ -59,7 +60,7 @@ internal fun ShortcutDestinationsRow(shortcuts: List<DestinationShortcut>, enabl
 
     val spacing = 8.dp
     val horizontalPadding = 12.dp
-    val labelStyle = LocalTextStyle.current.merge(MaterialTheme.typography.labelLarge)
+    val labelStyle = LocalTextStyle.current.merge(MaterialTheme.typography.labelLarge).copy(textAlign = TextAlign.Center)
     val textMeasurer = rememberTextMeasurer()
     val colors = MaterialTheme.colorScheme
     // The map can be any color, including black before its tiles are ready.
@@ -93,7 +94,9 @@ internal fun ShortcutDestinationsRow(shortcuts: List<DestinationShortcut>, enabl
                             if (!slot.valid) stateDescription = if (showUnassigned) "Atanmamış" else "Kullanılamıyor"
                         },
                     contentPadding = PaddingValues(horizontal = horizontalPadding, vertical = 8.dp)) {
-                    Text(if (compact) slot.label else slot.title, style = labelStyle, maxLines = 1, softWrap = false)
+                    // Draw and report text layout in the same padded slot width.
+                    Text(if (compact) slot.label else slot.title, modifier = Modifier.fillMaxWidth(),
+                        style = labelStyle, maxLines = 1, softWrap = false)
                 }
             }
         }
