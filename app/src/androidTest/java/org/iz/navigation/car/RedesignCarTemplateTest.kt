@@ -31,7 +31,7 @@ class RedesignCarTemplateTest {
             val weather = CarWeatherScreen(context, refreshWeather = {}).onGetTemplate() as MessageTemplate
             assertEquals(Action.BACK, weather.headerAction)
             assertTrue(weather.message.toString().contains("Hava takibi kapalı"))
-            assertEquals(listOf("Yenile", "Ayrıntılar"), weather.actions.map { it.title.toString() })
+            assertEquals(listOf("Yenile", "Telefonda aç"), weather.actions.map { it.title.toString() })
 
             val finish = CarFinishScreen(context, "synthetic-drive").onGetTemplate() as MessageTemplate
             assertEquals(Action.BACK, finish.headerAction)

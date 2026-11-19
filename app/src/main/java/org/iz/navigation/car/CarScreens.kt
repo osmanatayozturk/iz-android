@@ -577,7 +577,7 @@ internal class CarWeatherScreen(
             .setHeaderAction(Action.BACK).addAction(action("Yenile") {
                 refreshWeather()
                 safeInvalidate()
-            }).addAction(phoneAction("Ayrıntılar", "OPEN_WEATHER"))
+            }).addAction(phoneAction("Telefonda aç", "OPEN_WEATHER"))
             .setActionStrip(ActionStrip.Builder().addAction(mapReturn()).build()).build()
     }
 }

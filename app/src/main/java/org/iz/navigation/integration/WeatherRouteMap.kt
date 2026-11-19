@@ -1,9 +1,12 @@
 package org.iz.navigation.integration
 
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.GpsFixed
 import androidx.compose.material.icons.outlined.Layers
@@ -21,10 +24,12 @@ import androidx.compose.ui.unit.IntSize
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.iz.navigation.navigation.DriveCameraInput
 import org.iz.navigation.navigation.DriveCameraMode
 import org.iz.navigation.navigation.DriveCameraPolicy
 import org.iz.navigation.navigation.DriveCameraViewport
+import org.iz.navigation.navigation.PreparedRouteManager
 import org.iz.navigation.navigation.hasSafeAdaptiveArea
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
@@ -45,6 +50,8 @@ import androidx.compose.ui.unit.sp
 import org.iz.navigation.power.PowerDiagnostics
 import org.iz.navigation.data.GeoCoordinate
 import org.iz.navigation.data.TrackPoint
+import org.iz.navigation.offline.OfflinePackStatus
+import org.iz.navigation.ui.OfflineMapNoticesDialog
 import org.iz.navigation.ui.PlaceInformationDiscoveryOwner
 import org.iz.navigation.weather.PlannedRoute
 import org.iz.navigation.weather.RouteStop
@@ -75,6 +82,88 @@ private const val PLACE_INFO_SOURCE = "place-information-pois"
 private const val PLACE_INFO_LAYER = "place-information-poi-pins"
 
 data class RouteMapMember(val id: String, val name: String, val latitude: Double, val longitude: Double, val delayed: Boolean)
+
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+internal fun NavigationMapLayersDialog(
+    route: PlannedRoute?,
+    liveCoordinate: WeatherCoordinate?,
+    gpsStale: Boolean,
+    members: List<RouteMapMember>,
+    cameraIdentity: String,
+    drivingCamera: DriveCameraInput,
+    preparedRoutes: PreparedRouteManager,
+    usePreparedMap: Boolean,
+    onOpenSavedRoutes: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val prepared by preparedRoutes.state.collectAsStateWithLifecycle()
+    val pack by preparedRoutes.maps.state.collectAsStateWithLifecycle()
+    var showOffline by remember { mutableStateOf(false) }
+    var showNotices by remember { mutableStateOf(false) }
+    FullscreenMapDialog(
+        title = "Harita katmanları ve görünüm",
+        onDismiss = onDismiss,
+        bottomBar = {
+            FlowRow(Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = { showOffline = true }, modifier = Modifier.testTag("map-layer-offline")) {
+                    Text("Çevrimdışı harita")
+                }
+                if (pack != null) TextButton(onClick = { showNotices = true },
+                    modifier = Modifier.testTag("map-layer-licenses")) { Text("Harita ve yazı tipi lisansları") }
+                TextButton(onClick = onDismiss, modifier = Modifier.testTag("map-layer-dismiss")) { Text("Ayarlara dön") }
+            }
+        },
+    ) { modifier ->
+        BoxWithConstraints(modifier.testTag("map-layers-settings")) {
+            WeatherRouteMap(
+                route = route,
+                assessment = null,
+                modifier = Modifier.fillMaxSize(),
+                expandable = false,
+                liveCoordinate = liveCoordinate,
+                gpsStale = gpsStale,
+                cameraIdentity = cameraIdentity,
+                navigationLayout = true,
+                members = members,
+                attributionBottomInset = 4.dp,
+                cameraViewportInsets = PaddingValues(24.dp),
+                drivingCamera = drivingCamera,
+                navigationControlsReady = false,
+                preparedRoutes = preparedRoutes.takeIf { usePreparedMap },
+                layerSettingsMaxHeight = maxHeight * .55f,
+            )
+        }
+    }
+    if (showOffline) AlertDialog(
+        onDismissRequest = { showOffline = false },
+        title = { Text("Çevrimdışı harita") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(when (pack?.status) {
+                    null -> "Kayıtlı harita alanı yok."
+                    OfflinePackStatus.PREPARED -> "Harita alanı seçildi. İndirme bekleniyor."
+                    OfflinePackStatus.DOWNLOADING -> "Harita indiriliyor."
+                    OfflinePackStatus.PAUSED -> "İndirme duraklatıldı."
+                    OfflinePackStatus.PARTIAL -> "İndirme tamamlanmadı."
+                    OfflinePackStatus.ERROR -> "Harita alanı hazırlanamadı."
+                    OfflinePackStatus.READY -> if (preparedRoutes.mapReady()) "Kayıtlı harita alanı hazır."
+                        else "Kayıtlı harita alanı doğrulanamadı."
+                })
+                prepared.route?.stops?.lastOrNull()?.let { Text("Hazır rota · ${it.label}") }
+            }
+        },
+        confirmButton = {
+            if (prepared.route != null) TextButton(onClick = onOpenSavedRoutes) { Text("Rotalarım’ı aç") }
+            else TextButton(onClick = { showOffline = false }) { Text("Kapat") }
+        },
+        dismissButton = {
+            if (prepared.route != null) TextButton(onClick = { showOffline = false }) { Text("Geri") }
+        },
+    )
+    if (showNotices) OfflineMapNoticesDialog(preparedRoutes.maps) { showNotices = false }
+}
 
 @Composable
 fun WeatherRouteMap(
@@ -109,6 +198,7 @@ fun WeatherRouteMap(
     selectionPanelInsets: PaddingValues = PaddingValues(top = cameraViewportInsets.calculateTopPadding()),
     compactSelectionPanel: Boolean = false,
     onMultiSelectionOpenChanged: (Boolean) -> Unit = {},
+    layerSettingsMaxHeight: Dp? = null,
     overlay: @Composable BoxScope.() -> Unit = {},
 ) {
     ExpandableMap(modifier = modifier, title = title, expandable = expandable) { mapModifier ->
@@ -119,7 +209,7 @@ fun WeatherRouteMap(
                     members, onLocate, attributionBottomInset, cameraViewportInsets, navigationControlsTopInset,
                     navigationControlsHorizontal, drivingCamera, cameraViewportReady, navigationControlsReady,
                     preparedRoutes, navigationHeader, layersRequest, onOsmPlaceClick, placeInformationIdentity,
-                    selectionPanelInsets, compactSelectionPanel, onMultiSelectionOpenChanged)
+                    selectionPanelInsets, compactSelectionPanel, onMultiSelectionOpenChanged, layerSettingsMaxHeight)
             }
             overlay()
         }
@@ -127,6 +217,7 @@ fun WeatherRouteMap(
 }
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 private fun ColumnScope.WeatherRouteMapContent(
     route: PlannedRoute?,
     assessment: WeatherAssessment?,
@@ -156,6 +247,7 @@ private fun ColumnScope.WeatherRouteMapContent(
     selectionPanelInsets: PaddingValues,
     compactSelectionPanel: Boolean,
     onMultiSelectionOpenChanged: (Boolean) -> Unit,
+    layerSettingsMaxHeight: Dp?,
 ) {
     val context = LocalContext.current
     val selectOsmPlace by rememberUpdatedState(onOsmPlaceClick)
@@ -216,8 +308,20 @@ private fun ColumnScope.WeatherRouteMapContent(
     var showOfflineNotices by remember(preparedRoutes) { mutableStateOf(false) }
     if (showOfflineNotices && preparedRoutes != null)
         org.iz.navigation.ui.OfflineMapNoticesDialog(preparedRoutes.maps) { showOfflineNotices = false }
-    var showRoute by remember { mutableStateOf(true) }
-    var showMembers by remember { mutableStateOf(true) }
+    val layerPreferences = remember(context, navigationLayout) {
+        if (navigationLayout) context.applicationContext.getSharedPreferences("navigation_map_view", Context.MODE_PRIVATE)
+        else null
+    }
+    var showRoute by remember(layerPreferences) { mutableStateOf(layerPreferences?.getBoolean("show_route", true) ?: true) }
+    var showMembers by remember(layerPreferences) { mutableStateOf(layerPreferences?.getBoolean("show_members", true) ?: true) }
+    fun setRouteVisible(value: Boolean) {
+        showRoute = value
+        layerPreferences?.edit()?.putBoolean("show_route", value)?.apply()
+    }
+    fun setMembersVisible(value: Boolean) {
+        showMembers = value
+        layerPreferences?.edit()?.putBoolean("show_members", value)?.apply()
+    }
     var layersOpen by remember { mutableStateOf(false) }
     var seenLayersRequest by remember { mutableIntStateOf(layersRequest) }
     LaunchedEffect(layersRequest) {
@@ -238,7 +342,10 @@ private fun ColumnScope.WeatherRouteMapContent(
     var mapTouchActive by remember(map) { mutableStateOf(false) }
     var previousDriveViewport by remember(map) { mutableStateOf<DriveCameraViewport?>(null) }
     var driveRefreshNeeded by remember(map) { mutableStateOf(false) }
-    var driveMode by remember { mutableStateOf(DriveCameraMode.ADAPTIVE) }
+    var driveMode by remember(layerPreferences) {
+        mutableStateOf(if (layerPreferences?.getBoolean("simple_camera", false) == true)
+            DriveCameraMode.SIMPLE_2D else DriveCameraMode.ADAPTIVE)
+    }
     var driveRecenter by remember { mutableIntStateOf(0) }
     var appliedRecenter by remember(map) { mutableIntStateOf(0) }
     var wasDriving by remember(map) { mutableStateOf(false) }
@@ -336,15 +443,38 @@ private fun ColumnScope.WeatherRouteMapContent(
     if (preparedDetailsOpen && preparedDisplay) AlertDialog(onDismissRequest = { preparedDetailsOpen = false },
         title = { Text("Hazır harita kapsamı") }, text = { Text(preparedDescription) },
         confirmButton = { TextButton({ preparedDetailsOpen = false }) { Text("Kapat") } })
+    fun recenter() {
+        cancelDriveAnimation()
+        pendingFitDataset = null
+        driveFollow.recenter()
+        cameraPolicy.followCurrent()
+        following = true
+        if (fix == null) onLocate()
+        else if (driveEnabled) driveRecenter++
+        else if (cameraViewportReady) map?.let { focusRouteCoordinate(it, fix, 16.0, cameraPadding) }
+    }
+    fun fitRoute() {
+        cancelDriveAnimation()
+        pendingFitDataset = null
+        cameraPolicy.userGesture()
+        driveFollow.userGesture()
+        following = false
+        if (cameraViewportReady) map?.let { resetDrivingCamera(it); frameRoute(it) }
+        else pendingFitDataset = dataset
+    }
+    fun selectDriveMode(mode: DriveCameraMode) {
+        if (mode == driveMode) return
+        cancelDriveAnimation()
+        driveMode = mode
+        layerPreferences?.edit()?.putBoolean("simple_camera", mode == DriveCameraMode.SIMPLE_2D)?.apply()
+        driveRecenter++
+        if (!following && cameraViewportReady) map?.let(::resetDrivingCamera)
+    }
     val navigationControls: @Composable () -> Unit = {
         Surface(shape = CircleShape, shadowElevation = 3.dp) {
-            IconButton(onClick = {
-                cancelDriveAnimation()
-                pendingFitDataset = null; driveFollow.recenter(); cameraPolicy.followCurrent(); following = true
-                if (fix == null) onLocate()
-                else if (driveEnabled) driveRecenter++
-                else if (cameraViewportReady) map?.let { focusRouteCoordinate(it, fix, 16.0, cameraPadding) }
-            }, modifier = Modifier.size(48.dp).testTag("directions-recenter")) { Icon(Icons.Outlined.GpsFixed, "Konumum") }
+            IconButton(onClick = ::recenter, modifier = Modifier.size(48.dp).testTag("directions-recenter")) {
+                Icon(Icons.Outlined.GpsFixed, "Konumum")
+            }
         }
         if (!navigationLayout || layersOpen) Surface(shape = CircleShape, shadowElevation = 3.dp) {
             if (!navigationLayout) IconButton(onClick = { layersOpen = true }, modifier = Modifier.size(48.dp).testTag("map-layers")) {
@@ -355,19 +485,15 @@ private fun ColumnScope.WeatherRouteMapContent(
                     layersOpen = false; preparedDetailsOpen = true
                 }, modifier = Modifier.testTag("menu-prepared-map-status"))
                 if (route != null) DropdownMenuItem(text = { Text("Rotayı sığdır") }, onClick = {
-                    cancelDriveAnimation()
-                    layersOpen = false; pendingFitDataset = null; cameraPolicy.userGesture(); driveFollow.userGesture(); following = false
-                    if (cameraViewportReady) map?.let { resetDrivingCamera(it); frameRoute(it) }
-                    else pendingFitDataset = dataset
+                    layersOpen = false
+                    fitRoute()
                 }, modifier = Modifier.testTag("directions-fit-route"))
                 if (driveEnabled) DropdownMenuItem(text = { Text(if (driveMode == DriveCameraMode.SIMPLE_2D) "Sürüş görünümü" else "Basit 2D") }, onClick = {
-                    cancelDriveAnimation()
-                    driveMode = if (driveMode == DriveCameraMode.ADAPTIVE) DriveCameraMode.SIMPLE_2D else DriveCameraMode.ADAPTIVE
-                    layersOpen = false; driveRecenter++
-                    if (!following && cameraViewportReady) map?.let(::resetDrivingCamera)
+                    selectDriveMode(if (driveMode == DriveCameraMode.ADAPTIVE) DriveCameraMode.SIMPLE_2D else DriveCameraMode.ADAPTIVE)
+                    layersOpen = false
                 })
-                DropdownMenuItem(text = { Text(if (showRoute) "✓ Planlanan rota" else "Planlanan rota") }, onClick = { showRoute = !showRoute })
-                DropdownMenuItem(text = { Text(if (showMembers) "✓ Grup üyeleri" else "Grup üyeleri") }, onClick = { showMembers = !showMembers })
+                DropdownMenuItem(text = { Text(if (showRoute) "✓ Planlanan rota" else "Planlanan rota") }, onClick = { setRouteVisible(!showRoute) })
+                DropdownMenuItem(text = { Text(if (showMembers) "✓ Grup üyeleri" else "Grup üyeleri") }, onClick = { setMembersVisible(!showMembers) })
             }
         }
     }
@@ -491,6 +617,45 @@ private fun ColumnScope.WeatherRouteMapContent(
                         if (cameraViewportReady) map?.moveCamera(CameraUpdateFactory.newLatLngZoom(fix.mapCoordinate(), 16.0))
                     }, modifier = Modifier.testTag("directions-recenter")) { Text(if (following) "Konum izleniyor" else "Konumum") }
                 }
+            }
+        }
+    }
+    if (layerSettingsMaxHeight != null) {
+        Column(
+            Modifier.fillMaxWidth().heightIn(max = layerSettingsMaxHeight)
+                .verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).testTag("map-layer-choices"),
+        ) {
+            ListItem(headlineContent = { Text("Planlanan rota") }, trailingContent = {
+                Switch(checked = showRoute, onCheckedChange = ::setRouteVisible,
+                    modifier = Modifier.testTag("map-layer-route"))
+            })
+            ListItem(headlineContent = { Text("Grup üyeleri") }, trailingContent = {
+                Switch(checked = showMembers, onCheckedChange = ::setMembersVisible,
+                    modifier = Modifier.testTag("map-layer-members"))
+            })
+            HorizontalDivider()
+            Text("Sürüş kamerası", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = driveMode == DriveCameraMode.ADAPTIVE,
+                    onClick = { selectDriveMode(DriveCameraMode.ADAPTIVE) }, label = { Text("Uyarlanabilir") },
+                    modifier = Modifier.testTag("map-layer-adaptive-camera"))
+                FilterChip(selected = driveMode == DriveCameraMode.SIMPLE_2D,
+                    onClick = { selectDriveMode(DriveCameraMode.SIMPLE_2D) }, label = { Text("Basit 2D") },
+                    modifier = Modifier.testTag("map-layer-simple-camera"))
+            }
+            if (!driveEnabled) Text("Sürüş kamerası otomobil ve motosiklet oturumlarında kullanılır.",
+                style = MaterialTheme.typography.bodySmall)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val locationReady = fix != null && !gpsStale
+                TextButton(onClick = ::recenter, enabled = locationReady && map != null,
+                    modifier = Modifier.testTag("map-layer-follow")) {
+                    Text(when {
+                        !locationReady -> "Konum bekleniyor"
+                        following -> "Konum izleniyor"
+                        else -> "Konumu takip et"
+                    })
+                }
+                if (route != null) TextButton(onClick = ::fitRoute, enabled = map != null) { Text("Rotayı sığdır") }
             }
         }
     }

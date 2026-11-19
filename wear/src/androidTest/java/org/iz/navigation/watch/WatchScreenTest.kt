@@ -37,9 +37,9 @@ class WatchScreenTest {
     )
 
     private fun openPage(label: String, page: String) {
-        val action = hasText(label) and hasClickAction()
-        watchList().performScrollToNode(action)
-        compose.onNode(action).assertIsDisplayed().performClick()
+        val text = hasText(label)
+        watchList().performScrollToNode(text)
+        compose.onNode(text and hasClickAction()).assertIsDisplayed().performClick()
         compose.onNodeWithTag(page).assertIsDisplayed()
     }
 

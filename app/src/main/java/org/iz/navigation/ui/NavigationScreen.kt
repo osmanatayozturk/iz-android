@@ -379,6 +379,7 @@ internal fun NavigationScreen(
     onAssignShortcut: (DestinationShortcutKind) -> Unit = {},
     onOsmPlaceClick: ((SelectedOsmPlace) -> Unit)? = null,
     liveLeanReadings: StateFlow<LiveLeanReading?>? = null,
+    idleNavigationBar: (@Composable () -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val ui by vm.ui.collectAsStateWithLifecycle()
@@ -840,6 +841,7 @@ internal fun NavigationScreen(
         onLocate = { requestAction(DirectionsAction.CURRENT_ORIGIN) }, onPin = onPin,
         onOsmPlaceClick = onOsmPlaceClick,
         placeInformationIdentity = entryId,
+        idleNavigationBar = idleNavigationBar,
         leanInstrument = leanSession?.let { session -> @Composable {
             LiveLeanDial(session, leanReading.takeUnless {
                 nav.fix == null || nav.gpsStale || nav.paused || nav.plannedBreak != null || nav.approximateOrigin != null

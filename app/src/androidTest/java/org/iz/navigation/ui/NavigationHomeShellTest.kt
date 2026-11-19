@@ -2,10 +2,12 @@ package org.iz.navigation.ui
 
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.iz.navigation.IzApplication
 import org.iz.navigation.MainActivity
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -18,7 +20,7 @@ class NavigationHomeShellTest {
         val navigation = (compose.activity.application as IzApplication).navigation
         val before = navigation.state.value
         compose.onNodeWithTag("navigation-home-map").assertIsDisplayed()
-        compose.onNodeWithTag("home-menu").performClick()
+        compose.onNodeWithTag("home-menu").assertContentDescriptionEquals("Harita menüsü").performClick()
         compose.onNodeWithTag("menu-journeys").performClick()
         compose.onNode(hasText("Yolculuklar") and !hasClickAction()).assertIsDisplayed()
         compose.onNodeWithTag("return-home-map").performClick()
@@ -27,13 +29,52 @@ class NavigationHomeShellTest {
         assertEquals(before.guidance, navigation.state.value.guidance)
     }
 
+    @Test fun idleBarOpensHistoryDestinationsAndLeavesMapControlsVisible() {
+        val navigation = (compose.activity.application as IzApplication).navigation
+        val before = navigation.state.value
+        val bar = compose.onNodeWithTag("home-primary-navigation").assertIsDisplayed()
+            .fetchSemanticsNode().boundsInRoot
+        val menu = compose.onNodeWithTag("home-menu").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val search = compose.onNodeWithTag("open-navigation").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        assertEquals(search.center.y, menu.center.y, 1f)
+        listOf("directions-recenter", "home-record", "home-menu").forEach { tag ->
+            compose.onAllNodesWithTag(tag).assertCountEquals(1)
+            val control = compose.onNodeWithTag(tag).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            assertTrue("$tag overlaps the navigation bar", !control.overlaps(bar))
+        }
+        val attribution = compose.onNodeWithText("© OpenStreetMap contributors").assertIsDisplayed()
+            .fetchSemanticsNode().boundsInRoot
+        assertTrue(!attribution.overlaps(bar))
+        compose.onNodeWithTag("home-nav-map").assertTextContains("Harita").assertIsSelected().assertHeightIsAtLeast(48.dp)
+            .assertWidthIsAtLeast(48.dp).performClick()
+        compose.onNodeWithTag("navigation-home-map").assertIsDisplayed()
+        compose.onNodeWithTag("home-nav-journeys").assertTextContains("Yolculuklar").assertHeightIsAtLeast(48.dp)
+            .assertWidthIsAtLeast(48.dp).performClick()
+        compose.onNode(hasText("Yolculuklar") and !hasClickAction()).assertIsDisplayed()
+        compose.onNodeWithTag("return-home-map").performClick()
+        compose.onNodeWithTag("home-nav-osm").assertTextContains("OSM katkısı").assertHeightIsAtLeast(48.dp)
+            .assertWidthIsAtLeast(48.dp).performClick()
+        compose.onNodeWithTag("osm-contribution-hub").assertIsDisplayed()
+        compose.onNodeWithTag("return-home-map").performClick()
+        compose.onNodeWithTag("home-primary-navigation").assertIsDisplayed()
+        compose.runOnIdle {
+            val after = navigation.state.value
+            assertEquals(before.sessionId, after.sessionId)
+            assertEquals(before.journey?.id, after.journey?.id)
+            assertEquals(before.recording, after.recording)
+            assertEquals(before.guidance, after.guidance)
+        }
+    }
+
     @Test fun plannerCanCloseWithoutDismissingOrScrollingMainMap() {
         openPlannerFromMenu()
+        compose.onNodeWithTag("home-primary-navigation").assertDoesNotExist()
         compose.onNodeWithTag("navigation-screen").performScrollToNode(hasTestTag("record-navigation-choice"))
         compose.onNodeWithTag("record-navigation-choice").assertIsOn().performClick().assertIsOff()
         compose.onNodeWithTag("navigation-screen").performScrollToNode(hasTestTag("close-directions-planner"))
         compose.onNodeWithTag("close-directions-planner").performClick()
         compose.onNodeWithTag("navigation-home-map").assertIsDisplayed()
+        compose.onNodeWithTag("home-primary-navigation").assertIsDisplayed()
         openPlannerFromMenu()
         compose.onNodeWithTag("navigation-screen").performScrollToNode(hasTestTag("record-navigation-choice"))
         compose.onNodeWithTag("record-navigation-choice").assertIsOn()
@@ -44,11 +85,12 @@ class NavigationHomeShellTest {
         val before = navigation.state.value
         compose.onNodeWithTag("map-layers").assertDoesNotExist()
         compose.onNodeWithTag("open-navigation-dashboard").assertDoesNotExist()
-        compose.onNodeWithTag("home-menu").performClick()
+        compose.onNodeWithTag("home-menu").assertContentDescriptionEquals("Harita menüsü").performClick()
         compose.onNodeWithTag("menu-navigation-dashboard").performScrollTo().performClick()
         compose.onNodeWithTag("navigation-dashboard").assertIsDisplayed()
+        compose.onNodeWithTag("home-primary-navigation").assertDoesNotExist()
         compose.onNodeWithTag("close-navigation-dashboard").performClick()
-        compose.onNodeWithTag("home-menu").performClick()
+        compose.onNodeWithTag("home-menu").assertContentDescriptionEquals("Harita menüsü").performClick()
         compose.onNodeWithTag("menu-map-layers").performScrollTo().performClick()
         compose.onNodeWithText("Planlanan rota", substring = true).assertIsDisplayed()
         androidx.test.espresso.Espresso.pressBack()
@@ -62,7 +104,7 @@ class NavigationHomeShellTest {
     }
 
     private fun openPlannerFromMenu() {
-        compose.onNodeWithTag("home-menu").performClick()
+        compose.onNodeWithTag("home-menu").assertContentDescriptionEquals("Harita menüsü").performClick()
         compose.onNodeWithTag("menu-route-plan").performScrollTo().performClick()
     }
 }

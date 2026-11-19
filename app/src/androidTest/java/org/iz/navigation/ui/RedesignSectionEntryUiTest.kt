@@ -1,9 +1,12 @@
 package org.iz.navigation.ui
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasTestTag
@@ -60,6 +63,47 @@ class RedesignSectionEntryUiTest {
                 compose.onNodeWithTag("settings").assertIsDisplayed()
             })
             compose.runOnIdle { assertIdleNavigation(app.navigation.state.value) }
+        }
+    }
+
+    @Test fun voiceLayersReturnsToVoiceAndSharesTheSavedRouteChoiceWithTheMapMenu() {
+        val app = requireIsolatedApp()
+        val preferences = app.getSharedPreferences("navigation_map_view", Context.MODE_PRIVATE)
+        val original = preferences.all["show_route"] as? Boolean
+        val saved = !(original ?: true)
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use {
+                compose.onNodeWithTag("home-menu").performClick()
+                compose.onNodeWithTag("menu-settings").performScrollTo().performClick()
+                compose.onNodeWithTag("settings").performScrollToNode(hasTestTag("settings-open-voice"))
+                compose.onNodeWithTag("settings-open-voice").performClick()
+                compose.onNodeWithText("Harita katmanları").performScrollTo().performClick()
+                compose.onNodeWithTag("map-layers-settings").assertIsDisplayed()
+                compose.onNodeWithTag("map-layer-route").performScrollTo().performClick()
+                compose.onNodeWithTag("map-layer-dismiss").performClick()
+                compose.onNodeWithTag("settings-view-voice").assertIsDisplayed()
+
+                compose.onNodeWithText("Harita katmanları").performScrollTo().performClick()
+                val route = compose.onNodeWithTag("map-layer-route").performScrollTo()
+                if (saved) route.assertIsOn() else route.assertIsOff()
+                pressBack()
+                compose.onNodeWithTag("map-layers-settings").assertDoesNotExist()
+                compose.onNodeWithTag("settings-view-voice").assertIsDisplayed()
+
+                pressBack()
+                compose.onNodeWithTag("settings").assertIsDisplayed()
+                pressBack()
+                compose.onNodeWithTag("navigation-home-map").assertIsDisplayed()
+                compose.onNodeWithTag("home-menu").performClick()
+                compose.onNodeWithTag("menu-map-layers").performScrollTo().performClick()
+                compose.onNodeWithText(if (saved) "✓ Planlanan rota" else "Planlanan rota").assertIsDisplayed()
+                pressBack()
+                compose.runOnIdle { assertIdleNavigation(app.navigation.state.value) }
+            }
+        } finally {
+            val reset = preferences.edit()
+            if (original == null) reset.remove("show_route") else reset.putBoolean("show_route", original)
+            reset.apply()
         }
     }
 

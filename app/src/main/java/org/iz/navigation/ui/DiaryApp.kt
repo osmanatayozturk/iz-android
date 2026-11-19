@@ -41,6 +41,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -183,6 +185,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     }
     var navigationDashboardRequest by remember { mutableIntStateOf(0) }
     var navigationLayersRequest by remember { mutableIntStateOf(0) }
+    var settingsLayersOpen by rememberSaveable(uiEntry.key) { mutableStateOf(false) }
     var navigationInitialPlan by remember { mutableStateOf<SavedWeatherPlan?>(null) }
     var libraryOpen by navigator.pageFlag(UiPage.ROUTES)
     var collectionsOpen by navigator.pageFlag(UiPage.COLLECTIONS)
@@ -286,6 +289,12 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     }
     fun openAddPlace(journeyId: String? = active?.id, location: GeoCoordinate? = null) {
         targetJourney = journeyId; pin = location; osmSelection = null; addPlace = true
+    }
+    fun searchAddress() {
+        if (history.current.key != uiEntry.key || resultOwner.formBusy.value) return
+        shortcutError = null
+        openAddPlace(journeyId = if (shortcutAssignment == null) active?.id else null)
+        searchOsm = true
     }
     var trackExportOwner by remember { mutableStateOf<UiAsyncOwner?>(null) }
     fun captureResultOwner() = if (history.current.key == uiEntry.key) exitGuard.captureAsyncOwner(history.current.key) else null
@@ -647,6 +656,24 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     CompositionLocalProvider(LocalUiOwnerRegistrations provides resultOwner.registrations, LocalUiExitGuard provides exitGuard, LocalUiEntryKey provides uiEntry.key, LocalUiHistory provides history, LocalUiVoiceSettingsAction provides openVoiceSettings, LocalUiDirectionsPermissions provides openDirectionsPermissions,
         LocalUiOperationBusy provides { resultOwner.backupBusy.value || backupExport.busy || resultOwner.libraryBusy.value || resultOwner.gpxStarting.value || resultOwner.preparingGpx.value || resultOwner.formBusy.value || resultOwner.contributionBusy.value }) {
     UiEditOwner(UiEditState(uiEntry.key + "/ui", null, 0, 0, false, false))
+    if (uiEntry.page == UiPage.SETTINGS && settingsLayersOpen) {
+        val map = navigationMapPresentation(PhoneDirectionsState(), navigationState, emptyList(), planning = false)
+        val preparedRoutes = (context.applicationContext as org.iz.navigation.IzApplication).preparedRoutes
+        org.iz.navigation.integration.NavigationMapLayersDialog(
+            route = map.route,
+            liveCoordinate = map.coordinate,
+            gpsStale = navigationState.gpsStale,
+            members = groupState.markers.map {
+                org.iz.navigation.integration.RouteMapMember(it.userId, it.name, it.latitude, it.longitude, it.delayed)
+            },
+            cameraIdentity = map.cameraIdentity,
+            drivingCamera = phoneDriveCameraInput(navigationState, planning = false, nowMillis = android.os.SystemClock.elapsedRealtime()),
+            preparedRoutes = preparedRoutes,
+            usePreparedMap = preparedNavigationMapApplies(map, navigationState),
+            onOpenSavedRoutes = { settingsLayersOpen = false; navigator.open(UiPage.ROUTES) },
+            onDismiss = { settingsLayersOpen = false },
+        )
+    }
     if (!libraryOpen && !collectionsOpen && !mapEditsPage) Scaffold(containerColor = Paper, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             if (!homeVisible) Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -819,6 +846,9 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                 uiEntry.page in journeyPages || uiEntry.page == UiPage.PLACE || uiEntry.page == UiPage.PUBLIC_PLACE -> Text("Kayıt açılıyor…", Modifier.padding(24.dp))
                 uiEntry.page == UiPage.MAP || navigationPage -> NavigationScreen(onClose = { navigationPage = false; navigationTarget = null; navigationShared = null },
                     vm = phoneModel(uiEntry), liveLeanReadings = liveLeanReadings(navigationState),
+                    idleNavigationBar = if (uiEntry.page == UiPage.MAP) {
+                        { HomeNavigationBar(::returnToMap, { tab = 1 }, { contributionHub = true }) }
+                    } else null,
                     incomingTarget = navigationTarget, initialStops = navigationStops, initialTransport = navigationTransport,
                     incomingShared = navigationShared.takeIf { navigationPage },
                     dashboardRequest = navigationDashboardRequest, layersRequest = navigationLayersRequest,
@@ -862,8 +892,10 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                             openAddPlace(journeyId = null)
                         }
                     },
+                    onAddressSearch = ::searchAddress,
                     onCancel = ::returnToParent)
                 tab == 2 -> browseHolder.SaveableStateProvider(uiEntry.key) { PlacesScreen(state, onPlace = { selectedPlace = it.id }, onAdd = { openAddPlace() }, onReorder = vm.repository::reorderPlaces, shortcuts = destinationShortcuts,
+                    onAddressSearch = ::searchAddress,
                     onShortcut = { kind, target -> vm.execute { library.setDestinationShortcut(kind, target?.id) } }) }
                 tab == 3 -> browseHolder.SaveableStateProvider(uiEntry.key) { HeatmapScreen(state, onOpenJourneys = { tab = 1 }) }
                 uiEntry.page == UiPage.COMPARISON -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
@@ -873,7 +905,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                 else -> browseHolder.SaveableStateProvider(uiEntry.key) { SettingsScreen(settings, refresh, backupBusy,
                     initialSection = uiEntry.entityId,
                     onAccount = { navigator.open(UiPage.COMMUNITY, "account") },
-                    onLayers = { navigator.toMap(); navigationLayersRequest++ },
+                    onLayers = { settingsLayersOpen = true },
                     listState = rememberLazyListState(),
                     onDetection = { if (settings.enabled) { vm.tracker.disableDetection(); refresh++ } else showDetection = true },
                     onRepairDetection = { vm.tracker.enableDetection { error -> refresh++; error?.let(vm::message) } },
@@ -1446,7 +1478,7 @@ private fun JourneyDetail(
                 if (photos.isNotEmpty()) item { JournalLink("Paylaşılacakları seç", onClick = onSharePhotos) }
             }
             UiPage.JOURNEY_STATS -> {
-                item { PageHeading("Yolculuk istatistikleri", title) }
+                item { PageHeading("Yolculuk istatistikleri ve sağlık", title) }
                 item { JourneyStatsPanel(journey, prepared?.stats, state.analysisLabel) }
                 item { JourneyHealthPanel(journey, state, now) }
                 item { JournalLink("Saat ve sağlık", onClick = onHealth) }
@@ -1459,7 +1491,12 @@ private fun JourneyDetail(
                 item { JournalLink("İki yolculuğu karşılaştır", onClick = onCompare) }
             }
             else -> {
-                item { PageHeading(title, date(journey.startedAt)) }
+                item {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) { PageHeading(title, date(journey.startedAt)) }
+                        IconButton(onClick = onEdit) { Icon(Icons.Outlined.Edit, "Yolculuğu düzenle") }
+                    }
+                }
                 item { DiaryMap(emptyList(), places, Modifier.fillMaxWidth().height(220.dp)
                     .clip(RoundedCornerShape(18.dp)), journeyId = journey.id, analysis = analysis) }
                 item { JournalLink("İzi haritada aç", onClick = { onSection(UiPage.TRACK_MAP) }) }
@@ -1482,7 +1519,6 @@ private fun JourneyDetail(
                 item { JournalLink("Ziyaretler", visits.size.toString(), { onSection(UiPage.JOURNEY_VISITS) }) }
                 item { JournalLink("Fotoğraflar", photos.size.toString(), { onSection(UiPage.JOURNEY_PHOTOS) }) }
                 item { JournalLink("Raporlar", onClick = { onSection(UiPage.JOURNEY_REPORTS) }) }
-                item { JournalLink("Yolculuğu düzenle", onClick = onEdit) }
                 if (journey.endedAt != null && journey.status == JourneyStatus.CONFIRMED)
                     item { JournalLink("GPX rotasını dışa aktar", onClick = onExportGpx) }
                 if (osmGpsEligibleJourney(journey)) item {
@@ -1570,7 +1606,11 @@ private fun TextEditor(title: String, initial: String, initialNote: String?, onD
     AlertDialog(onDismissRequest = back, title = { Text(title) }, text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) { OutlinedTextField(name, { name = it }, label = { Text("Ad") }); if (initialNote != null) OutlinedTextField(note, { note = it }, label = { Text("Özel not") }, minLines = 3) } }, confirmButton = { TextButton(onClick = { onSave(name.trim(), note.trim()) }, enabled = name.isNotBlank()) { Text("Kaydet") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Vazgeç") } })
 }
 
-@Composable private fun PageHeading(title: String, subtitle: String) { Text(title, style = MaterialTheme.typography.headlineMedium); Spacer(Modifier.height(8.dp)); Text(subtitle, color = Muted, style = MaterialTheme.typography.bodyMedium) }
+@Composable private fun PageHeading(title: String, subtitle: String) {
+    Text(title, Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineMedium)
+    Spacer(Modifier.height(8.dp))
+    Text(subtitle, color = Muted, style = MaterialTheme.typography.bodyMedium)
+}
 @Composable private fun Stat(label: String, value: String) { Column { Text(label, style = MaterialTheme.typography.labelSmall, color = Muted, letterSpacing = 1.sp); Spacer(Modifier.height(6.dp)); Text(value, style = MaterialTheme.typography.titleLarge) } }
 @Composable private fun ModeBadge(transport: Transport) { Icon(transport.icon(), null, tint = transport.accentColor(), modifier = Modifier.size(44.dp).background(transport.badgeColor(), RoundedCornerShape(14.dp)).padding(10.dp)) }
 @Composable private fun Notice(text: String) { Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(14.dp)) { Text(text, Modifier.padding(14.dp), style = MaterialTheme.typography.bodySmall) } }

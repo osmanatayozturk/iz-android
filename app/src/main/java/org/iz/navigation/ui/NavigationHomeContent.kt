@@ -7,10 +7,15 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
@@ -24,8 +29,10 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.onClick
@@ -42,6 +49,10 @@ import org.iz.navigation.integration.RouteMapMember
 import org.iz.navigation.integration.WeatherRouteMap
 import org.iz.navigation.navigation.NavigationState
 import kotlin.math.roundToInt
+
+// WeatherRouteMap uses a 48 dp location action with a 12 dp end inset.
+private val HomeCornerActionSize = 48.dp
+private val HomeCornerInset = 12.dp
 
 /** Keep original positional callers and trailing planner lambdas source-compatible. */
 @Composable
@@ -85,6 +96,7 @@ internal fun NavigationHomeContent(
     onOsmPlaceClick: ((org.iz.navigation.data.SelectedOsmPlace) -> Unit)? = null,
     placeInformationIdentity: Any? = null,
     leanInstrument: (@Composable () -> Unit)? = null,
+    idleNavigationBar: (@Composable () -> Unit)? = null,
     planner: @Composable () -> Unit,
 ) {
     val plannerPresentation = navigationMapPresentation(ui, nav, points, showPlanner, editPreview)
@@ -111,7 +123,10 @@ internal fun NavigationHomeContent(
     var fixedTopMeasurement by remember { mutableStateOf<Pair<List<Any?>, androidx.compose.ui.unit.Dp>?>(null) }
     var multiSelectionOpen by remember { mutableStateOf(false) }
     val dashboardEpoch = remember(dashboardVisible) { Any() }
-    BoxWithConstraints(Modifier.fillMaxSize().testTag("navigation-home")) {
+    val navigationBar = idleNavigationBar.takeIf {
+        baseShowBrand && !showDashboard && !nav.recordingPending && nav.trackFollow == null
+    }
+    HomeMapLayout(navigationBar) { dockedNavigationBar ->
         var bottomActionsHeight by remember(maxWidth, maxHeight, density.density, density.fontScale) { mutableStateOf(0.dp) }
         val compactSelection = multiSelectionOpen && (maxWidth > maxHeight || maxHeight < 400.dp)
         val shortIdle = baseShowBrand && (maxWidth > maxHeight || maxHeight < 400.dp)
@@ -122,15 +137,22 @@ internal fun NavigationHomeContent(
         val desiredBottomHeight = (maxHeight * .52f).coerceAtMost((maxHeight - 100.dp).coerceAtLeast(0.dp))
         val dashboardSideWidth = if (dashboardAtSide) measuredDashboard?.let { with(density) { it.width.toDp() } } ?: desiredSideWidth else 0.dp
         val dashboardBottomHeight = if (dashboardVisible && !dashboardAtSide) measuredDashboard?.let { with(density) { it.height.toDp() } } ?: desiredBottomHeight else 0.dp
-        val dashboardButtonVisible = false
         val dashboardButtonInMap = false
         val dashboardButtonKey = listOf(maxWidth, maxHeight, density.density, density.fontScale, dashboardEpoch)
         val dashboardButtonHeight = if (dashboardButtonInMap) dashboardButtonMeasurement?.takeIf { it.first == dashboardButtonKey }?.second ?: 48.dp else 0.dp
         val shortLandscape = maxWidth > maxHeight && maxHeight < 480.dp
         val showLean = leanInstrument != null && !showPlanner && !dashboardVisible && !multiSelectionOpen
         val inlineLean = showLean && shortLandscape && maxWidth >= 480.dp
-        val dockAttributionInset = if (inlineLean) maxOf(92.dp, bottomActionsHeight + 8.dp) else 92.dp
-        val dockCameraInset = if (inlineLean) maxOf(112.dp, bottomActionsHeight + 28.dp) else 112.dp
+        val measuredIdleDock = maxOf(bottomActionsHeight, HomeCornerActionSize + HomeCornerInset * 2)
+        // The native location action aligns with the record action even if the dock grows with text.
+        val idleLocationTop = (maxHeight - (measuredIdleDock + HomeCornerActionSize) / 2f).coerceAtLeast(0.dp)
+        val paddedDockHeight = when {
+            baseShowBrand -> measuredIdleDock
+            inlineLean -> bottomActionsHeight
+            else -> 0.dp
+        }
+        val dockAttributionInset = maxOf(92.dp, paddedDockHeight + 8.dp)
+        val dockCameraInset = maxOf(112.dp, paddedDockHeight + 28.dp)
         // At 320dp, leave 192dp for the native map. Its existing local top/bottom margins then leave 56dp.
         val headerBudget = if (shortLandscape) minOf(maxHeight * .60f, (maxHeight - 192.dp).coerceAtLeast(maxHeight * .40f))
             else maxHeight * .60f
@@ -143,11 +165,11 @@ internal fun NavigationHomeContent(
             showShortcuts)
         // Slot labels are single-line and keep the same row dimensions when assignments change.
         val shortcutKey = listOf(maxWidth, maxHeight, density.density, density.fontScale)
-        val headerKey = shortcutKey + listOf(baseShowBrand, shortIdle, shortIdle && dashboardButtonVisible)
+        val headerKey = shortcutKey + baseShowBrand
         val shortcutHeight = shortcutMeasurement?.takeIf { it.first == shortcutKey }?.second ?: 0.dp
         val shortcutOffset = if (showShortcuts) shortcutHeight + 8.dp else 0.dp
         val headerHeight = if (!showDestinationHeader) 0.dp else
-            headerMeasurement?.takeIf { it.first == headerKey }?.second ?: if (baseShowBrand) 144.dp else 80.dp
+            headerMeasurement?.takeIf { it.first == headerKey }?.second ?: if (baseShowBrand) 48.dp else 80.dp
 
         val compact = maxHeight - shortcutOffset < 640.dp
         val controlsTopInset = headerHeight + shortcutOffset + if (shortIdle) 20.dp else 24.dp
@@ -177,27 +199,21 @@ internal fun NavigationHomeContent(
                     Text(label, Modifier.padding(12.dp), style = MaterialTheme.typography.labelLarge)
                 }
             }
-            if (showDestinationHeader) Column(Modifier.fillMaxWidth().onSizeChanged { headerMeasurement = headerKey to with(density) { it.height.toDp() } },
-                verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (shortIdle) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        HomeBrand(compact = true, modifier = Modifier.weight(1.2f))
-                        if (current == null) HomeLocateChip(ui.locating, onLocate, Modifier.weight(1f, fill = false))
-                        HomeWeatherChip(weatherLabel, onWeather, Modifier.weight(1f, fill = false))
-                        if (dashboardButtonVisible && onDashboard != null) HomeDashboardButton(onDashboard)
-                    }
-                } else if (baseShowBrand) HomeBrand()
-                Surface(onClick = onSearch, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("open-navigation"),
-                    shape = RoundedCornerShape(24.dp), shadowElevation = 4.dp, color = MaterialTheme.colorScheme.surface) {
-                    Row(Modifier.heightIn(min = 48.dp).padding(horizontal = 18.dp, vertical = if (shortIdle) 4.dp else 15.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Icon(Icons.Outlined.Search, null, tint = Forest)
-                        Column(Modifier.weight(1f)) {
-                            Text("Nereye?", style = if (shortIdle) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge)
+            if (showDestinationHeader) {
+                val headerModifier = Modifier.fillMaxWidth()
+                    .onSizeChanged { headerMeasurement = headerKey to with(density) { it.height.toDp() } }
+                if (baseShowBrand) {
+                    HomeSearchBar(onSearch, onMenu, headerModifier)
+                } else {
+                    Surface(onClick = onSearch, modifier = headerModifier.heightIn(min = 48.dp).testTag("open-navigation"),
+                        shape = RoundedCornerShape(24.dp), shadowElevation = 4.dp, color = MaterialTheme.colorScheme.surface) {
+                        Row(Modifier.heightIn(min = 48.dp).padding(horizontal = 18.dp, vertical = 15.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Icon(Icons.Outlined.Search, null, tint = Forest)
+                            Text("Nereye?", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                            Icon(Icons.Outlined.Route, "Yol tarifi", tint = Forest)
                         }
-                        Icon(Icons.Outlined.Route, "Yol tarifi", tint = Forest)
                     }
                 }
             }
@@ -206,7 +222,8 @@ internal fun NavigationHomeContent(
             }
         }
         val statusMessage: @Composable () -> Unit = {
-            ui.message?.let { Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surface) {
+            val message = ui.message ?: if (baseShowBrand && ui.locating) "Konum alınıyor…" else null
+            message?.let { Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surface) {
                 Text(it, Modifier.padding(10.dp), style = MaterialTheme.typography.bodySmall)
             } }
         }
@@ -226,8 +243,12 @@ internal fun NavigationHomeContent(
             drivingCamera = phoneDriveCameraInput(nav, showPlanner, android.os.SystemClock.elapsedRealtime()),
             cameraViewportReady = viewportReady, navigationControlsReady = controlsReady,
             navigationLayout = true, members = members, onLocate = onLocate, onMapLongClick = onPin,
-            navigationControlsTopInset = if (compactSelection) selectionTopInset else if (presentation.editPreviewLabel != null)
-                panelsHeight + 24.dp else controlsTopInset,
+            navigationControlsTopInset = when {
+                baseShowBrand -> idleLocationTop
+                compactSelection -> selectionTopInset
+                presentation.editPreviewLabel != null -> panelsHeight + 24.dp
+                else -> controlsTopInset
+            },
             navigationControlsHorizontal = horizontalMapControls,
             attributionBottomInset = if (dashboardBottomHeight > 0.dp) dashboardBottomHeight + 92.dp else if (showPlanner && !dashboardVisible) maxHeight * .64f + 4.dp else dockAttributionInset,
             cameraViewportInsets = PaddingValues(start = 28.dp,
@@ -261,9 +282,8 @@ internal fun NavigationHomeContent(
                         }, style = MaterialTheme.typography.titleSmall)
                 }
             }
-            if (!shortIdle && !showPlanner && !dashboardVisible && !live && current == null) HomeLocateChip(ui.locating, onLocate)
             if (!showPlanner && !dashboardVisible) statusMessage()
-            if (!showPlanner && !dashboardVisible && !shortIdle) HomeWeatherChip(weatherLabel, onWeather,
+            if (!showPlanner && !dashboardVisible) HomeWeatherChip(weatherLabel, onWeather,
                 if (compact && live) Modifier.align(Alignment.End).widthIn(max = compactWeatherWidth) else Modifier)
             }
         }
@@ -286,18 +306,21 @@ internal fun NavigationHomeContent(
                 leanInstrument()
             }
         }
-        if (!live && !showPlanner && !dashboardVisible) {
+        if (baseShowBrand) {
             Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                 .onSizeChanged { bottomActionsHeight = with(density) { it.height.toDp() } }
-                .testTag("home-bottom-actions").padding(horizontal = 12.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween) {
-                FilledTonalIconButton(onRecord, Modifier.size(52.dp).testTag("home-record"),
-                    enabled = !nav.recordingPending) {
-                    Icon(Icons.Outlined.FiberManualRecord, "Yolculuk kaydını başlat")
+                .testTag("home-bottom-actions").padding(HomeCornerInset),
+                horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Surface(shape = CircleShape, shadowElevation = 3.dp) {
+                    IconButton(onRecord, Modifier.size(HomeCornerActionSize).testTag("home-record"),
+                        enabled = !nav.recordingPending) {
+                        Icon(Icons.Outlined.FiberManualRecord, "Yolculuk kaydını başlat")
+                    }
                 }
-                FilledTonalIconButton(onMenu, Modifier.size(52.dp).testTag("home-menu")) {
-                    Icon(Icons.Outlined.Menu, "Harita menüsü")
+                if (dockedNavigationBar != null) Box(Modifier.weight(1f).padding(horizontal = 8.dp)) {
+                    dockedNavigationBar()
                 }
+                Spacer(Modifier.size(HomeCornerActionSize))
             }
         } else {
             Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
@@ -330,11 +353,46 @@ internal fun NavigationHomeContent(
 }
 
 @Composable
-private fun HomeLocateChip(locating: Boolean, onLocate: () -> Unit, modifier: Modifier = Modifier) {
-    AssistChip(onClick = onLocate, modifier = modifier,
-        label = { Text(if (locating) "Konum alınıyor…" else "Konumumu göster", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        leadingIcon = { Icon(Icons.Outlined.GpsFixed, null, Modifier.size(18.dp)) },
-        colors = AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.surface))
+private fun HomeMapLayout(
+    navigationBar: (@Composable () -> Unit)?,
+    map: @Composable BoxWithConstraintsScope.((@Composable () -> Unit)?) -> Unit,
+) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        // Share the existing action row on short landscape screens to retain map height.
+        val docked = maxWidth >= 400.dp && maxWidth > maxHeight && maxHeight < 380.dp
+        Column(Modifier.fillMaxSize()) {
+            BoxWithConstraints(Modifier.fillMaxWidth().weight(1f).testTag("navigation-home")) {
+                map(navigationBar.takeIf { docked })
+            }
+            if (!docked) navigationBar?.invoke()
+        }
+    }
+}
+
+@Composable
+internal fun HomeNavigationBar(onMap: () -> Unit, onJourneys: () -> Unit, onOsmContribution: () -> Unit) {
+    Surface(Modifier.fillMaxWidth().testTag("home-primary-navigation"), tonalElevation = 2.dp) {
+        Row(Modifier.fillMaxWidth().selectableGroup().padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            HomeNavigationItem("Harita", "home-nav-map", selected = true, onClick = onMap)
+            HomeNavigationItem("Yolculuklar", "home-nav-journeys", selected = false, onClick = onJourneys)
+            HomeNavigationItem("OSM katkısı", "home-nav-osm", selected = false, onClick = onOsmContribution)
+        }
+    }
+}
+
+@Composable
+private fun RowScope.HomeNavigationItem(label: String, tag: String, selected: Boolean, onClick: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    Box(Modifier.weight(1f).sizeIn(minWidth = 48.dp, minHeight = 48.dp).testTag(tag)
+        .clip(MaterialTheme.shapes.medium)
+        .background(if (selected) colors.secondaryContainer else colors.surface)
+        .selectable(selected, role = Role.Tab, onClick = onClick)
+        .padding(horizontal = 4.dp, vertical = 4.dp),
+        contentAlignment = Alignment.Center) {
+        Text(label, color = if (selected) colors.onSecondaryContainer else colors.onSurface,
+            style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center)
+    }
 }
 
 @Composable
@@ -346,16 +404,27 @@ private fun HomeWeatherChip(label: String, onWeather: () -> Unit, modifier: Modi
 }
 
 @Composable
-private fun HomeBrand(compact: Boolean = false, modifier: Modifier = Modifier) {
-    Surface(modifier.fillMaxWidth().testTag("home-brand").semantics(mergeDescendants = true) {},
-        shape = RoundedCornerShape(24.dp), color = Paper, shadowElevation = 2.dp) {
-        Row(Modifier.padding(horizontal = if (compact) 8.dp else 16.dp, vertical = if (compact) 4.dp else 8.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 12.dp)) {
-            Image(painterResource(R.drawable.ic_launcher), contentDescription = null,
-                modifier = Modifier.size(if (compact) 28.dp else 36.dp).clip(RoundedCornerShape(10.dp)).testTag("home-brand-logo"))
-            Column(Modifier.weight(1f)) {
-                Text("İz", style = if (compact) MaterialTheme.typography.titleMedium else MaterialTheme.typography.headlineMedium, color = Forest)
-                if (!compact) Text("Küçük yollar, güzel anılar.", style = MaterialTheme.typography.bodySmall, color = Muted)
+private fun HomeSearchBar(onSearch: () -> Unit, onMenu: () -> Unit, modifier: Modifier = Modifier) {
+    val colors = MaterialTheme.colorScheme
+    Surface(modifier, shape = RoundedCornerShape(24.dp), color = colors.primary,
+        contentColor = colors.onPrimary, shadowElevation = 4.dp) {
+        Row(Modifier.padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.testTag("home-brand").semantics(mergeDescendants = true) {},
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Image(painterResource(R.drawable.ic_launcher), contentDescription = null,
+                    modifier = Modifier.size(26.dp).clip(RoundedCornerShape(8.dp)).testTag("home-brand-logo"))
+                Text("İz", style = MaterialTheme.typography.titleMedium)
+            }
+            VerticalDivider(Modifier.padding(horizontal = 8.dp).height(20.dp),
+                color = colors.onPrimary.copy(alpha = .35f))
+            Row(Modifier.weight(1f).heightIn(min = 48.dp).testTag("open-navigation")
+                .clickable(role = Role.Button, onClick = onSearch),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Outlined.Search, null, Modifier.size(20.dp))
+                Text("Nereye?", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            IconButton(onMenu, Modifier.size(48.dp).testTag("home-menu")) {
+                Icon(Icons.Outlined.Menu, "Harita menüsü")
             }
         }
     }

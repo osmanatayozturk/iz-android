@@ -27,6 +27,7 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.CompletableDeferred
@@ -67,8 +68,10 @@ class RedesignFirstSliceUiTest {
         val dial = compose.onNodeWithTag("live-lean-dial", useUnmergedTree = true)
         dial.assertIsDisplayed().assertContentDescriptionEquals("Tahmini yatış, Sol 26 derece")
         val bounds = dial.getUnclippedBoundsInRoot()
-        assertTrue("Dial width was ${bounds.width}", bounds.width.value in 113f..128f)
-        assertTrue("Dial height was ${bounds.height}", bounds.height.value in 50f..60f)
+        val width: Dp = bounds.right - bounds.left
+        val height: Dp = bounds.bottom - bounds.top
+        assertTrue("Dial width was $width", width.value in 113f..128f)
+        assertTrue("Dial height was $height", height.value in 50f..60f)
 
         compose.runOnIdle {
             reading.value = LiveLeanReading("previous-synthetic-drive", 19.0, SystemClock.elapsedRealtime())
@@ -103,6 +106,9 @@ class RedesignFirstSliceUiTest {
                                 places = listOf(Place(name = destinationName, latitude = finish.latitude, longitude = finish.longitude)),
                                 navigationState = navigation,
                                 locate = { origin },
+                                validateOrigin = { candidate ->
+                                    check(candidate === origin) { "Unexpected origin in the isolated route fixture" }
+                                },
                                 plan = { coordinate, destination, mode, _ ->
                                     probes += destination to mode
                                     if (probes.size == 1) throw IOException("Synthetic route failure")
