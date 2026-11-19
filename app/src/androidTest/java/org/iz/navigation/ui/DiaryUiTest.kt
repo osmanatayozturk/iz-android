@@ -89,7 +89,7 @@ class DiaryUiTest {
         compose.onNodeWithText(title).performClick()
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Bu yolculuğu sakla"))
         compose.onNodeWithText("Bu yolculuğu sakla").performClick()
-        compose.onNodeWithText("Kaydı başlat / sakla").performClick()
+        compose.onNodeWithText("Yolculuğu sakla").performClick()
         compose.waitUntil(10_000) { runBlocking { repository.getJourney(journey.id)?.status == JourneyStatus.CONFIRMED } }
         assertNotNull(runBlocking { repository.getJourney(journey.id)?.endedAt })
         assertNull(runBlocking { repository.activeJourney() })

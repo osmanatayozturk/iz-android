@@ -111,7 +111,7 @@ internal fun GpxTrackScreen(
     Surface(Modifier.fillMaxSize().testTag("gpx-screen"), color = MaterialTheme.colorScheme.surface) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp).testTag("gpx-close")) { Text("Kapat") }
+            if (!LocalShellBackVisible.current) TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp).testTag("gpx-close")) { Text("Kapat") }
             Text("GPX içe alma ve çizgi takibi", style = MaterialTheme.typography.headlineMedium)
             if (interrupted) Card(Modifier.fillMaxWidth().testTag("gpx-interrupted")) {
                 Column(Modifier.padding(12.dp)) {

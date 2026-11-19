@@ -137,10 +137,13 @@ internal fun PhoneSettings(
         return
     }
     key(selected, diagnostics) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 14.dp),
+        val viewTag = "settings-view-" + if (diagnostics) "diags" else selected.id
+        val panelHasHeading = selected == Section.CALIBRATE || selected == Section.OSM
+        val panelModifier = if (panelHasHeading) Modifier.testTag(viewTag) else Modifier
+        Column(panelModifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Text(if (diagnostics) "Algılama tanısı" else selected.label,
-                style = MaterialTheme.typography.headlineSmall, modifier = Modifier.testTag("settings-view-" + if (diagnostics) "diags" else selected.id))
+            if (!panelHasHeading) Text(if (diagnostics) "Algılama tanısı" else selected.label,
+                style = MaterialTheme.typography.headlineSmall, modifier = Modifier.testTag(viewTag))
             when (selected) {
                 Section.THEME -> {
                     val context = LocalContext.current

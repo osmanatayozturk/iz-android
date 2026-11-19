@@ -21,6 +21,7 @@ internal fun TransportDialog(
     title: String,
     onDismiss: () -> Unit,
     onReject: (() -> Unit)? = null,
+    confirmLabel: String = "Kaydı başlat",
     onChoose: (Transport) -> Unit,
 ) {
     var chosen by rememberSaveable { mutableStateOf(if (initial == Transport.UNKNOWN) Transport.CAR.name else initial.name) }
@@ -46,7 +47,7 @@ internal fun TransportDialog(
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { onChoose(Transport.valueOf(chosen)) }) { Text("Kaydı başlat / sakla") } },
+        confirmButton = { TextButton(onClick = { onChoose(Transport.valueOf(chosen)) }) { Text(confirmLabel) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Vazgeç") } },
     )
 }

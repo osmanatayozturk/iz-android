@@ -159,7 +159,7 @@ internal fun OsmSurveyScreen(repository: DiaryRepository, onClose: () -> Unit, o
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("Yerinde tamamlama görevleri", Modifier.weight(1f).padding(vertical = 12.dp).semantics { heading() },
                 style = MaterialTheme.typography.headlineSmall)
-            TextButton(onClick = onClose, modifier = Modifier.heightIn(min = 48.dp)) { Text("Geri") }
+            if (!LocalShellBackVisible.current) TextButton(onClick = onClose, modifier = Modifier.heightIn(min = 48.dp)) { Text("Geri") }
         }
         if (!permitted()) TextButton(onClick = {
             permissionOwner = generation

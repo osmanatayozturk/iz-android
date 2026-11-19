@@ -31,7 +31,7 @@ class RunningUiTest {
         }
         compose.onNodeWithTag("transport_options").assert(hasScrollAction())
         compose.onNodeWithText("Koşu").performScrollTo().performClick()
-        compose.onNodeWithText("Kaydı başlat / sakla").assertIsDisplayed().performClick()
+        compose.onNodeWithText("Kaydı başlat").assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals(Transport.RUN, chosen) }
     }
 

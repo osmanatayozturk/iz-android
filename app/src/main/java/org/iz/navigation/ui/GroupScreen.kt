@@ -48,7 +48,9 @@ fun GroupScreen(group: GroupCoordinator, onClose: () -> Unit, onOpenRoute: (List
 
     Scaffold(topBar = {
         TopAppBar(title = { Text(if (state.groupId == null) "Grup oluştur veya katıl" else "Grup yolculuğu") },
-            navigationIcon = { IconButton(onClick = back) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Geri") } },
+            navigationIcon = {
+                if (!LocalShellBackVisible.current) IconButton(onClick = back) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Geri") }
+            },
             actions = { IconButton(onClick = group::refresh, enabled = state.configured && !state.busy) {
                 Icon(Icons.Outlined.Refresh, "Grubu yenile")
             } })

@@ -13,6 +13,9 @@ import android.view.ViewGroup
 import android.view.Window
 import android.view.inspector.WindowInspector
 import androidx.activity.OnBackPressedDispatcherOwner
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
@@ -34,6 +37,9 @@ import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.runBlocking
 import org.iz.navigation.IzApplication
 import org.iz.navigation.MainActivity
+import androidx.room.withTransaction
+import org.iz.navigation.data.DiaryDatabase
+import org.iz.navigation.data.TrackPoint
 import org.iz.navigation.data.DiaryRepository
 import org.iz.navigation.data.DiarySnapshot
 import org.iz.navigation.data.Journey
@@ -248,6 +254,135 @@ class RedesignSectionEntryUiTest {
         }
     }
 
+    @Test fun captureExpiredWearRequest() {
+        org.junit.Assume.assumeTrue(InstrumentationRegistry.getArguments().getString("izVisualEntryId") == "wearrequest")
+        val app = requireIsolatedApp()
+        ActivityScenario.launch(org.iz.navigation.wear.WearStartActivity::class.java).use {
+            val expired = hasText("Bu isteğin süresi dolmuş", substring = true)
+            compose.waitUntil(10_000) { compose.onAllNodes(expired).fetchSemanticsNodes().isNotEmpty() }
+            val bitmap = compose.onRoot().captureToImage().asAndroidBitmap()
+            try {
+                val dir = File(app.cacheDir, "redesign-window-captures")
+                check(dir.isDirectory || dir.mkdirs())
+                val file = File(dir, "wearrequest.png")
+                check(file.createNewFile())
+                file.outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+            } finally { bitmap.recycle() }
+        }
+    }
+
+    @Test fun captureAllocatedJournalMapOrExport() {
+        val id = InstrumentationRegistry.getArguments().getString("izVisualJournalId")
+        org.junit.Assume.assumeTrue(id == "trackmap" || id == "export")
+        val app = requireIsolatedApp()
+        val repository = DiaryRepository(app)
+        val db = DiaryDatabase.get(app)
+        val start = System.currentTimeMillis() - 300_000
+        val row = Journey(title = "Örnek bisiklet parkuru", transport = Transport.BICYCLE, startedAt = start,
+            endedAt = start + 50_000, interrupted = true)
+        runBlocking {
+            assertEquals(DiarySnapshot(), repository.snapshot())
+            db.withTransaction {
+                val dao = db.diaryDao()
+                dao.save(row)
+                for (step in 0..5) dao.save(TrackPoint(journeyId = row.id, latitude = 41.0 + step * .00010,
+                    longitude = 29.0 + step * .00008, recordedAt = start + step * 10_000, accuracy = 4f))
+            }
+        }
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                compose.onNodeWithTag("home-menu").performClick()
+                compose.onNodeWithTag("menu-journeys").performScrollTo().performClick()
+                visitJournalLink(row.title)
+                if (id == "trackmap") {
+                    visitJournalLink("İzi haritada aç")
+                    compose.onNodeWithText("Konum kaydında kesinti var.").assertIsDisplayed()
+                } else {
+                    visitJournalLink("GPX rotasını dışa aktar")
+                    compose.waitUntil(15_000) {
+                        compose.onAllNodes(hasText("6 konum", substring = true)).fetchSemanticsNodes().isNotEmpty()
+                    }
+                }
+                compose.waitForIdle()
+                captureEntryWindow(scenario, requireNotNull(id), app)
+            }
+        } finally {
+            runBlocking {
+                repository.deleteJourney(row.id)
+                assertEquals(DiarySnapshot(), repository.snapshot())
+            }
+        }
+    }
+
+    @Test fun captureAllocatedMenuDestination() {
+        val id = InstrumentationRegistry.getArguments().getString("izVisualEntryId")
+        org.junit.Assume.assumeTrue(!id.isNullOrBlank())
+        val destinations = mapOf(
+            "group" to ("menu-group" to hasTestTag("group")),
+            "contrib" to ("menu-osm" to hasTestTag("osm-contribution-hub")),
+            "activity" to ("menu-osm" to hasText("Etkinlikler ve taslaklar")),
+            "survey" to ("menu-osm" to hasText("Yerinde tamamlama görevleri")),
+            "record" to ("" to hasText("Kaydı başlat")),
+            "calibrate" to ("menu-settings" to hasTestTag("settings-view-calibrate")),
+            "osmsettings" to ("menu-settings" to hasTestTag("settings-view-osmsettings")),
+            "layers" to ("menu-map-layers" to hasText("Planlanan rota", substring = true)),
+            "gpx" to ("menu-gpx-follow" to hasTestTag("gpx-import")),
+            "routes" to ("menu-route-library" to hasTestTag("routes-list")),
+            "trips" to ("menu-collections" to hasText("Yeni gezi", substring = true)),
+            "stats" to ("menu-statistics" to hasText("Karşılaştır")),
+            "places" to ("menu-places" to hasText("Yeni yer", substring = true)),
+            "journeys" to ("menu-journeys" to (hasText("Yolculuklar") and !hasClickAction())),
+            "heat" to ("menu-heatmap" to hasText("Yoğunluk haritası", substring = true)),
+            "plan" to ("menu-route-plan" to hasTestTag("navigation-screen")),
+        )
+        val (entry, marker) = destinations.getValue(requireNotNull(id))
+        val app = requireIsolatedApp()
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            if (id == "record") {
+                compose.onNodeWithTag("home-record").performClick()
+            } else {
+                compose.onNodeWithTag("home-menu").performClick()
+                compose.onNodeWithTag(entry).performScrollTo().performClick()
+            }
+            if (id == "activity" || id == "survey") {
+                val link = if (id == "activity") "osm-contribution-activities" else "osm-contribution-survey"
+                compose.onNodeWithTag("osm-contribution-list").performScrollToNode(hasTestTag(link))
+                compose.onNodeWithTag(link).performClick()
+            }
+            if (id == "calibrate" || id == "osmsettings") {
+                val link = "settings-open-$id"
+                compose.onNodeWithTag("settings").performScrollToNode(hasTestTag(link))
+                compose.onNodeWithTag(link).performClick()
+            }
+            compose.waitUntil(10_000) { compose.onAllNodes(marker).fetchSemanticsNodes().isNotEmpty() }
+            compose.waitForIdle()
+            val title = when (id) {
+                "calibrate" -> "Motosiklet montajı ve kalibrasyon"
+                "osmsettings" -> "OSM ve harita servisleri"
+                else -> null
+            }
+            if (title != null) assertEquals(1, compose.onAllNodes(hasText(title)).fetchSemanticsNodes().size)
+            if (id == "group") assertEquals(1, compose.onAllNodes(
+                androidx.compose.ui.test.hasContentDescription("Geri")).fetchSemanticsNodes().size)
+            captureEntryWindow(scenario, id, app)
+        }
+    }
+
+    private fun captureEntryWindow(scenario: ActivityScenario<MainActivity>, id: String, app: IzApplication) {
+        if (compose.onAllNodes(isDialog()).fetchSemanticsNodes().isEmpty()) {
+            captureWindowIfAllocated(scenario, "$id.png")
+            return
+        }
+        val out = File(app.cacheDir, "redesign-window-captures")
+        check(out.isDirectory || out.mkdirs())
+        val bitmap = compose.onNode(isDialog()).captureToImage().asAndroidBitmap()
+        try {
+            val file = File(out, "$id.png")
+            check(file.createNewFile())
+            file.outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+        } finally { bitmap.recycle() }
+    }
+
     private fun requireIsolatedApp(): IzApplication {
         val app = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as IzApplication
         assertEquals("org.iz.navigation.qaredesign20261119", app.packageName)
@@ -289,7 +424,8 @@ class RedesignSectionEntryUiTest {
     }
 
     private fun captureWindowIfAllocated(scenario: ActivityScenario<MainActivity>, name: String) {
-        if (InstrumentationRegistry.getArguments().getString("izRedesignWindowPng") != "true") return
+        val args = InstrumentationRegistry.getArguments()
+        if (args.getString("izRedesignWindowPng") != "true" && args.getString("izVisualEntryId") == null && args.getString("izVisualJournalId") == null) return
         val app = requireIsolatedApp()
         val copyDone = CountDownLatch(1)
         val result = AtomicInteger(PixelCopy.ERROR_UNKNOWN)

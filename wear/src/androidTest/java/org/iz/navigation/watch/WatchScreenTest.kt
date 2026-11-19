@@ -52,6 +52,45 @@ class WatchScreenTest {
 
     private fun openWeather() = openPage("Yolculuk havası", "wweather")
 
+    @Test fun captureAllocatedWearPages() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val requested = InstrumentationRegistry.getArguments().getString("izVisualWearIds")
+            ?.split(",")?.filter(String::isNotBlank)?.toSet().orEmpty()
+        org.junit.Assume.assumeTrue(requested.isNotEmpty())
+        check(context.packageName == "org.iz.navigation.qaredesign20261119")
+        check(context.checkSelfPermission(android.Manifest.permission.INTERNET) ==
+            android.content.pm.PackageManager.PERMISSION_DENIED)
+        require(requested.all { it in setOf("wrecord", "wend", "wsettings", "whealth") })
+        val directory = File(requireNotNull(context.getExternalFilesDir(null)), "qa/visual")
+        check(directory.isDirectory || directory.mkdirs())
+        fun capture(id: String) {
+            if (id !in requested) return
+            compose.onNodeWithTag(id).assertIsDisplayed()
+            val bitmap = compose.onRoot().captureToImage().asAndroidBitmap()
+            File(directory, "$id.png").outputStream().use {
+                check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
+            }
+        }
+        compose.setContent {
+            WatchScreen(active(null).copy(phoneVersion = WearProtocol.CURRENT_VERSION), now, {}, {}, {})
+        }
+        capture("wrecord")
+        if ("wend" in requested) {
+            openPage("Yolculuğu bitir", "wend")
+            capture("wend")
+            openPage("Vazgeç", "wrecord")
+        }
+        if ("wsettings" in requested || "whealth" in requested) {
+            openPage("Bağlantı ve ayarlar", "wsettings")
+            capture("wsettings")
+            if ("whealth" in requested) {
+                openPage("Ölçümler ve izinler", "whealth")
+                capture("whealth")
+            }
+        }
+    }
+
     @Test fun automaticHealthOffersOneTimeArmingAndExplicitDisarming() {
         val health = mutableStateOf(WatchLiveHealthState())
         var armed = false

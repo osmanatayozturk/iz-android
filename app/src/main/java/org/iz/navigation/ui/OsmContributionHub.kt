@@ -136,7 +136,7 @@ internal fun OsmContributionHubContent(
     Column(Modifier.fillMaxSize().testTag("osm-contribution-hub")) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = ::back, modifier = Modifier.testTag("osm-contribution-back")) {
+            if (!LocalShellBackVisible.current) IconButton(onClick = ::back, modifier = Modifier.testTag("osm-contribution-back")) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Geri")
             }
             Text(if (activities) "Etkinlikler ve taslaklar" else "Katkı Merkezi",

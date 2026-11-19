@@ -98,6 +98,8 @@ private fun journeyDistance(journey: Journey, state: DiaryState): String {
     val meters = stats.observedDistanceMeters ?: return "Mesafe ölçülemedi"
     return String.format(Locale.forLanguageTag("tr-TR"), "%.1f km", meters / 1000)
 }
+internal val LocalShellBackVisible = staticCompositionLocalOf { false }
+
 private data class PhotoTarget(val journeyId: String? = null, val visitId: String? = null)
 private data class TransportAction(val journeyId: String? = null, val split: Boolean = false, val suggestion: Transport = Transport.WALK)
 private data class Deletion(val text: String, val action: suspend () -> Unit)
@@ -655,7 +657,8 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     BackHandler(enabled = entries.size > 1, onBack = ::returnToParent)
     LaunchedEffect(groupState.screenRequested) { if (groupState.screenRequested) groupPage = true }
 
-    CompositionLocalProvider(LocalUiOwnerRegistrations provides resultOwner.registrations, LocalUiExitGuard provides exitGuard, LocalUiEntryKey provides uiEntry.key, LocalUiHistory provides history, LocalUiVoiceSettingsAction provides openVoiceSettings, LocalUiDirectionsPermissions provides openDirectionsPermissions,
+    CompositionLocalProvider(LocalShellBackVisible provides (!homeVisible && !libraryOpen && !collectionsOpen && !mapEditsPage),
+        LocalUiOwnerRegistrations provides resultOwner.registrations, LocalUiExitGuard provides exitGuard, LocalUiEntryKey provides uiEntry.key, LocalUiHistory provides history, LocalUiVoiceSettingsAction provides openVoiceSettings, LocalUiDirectionsPermissions provides openDirectionsPermissions,
         LocalUiOperationBusy provides { resultOwner.backupBusy.value || backupExport.busy || resultOwner.libraryBusy.value || resultOwner.gpxStarting.value || resultOwner.preparingGpx.value || resultOwner.formBusy.value || resultOwner.contributionBusy.value }) {
     UiEditOwner(UiEditState(uiEntry.key + "/ui", null, 0, 0, false, false))
     if (uiEntry.page == UiPage.SETTINGS && settingsLayersOpen) {
@@ -1046,6 +1049,11 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     transportAction?.let { action ->
         val existing = state.journeys.firstOrNull { it.id == action.journeyId }
         TransportDialog(existing?.transport ?: action.suggestion, if (action.split) "Ulaşım türünü değiştir" else if (action.journeyId != null) "Yolculuğunu sakla" else "Yeni bir yolculuk", onDismiss = { transportAction = null },
+            confirmLabel = when {
+                action.split -> "Ulaşım türünü değiştir"
+                action.journeyId != null -> "Yolculuğu sakla"
+                else -> "Kaydı başlat"
+            },
             onReject = if (existing?.status == JourneyStatus.TEMPORARY) ({ transportAction = null; vm.execute("Geçici kayıt silindi.") { vm.tracker.reject(existing.id) } }) else null,
         ) { transport ->
             if (action.journeyId == null && !hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)) {
