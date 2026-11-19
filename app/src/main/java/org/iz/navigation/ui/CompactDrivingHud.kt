@@ -19,6 +19,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -73,18 +75,19 @@ internal fun CompactDrivingHud(data: CompactHudData, landscape: Boolean, onMute:
     onResumeBreak: (() -> Unit)? = null, resumeEnabled: Boolean = false,
     disclosure: @Composable () -> Unit = {}, controls: @Composable () -> Unit) {
     val scale = LocalDensity.current.fontScale
+    val guidanceStyle = LocalTextStyle.current.copy(
+        platformStyle = PlatformTextStyle(includeFontPadding = false),
+        lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None),
+    )
     val instruction: @Composable () -> Unit = {
-        Box(Modifier.fillMaxWidth().height((44 * scale).dp)) {
-            Text(data.instruction, Modifier.fillMaxWidth().testTag("hud-instruction").semantics { contentDescription = data.instruction },
-                fontSize = 20.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold,
-                maxLines = 2, overflow = TextOverflow.Ellipsis)
-        }
+        Text(data.instruction, Modifier.fillMaxWidth().testTag("hud-instruction").semantics { contentDescription = data.instruction },
+            style = guidanceStyle, fontSize = 20.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold,
+            minLines = 2, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
     val summary: @Composable () -> Unit = {
-        Box(Modifier.fillMaxWidth().height((34 * scale).dp)) {
-            Text(data.summaryText, Modifier.fillMaxWidth().testTag("hud-remaining").semantics { contentDescription = data.summaryDescription },
-                fontSize = 15.sp, lineHeight = 17.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        }
+        Text(data.summaryText, Modifier.fillMaxWidth().testTag("hud-remaining").semantics { contentDescription = data.summaryDescription },
+            style = guidanceStyle, fontSize = 15.sp, lineHeight = 17.sp,
+            minLines = 2, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
     val commands: @Composable () -> Unit = {
         Row {

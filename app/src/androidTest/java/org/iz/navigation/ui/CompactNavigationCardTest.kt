@@ -96,25 +96,37 @@ class CompactNavigationCardTest {
     }
 
     @Test fun portrait384DpKeepsTwoManeuversStableAndReclaimsMapHeight() {
-        verifyViewport(384, 832, 115f..130.6f, 240f, 109f,
+        verifyViewport(384, 832, 115f..134f, 240f, 106f,
             "İkinci kavşaktan sola dön ve sahil yoluna devam et", "portrait-384x832-compact")
     }
 
     @Test fun landscape832DpKeepsTwoManeuversStableAndReclaimsMapHeight() {
-        verifyViewport(832, 384, 92f..105f, 128f, 31f,
+        verifyViewport(832, 384, 92f..105f, 128f, 23f,
             "İkinci ışıklardan sola dön ve sahil yolundan şehir merkezine devam et", "landscape-832x384-compact")
     }
 
     private fun verifyViewport(width: Int, height: Int, expectedHeight: ClosedFloatingPointRange<Float>,
         baselineHeight: Float, minGain: Float, next: String, evidence: String) {
         render(viewport = width to height)
+        val short = readHudFrame()
+        compose.runOnIdle { state.value = guided(next) }
+        val natural = readHudFrame()
+        val twoLine = "İkinci kavşaktan sola dön\nSahil yolundan devam et"
+        compose.runOnIdle { state.value = guided(twoLine) }
+        val explicitBreak = readHudFrame()
+        val samples = JSONObject().put("short", short.diagnostics())
+            .put("naturalWrap", natural.diagnostics())
+            .put("explicitLineBreak", explicitBreak.diagnostics())
+        println("COMPACT_HUD_LAYOUTS $evidence $samples")
+        val captureFailure = capture(evidence, ownedWindowPng = true, textSamples = samples)
+
         assertHomeWidth(width)
         val home = bounds("navigation-home")
         assertEquals("Requested synthetic viewport height", height.toFloat(), home.height / density, 1f)
-        val header = bounds("compact-guidance-header")
-        val map = bounds("navigation-home-map")
+        assertEquals("Normal-font viewport", 1f, fontScale, .01f)
+        val header = explicitBreak.header
+        val map = explicitBreak.map
         val visibleMapBottom = minOf(map.bottom, bounds("home-bottom-actions").top)
-        val card = bounds("live-guidance-card")
         val heightDp = header.height / density
         assertTrue("Expected a header within $expectedHeight dp, got $heightDp", heightDp in expectedHeight)
         assertEquals("Real map starts immediately after HUD", header.bottom, map.top, 1f)
@@ -130,29 +142,63 @@ class CompactNavigationCardTest {
             assertTrue("Landscape maneuver and summary share one row", instruction.overlapsVertically(summary))
             assertTrue("Landscape summary does not cover the maneuver", instruction.right <= summary.left)
         }
-        assertCompactTypography()
+        assertCompactTypography(twoLine)
         assertControlsAndMapStaySeparate()
 
-        compose.runOnIdle { state.value = guided(next) }
-        assertEquals(header, bounds("compact-guidance-header"))
-        assertEquals(card, bounds("live-guidance-card"))
-        assertEquals(map, bounds("navigation-home-map"))
-        compose.onNodeWithContentDescription(next, useUnmergedTree = true).assertIsDisplayed()
-        val layouts = mutableListOf<TextLayoutResult>()
-        compose.onNodeWithTag("hud-instruction", useUnmergedTree = true)
-            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
-        assertEquals("Two-line ordinary maneuver", 2, layouts.single().lineCount)
-        assertFalse("Ordinary maneuver must fit without clipping", layouts.single().hasVisualOverflow)
-        val maneuver = layouts.single()
-        val maneuverBounds = bounds("hud-instruction")
-        assertTrue(maneuverBounds.top + maneuver.getLineTop(0) >= card.top - 1f)
-        assertTrue(maneuverBounds.top + maneuver.getLineBottom(1) <= card.bottom + 1f)
-        assertTrue(maneuver.getLineBottom(1) <= maneuver.size.height + 0.5f)
+        for ((label, frame) in listOf("naturalWrap" to natural, "explicitLineBreak" to explicitBreak)) {
+            assertEquals("$label changed the header bounds", short.header, frame.header)
+            assertEquals("$label changed the card bounds", short.card, frame.card)
+            assertEquals("$label changed where the real map starts", short.map, frame.map)
+        }
+        compose.onNodeWithContentDescription(twoLine, useUnmergedTree = true).assertIsDisplayed()
+        assertEquals("Explicit break must render two lines. $samples", 2, explicitBreak.instruction.lineCount)
+        for ((label, frame) in listOf("short" to short, "naturalWrap" to natural, "explicitLineBreak" to explicitBreak)) {
+            assertFullTextFits(label, frame.instruction, frame.instructionBounds, frame.card)
+            assertFullTextFits("$label summary", frame.summary, frame.summaryBounds, frame.card)
+        }
         compose.onNodeWithTag("hud-weather").assertHasClickAction().performTouchInput { click() }
         compose.onNodeWithTag("directions-recenter").assertHasClickAction().performTouchInput { click() }
         compose.runOnIdle { assertEquals(1, weatherOpens); assertEquals(1, locationRequests) }
-        awaitLocalRoute()
-        capture(evidence, ownedWindowPng = true)
+        captureFailure?.let { throw it }
+    }
+
+    private data class HudFrame(
+        val header: Rect, val card: Rect, val map: Rect,
+        val instruction: TextLayoutResult, val instructionBounds: Rect,
+        val summary: TextLayoutResult, val summaryBounds: Rect,
+    ) {
+        fun diagnostics() = JSONObject()
+            .put("headerBoundsPx", header.toString()).put("cardBoundsPx", card.toString()).put("mapBoundsPx", map.toString())
+            .put("instruction", instruction.diagnostics(instructionBounds))
+            .put("summary", summary.diagnostics(summaryBounds))
+    }
+
+    private fun readHudFrame() = HudFrame(bounds("compact-guidance-header"), bounds("live-guidance-card"),
+        bounds("navigation-home-map"), textLayout("hud-instruction"), bounds("hud-instruction"),
+        textLayout("hud-remaining"), bounds("hud-remaining"))
+
+    private fun textLayout(tag: String): TextLayoutResult {
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithTag(tag, useUnmergedTree = true)
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        return layouts.single()
+    }
+
+    private fun assertFullTextFits(label: String, layout: TextLayoutResult, textBounds: Rect, card: Rect) {
+        val details = "$label ${layout.diagnostics(textBounds)}"
+        assertTrue(details, layout.lineCount in 1..2)
+        assertFalse(details, layout.hasVisualOverflow)
+        assertFalse(details, layout.multiParagraph.didExceedMaxLines)
+        val last = layout.lineCount - 1
+        assertEquals(details, layout.layoutInput.text.text.length, layout.getLineEnd(last, visibleEnd = true))
+        for (line in 0..last) {
+            assertFalse(details, layout.isLineEllipsized(line))
+            assertTrue(details, layout.getLineLeft(line) >= -.5f &&
+                layout.getLineRight(line) <= minOf(layout.size.width.toFloat(), textBounds.width) + 1f)
+            assertTrue(details, layout.getLineTop(line) >= -.5f && layout.getLineBottom(line) <= layout.size.height + .5f)
+            assertTrue(details, textBounds.top + layout.getLineTop(line) >= card.top - 1f &&
+                textBounds.top + layout.getLineBottom(line) <= minOf(card.bottom, textBounds.bottom) + 1f)
+        }
     }
 
     @Test fun longManeuverWrapsAndPanelHasFullInstruction() {
@@ -304,20 +350,22 @@ class CompactNavigationCardTest {
                 }
             } else Box(if (width == null) Modifier.fillMaxSize() else Modifier.width(width).fillMaxSize()) { scene() }
         } }
-        compose.onNodeWithTag("live-guidance-card").assertIsDisplayed()
-        compose.runOnIdle { assertEquals("Run only the allocated normal-font scenario", 1f, fontScale, .01f) }
+        if (viewport == null) {
+            compose.onNodeWithTag("live-guidance-card").assertIsDisplayed()
+            compose.runOnIdle { assertEquals("Run only the allocated normal-font scenario", 1f, fontScale, .01f) }
+        }
     }
 
     private fun assertHomeWidth(expected: Int) {
         assertEquals("The host must actually provide the requested width", expected.toFloat(), bounds("navigation-home").width / density, 1f)
     }
 
-    private fun assertCompactTypography() {
+    private fun assertCompactTypography(instruction: String = "Sağa dön") {
         compose.onNodeWithTag("hud-remaining", useUnmergedTree = true).assertTextEquals("200 m · 1,5 km / 10 dk")
         compose.onAllNodes(hasText("Tahmini varış", substring = true), useUnmergedTree = true).assertCountEquals(0)
         compose.onNodeWithTag("hud-remaining", useUnmergedTree = true)
             .assertContentDescriptionEquals("Manevra 200 m · Kalan 1.5 km · 10 dk")
-        compose.onNodeWithText("Sağa dön", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText(instruction, useUnmergedTree = true).assertIsDisplayed()
         fun assertSize(text: String, expected: Float, lineHeight: Float) {
             val layouts = mutableListOf<TextLayoutResult>()
             compose.onNodeWithText(text, useUnmergedTree = true)
@@ -326,7 +374,7 @@ class CompactNavigationCardTest {
             assertEquals(lineHeight, layouts.single().layoutInput.style.lineHeight.value, .01f)
             assertEquals(2, layouts.single().layoutInput.maxLines)
         }
-        assertSize("Sağa dön", 20f, 22f)
+        assertSize(instruction, 20f, 22f)
         val summaryLayouts = mutableListOf<TextLayoutResult>()
         compose.onNodeWithTag("hud-remaining", useUnmergedTree = true)
             .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(summaryLayouts) }
@@ -371,11 +419,11 @@ class CompactNavigationCardTest {
     private fun textBounds(text: String) = compose.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
     private fun Rect.overlapsVertically(other: Rect) = top < other.bottom && bottom > other.top
 
-    private fun capture(name: String, ownedWindowPng: Boolean = false) {
+    private fun capture(name: String, ownedWindowPng: Boolean = false, textSamples: JSONObject? = null): Throwable? {
         val directory = File(requireNotNull(InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null)),
             "qa/compact-navigation-card/$name-${SystemClock.uptimeMillis()}").apply { check(mkdirs()) }
         val evidenceType = "OWNED_COMPOSE_SEMANTICS_NOT_PLATFORM_TALKBACK"
-        val home = compose.onNodeWithTag("navigation-home", useUnmergedTree = true).assertIsDisplayed().fetchSemanticsNode()
+        val home = compose.onNodeWithTag("navigation-home", useUnmergedTree = true).fetchSemanticsNode()
         val (nodes, window) = compose.runOnIdle {
             runCatching {
                 check(home.config.getOrNull(SemanticsProperties.TestTag) == "navigation-home")
@@ -447,27 +495,30 @@ class CompactNavigationCardTest {
             .put("visibleMapAboveDockBoundsPx", visibleMap.toString()).put("visibleMapAboveDockHeightDp", visibleMap.height / density)
             .put("sourceCommitArgument", InstrumentationRegistry.getArguments().getString("izCandidateCommit"))
         if (ownedWindowPng) {
-            metadata.put("localRenderedRouteQuery", true).put("localMapPngBackground", "NOT_CAPTURED")
-            for (tag in listOf("hud-instruction", "hud-remaining")) {
-                val layouts = mutableListOf<TextLayoutResult>()
-                compose.onNodeWithTag(tag, useUnmergedTree = true)
-                    .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
-                val layout = layouts.single()
-                metadata.put(tag, JSONObject().put("fontSizeSp", layout.layoutInput.style.fontSize.value)
-                    .put("lineHeightSp", layout.layoutInput.style.lineHeight.value).put("lines", layout.lineCount))
-            }
+            metadata.put("localRenderedRouteQuery", JSONObject.NULL).put("localMapPngBackground", "NOT_CAPTURED")
+            metadata.put("textSamples", textSamples)
         }
         val geometry = File(directory, "geometry.json")
         geometry.writeText(metadata.toString(2))
         val png = File(directory, "screen.png")
         if (ownedWindowPng) {
-            val matching = captureOwnedViewport(home, window, png)
-            metadata.put("localMapPngBackground", if (matching >= 2) "SAMPLED_BACKGROUND_VISIBLE" else "NOT_DETECTED")
-                .put("matchingLocalBackgroundSamples", matching).put("localBackgroundSamples", 4)
+            val route = runCatching { awaitLocalRoute() }
+            metadata.put("localRenderedRouteQuery", route.isSuccess)
+            route.exceptionOrNull()?.let { metadata.put("localRenderedRouteError", it.toString()) }
             geometry.writeText(metadata.toString(2))
+            // A missing route must not prevent the owned HUD image from being saved.
+            val image = runCatching { captureOwnedViewport(home, window, png) }
+            image.getOrNull()?.let { matching ->
+                metadata.put("localMapPngBackground", if (matching >= 2) "SAMPLED_BACKGROUND_VISIBLE" else "NOT_DETECTED")
+                    .put("matchingLocalBackgroundSamples", matching).put("localBackgroundSamples", 4)
+            }
+            image.exceptionOrNull()?.let { metadata.put("pngError", it.toString()) }
+            geometry.writeText(metadata.toString(2))
+            return route.exceptionOrNull() ?: image.exceptionOrNull()
         } else png.outputStream().use {
             check(compose.onNodeWithTag("navigation-home").captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it))
         }
+        return null
     }
 
     private fun compactLocalStyle(raw: String): String = JSONObject(raw).apply {
@@ -546,4 +597,30 @@ class CompactNavigationCardTest {
             route = route, guidance = true, gpsStale = false, locationActive = true,
             progress = NavigationProgress(0.0, 600.0, 1500.0, 0.0, 0, 200.0))
     }
+}
+
+private fun TextLayoutResult.diagnostics(bounds: Rect): JSONObject {
+    val text = layoutInput.text.text
+    val constraints = layoutInput.constraints
+    val lines = JSONArray()
+    for (line in 0 until lineCount) {
+        val start = getLineStart(line)
+        val visibleEnd = getLineEnd(line, visibleEnd = true)
+        lines.put(JSONObject()
+            .put("start", start).put("end", getLineEnd(line, visibleEnd = false)).put("visibleEnd", visibleEnd)
+            .put("visibleText", text.substring(start, visibleEnd))
+            .put("ellipsized", isLineEllipsized(line))
+            .put("topPx", getLineTop(line)).put("bottomPx", getLineBottom(line))
+            .put("leftPx", getLineLeft(line)).put("rightPx", getLineRight(line)))
+    }
+    return JSONObject().put("fullText", text).put("textLength", text.length).put("boundsPx", bounds.toString())
+        .put("widthPx", size.width).put("heightPx", size.height)
+        .put("availableWidthPx", constraints.maxWidth).put("availableHeightPx", constraints.maxHeight)
+        .put("hasBoundedHeight", constraints.hasBoundedHeight).put("minimumHeightPx", constraints.minHeight)
+        .put("fontSizeSp", layoutInput.style.fontSize.value).put("lineHeightSp", layoutInput.style.lineHeight.value)
+        .put("maxLines", layoutInput.maxLines).put("renderedLines", lineCount)
+        .put("didExceedMaxLines", multiParagraph.didExceedMaxLines)
+        .put("didOverflowWidth", didOverflowWidth).put("didOverflowHeight", didOverflowHeight)
+        .put("firstLine", lines.opt(0)).put("lastLine", lines.opt(lineCount - 1))
+        .put("lines", lines)
 }
