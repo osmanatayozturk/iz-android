@@ -69,11 +69,16 @@ class OsmSurveyEditorUiTest {
             compose.onNodeWithTag("osm-survey-hours-open").performClick()
         } else if (!tag.startsWith("osm-survey-hours-") && tag != "osm-survey-save" &&
             editingHours) {
-            list.performScrollToNode(hasTestTag("osm-survey-hours-return"))
-            compose.onNodeWithTag("osm-survey-hours-return").performClick()
+            returnToObservation()
         }
         compose.onNodeWithTag("osm-survey-editor-list").performScrollToNode(hasTestTag(tag))
         return compose.onNodeWithTag(tag)
+    }
+
+    private fun returnToObservation() {
+        val back = hasContentDescription("Gözleme dön")
+        compose.onNodeWithTag("osm-survey-editor-list").performScrollToNode(back)
+        compose.onNode(back).performClick()
     }
 
     @Test fun unknownThenEditCannotResurrectDiscardedWeeklyInput() = assertWeeklyActionReset(SurveyAction.UNKNOWN)
@@ -85,7 +90,7 @@ class OsmSurveyEditorUiTest {
         node("osm-survey-opening_hours-EDIT").performClick()
         node("osm-survey-hours-open").performClick()
         node("osm-survey-hours-advanced").performTextReplacement("Mo invalid")
-        node("osm-survey-hours-return").performClick()
+        returnToObservation()
         compose.onNodeWithTag("osm-survey-observation-screen").assertExists()
         node("osm-survey-review").assertIsNotEnabled()
         node("osm-survey-hours-open").performClick()

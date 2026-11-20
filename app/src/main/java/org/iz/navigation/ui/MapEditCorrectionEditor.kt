@@ -257,7 +257,9 @@ internal fun MapEditCorrectionEditor(
                     CorrectionTextField("phone", phone, current?.phoneText(), !locked && ready && geometry != null) {
                         phone = it; phoneAction = fieldAction(it, current?.phoneText().orEmpty()); survey = false
                     }
-                    current?.tags?.filterKeys { it == "phone" || it == "contact:phone" }?.forEach { (key, value) -> Text("$key: $value") }
+                    current?.tags?.forEach { (key, value) ->
+                        if ((key == "phone" || key == "contact:phone") && value.isNotBlank()) Text("$key: $value")
+                    }
                     if (phoneAction == MapEditFieldAction.DELETE) Text("Yayımlanırsa bu bilgi OSM'den silinecek.")
                     OutlinedTextField(observationDate, { observationDate = it; survey = false }, label = { Text("Gözlem tarihi") },
                         enabled = !locked && ready && geometry != null, isError = observedAt == null, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -318,7 +320,9 @@ internal fun CorrectionConfirmationRow(
 private fun CorrectionTextField(key: String, value: String, current: String?, enabled: Boolean, onChange: (String) -> Unit) {
     OutlinedTextField(value = value, onValueChange = onChange, enabled = enabled, singleLine = true,
         label = { Text(correctionFieldLabel(key)) },
-        supportingText = { Text("OSM’deki değer: ${current ?: "Boş"}") },
+        supportingText = if (current.isNullOrBlank()) null else {
+            { Text("OSM’deki değer: $current") }
+        },
         isError = value.codePointCount(0, value.length) > if (key == "phone" && value == current) 1024 else 255,
         modifier = Modifier.fillMaxWidth().testTag("osm-map-correction-$key"))
 }

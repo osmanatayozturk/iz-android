@@ -262,7 +262,7 @@ internal fun ContributionEditor(initial: ContributionDraft, connected: Boolean, 
                 OutlinedButton(onClick = { onSave(draft) }, enabled = text.length <= 2000 && !busy, modifier = Modifier.fillMaxWidth()) { Text("Taslağı sakla") }
             }
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-            TextButton(onClick = { exit(onDismiss) }, enabled = !busy) { Text("Kapat") }
+            if (preview) TextButton(onClick = { exit(onDismiss) }, enabled = !busy) { Text("Kapat") }
     }
 }
 

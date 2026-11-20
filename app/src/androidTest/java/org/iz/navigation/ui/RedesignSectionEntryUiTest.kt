@@ -1,16 +1,21 @@
 package org.iz.navigation.ui
 
 import android.Manifest
+import android.app.UiAutomation
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.Color
+import android.graphics.RectF
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.PixelCopy
 import android.view.View
 import android.view.ViewGroup
 import android.view.Window
+import android.view.WindowManager
 import android.view.inspector.WindowInspector
 import androidx.activity.OnBackPressedDispatcherOwner
 import androidx.compose.ui.graphics.asAndroidBitmap
@@ -47,6 +52,10 @@ import org.iz.navigation.data.Journey
 import org.iz.navigation.data.JourneyStatus
 import org.iz.navigation.data.Transport
 import org.iz.navigation.navigation.NavigationState
+import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.maps.MapView
+import org.maplibre.android.style.sources.GeoJsonSource
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -59,6 +68,8 @@ import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 @RunWith(AndroidJUnit4::class)
 class RedesignSectionEntryUiTest {
@@ -281,13 +292,16 @@ class RedesignSectionEntryUiTest {
         val start = System.currentTimeMillis() - 300_000
         val row = Journey(title = "Örnek bisiklet parkuru", transport = Transport.BICYCLE, startedAt = start,
             endedAt = start + 50_000, interrupted = true)
+        val points = (0..5).map { step ->
+            TrackPoint(journeyId = row.id, latitude = 41.0 + step * .00010,
+                longitude = 29.0 + step * .00008, recordedAt = start + step * 10_000, accuracy = 4f)
+        }
         runBlocking {
             assertEquals(DiarySnapshot(), repository.snapshot())
             db.withTransaction {
                 val dao = db.diaryDao()
                 dao.save(row)
-                for (step in 0..5) dao.save(TrackPoint(journeyId = row.id, latitude = 41.0 + step * .00010,
-                    longitude = 29.0 + step * .00008, recordedAt = start + step * 10_000, accuracy = 4f))
+                points.forEach { dao.save(it) }
             }
         }
         try {
@@ -298,14 +312,18 @@ class RedesignSectionEntryUiTest {
                 if (id == "trackmap") {
                     visitJournalLink("İzi haritada aç")
                     compose.onNodeWithText("Konum kaydında kesinti var.").assertIsDisplayed()
+                    compose.waitUntil(20_000) {
+                        compose.onAllNodes(hasTestTag("recorded-speed-legend")).fetchSemanticsNodes().isNotEmpty()
+                    }
                 } else {
                     visitJournalLink("GPX rotasını dışa aktar")
                     compose.waitUntil(15_000) {
                         compose.onAllNodes(hasText("6 konum", substring = true)).fetchSemanticsNodes().isNotEmpty()
                     }
                 }
-                compose.waitForIdle()
-                captureEntryWindow(scenario, requireNotNull(id), app)
+                val middle = LatLng((points[2].latitude + points[3].latitude) / 2,
+                    (points[2].longitude + points[3].longitude) / 2)
+                captureJournalNativeWindow(scenario, requireNotNull(id), app, middle)
             }
         } finally {
             runBlocking {
@@ -313,6 +331,111 @@ class RedesignSectionEntryUiTest {
                 assertEquals(DiarySnapshot(), repository.snapshot())
             }
         }
+    }
+
+    private data class JournalCapture(val window: Window, val x: Int, val y: Int)
+
+    private fun captureJournalNativeWindow(
+        scenario: ActivityScenario<MainActivity>, id: String, app: IzApplication, middle: LatLng,
+    ) {
+        check(Build.VERSION.SDK_INT >= 34)
+        val export = id == "export"
+        val color = if (export) "#3989C9" else "#87939B"
+        var viewedMap: MapView? = null
+        var nativeMap: MapLibreMap? = null
+        var settled: Bitmap? = null
+        var diagnostic = "No visible owned map window"
+        val automation = InstrumentationRegistry.getInstrumentation()
+            .getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES)
+        try {
+            compose.waitUntil(20_000) {
+                var capture: JournalCapture? = null
+                scenario.onActivity { activity ->
+                    check(activity.packageName == app.packageName && !activity.isDestroyed)
+                    val window = if (!export) activity.window else WindowInspector.getGlobalWindowViews()
+                        .asSequence().flatMap(::journalDescendants).filterIsInstance<DialogWindowProvider>()
+                        .map { it.window }.distinctBy { it.decorView }
+                        .filter { it.context.findActivity() === activity && it.decorView.isShown }
+                        .filter { dialog -> journalDescendants(dialog.decorView).any { it is MapView && it.isShown } }
+                        .singleOrNull()
+                    val view = window?.takeIf { it.decorView.isShown }?.let {
+                        journalDescendants(it.decorView).filterIsInstance<MapView>().filter { map -> map.isShown }.singleOrNull()
+                    }
+                    if (view !== viewedMap) {
+                        viewedMap = view
+                        nativeMap = null
+                        view?.getMapAsync { map -> if (viewedMap === view) nativeMap = map }
+                    }
+                    val map = nativeMap
+                    if (window == null || !window.decorView.hasWindowFocus() ||
+                        view == null || map == null || view.width <= 0 || view.height <= 0) {
+                        diagnostic = "window=${window != null} view=${view != null} nativeMap=${map != null}"
+                        return@onActivity
+                    }
+                    check(window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE == 0)
+                    val source = map.style?.getSourceAs<GeoJsonSource>("routes")?.querySourceFeatures(null).orEmpty()
+                    val point = map.projection.toScreenLocation(middle)
+                    val inViewport = point.x.isFinite() && point.y.isFinite() &&
+                        point.x in 0f..view.width.toFloat() && point.y in 0f..view.height.toFloat()
+                    val hits = if (inViewport) map.queryRenderedFeatures(
+                        RectF(point.x - 5, point.y - 5, point.x + 5, point.y + 5), "journey-lines",
+                    ) else emptyList()
+                    diagnostic = "routes=${source.size} centerInViewport=$inViewport " +
+                        "rendered=${hits.size} zoom=${map.cameraPosition.zoom}"
+                    if (source.isEmpty() || hits.none { it.getStringProperty("color") == color }) return@onActivity
+                    val offset = IntArray(2).also(view::getLocationInWindow)
+                    val origin = IntArray(2).also(window.decorView::getLocationInWindow)
+                    capture = JournalCapture(window, offset[0] - origin[0] + point.x.roundToInt(),
+                        offset[1] - origin[1] + point.y.roundToInt())
+                }
+                val frame = capture ?: return@waitUntil false
+                val bitmap = automation.takeScreenshot(frame.window) ?: return@waitUntil false
+                val pixels = if (bitmap.config == Bitmap.Config.ARGB_8888) bitmap else {
+                    try { checkNotNull(bitmap.copy(Bitmap.Config.ARGB_8888, false)) } finally { bitmap.recycle() }
+                }
+                try {
+                    if (pixels.width == frame.window.decorView.width && pixels.height == frame.window.decorView.height &&
+                        hasJournalLinePixel(pixels, frame.x, frame.y, Color.parseColor(color))) {
+                        settled = pixels
+                    } else {
+                        diagnostic += " ownedWindow=${pixels.width}x${pixels.height} routePixelsMissing=true"
+                    }
+                    settled != null
+                } finally {
+                    if (settled !== pixels) pixels.recycle()
+                }
+            }
+        } catch (timeout: androidx.compose.ui.test.ComposeTimeoutException) {
+            throw AssertionError("Journal native route not ready in the $id window. $diagnostic", timeout)
+        }
+        val pixels = checkNotNull(settled)
+        try {
+            val directory = File(app.cacheDir, "redesign-window-captures")
+            check(directory.isDirectory || directory.mkdirs())
+            val output = File(directory, "$id.png")
+            check(output.createNewFile())
+            output.outputStream().use { check(pixels.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+        } finally {
+            pixels.recycle()
+        }
+    }
+
+    private fun journalDescendants(view: View): Sequence<View> = sequence {
+        yield(view)
+        if (view is ViewGroup) for (index in 0 until view.childCount) yieldAll(journalDescendants(view.getChildAt(index)))
+    }
+
+    private fun hasJournalLinePixel(bitmap: Bitmap, x: Int, y: Int, color: Int): Boolean {
+        var matches = 0
+        for (row in maxOf(0, y - 12)..minOf(bitmap.height - 1, y + 12)) {
+            for (column in maxOf(0, x - 12)..minOf(bitmap.width - 1, x + 12)) {
+                val pixel = bitmap.getPixel(column, row)
+                if (Color.alpha(pixel) >= 224 && abs(Color.red(pixel) - Color.red(color)) <= 18 &&
+                    abs(Color.green(pixel) - Color.green(color)) <= 18 &&
+                    abs(Color.blue(pixel) - Color.blue(color)) <= 18 && ++matches >= 4) return true
+            }
+        }
+        return false
     }
 
     @Test fun captureAllocatedMenuDestination() {
@@ -326,7 +449,7 @@ class RedesignSectionEntryUiTest {
             "record" to ("" to hasText("Kaydı başlat")),
             "calibrate" to ("menu-settings" to hasTestTag("settings-view-calibrate")),
             "osmsettings" to ("menu-settings" to hasTestTag("settings-view-osmsettings")),
-            "layers" to ("menu-map-layers" to hasText("Planlanan rota", substring = true)),
+            "layers" to ("menu-settings" to hasTestTag("map-layers-settings")),
             "gpx" to ("menu-gpx-follow" to hasTestTag("gpx-import")),
             "routes" to ("menu-route-library" to hasTestTag("routes-list")),
             "trips" to ("menu-collections" to hasText("Yeni gezi", substring = true)),
@@ -349,6 +472,11 @@ class RedesignSectionEntryUiTest {
                 val link = if (id == "activity") "osm-contribution-activities" else "osm-contribution-survey"
                 compose.onNodeWithTag("osm-contribution-list").performScrollToNode(hasTestTag(link))
                 compose.onNodeWithTag(link).performClick()
+            }
+            if (id == "layers") {
+                compose.onNodeWithTag("settings").performScrollToNode(hasTestTag("settings-open-voice"))
+                compose.onNodeWithTag("settings-open-voice").performClick()
+                compose.onNodeWithText("Harita katmanları").performScrollTo().performClick()
             }
             if (id == "calibrate" || id == "osmsettings") {
                 val link = "settings-open-$id"
@@ -475,6 +603,14 @@ internal fun dispatchRedesignModalBack() {
     check(useRedesignDispatcherBack())
     check(context.checkSelfPermission(Manifest.permission.INTERNET) == PackageManager.PERMISSION_DENIED)
     check(Looper.myLooper() == Looper.getMainLooper())
+    val owner = visibleRedesignDialogWindow().callback as OnBackPressedDispatcherOwner
+    owner.onBackPressedDispatcher.onBackPressed()
+}
+
+internal fun visibleRedesignDialogWindow(): Window {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    check(context.packageName == "org.iz.navigation.qaredesign20261119")
+    check(Looper.myLooper() == Looper.getMainLooper())
     val windows = linkedSetOf<Window>()
     fun collect(view: View) {
         if (view is DialogWindowProvider && view.window.context.packageName == context.packageName &&
@@ -482,6 +618,5 @@ internal fun dispatchRedesignModalBack() {
         if (view is ViewGroup) for (index in 0 until view.childCount) collect(view.getChildAt(index))
     }
     WindowInspector.getGlobalWindowViews().forEach(::collect)
-    val owner = windows.single().callback as OnBackPressedDispatcherOwner
-    owner.onBackPressedDispatcher.onBackPressed()
+    return windows.single()
 }

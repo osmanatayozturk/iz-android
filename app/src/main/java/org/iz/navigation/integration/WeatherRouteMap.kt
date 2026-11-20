@@ -368,6 +368,25 @@ private fun ColumnScope.WeatherRouteMapContent(
             cameraViewportInsets.calculateRightPadding(layoutDirection).roundToPx(),
             cameraViewportInsets.calculateBottomPadding().roundToPx())
     }
+    // The idle/free-drive search and session cards overlay the native map. Keep its compass
+    // below their measured height, opposite the recenter and layer controls.
+    val compassInset = with(density) { 12.dp.roundToPx() }
+    val headerOverMap = navigationLayout && navigationHeader == null
+    DisposableEffect(map, headerOverMap, cameraPadding[1], compassInset) {
+        val settings = map?.uiSettings?.takeIf { headerOverMap }
+        if (settings == null) return@DisposableEffect onDispose {}
+        val gravity = settings.compassGravity
+        val left = settings.compassMarginLeft
+        val top = settings.compassMarginTop
+        val right = settings.compassMarginRight
+        val bottom = settings.compassMarginBottom
+        settings.compassGravity = android.view.Gravity.TOP or android.view.Gravity.START
+        settings.setCompassMargins(compassInset, cameraPadding[1], compassInset, 0)
+        onDispose {
+            settings.compassGravity = gravity
+            settings.setCompassMargins(left, top, right, bottom)
+        }
+    }
     val driveViewport = DriveCameraViewport(mapSize.width, mapSize.height, cameraPadding[0], cameraPadding[1],
         cameraPadding[2], cameraPadding[3], mapSize.width > 0 && mapSize.height > 0)
     DisposableEffect(driveAnimator, lifecycle) {

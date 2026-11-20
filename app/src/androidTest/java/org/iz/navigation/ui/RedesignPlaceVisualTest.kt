@@ -3,6 +3,8 @@ package org.iz.navigation.ui
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.os.Build
+import android.view.WindowManager
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -56,7 +58,7 @@ class RedesignPlaceVisualTest {
         check(context.packageName == "org.iz.navigation.qaredesign20261119")
         check(context.checkSelfPermission(Manifest.permission.INTERNET) == PackageManager.PERMISSION_DENIED)
         require(ids.all { it in setOf("links", "sharedmode", "near", "public", "hoursview",
-            "place", "placeedit", "visit", "photoshare", "shortcut", "journaledit", "offline", "break", "pick") })
+            "place", "placeedit", "visit", "photoshare", "shortcut", "journaledit", "offline", "break", "pick", "vehicle", "end") })
         val out = File(requireNotNull(context.getExternalFilesDir(null)), "qa/visual")
         check(out.isDirectory || out.mkdirs())
         val picture = if ("photoshare" in ids) {
@@ -88,7 +90,28 @@ class RedesignPlaceVisualTest {
                 }
                 val dialog = compose.onAllNodes(isDialog()).fetchSemanticsNodes()
                 val root = if (dialog.isEmpty()) compose.onRoot() else compose.onNode(isDialog())
-                val bitmap = root.captureToImage().asAndroidBitmap()
+                val bitmap = if (id == "vehicle" || id == "end") {
+                    check(dialog.size == 1 && Build.VERSION.SDK_INT >= 34)
+                    val window = compose.runOnIdle { visibleRedesignDialogWindow() }
+                    check(window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE == 0)
+                    var settled: Bitmap? = null
+                    compose.waitUntil(5_000) {
+                        val frame = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot(window)
+                        if (frame != null) {
+                            val pixels = if (frame.config == Bitmap.Config.HARDWARE) {
+                                checkNotNull(frame.copy(Bitmap.Config.ARGB_8888, false)).also { frame.recycle() }
+                            } else frame
+                            val colors = mutableSetOf<Int>()
+                            for (y in 0 until pixels.height step 8) {
+                                for (x in 0 until pixels.width step 8) colors += pixels.getPixel(x, y)
+                                if (colors.size >= 12) break
+                            }
+                            if (colors.size >= 12) settled = pixels else pixels.recycle()
+                        }
+                        settled != null
+                    }
+                    checkNotNull(settled)
+                } else root.captureToImage().asAndroidBitmap()
                 try {
                     File(out, "$id.png").outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
                 } finally { bitmap.recycle() }
@@ -113,11 +136,16 @@ class RedesignPlaceVisualTest {
             "pick" -> WeatherStopMapPicker("Durak konumu", onDismiss = {}, onChoose = {})
             "links" -> SharedMapEntryDialog(SharedMapInput.Single(SharedMapStop(place.name)), {}, {}, { _, _ -> },
                 resolve = { null })
-            "sharedmode" -> QuickDirectionsDialog(emptyList(), remember { MutableStateFlow(NavigationState()) },
+            "end" -> {
+                val state = PhoneVisualFixture.guided
+                val request = checkNotNull(phoneSessionEndRequest(PhoneSessionEnd.ALL, state))
+                PhoneSessionEndConfirmation(request, state, locked = false, onDismiss = {}, onConfirm = {})
+            }
+            "vehicle", "sharedmode" -> QuickDirectionsDialog(emptyList(), remember { MutableStateFlow(NavigationState()) },
                 locate = { error("Visual fixture") }, validateOrigin = {}, plan = { _, _, _, _ -> error("Visual fixture") },
                 activate = { _, _, _ -> error("Visual fixture") }, onDismiss = {}, onStarted = {},
                 hasLocationPermission = { false }, initialDestination = RouteStop(place.name, WeatherCoordinate(41.0, 29.0)),
-                sharedPreview = true)
+                sharedPreview = id == "sharedmode")
             "near" -> {
                 val candidate = MapPlaceCandidate(SelectedOsmPlace(place.name, 41.0, 29.0, ref), "Kütüphane", 18.0)
                 val building = MapPlaceCandidate(SelectedOsmPlace("Kütüphane binası", 41.0001, 29.0001,

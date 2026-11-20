@@ -448,7 +448,7 @@ internal fun MapEditSubmissionStatus(draft: MapEditDraft, target: OsmCorrectionE
         properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnBackPress = !busy)) {
         Surface(Modifier.fillMaxSize().systemBarsPadding(), color = MaterialTheme.colorScheme.background) {
             Column(Modifier.verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OsmEditorHeading("Çatışma ve belirsiz gönderim", !busy, onClose)
+                OsmEditorHeading("Çatışma ve belirsiz gönderim", !busy, onBack = onClose)
                 Text("Yerel taslak", style = MaterialTheme.typography.titleMedium)
                 Text(draft.name.ifBlank { mapEditPresetLabel(draft.presetSnapshot) ?: draft.preset.label })
                 Text("${draft.latitude}, ${draft.longitude}", style = MaterialTheme.typography.bodySmall)
@@ -499,7 +499,7 @@ private fun MapEditNearbySheet(draft: MapEditDraft, busy: Boolean, onClose: () -
         Surface(Modifier.fillMaxSize().systemBarsPadding(), color = MaterialTheme.colorScheme.background) {
             LazyColumn(contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 item {
-                    OsmEditorHeading("Yakındaki nesneler", !busy, onClose)
+                    OsmEditorHeading("Yakındaki nesneler", !busy, onBack = onClose)
                     Text("Yeni noktanın çevresinde mevcut bir mekân veya bina varsa onu seçerek düzelt.")
                     Text(String.format(Locale.ROOT, "%.6f, %.6f", draft.latitude, draft.longitude),
                         style = MaterialTheme.typography.bodySmall)
@@ -660,7 +660,11 @@ private fun MapEditEditorContent(initial: MapEditDraft, busy: Boolean, canWriteM
         properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnBackPress = !locked, dismissOnClickOutside = !locked)) {
         Surface(Modifier.fillMaxSize().systemBarsPadding().imePadding(), color = MaterialTheme.colorScheme.background) {
             Column(Modifier.verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OsmEditorHeading(if (preview != null) "OSM gönderim önizlemesi" else "Yeni mekân", !locked) {
+                OsmEditorHeading(
+                    title = if (preview != null) "OSM gönderim önizlemesi" else "Yeni mekân",
+                    enabled = !locked,
+                    backDescription = if (preview != null) "Düzenlemeye dön" else "Geri",
+                ) {
                     if (preview != null) { preview = null; reviewed = false } else exit(onClose)
                 }
                 (error ?: authError)?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -682,7 +686,6 @@ private fun MapEditEditorContent(initial: MapEditDraft, busy: Boolean, canWriteM
                         } else { preview = null; reviewed = false; error = "OSM oturumu değişti. Yeniden incele." }
                     }, enabled = !locked && reviewed, modifier = Modifier.fillMaxWidth().testTag("osm-map-publish")) { Text("OSM'de yayımla") }
                     else Button(onClick = { onLogin(prepared) }, enabled = !locked && reviewed, modifier = Modifier.fillMaxWidth()) { Text("OSM düzenleme iznini etkinleştir") }
-                    TextButton(onClick = { preview = null; reviewed = false }, enabled = !locked) { Text("Düzenlemeye dön") }
                 } else {
                     Text("Haritadaki nokta", style = MaterialTheme.typography.titleSmall)
                     Text(String.format(Locale.ROOT, "%.6f, %.6f", initial.latitude, initial.longitude),
@@ -726,18 +729,18 @@ private fun MapEditEditorContent(initial: MapEditDraft, busy: Boolean, canWriteM
                 }
                 if (preview == null) OutlinedButton(enabled = !locked && saveValid, onClick = { onSave(draft) }, modifier = Modifier.fillMaxWidth()) { Text("Taslağı sakla") }
                 if (locked) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("Yayımlanıyor veya işlem hazırlanıyor…") }
-                TextButton(onClick = { exit(onClose) }, enabled = !locked) { Text("Kapat") }
+                if (prepared != null) TextButton(onClick = { exit(onClose) }, enabled = !locked) { Text("Kapat") }
             }
         }
     }
 }
 
 @Composable
-internal fun OsmEditorHeading(title: String, enabled: Boolean, onBack: () -> Unit) {
+internal fun OsmEditorHeading(title: String, enabled: Boolean, backDescription: String = "Geri", onBack: () -> Unit) {
     Row(Modifier.fillMaxWidth().heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         IconButton(onClick = onBack, enabled = enabled, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Geri")
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = backDescription)
         }
         Text(title, Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.headlineSmall)
     }

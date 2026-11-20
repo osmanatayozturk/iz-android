@@ -161,7 +161,7 @@ internal fun OsmSurveyEditor(
                         activeReview != null -> "OSM gönderim önizlemesi"
                         editingHours -> "Saat düzenleyici"
                         else -> "Yerinde gözlem ve doğrulama"
-                    }, !locked) {
+                    }, !locked, backDescription = if (editingHours) "Gözleme dön" else "Geri") {
                         if (review != null) resetReview() else if (editingHours) editingHours = false else exit(onClose)
                     }
                     Text(current?.tags?.get("name:tr") ?: current?.tags?.get("name") ?: initial.preset.label)
@@ -332,12 +332,6 @@ internal fun OsmSurveyEditor(
                                     Text("Saat ifadesini kontrol et. Taslağın saklanıyor.", color = MaterialTheme.colorScheme.error)
                                 }
                             }
-                            item {
-                                Button(onClick = { editingHours = false }, enabled = !locked,
-                                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("osm-survey-hours-return")) {
-                                    Text("Gözleme dön")
-                                }
-                            }
                         }
                     }
                     if (!editingHours) item {
@@ -392,7 +386,9 @@ internal fun OsmSurveyEditor(
                             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("osm-survey-save")) { Text("Taslağı sakla") }
                     }
                 }
-                if (!editingHours) item { TextButton(onClick = { exit(onClose) }, enabled = !locked, modifier = Modifier.heightIn(min = 48.dp)) { Text("Kapat") } }
+                if (activeReview != null) item {
+                    TextButton(onClick = { exit(onClose) }, enabled = !locked, modifier = Modifier.heightIn(min = 48.dp)) { Text("Kapat") }
+                }
             }
         }
     }

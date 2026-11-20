@@ -1580,7 +1580,7 @@ internal fun PlaceDetail(place: Place, state: DiaryState, onEdit: () -> Unit, on
             return@LazyColumn
         }
         item { Text("Kişisel yer günlüğü", style = MaterialTheme.typography.titleLarge) }
-        item { Row(verticalAlignment = Alignment.Top) { Column(Modifier.weight(1f)) { PageHeading(place.name, "${visits.size} ziyaret · Kişisel yer günlüğü") }; IconButton(onClick = onEdit) { Icon(Icons.Outlined.Edit, "Yer adını düzenle") } } }
+        item { Row(verticalAlignment = Alignment.Top) { Column(Modifier.weight(1f)) { PageHeading(place.name, "${visits.size} ziyaret") }; IconButton(onClick = onEdit) { Icon(Icons.Outlined.Edit, "Yer adını düzenle") } } }
         if (place.latitude != null && place.longitude != null) item { DiaryMap(emptyList(), listOf(place), Modifier.fillMaxWidth().height(200.dp).clip(RoundedCornerShape(24.dp))) }
         item {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

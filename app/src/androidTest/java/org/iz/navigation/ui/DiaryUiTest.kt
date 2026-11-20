@@ -28,7 +28,7 @@ class DiaryUiTest {
         compose.waitUntil(10_000) { compose.onAllNodesWithText(name).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Özel yürüyüş notum").assertIsDisplayed()
         compose.onNodeWithText("Yeni ziyaret").performClick()
-        compose.waitUntil(10_000) { compose.onAllNodesWithText("2 ziyaret · Kişisel yer günlüğü").fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("2 ziyaret").fetchSemanticsNodes().isNotEmpty() }
         val repository = DiaryRepository(compose.activity)
         val snapshot = runBlocking { repository.snapshot() }
         val place = snapshot.places.single { it.name == name }

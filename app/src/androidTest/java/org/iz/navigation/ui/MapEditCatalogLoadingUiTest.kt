@@ -77,7 +77,7 @@ class MapEditCatalogLoadingUiTest {
             assertNull(saved?.presetSnapshot)
             assertEquals(true, saved?.surveyConfirmed)
         }
-        compose.onNodeWithText("Kapat").performScrollTo().performClick()
+        compose.onNodeWithContentDescription("Geri").performScrollTo().performClick()
         compose.runOnIdle { assertEquals(1, closed) }
     }
 
@@ -106,7 +106,7 @@ class MapEditCatalogLoadingUiTest {
         compose.onNodeWithTag("osm-map-catalog-loading").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Tür kataloğu yüklenemedi.").assertDoesNotExist()
         compose.onNodeWithText("Taslağı sakla").performScrollTo().assertIsEnabled()
-        compose.onNodeWithText("Kapat").performScrollTo().assertIsEnabled()
+        compose.onNodeWithContentDescription("Geri").performScrollTo().assertIsEnabled()
         compose.runOnIdle { second.complete(fixture) }
         compose.waitUntil(5_000) { compose.onAllNodesWithTag("osm-map-catalog-loading").fetchSemanticsNodes().isEmpty() }
         compose.onNodeWithTag("osm-map-survey").performScrollTo().assertIsOn()

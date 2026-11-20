@@ -99,7 +99,8 @@ private fun PhoneSceneHost.quickScene(id: String) {
         compose.waitUntil(5_000) { compose.onAllNodesWithTag("shared-start").fetchSemanticsNodes().size == 1 }
         compose.onNodeWithTag("shared-start").assertIsDisplayed()
         capture(id, hasTestTag("shared-preview-content"), "QuickDirectionsDialog/SharedRoutePreviewContent",
-            "Synthetic route in the real preview without activation", native = true)
+            "Synthetic route in the real preview without activation", native = true,
+            expectedRoute = PhoneVisualFixture.route)
     } else {
         capture(id, hasTestTag("quick-mode-CAR"), "QuickDirectionsDialog", "Regular transport picker before activation")
     }
@@ -109,8 +110,10 @@ private fun PhoneSceneHost.orderScene() {
     val original = PhoneVisualFixture.route
     val stops = original.stops
     val reordered = listOf(stops[0], stops[2], stops[1], stops[3])
-    val proposed = original.copy(id = "visual-order", stops = reordered, durationSeconds = 380.0,
-        stopElapsedSeconds = listOf(0.0, 120.0, 250.0, 380.0))
+    val arrivalTimes = listOf(0.0, 120.0, 250.0, 380.0)
+    val proposed = original.copy(id = "visual-order", stops = reordered,
+        vertices = reordered.zip(arrivalTimes) { stop, elapsed -> RouteVertex(stop.coordinate, elapsed) },
+        durationSeconds = arrivalTimes.last(), stopElapsedSeconds = arrivalTimes, maneuvers = emptyList())
     val proposal = StopOrderProposal(stops, reordered, original, proposed,
         PhoneVisualFixture.epoch, approximateMotorcycle = true,
         createdAt = PhoneVisualFixture.epoch, credentialRevision = "visual", heuristic = true)
@@ -123,7 +126,7 @@ private fun PhoneSceneHost.ridingScene(id: String) {
     val lean = id == "lean"
     val nav = if (id == "record") PhoneVisualFixture.guided.copy(
         guidance = false, route = null, progress = null,
-    ) else PhoneVisualFixture.guided
+    ) else PhoneVisualFixture.guidedMapCapture
     show {
         val reading by produceState(
             LiveLeanReading(checkNotNull(nav.sessionId), 18.0, SystemClock.elapsedRealtime()), lean,
@@ -153,7 +156,8 @@ private fun PhoneSceneHost.ridingScene(id: String) {
         "drive" -> "Synthetic active guidance with maneuver and posted speed, recorder off"
         else -> "Synthetic free recording, recorder off"
     }
-    capture(id, anchor, "NavigationHomeContent", fixture, native = true)
+    capture(id, anchor, "NavigationHomeContent", fixture, native = true,
+        expectedRoute = nav.route, expectedFix = nav.fix?.coordinate?.takeIf { nav.guidance })
 }
 
 private fun PhoneSceneHost.operationsScene() {
@@ -209,4 +213,23 @@ internal object PhoneVisualFixture {
         progress = NavigationProgress(20.0, 400.0, 4_000.0, 0.0, 0, 300.0),
         roadSpeed = RoadSpeedState(36.0, RoadSpeedLimit(50.0, RoadSpeedSource.OSM, false,
             epoch, fix.coordinate, Transport.MOTORCYCLE, "visual-road"), true))
+
+    // These four stops lie near the live fix so the adaptive camera can show them at driving zoom.
+    val guidedMapCapture: NavigationState by lazy {
+        val coordinates = listOf(
+            WeatherCoordinate(40.00153, 32.00138),
+            WeatherCoordinate(40.00269, 32.00290),
+            WeatherCoordinate(40.00364, 32.00274),
+            WeatherCoordinate(40.00510, 32.00459),
+        )
+        val nearbyStops = stops.zip(coordinates) { stop, coordinate -> stop.copy(coordinate = coordinate) }
+        val arrivalTimes = listOf(0.0, 25.0, 39.0, 65.0)
+        val nearbyRoute = route.copy(
+            id = "visual-driving-route", stops = nearbyStops,
+            vertices = coordinates.zip(arrivalTimes, ::RouteVertex),
+            distanceMeters = 490.0, durationSeconds = arrivalTimes.last(), stopElapsedSeconds = arrivalTimes,
+            maneuvers = route.maneuvers.map { it.copy(endElapsedSeconds = arrivalTimes.last()) },
+        )
+        guided.copy(route = nearbyRoute, progress = NavigationProgress(10.0, 55.0, 415.0, 0.0, 0, 260.0))
+    }
 }

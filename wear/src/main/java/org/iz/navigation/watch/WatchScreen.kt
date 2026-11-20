@@ -214,7 +214,7 @@ internal fun WatchScreen(
                 }
                 WatchPage.HEALTH -> {
                     item { WatchValue(if (liveHealth.armed) "Otomatik ölçüm açık" else "Otomatik ölçüm kapalı") }
-                    item { Note(liveHealth.status, highlighted = liveHealth.capturing) }
+                    if (liveHealth.status.isNotBlank()) item { Note(liveHealth.status, highlighted = liveHealth.capturing) }
                     if (liveHealth.capturing && liveHealth.phoneId == state.phoneId && activeId != null &&
                         liveHealth.journeyId == activeId) item {
                         Note(liveHealth.latestSampleAt?.let { "Saat sensörü · Son ölçüm ${WatchSurfacePolicy.age(it, now)}" }

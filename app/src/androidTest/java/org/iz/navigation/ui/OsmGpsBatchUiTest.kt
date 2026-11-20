@@ -93,11 +93,13 @@ class OsmGpsBatchUiTest {
         }
         compose.onNodeWithText("GPS önizleme ve toplu onay").assertIsDisplayed()
         compose.onNodeWithText("2 GPS izini OSM'ye gönder?").assertIsDisplayed()
-        compose.onNodeWithText("Seçilileri gönder · 2 iz").assertIsDisplayed()
+        compose.onNodeWithTag("osm-gps-consent-confirm").assertIsDisplayed()
+            .assertTextContains("Tanımlanabilir olarak gönder · 2 iz")
         compose.onNodeWithText("Fixture user", substring = true).assertExists()
         compose.onNodeWithText("noktaları ve kayıt zamanlarını", substring = true).assertExists()
         compose.onNodeWithText("herkese açık iz listesinde", substring = true).assertExists()
-        compose.onNodeWithTag("osm-gps-visibility-identifiable").assertIsSelected()
+        compose.onNodeWithTag("osm-gps-visibility-identifiable").assertIsDisplayed().assertIsSelected()
+        compose.onNodeWithTag("osm-gps-visibility-trackable").assertIsDisplayed().assertIsNotSelected()
         compose.onNodeWithTag("osm-gps-consent-confirm").assertIsEnabled()
         compose.onNodeWithTag("osm-gps-preview-coast")
             .assert(SemanticsMatcher.expectValue(OsmGpsPreparedSha256, traces[0].sha256))
@@ -115,7 +117,8 @@ class OsmGpsBatchUiTest {
             .assert(SemanticsMatcher.expectValue(OsmGpsPreparedSha256, traces[1].sha256))
         compose.onNodeWithTag("osm-gps-visibility-trackable").performScrollTo().performClick().assertIsSelected()
         compose.onNodeWithTag("osm-gps-visibility-identifiable").assertIsNotSelected()
-        compose.onNodeWithText("Görünürlük Takip Edilebilir").assertExists()
+        compose.onNodeWithTag("osm-gps-consent-confirm").assertIsDisplayed()
+            .assertTextContains("Takip Edilebilir olarak gönder · 2 iz")
         compose.runOnIdle { assertEquals(listOf(OsmGpxVisibility.IDENTIFIABLE), confirmations) }
         compose.onNodeWithTag("osm-gps-consent-confirm").performClick()
         compose.runOnIdle {

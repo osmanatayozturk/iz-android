@@ -20,7 +20,7 @@ import java.util.UUID
 internal data class WatchLiveHealthState(val armed: Boolean = false, val onBody: Boolean? = null,
     val phoneId: String? = null, val sessionId: String? = null, val journeyId: String? = null, val capturing: Boolean = false, val latestHeartRate: Double? = null,
     val latestHeartAt: Long? = null, val steps: Long? = null, val buffered: Int = 0,
-    val status: String = "Otomatik saat ölçümü kapalı", val latestSampleAt: Long? = null)
+    val status: String = "", val latestSampleAt: Long? = null)
 
 internal object WatchHealthRuntime {
     var running = false

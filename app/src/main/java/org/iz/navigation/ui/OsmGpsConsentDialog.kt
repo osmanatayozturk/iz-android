@@ -81,7 +81,23 @@ internal fun OsmGpsConsentDialog(
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("${preview.count} GPS izini OSM'ye gönder?", style = MaterialTheme.typography.titleMedium)
                     Text("OSM hesabı $username")
-                    Text("Görünürlük ${visibility.label}")
+                    Text("Bu gönderimdeki tüm izler için görünürlük")
+                    Column(Modifier.selectableGroup()) {
+                        OsmGpxVisibility.entries.forEach { option ->
+                            Row(
+                                Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("osm-gps-visibility-${option.wireValue}")
+                                    .selectable(visibility == option, enabled = enabled, role = Role.RadioButton,
+                                        onClick = { onVisibility(option) }),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                RadioButton(selected = visibility == option, onClick = null, enabled = enabled)
+                                Text(option.label)
+                            }
+                        }
+                    }
+                    Text("OSM API'si her iki seçenekte de gönderilen noktaları ve kayıt zamanlarını paylaşır.")
+                    Text("Tanımlanabilir iz OSM hesabınla ilişkilendirilir ve herkese açık iz listesinde görünür.")
                     Text("İz ${preview.index + 1}/${preview.count}")
                     OsmGpsPreview(preview.trace, onShowPoints = { showPoints = true })
                     Text("Başlangıç ve bitişten en az 1 km çıkarıldı.")
@@ -98,29 +114,12 @@ internal fun OsmGpsConsentDialog(
                             }
                         }
                     }
-                    Text("OSM API'si her iki seçenekte de gönderilen noktaları ve kayıt zamanlarını paylaşır.")
-                    Text("Tanımlanabilir iz OSM hesabınla ilişkilendirilir ve herkese açık iz listesinde görünür.")
-                    Text("Bu gönderimdeki tüm izler için görünürlük")
-                    Column(Modifier.selectableGroup()) {
-                        OsmGpxVisibility.entries.forEach { option ->
-                            Row(
-                                Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("osm-gps-visibility-${option.wireValue}")
-                                    .selectable(visibility == option, enabled = enabled, role = Role.RadioButton,
-                                        onClick = { onVisibility(option) }),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                RadioButton(selected = visibility == option, onClick = null, enabled = enabled)
-                                Text(option.label)
-                            }
-                        }
-                    }
                 }
                 HorizontalDivider()
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                     Button(onClick = onConfirm, enabled = enabled,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("osm-gps-consent-confirm")) {
-                        Text("Seçilileri gönder · ${preview.count} iz")
+                        Text("${visibility.label} olarak gönder · ${preview.count} iz")
                     }
                     TextButton(onClick = onDismiss,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("osm-gps-consent-cancel")) {

@@ -176,8 +176,9 @@ class OsmSurveyNativeRoutingTest {
             list.performScrollToNode(hasTestTag("osm-survey-hours-open"))
             compose.onNodeWithTag("osm-survey-hours-open").performClick()
         } else if (!tag.startsWith("osm-survey-hours-") && tag != "osm-survey-save" && editingHours) {
-            list.performScrollToNode(hasTestTag("osm-survey-hours-return"))
-            compose.onNodeWithTag("osm-survey-hours-return").performClick()
+            val back = hasContentDescription("Gözleme dön")
+            list.performScrollToNode(back)
+            compose.onNode(back).performClick()
         }
         compose.onNodeWithTag("osm-survey-editor-list").performScrollToNode(hasTestTag(tag))
         return compose.onNodeWithTag(tag)
@@ -189,8 +190,10 @@ class OsmSurveyNativeRoutingTest {
         editor("osm-survey-wheelchair-UNKNOWN").assertIsSelected()
     }
     private fun editorClose() {
-        compose.onNodeWithTag("osm-survey-editor-list").performScrollToNode(hasText("Kapat"))
-        compose.onNode(hasText("Kapat") and hasAnyAncestor(hasTestTag("osm-survey-editor-list"))).performClick()
+        val back = hasContentDescription("Geri")
+        val list = hasTestTag("osm-survey-editor-list")
+        compose.onNode(list).performScrollToNode(back)
+        compose.onNode(back and hasAnyAncestor(list)).performClick()
     }
     private fun assertSameDraft(repository: DiaryRepository, saved: MapEditDraft, ref: OsmRef) {
         val current = runBlocking { repository.snapshot().mapEdits.filter { it.targetType == ref.type && it.targetId == ref.id } }
