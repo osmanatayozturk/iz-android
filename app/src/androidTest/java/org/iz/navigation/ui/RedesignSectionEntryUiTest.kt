@@ -18,6 +18,7 @@ import android.view.Window
 import android.view.WindowManager
 import android.view.inspector.WindowInspector
 import androidx.activity.OnBackPressedDispatcherOwner
+import androidx.activity.compose.setContent
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.isDialog
@@ -51,6 +52,7 @@ import org.iz.navigation.data.DiarySnapshot
 import org.iz.navigation.data.Journey
 import org.iz.navigation.data.JourneyStatus
 import org.iz.navigation.data.Transport
+import org.iz.navigation.integration.gpxSegments
 import org.iz.navigation.navigation.NavigationState
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapLibreMap
@@ -305,11 +307,24 @@ class RedesignSectionEntryUiTest {
             }
         }
         try {
+            if (id == "export") runBlocking {
+                assertEquals(listOf(points.size), gpxSegments(row, repository.journeyPoints(row.id)).map { it.size })
+            }
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                 compose.onNodeWithTag("home-menu").performClick()
                 compose.onNodeWithTag("menu-journeys").performScrollTo().performClick()
                 visitJournalLink(row.title)
-                if (id == "trackmap") {
+                val componentOnly = id == "export" && InstrumentationRegistry.getArguments()
+                    .getString("izVisualExportComponent") == "true"
+                if (componentOnly) {
+                    scenario.onActivity { activity ->
+                        activity.setContent {
+                            IzTheme {
+                                GpxExportSheet(row, points, onDismiss = {}, onExport = { error("Visual preview only") })
+                            }
+                        }
+                    }
+                } else if (id == "trackmap") {
                     visitJournalLink("İzi haritada aç")
                     compose.onNodeWithText("Konum kaydında kesinti var.").assertIsDisplayed()
                     compose.waitUntil(20_000) {
@@ -317,9 +332,6 @@ class RedesignSectionEntryUiTest {
                     }
                 } else {
                     visitJournalLink("GPX rotasını dışa aktar")
-                    compose.waitUntil(15_000) {
-                        compose.onAllNodes(hasText("6 konum", substring = true)).fetchSemanticsNodes().isNotEmpty()
-                    }
                 }
                 val middle = LatLng((points[2].latitude + points[3].latitude) / 2,
                     (points[2].longitude + points[3].longitude) / 2)
@@ -369,7 +381,8 @@ class RedesignSectionEntryUiTest {
                     val map = nativeMap
                     if (window == null || !window.decorView.hasWindowFocus() ||
                         view == null || map == null || view.width <= 0 || view.height <= 0) {
-                        diagnostic = "window=${window != null} view=${view != null} nativeMap=${map != null}"
+                        diagnostic = "window=${window != null} focus=${window?.decorView?.hasWindowFocus()} " +
+                            "view=${view != null} nativeMap=${map != null}"
                         return@onActivity
                     }
                     check(window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE == 0)

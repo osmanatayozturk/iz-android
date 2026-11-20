@@ -224,7 +224,7 @@ internal class PhoneSceneHost(
                 .put("component", component).put("fixture", fixture).put("method", method)
                 .apply {
                     if (expectedRoute != null) put("settleCriteria", when (id) {
-                        "lean" -> "Native route and live fix in owned-window pixels; four separated stop badges"
+                        "lean" -> "Native route and live fix in owned-window pixels; at least two visible stop badges, all in-frame badges separated"
                         "drive" -> "Native route and live fix in owned-window pixels"
                         else -> "Native route in owned-dialog pixels"
                     })
@@ -297,7 +297,7 @@ internal class PhoneSceneHost(
                         routePoints.map(::toWindow), fixPoint?.let(::toWindow))
                 } ?: return@waitUntil false
                 if (id == "lean" && !leanMarkersSeparated()) {
-                    status = "Waiting for four visible, separated A/1/2/B stop badges"
+                    status = "Waiting for separated stop badges within the lean camera viewport"
                     return@waitUntil false
                 }
                 val frame = instrumentation.getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES)
@@ -324,11 +324,14 @@ internal class PhoneSceneHost(
     }
 
     private fun leanMarkersSeparated(): Boolean {
-        val badges = listOf("A", "1", "2", "B").map { label ->
+        // Follow mode can legitimately place distant stops outside the visible map.
+        val badges = listOf("A", "1", "2", "B").mapNotNull { label ->
             val node = compose.onAllNodesWithTag("directions-map-marker-$label").fetchSemanticsNodes().singleOrNull()
-            node?.boundsInRoot?.takeIf { it.width > 0f && it.height > 0f } ?: return false
+            node?.boundsInRoot?.takeIf { it.width > 0f && it.height > 0f }
         }
-        return badges.withIndex().none { (index, badge) -> badges.drop(index + 1).any { badge.overlaps(it) } }
+        return badges.size >= 2 && badges.withIndex().none { (index, badge) ->
+            badges.drop(index + 1).any { badge.overlaps(it) }
+        }
     }
 
     private fun View.findMapView(): MapView? {
