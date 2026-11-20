@@ -1,5 +1,18 @@
 # İz sürüm değişikliği planı
 
+## Arayüz yenilemesi — kaynak teslimi
+
+Telefon 0.13.5 / code 34 ve Wear 0.7.0 / code 12 sürüm bilgileriyle telefon, Wear ve Android Auto görünümlerinde ortak tasarım dili uygulanır. Telefon ve Wear palet eşlemesi protokol v8 kapsamındadır. Kaynak teslimi, arayüz değişikliklerini ve bunları kontrol eden testleri içerir.
+
+| Alan | Kanıt ve kabul kapsamı |
+|---|---|
+| Güncel kaynak ve lint | Ürün ağacı `0082777`, AndroidTest takip adayı `952e663`. Debug lint sonucu telefon için 0 hata / 111 uyarı, Wear için 0 hata / 31 uyarı. |
+| Host testleri | `0b59801` üzerinde 1.769 telefon ve 83 Wear birim testi geçti. Ortak protokolün 49 testi `198777b` kaydına ait. Sonraki hedefli sonuçlarda `12b53df` üzerinde 31 mesafe testi, `f6101ce` üzerinde 5 hava testi geçti. Her sonuç kendi kaynak adayıyla bağlıdır. |
+| QA paketleri | Telefon ve Wear için çevrimdışı uygulama ve test APK’ları doğrulandı. Telefon ve Wear uygulamaları `0082777`, telefon test paketi `952e663`, Wear test paketi `1ea0ce5` kaynaklıdır. |
+| Görsel kapsam | 106 görünümden 93’ü gösterilen durumlar için geçti. 67 hedef durum tam, 26 hedef durum kısmen gösterildi. Bir kontrol çalıştırılmadı, 12 görünüm oluşturulamadı. Önceki kareler kendi adaylarına bağlıdır. |
+| Ayrı kabul gerektiren alanlar | Korunan trafik içeriği, yerel Android Auto alıcısı, fiziksel Wear ekranı ve döner kontrol, elle TalkBack ve sahada yatış doğruluğu/gecikmesi. Android Auto şablon kanıtı sentetik host koşusundan gelir. |
+| Teslim | GitHub kaynak ve belgeleri. APK dağıtımı ve uygulama sürüm yayını ayrı ele alınır. |
+
 ## Telefon 0.13.5 / code 34 - yakındaki yerler için güvenli teşhis
 
 Amaç, yakındaki yerleri bulma hatasında kullanıcının açabileceği **Teknik ayrıntı** ile güvenli hata kodunu görünür kılmaktır. Sabit kod, aşama, geçen süre ve varsa HTTP durumu, bekleme ve sabit sınır bilgileri son deneme boyunca bellekte tutulur. Yeni deneme eski teşhisi temizler ve ayrıntıyı kapatır. Ham hata mesajı, URL, sorgu, koordinat, yanıt gövdesi, hesap ve anahtar teşhis kapsamında saklanmaz veya gönderilmez.

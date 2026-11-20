@@ -1,5 +1,13 @@
 # Değişiklik geçmişi
 
+## Telefon 0.13.5 / code 34 ve Wear 0.7.0 / code 12 — arayüz kaynak güncellemesi
+
+Telefon, Wear ve Android Auto arayüzleri ortak görsel dil doğrultusunda yenilendi. Telefonun ana harita girişleri, kompakt sürüş göstergesi, günlük, kayıtlı yerler, OSM katkı akışları ve ayarları güncellendi. Wear başlangıç, hava ve sağlık görünümleri ile Android Auto şablonları da bu kaynak teslimine dahil. Telefon ve Wear arasındaki palet kimliği protokol v8 ile taşınıyor.
+
+Görsel inceleme matrisi 106 görünüm içeriyor. Gösterilen durumlar için 93 kayıt geçti, 1 kontrol çalıştırılmadı ve 12 görünüm oluşturulamadı. Geçen kayıtların 67’sinde hedef durum tam, 26’sında kısmen gösterildi. Trafik içeriği, yerel Android Auto alıcısı, fiziksel Wear davranışı ve sahada yatış ölçümü ayrı doğrulama gerektiriyor.
+
+`0082777` ürün ağacını içeren `952e663` adayında iki debug lint görevi geçti. Telefon 111, Wear 31 uyarı verdi ve ikisinde de hata yoktu. QA paketleri çevrimdışı hazırlandı. Bu teslim GitHub kaynak ve belgelerini kapsar.
+
 ## Telefon 0.13.5 / code 34 - yakındaki yerler için güvenli teşhis (sınırlı QA kabulü)
 
 Yakındaki yerleri bulma işlemi başarısız olduğunda **Teknik ayrıntı** bölümü sabit hata kodunu, aşamayı, geçen süreyi ve varsa HTTP durumu, bekleme süresi ve sabit sınır bilgisini gösterir. Yeniden deneme kullanıcı tarafından başlatılır; yeni deneme önceki teşhisi temizler ve ayrıntıyı kapatır. Son denemenin teşhisi yalnız bellekte tutulur; ham hata mesajı, URL, sorgu, koordinat, yanıt gövdesi, hesap veya anahtar teşhis kaydına alınmaz ve gönderilmez.
