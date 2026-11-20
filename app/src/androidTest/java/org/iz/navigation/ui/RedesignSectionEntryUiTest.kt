@@ -345,7 +345,8 @@ class RedesignSectionEntryUiTest {
         }
     }
 
-    private data class JournalCapture(val window: Window, val x: Int, val y: Int)
+    private data class JournalCapture(val window: Window, val x: Int, val y: Int,
+        val contentX: Int, val contentY: Int, val width: Int, val height: Int)
 
     private fun captureJournalNativeWindow(
         scenario: ActivityScenario<MainActivity>, id: String, app: IzApplication, middle: LatLng,
@@ -379,7 +380,7 @@ class RedesignSectionEntryUiTest {
                         view?.getMapAsync { map -> if (viewedMap === view) nativeMap = map }
                     }
                     val map = nativeMap
-                    if (window == null || !window.decorView.hasWindowFocus() ||
+                    if (window == null || !window.decorView.isAttachedToWindow ||
                         view == null || map == null || view.width <= 0 || view.height <= 0) {
                         diagnostic = "window=${window != null} focus=${window?.decorView?.hasWindowFocus()} " +
                             "view=${view != null} nativeMap=${map != null}"
@@ -396,10 +397,12 @@ class RedesignSectionEntryUiTest {
                     diagnostic = "routes=${source.size} centerInViewport=$inViewport " +
                         "rendered=${hits.size} zoom=${map.cameraPosition.zoom}"
                     if (source.isEmpty() || hits.none { it.getStringProperty("color") == color }) return@onActivity
-                    val offset = IntArray(2).also(view::getLocationInWindow)
-                    val origin = IntArray(2).also(window.decorView::getLocationInWindow)
-                    capture = JournalCapture(window, offset[0] - origin[0] + point.x.roundToInt(),
-                        offset[1] - origin[1] + point.y.roundToInt())
+                    // The captured SurfaceControl includes an elevated dialog's shadow insets.
+                    val offset = IntArray(2).also(view::getLocationInSurface)
+                    val decor = window.decorView
+                    val origin = IntArray(2).also(decor::getLocationInSurface)
+                    capture = JournalCapture(window, offset[0] + point.x.roundToInt(), offset[1] + point.y.roundToInt(),
+                        origin[0], origin[1], decor.width, decor.height)
                 }
                 val frame = capture ?: return@waitUntil false
                 val bitmap = automation.takeScreenshot(frame.window) ?: return@waitUntil false
@@ -407,11 +410,14 @@ class RedesignSectionEntryUiTest {
                     try { checkNotNull(bitmap.copy(Bitmap.Config.ARGB_8888, false)) } finally { bitmap.recycle() }
                 }
                 try {
-                    if (pixels.width == frame.window.decorView.width && pixels.height == frame.window.decorView.height &&
-                        hasJournalLinePixel(pixels, frame.x, frame.y, Color.parseColor(color))) {
-                        settled = pixels
+                    val contentFits = frame.contentX >= 0 && frame.contentY >= 0 &&
+                        frame.contentX + frame.width <= pixels.width && frame.contentY + frame.height <= pixels.height
+                    if (contentFits && hasJournalLinePixel(pixels, frame.x, frame.y, Color.parseColor(color))) {
+                        settled = Bitmap.createBitmap(pixels, frame.contentX, frame.contentY, frame.width, frame.height)
                     } else {
-                        diagnostic += " ownedWindow=${pixels.width}x${pixels.height} routePixelsMissing=true"
+                        diagnostic += " surface=${pixels.width}x${pixels.height} " +
+                            "content=${frame.contentX},${frame.contentY}:${frame.width}x${frame.height} " +
+                            "sample=${frame.x},${frame.y} routePixelsMissing=true"
                     }
                     settled != null
                 } finally {
