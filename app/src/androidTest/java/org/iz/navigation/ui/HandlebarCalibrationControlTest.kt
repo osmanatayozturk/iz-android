@@ -23,9 +23,9 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
-import org.iz.navigation.lean.HandlebarCalibrationResult
+import org.iz.navigation.lean.CalibrationFailure
+import org.iz.navigation.lean.CalibrationResult
 import org.iz.navigation.lean.HandlebarCalibrationStep
-import org.iz.navigation.lean.HandlebarLeanGate
 import org.iz.navigation.lean.LeanCalibration
 import org.junit.Assert.*
 import org.junit.Rule
@@ -38,6 +38,25 @@ import java.util.UUID
 @RunWith(AndroidJUnit4::class)
 class HandlebarCalibrationControlTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test fun bodyCalibrationShowsTheSensorFailureAndAllowsRetryWithoutSaving() {
+        var attempts = 0
+        var saves = 0
+        compose.setContent { EvidenceFixture {
+            BodyCalibrationControl(true, { true }, {
+                attempts++
+                CalibrationResult.Failed(if (attempts == 1) CalibrationFailure.MOVEMENT else CalibrationFailure.INSUFFICIENT_SAMPLES)
+            }, { saves++ }, {})
+        } }
+        compose.onNodeWithText("Dik referans al").assertIsNotEnabled()
+        compose.onNode(isToggleable()).performClick()
+        compose.onNodeWithText("Dik referans al").performClick()
+        compose.onNodeWithText(CalibrationFailure.MOVEMENT.message).assertIsDisplayed()
+        compose.onNodeWithText("Dik referans al").performClick()
+        compose.onNodeWithText(CalibrationFailure.INSUFFICIENT_SAMPLES.message).assertIsDisplayed()
+        compose.onNodeWithText(CalibrationFailure.MOVEMENT.message).assertDoesNotExist()
+        compose.runOnIdle { assertEquals(2, attempts); assertEquals(0, saves) }
+    }
 
     @Test fun keyboardCancelReturnsFocusToOpenerAndDoesNotSave() {
         var saves = 0
@@ -56,7 +75,7 @@ class HandlebarCalibrationControlTest {
     }
 
     @Test fun parkConfirmationAndExplicitSaveGateTheProfile() {
-        val completed = CompletableDeferred<HandlebarCalibrationResult>()
+        val completed = CompletableDeferred<CalibrationResult>()
         val profile = LeanCalibration("fixture", 1, listOf(0.0, 0.0, 9.8), listOf(0.0, 0.0, 0.0),
             bodyConfirmed = false, steeringAxis = listOf(0.0, 0.0, -1.0))
         var saved: LeanCalibration? = null
@@ -76,7 +95,7 @@ class HandlebarCalibrationControlTest {
         pressOn("handlebar-calibration-start", KeyEvent.KEYCODE_DPAD_CENTER)
         compose.onNodeWithTag("handlebar-calibration-step").assertIsDisplayed()
         captureEvidence(EvidenceFrame.STEP, compose.onNode(isDialog()))
-        compose.runOnIdle { assertNull(saved); completed.complete(HandlebarCalibrationResult.Ready(profile)) }
+        compose.runOnIdle { assertNull(saved); completed.complete(CalibrationResult.Ready(profile)) }
         pressOn("handlebar-calibration-save", KeyEvent.KEYCODE_DPAD_CENTER)
         awaitFocus("handlebar-calibration-open")
         compose.runOnIdle { assertSame(profile, saved) }
@@ -111,7 +130,7 @@ class HandlebarCalibrationControlTest {
                 step(HandlebarCalibrationStep.LEFT)
                 accepted()
                 step(HandlebarCalibrationStep.RIGHT)
-                retry(HandlebarCalibrationStep.RIGHT)
+                retry(HandlebarCalibrationStep.RIGHT, CalibrationFailure.MOVEMENT)
                 retries++
                 step(HandlebarCalibrationStep.RIGHT)
                 awaitCancellation()
@@ -120,7 +139,8 @@ class HandlebarCalibrationControlTest {
         touch("handlebar-calibration-open")
         touch("handlebar-calibration-parked", scroll = true)
         touch("handlebar-calibration-start", scroll = true)
-        compose.onNodeWithText("Gidonu önceki sol konuma getir", substring = true).assertIsDisplayed()
+        compose.onNodeWithText(CalibrationFailure.MOVEMENT.message, substring = true)
+            .assert(hasText("Gidonu önceki sol konuma getir", substring = true)).assertIsDisplayed()
         enterDirectionalMode("handlebar-calibration-retry")
         captureEvidence(EvidenceFrame.RETRY, compose.onNode(isDialog()))
         pressOn("handlebar-calibration-retry", KeyEvent.KEYCODE_DPAD_CENTER)
@@ -207,9 +227,9 @@ class HandlebarCalibrationControlTest {
 
     /** The two callers mount synthetic content and crop only its Compose dialog or fixture. */
     private fun captureEvidence(frame: EvidenceFrame, node: SemanticsNodeInteraction) {
-        if (!HandlebarLeanGate.enabled) return
         val app = InstrumentationRegistry.getInstrumentation().targetContext
-        check(app.packageName == "org.iz.navigation.qahandlebar20261118")
+        if (app.packageName != "org.iz.navigation.qahandlebar20261118" ||
+            InstrumentationRegistry.getArguments().getString("captureHandlebarEvidence") != "true") return
         val directory = File(app.cacheDir, "handlebar-calibration-qa/$evidenceRunId")
         check(directory.isDirectory || directory.mkdirs())
         val bitmap = node.captureToImage().asAndroidBitmap()

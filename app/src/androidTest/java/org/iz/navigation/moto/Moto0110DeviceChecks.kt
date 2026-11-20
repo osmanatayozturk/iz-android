@@ -443,7 +443,7 @@ class Moto0110DeviceChecks {
             }
             var callbacks = 0
             val capture = LeanSensorCapture(absentSensors, { callbacks++ })
-            try { assertFalse(capture.start()); assertEquals(0, callbacks) } finally { capture.stop() }
+            try { assertEquals(org.iz.navigation.lean.CalibrationFailure.SENSOR_SERVICE, capture.startOrFailure()); assertEquals(0, callbacks) } finally { capture.stop() }
             val point = TrackPoint(id = id(), journeyId = moto.id, latitude = 0.0, longitude = 0.0,
                 recordedAt = moto.startedAt + 1_000, accuracy = 5f)
             diary.addPoint(point)

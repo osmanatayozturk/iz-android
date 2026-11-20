@@ -27,16 +27,15 @@ internal fun validHandlebarReference(reference: LeanCalibration?): Boolean =
         reference.gyroBias.sumOf { it * it } <= 0.25 &&
         reference.steeringAxis.size == 3 && reference.steeringAxis.sumOf { it * it } in 0.98..1.02
 
-private fun matchesMount(mount: LeanMount, reference: LeanCalibration?, handlebarEnabled: Boolean): Boolean =
+private fun matchesMount(mount: LeanMount, reference: LeanCalibration?): Boolean =
     when (mount) {
         LeanMount.BODY -> validLeanReference(reference)
-        LeanMount.HANDLEBAR -> handlebarEnabled && validHandlebarReference(reference)
+        LeanMount.HANDLEBAR -> validHandlebarReference(reference)
         LeanMount.UNKNOWN -> false
     }
 
-internal fun leanCaptureEligible(journey: Journey?, settings: LeanCaptureSettings,
-    handlebarEnabled: Boolean = HandlebarLeanGate.enabled): Boolean =
-    settings.enabled && matchesMount(settings.mount, settings.calibration, handlebarEnabled) &&
+internal fun leanCaptureEligible(journey: Journey?, settings: LeanCaptureSettings): Boolean =
+    settings.enabled && matchesMount(settings.mount, settings.calibration) &&
         journey?.transport == Transport.MOTORCYCLE && journey.status == JourneyStatus.CONFIRMED && journey.endedAt == null
 
 /** Explicit single-MOTO feature settings; not a transport/profile or a diary inference. */
@@ -55,7 +54,7 @@ internal class LeanSettingsStore internal constructor(context: Context) {
             require(body || json.optInt("version") == 2)
             LeanCalibration(json.getString("epoch"), json.getLong("created"), vector("gravity"), vector("bias"),
                 body, if (json.has("steeringAxis")) vector("steeringAxis") else emptyList())
-        }?.takeIf { matchesMount(mount, it, HandlebarLeanGate.enabled) }
+        }?.takeIf { matchesMount(mount, it) }
         LeanCaptureSettings(prefs.getBoolean("enabled", false), mount, reference)
     }.getOrElse { LeanCaptureSettings() }
     @Synchronized fun enabled(value: Boolean) = save(state.value.copy(enabled = value))
@@ -64,7 +63,7 @@ internal class LeanSettingsStore internal constructor(context: Context) {
     }
     @Synchronized fun clearCalibration() = save(state.value.copy(calibration = null))
     @Synchronized fun reference(value: LeanCalibration) {
-        require(matchesMount(state.value.mount, value, HandlebarLeanGate.enabled))
+        require(matchesMount(state.value.mount, value))
         save(state.value.copy(calibration = value))
     }
     private fun save(value: LeanCaptureSettings) {

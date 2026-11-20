@@ -1,5 +1,10 @@
 # Değişiklik geçmişi
 
+## Telefon 0.14.0 (36) · Motosiklet yatış raporu
+
+- Genel telefon sürümünde gidona sabitlenen telefonla sürüş sonrası yatış tahmini alınabilir. Gidon ve gövde için park hâlinde ayrı kalibrasyon yapılır.
+- Kalibrasyon tamamlanamadığında ekran ilgili nedeni gösterir. Sensör veya GPS verisi yetersiz kalan sürüş bölümlerinde sayısal yatış gösterilmez. Gidon tahmininin açısal doğruluğu bağımsız bir şasi ölçümüyle henüz doğrulanmadı.
+
 ## Telefon 0.13.5 / code 34 ve Wear 0.7.0 / code 12 — arayüz kaynak güncellemesi
 
 Telefon, Wear ve Android Auto arayüzleri ortak görsel dil doğrultusunda yenilendi. Telefonun ana harita girişleri, kompakt sürüş göstergesi, günlük, kayıtlı yerler, OSM katkı akışları ve ayarları güncellendi. Wear başlangıç, hava ve sağlık görünümleri ile Android Auto şablonları da bu kaynak teslimine dahil. Telefon ve Wear arasındaki palet kimliği protokol v8 ile taşınıyor.

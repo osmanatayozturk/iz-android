@@ -38,7 +38,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
-import org.iz.navigation.lean.HandlebarCalibrationResult
+import org.iz.navigation.lean.CalibrationFailure
+import org.iz.navigation.lean.CalibrationResult
 import org.iz.navigation.lean.HandlebarCalibrationStep
 import org.iz.navigation.lean.LeanCalibration
 
@@ -49,8 +50,8 @@ internal fun HandlebarCalibrationControl(
     onSave: (LeanCalibration) -> Unit,
     onReset: () -> Unit,
     capture: suspend (
-        (HandlebarCalibrationStep) -> Unit, () -> Unit, suspend (HandlebarCalibrationStep) -> Unit,
-    ) -> HandlebarCalibrationResult,
+        (HandlebarCalibrationStep) -> Unit, () -> Unit, suspend (HandlebarCalibrationStep, CalibrationFailure) -> Unit,
+    ) -> CalibrationResult,
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val hostWindow = LocalWindowInfo.current
@@ -74,6 +75,7 @@ internal fun HandlebarCalibrationControl(
     var retry by remember { mutableStateOf<CompletableDeferred<Unit>?>(null) }
     var result by remember { mutableStateOf<LeanCalibration?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var interrupted by remember { mutableStateOf(false) }
     var attempt by remember { mutableLongStateOf(0L) }
     fun close() {
         attempt++
@@ -86,7 +88,11 @@ internal fun HandlebarCalibrationControl(
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_RESUME -> resumed = true
-                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> { resumed = false; close() }
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
+                    if (job != null) interrupted = true
+                    resumed = false
+                    close()
+                }
                 else -> Unit
             }
         }
@@ -103,9 +109,13 @@ internal fun HandlebarCalibrationControl(
         }
     }
     Text("Gidon yatışı deneysel bir sürüş sonrası tahmindir.")
-    Button(onClick = { restoreFocus = false; open = true }, modifier = Modifier.calibrationFocus(opener)
+    Button(onClick = { interrupted = false; restoreFocus = false; open = true }, modifier = Modifier.calibrationFocus(opener)
         .heightIn(min = 48.dp).testTag("handlebar-calibration-open")) {
         Text(if (hasProfile) "Gidonu yeniden kalibre et" else "Gidonu kalibre et")
+    }
+    if (interrupted) {
+        Text("Ekrandan ayrıldığın için ölçüm durdu. Gidon kalibrasyonunu yeniden başlat.",
+            Modifier.semantics { liveRegion = LiveRegionMode.Polite }, color = MaterialTheme.colorScheme.error)
     }
     if (hasProfile) {
         Text("Gidon kalibrasyonu hazır.")
@@ -174,26 +184,28 @@ internal fun HandlebarCalibrationControl(
                                         checkOwner()
                                         stepAccepted = true
                                         cue(ToneGenerator.TONE_PROP_ACK)
-                                    }, { failed ->
+                                    }, { failed, reason ->
                                         checkOwner()
+                                        error = reason.message
                                         step = failed
                                         stepAccepted = false
                                         cue(ToneGenerator.TONE_PROP_NACK)
                                         val request = CompletableDeferred<Unit>()
                                         retry = request
                                         request.await()
+                                        checkOwner()
+                                        error = null
                                         retry = null
                                         step = null
                                     })
                                     ensureActive()
                                     if (owner != attempt || !resumed || !currentAllowed()) return@launch
                                     when (measured) {
-                                        is HandlebarCalibrationResult.Ready -> {
+                                        is CalibrationResult.Ready -> {
                                             result = measured.profile
                                         }
-                                        HandlebarCalibrationResult.SensorsUnavailable -> error = "İvmeölçer ve jiroskop gerekli."
-                                        HandlebarCalibrationResult.InvalidSamples -> {
-                                            error = "Hareketler doğrulanamadı. Gidonu düz konuma getirip yeniden dene."
+                                        is CalibrationResult.Failed -> {
+                                            error = measured.reason.message
                                             cue(ToneGenerator.TONE_PROP_NACK)
                                             delay(200)
                                         }
@@ -216,7 +228,7 @@ internal fun HandlebarCalibrationControl(
                         style = MaterialTheme.typography.labelLarge)
                 }
                 if (retryRequest != null) {
-                    Text(step?.retryInstruction.orEmpty(), Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                    Text(listOfNotNull(error, step?.retryInstruction).joinToString(" "), Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                         color = MaterialTheme.colorScheme.error)
                     Button(onClick = { retryRequest.complete(Unit) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
                         .calibrationFocus(retryButton).testTag("handlebar-calibration-retry")) { Text("Bu adımı yeniden dene") }
@@ -227,7 +239,7 @@ internal fun HandlebarCalibrationControl(
                     Text(instruction, Modifier
                         .semantics { liveRegion = LiveRegionMode.Polite }.testTag("handlebar-calibration-step"))
                 }
-                error?.let { Text(it, Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                if (retryRequest == null) error?.let { Text(it, Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                     color = MaterialTheme.colorScheme.error) }
                 result?.let { profile ->
                     Surface(shape = MaterialTheme.shapes.medium,
@@ -286,8 +298,8 @@ private val HandlebarCalibrationStep.tone: Int
 
 private val HandlebarCalibrationStep.retryInstruction: String
     get() = when (this) {
-        HandlebarCalibrationStep.STRAIGHT -> "Düz bekleme doğrulanamadı. Gidonu düz konuma getir ve motosikleti sabit tut."
-        HandlebarCalibrationStep.LEFT -> "Sol dönüş doğrulanamadı. Gidonu düz konuma getir. Sinyalden sonra yeniden sola çevir."
-        HandlebarCalibrationStep.RIGHT -> "Sağ dönüş doğrulanamadı. Gidonu önceki sol konuma getir. Sinyalden sonra yeniden sağa çevir."
-        HandlebarCalibrationStep.CENTER -> "Düze dönüş doğrulanamadı. Gidonu önceki sağ konuma getir. Sinyalden sonra yeniden düz konuma getir."
+        HandlebarCalibrationStep.STRAIGHT -> "Gidonu düz konuma getir ve motosikleti sabit tut."
+        HandlebarCalibrationStep.LEFT -> "Gidonu düz konuma getir. Sinyalden sonra yeniden sola çevir."
+        HandlebarCalibrationStep.RIGHT -> "Gidonu önceki sol konuma getir. Sinyalden sonra yeniden sağa çevir."
+        HandlebarCalibrationStep.CENTER -> "Gidonu önceki sağ konuma getir. Sinyalden sonra yeniden düz konuma getir."
     }

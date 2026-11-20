@@ -14,7 +14,6 @@ import org.iz.navigation.data.Journey
 import org.iz.navigation.data.Transport
 import org.iz.navigation.lean.*
 import org.junit.Assert.*
-import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.UUID
@@ -22,7 +21,6 @@ import java.util.UUID
 @RunWith(AndroidJUnit4::class)
 class HandlebarSessionIntegrationTest {
     @Test fun savedHandlebarSurvivesRestartUntilMountIsReset() {
-        assumeTrue(HandlebarLeanGate.enabled)
         val app = ApplicationProvider.getApplicationContext<Context>()
         val ownPreferences = "qa-handlebar-" + UUID.randomUUID()
         val context = object : ContextWrapper(app) {
@@ -53,7 +51,6 @@ class HandlebarSessionIntegrationTest {
     }
 
     @Test fun mixedMountJourneyKeepsParkedHandlebarOutOfBodyPeaks() = runBlocking(Dispatchers.IO) {
-        assumeTrue(HandlebarLeanGate.enabled)
         val context = ApplicationProvider.getApplicationContext<Context>()
         val db = Room.inMemoryDatabaseBuilder(context, DiaryDatabase::class.java).build()
         try {

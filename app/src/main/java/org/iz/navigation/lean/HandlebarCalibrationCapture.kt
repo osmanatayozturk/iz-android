@@ -7,61 +7,53 @@ import kotlinx.coroutines.ensureActive
 import java.util.UUID
 import kotlin.coroutines.coroutineContext
 
-internal sealed interface HandlebarCalibrationResult {
-    data class Ready(val profile: LeanCalibration) : HandlebarCalibrationResult
-    data object SensorsUnavailable : HandlebarCalibrationResult
-    data object InvalidSamples : HandlebarCalibrationResult
-}
-
-/** Bounded foreground capture. Sensor samples stay in memory until the attempt ends. */
+/** Samples from a park calibration stay in memory. Only a completed, accepted profile can be saved. */
 internal suspend fun captureHandlebarCalibration(
     context: Context, onStep: (HandlebarCalibrationStep) -> Unit, onAccepted: () -> Unit,
-    awaitRetry: suspend (HandlebarCalibrationStep) -> Unit,
-): HandlebarCalibrationResult {
+    awaitRetry: suspend (HandlebarCalibrationStep, CalibrationFailure) -> Unit,
+): CalibrationResult {
     val accepted = mutableListOf<List<LeanImuRecord>>()
+    val epoch = UUID.randomUUID().toString()
     for (step in HandlebarCalibrationStep.entries) {
         while (true) {
             coroutineContext.ensureActive()
-            val samples = collectStep(context, step, onStep) ?: return HandlebarCalibrationResult.SensorsUnavailable
-            val candidate = accepted + listOf(samples)
-            if (step == HandlebarCalibrationStep.CENTER) {
-                val profile = handlebarCalibration(candidate[0], candidate[1], candidate[2], candidate[3],
-                    UUID.randomUUID().toString(), System.currentTimeMillis())
-                if (profile != null) {
+            val window = HandlebarSampleWindow()
+            val capture = LeanSensorCapture(context, window::add)
+            capture.startOrFailure()?.let { return CalibrationResult.Failed(it) }
+            val samples = try {
+                // Discard the touch that started this attempt. The cue marks the beginning of the step.
+                delay(750)
+                window.begin(SystemClock.elapsedRealtimeNanos())
+                onStep(step)
+                delay(step.durationMillis)
+                window.finish()
+            } finally {
+                capture.stop()
+            }
+            if (samples == null) {
+                awaitRetry(step, CalibrationFailure.BUFFER_FULL)
+                continue
+            }
+            when (val checked = evaluateHandlebarSteps(accepted + listOf(samples), epoch, System.currentTimeMillis())) {
+                is CalibrationResult.Failed -> awaitRetry(step, checked.reason)
+                is CalibrationResult.Ready -> {
                     onAccepted()
                     delay(300)
-                    return HandlebarCalibrationResult.Ready(profile)
+                    return checked
                 }
-            } else if (handlebarStepsAreValid(candidate)) {
-                accepted += listOf(samples)
-                onAccepted()
-                delay(450)
-                break
+                StepAccepted -> {
+                    accepted += listOf(samples)
+                    onAccepted()
+                    delay(450)
+                    break
+                }
             }
-            awaitRetry(step)
         }
     }
-    return HandlebarCalibrationResult.InvalidSamples
+    error("Final handlebar step must produce a reference")
 }
 
-private suspend fun collectStep(context: Context, step: HandlebarCalibrationStep,
-    onStep: (HandlebarCalibrationStep) -> Unit): List<LeanImuRecord>? {
-    val window = HandlebarSampleWindow()
-    val capture = LeanSensorCapture(context, window::add)
-    if (!capture.start()) return null
-    return try {
-        // Discard the touch used to start or retry. Move only when the step cue sounds.
-        delay(750)
-        window.begin(SystemClock.elapsedRealtimeNanos())
-        onStep(step)
-        delay(step.durationMillis)
-        window.finish()
-    } finally {
-        capture.stop()
-    }
-}
-
-private class HandlebarSampleWindow {
+internal class HandlebarSampleWindow {
     private val samples = ArrayList<LeanImuRecord>()
     private var startedAt = Long.MAX_VALUE
     private var overflow = false
@@ -74,11 +66,12 @@ private class HandlebarSampleWindow {
 
     @Synchronized fun add(record: LeanImuRecord) {
         if (record.elapsedNanos < startedAt) return
-        if (samples.size < 1_024) samples += record else overflow = true
+        // Five seconds at 200 Hz per sensor plus delivery margin.
+        if (samples.size < 2_560) samples += record else overflow = true
     }
 
-    @Synchronized fun finish(): List<LeanImuRecord> {
+    @Synchronized fun finish(): List<LeanImuRecord>? {
         startedAt = Long.MAX_VALUE
-        return if (overflow) emptyList() else samples.toList()
+        return if (overflow) null else samples.toList()
     }
 }

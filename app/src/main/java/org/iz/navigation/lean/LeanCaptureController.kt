@@ -69,7 +69,7 @@ internal class LeanCaptureController(context: Context, private val onCaptureChan
         active = session
         session.writer.start()
         if (closed) { stopLocked("capture_interrupted"); return@withLock }
-        if (!session.sensor.start()) {
+        if (session.sensor.startOrFailure() != null) {
             session.reason = "sensor_unavailable"
             stopLocked("sensor_unavailable")
         } else if (session.accepting) { mutableStatus.value = null; onCaptureChanged() }

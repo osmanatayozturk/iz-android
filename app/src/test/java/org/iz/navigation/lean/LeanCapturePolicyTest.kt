@@ -42,7 +42,7 @@ class LeanCapturePolicyTest {
     @Test fun shortOrMovingReferenceIsRejectedWithoutInventingFrame() {
         val short = LeanCalibrationAccumulator()
         short.add(LeanImuRecord(LeanSensorKind.ACCELEROMETER, 0, 1, 0.0, 0.0, 9.81, 3))
-        assertNull(short.finish("epoch", 1))
+        assertEquals(CalibrationResult.Failed(CalibrationFailure.INSUFFICIENT_SAMPLES), short.finish("epoch", 1))
         val still = LeanCalibrationAccumulator()
         val moving = LeanCalibrationAccumulator()
         repeat(120) { i ->
@@ -52,10 +52,9 @@ class LeanCapturePolicyTest {
             still.add(acc); still.add(gyro)
             moving.add(acc); moving.add(gyro.copy(x = if (i % 2 == 0) 1.0 else -1.0))
         }
-        val result = still.finish("epoch", 1)
-        assertNotNull(result)
-        assertEquals(.01, result!!.gyroBias[0], .00001)
-        assertNull(moving.finish("epoch", 1))
+        val result = (still.finish("epoch", 1) as CalibrationResult.Ready).profile
+        assertEquals(.01, result.gyroBias[0], .00001)
+        assertEquals(CalibrationResult.Failed(CalibrationFailure.MOVEMENT), moving.finish("epoch", 1))
     }
 
     @Test fun calibrationSamplesAreBoundedAndBadAccuracyDoesNotBecomeReference() {
@@ -64,6 +63,34 @@ class LeanCapturePolicyTest {
             reference.add(LeanImuRecord(LeanSensorKind.ACCELEROMETER, i.toLong(), i * 20_000_000L + 1, 0.0, 0.0, 9.81, 0))
             reference.add(LeanImuRecord(LeanSensorKind.GYROSCOPE, i.toLong(), i * 20_000_000L + 1, 0.0, 0.0, 0.0, 0))
         }
-        assertNull(reference.finish("epoch", 1))
+        assertEquals(CalibrationResult.Failed(CalibrationFailure.UNRELIABLE_SAMPLES), reference.finish("epoch", 1))
+    }
+
+    @Test fun fastStationarySensorsUseWholeWindowAndStillRejectMovementLateInCapture() {
+        val fast = LeanCalibrationAccumulator()
+        val moving = LeanCalibrationAccumulator()
+        repeat(600) { i ->
+            val acc = LeanImuRecord(LeanSensorKind.ACCELEROMETER, i.toLong(), 1L + i * 5_000_000L, 0.0, 0.0, 9.81, 3)
+            val gyro = acc.copy(kind = LeanSensorKind.GYROSCOPE, z = 0.0)
+            fast.add(acc); fast.add(gyro)
+            moving.add(acc); moving.add(if (i > 400) gyro.copy(x = 1.0) else gyro)
+        }
+        assertTrue(fast.finish("epoch", 1) is CalibrationResult.Ready)
+        assertEquals(CalibrationResult.Failed(CalibrationFailure.MOVEMENT), moving.finish("epoch", 1))
+    }
+
+    @Test fun reportsWhichStationaryCheckFailed() {
+        fun result(spacing: Long = 20_000_000L, gravity: Double = 9.81, rotation: Double = 0.0): CalibrationResult {
+            val reference = LeanCalibrationAccumulator()
+            repeat(120) { i ->
+                val record = LeanImuRecord(LeanSensorKind.ACCELEROMETER, i.toLong(), 1L + i * spacing, 0.0, 0.0, gravity, 3)
+                reference.add(record)
+                reference.add(record.copy(kind = LeanSensorKind.GYROSCOPE, z = rotation))
+            }
+            return reference.finish("epoch", 1)
+        }
+        assertEquals(CalibrationResult.Failed(CalibrationFailure.SHORT_WINDOW), result(spacing = 5_000_000L))
+        assertEquals(CalibrationResult.Failed(CalibrationFailure.GRAVITY), result(gravity = 7.0))
+        assertEquals(CalibrationResult.Failed(CalibrationFailure.GYRO_DRIFT), result(rotation = .2))
     }
 }

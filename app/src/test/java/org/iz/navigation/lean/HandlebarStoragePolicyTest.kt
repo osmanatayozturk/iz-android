@@ -11,14 +11,14 @@ class HandlebarStoragePolicyTest {
     private val bars = body.copy(bodyConfirmed = false, steeringAxis = listOf(0.0, 0.6, 0.8))
     private val journey = Journey(id = "trip", transport = Transport.MOTORCYCLE, startedAt = 1L)
 
-    @Test fun handlebarProfileRequiresMatchingMountAndExplicitPackageGate() {
+    @Test fun handlebarRecordingRequiresOptInAndMatchingMountInTheNormalPackage() {
         val settings = LeanCaptureSettings(true, LeanMount.HANDLEBAR, bars)
-        assertTrue(leanCaptureEligible(journey, settings, true))
-        assertFalse(leanCaptureEligible(journey, settings, false))
-        assertFalse(leanCaptureEligible(journey, settings.copy(mount = LeanMount.BODY), true))
-        assertFalse(leanCaptureEligible(journey, settings.copy(calibration = body), true))
-        assertFalse(leanCaptureEligible(journey, settings.copy(calibration = bars.copy(steeringAxis = listOf(0.0, 0.0, 0.0))), true))
-        assertTrue(leanCaptureEligible(journey, LeanCaptureSettings(true, LeanMount.BODY, body), false))
+        assertTrue(leanCaptureEligible(journey, settings))
+        assertFalse(leanCaptureEligible(journey, settings.copy(enabled = false)))
+        assertFalse(leanCaptureEligible(journey, settings.copy(mount = LeanMount.BODY)))
+        assertFalse(leanCaptureEligible(journey, settings.copy(calibration = body)))
+        assertFalse(leanCaptureEligible(journey, settings.copy(calibration = bars.copy(steeringAxis = listOf(0.0, 0.0, 0.0)))))
+        assertTrue(leanCaptureEligible(journey, LeanCaptureSettings(true, LeanMount.BODY, body)))
     }
 
     @Test fun legacyBodyAndVerifiedHandlebarBackupsKeepDistinctIdentity() {

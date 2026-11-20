@@ -29,7 +29,7 @@ internal fun liveLeanReadings(state: NavigationState): StateFlow<LiveLeanReading
     val reference = settings.calibration?.takeIf { LiveLeanGate.allows(settings.mount) }?.takeIf {
         when (settings.mount) {
             LeanMount.BODY -> validLeanReference(it)
-            LeanMount.HANDLEBAR -> HandlebarLeanGate.enabled && validHandlebarReference(it)
+            LeanMount.HANDLEBAR -> validHandlebarReference(it)
             LeanMount.UNKNOWN -> false
         }
     }

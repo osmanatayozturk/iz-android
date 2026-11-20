@@ -40,7 +40,7 @@ internal object LiveLeanCapture {
         val window = Window(sessionId, calibration)
         val capture = LeanSensorCapture(context, { record -> receiveImu(window, record) }, { invalidate(window) })
         current = window
-        if (capture.start()) {
+        if (capture.startOrFailure() == null) {
             sensors = capture
             mutableDemand.value = sessionId
         } else stop()

@@ -1,5 +1,11 @@
 # İz sürüm değişikliği planı
 
+## Telefon 0.14.0 (36) · Gidon ve gövde kalibrasyonu
+
+Genel telefon sürümünde iki montaj da park hâlinde kalibre edilebilir. Sürüş sonrası sensör kaydı ayrı bir tercihtir. Kalibrasyon başarısız olduğunda nedeni ekranda görünür. Gidonda yalnız başarısız adım tekrarlanabilir. Tamamlanan motosiklet yolculuklarında yeterli sensör ve GPS verisi olan bölümler için yatış tahmini gösterilir.
+
+65 birim testi ve Android 17 emülatöründe 7 entegrasyon ve arayüz testi geçti. Normal menüden kayıt kapalıyken gidon kalibrasyonuna erişim ve sanal sensörle gövde referansı alma doğrulandı. Gerçek motosiklette tahminin açısal doğruluğu henüz ölçülmedi.
+
 ## Arayüz yenilemesi — kaynak teslimi
 
 Telefon 0.13.5 / code 34 ve Wear 0.7.0 / code 12 sürüm bilgileriyle telefon, Wear ve Android Auto görünümlerinde ortak tasarım dili uygulanır. Telefon ve Wear palet eşlemesi protokol v8 kapsamındadır. Kaynak teslimi, arayüz değişikliklerini ve bunları kontrol eden testleri içerir.

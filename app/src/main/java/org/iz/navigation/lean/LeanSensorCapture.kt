@@ -13,7 +13,6 @@ import kotlinx.coroutines.withContext
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
-import kotlin.math.sqrt
 
 /** No retained SensorEvent/values array. Android reuses them after onSensorChanged returns.
  * Source: https://developer.android.com/reference/android/hardware/SensorEvent#timestamp
@@ -50,20 +49,27 @@ internal class LeanSensorCapture(context: Context, private val onRecord: (LeanIm
             if (active.get()) onRecord(record)
         }
     }
-    @Synchronized fun start(): Boolean {
-        if (active.get()) return true
-        val sensors = manager ?: return false
-        val accel = sensors.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) ?: return false
-        val gyro = sensors.getDefaultSensor(Sensor.TYPE_GYROSCOPE) ?: return false
-        val worker = HandlerThread("IzLeanSensors").also { it.start() }
+    @Synchronized fun startOrFailure(): CalibrationFailure? {
+        if (active.get()) return null
+        val sensors = manager ?: return CalibrationFailure.SENSOR_SERVICE
+        val accel = sensors.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) ?: return CalibrationFailure.ACCELEROMETER_MISSING
+        val gyro = sensors.getDefaultSensor(Sensor.TYPE_GYROSCOPE) ?: return CalibrationFailure.GYROSCOPE_MISSING
+        val worker = HandlerThread("IzLeanSensors")
         thread = worker
-        active.set(true)
+        var failure = CalibrationFailure.SENSOR_SERVICE
         return try {
+            worker.start()
+            active.set(true)
             val handler = Handler(worker.looper)
-            val first = sensors.registerListener(listener, accel, 20_000, 0, handler)
-            val second = sensors.registerListener(listener, gyro, 20_000, 0, handler)
-            if (!first || !second) { stop(); false } else true
-        } catch (_: RuntimeException) { stop(); false }
+            failure = CalibrationFailure.ACCELEROMETER_START
+            if (!sensors.registerListener(listener, accel, 20_000, 0, handler)) return failure.also { stop() }
+            failure = CalibrationFailure.GYROSCOPE_START
+            if (!sensors.registerListener(listener, gyro, 20_000, 0, handler)) return failure.also { stop() }
+            null
+        } catch (_: RuntimeException) {
+            stop()
+            failure
+        }
     }
     @Synchronized fun stop() {
         active.set(false)
@@ -72,10 +78,12 @@ internal class LeanSensorCapture(context: Context, private val onRecord: (LeanIm
     }
     companion object {
         /** Explicit bounded foreground reference only; no raw session, navigation or recording start. */
-        suspend fun calibrate(context: Context): LeanCalibration? = withContext(Dispatchers.Default) {
+        suspend fun calibrate(context: Context): CalibrationResult = withContext(Dispatchers.Default) {
             val samples = LeanCalibrationAccumulator()
             val capture = LeanSensorCapture(context, samples::add)
-            if (!capture.start()) return@withContext null
+            // Let the tap that started calibration settle before the stationary window.
+            delay(750)
+            capture.startOrFailure()?.let { return@withContext CalibrationResult.Failed(it) }
             try {
                 delay(3_000)
                 samples.finish(UUID.randomUUID().toString(), System.currentTimeMillis())
@@ -86,25 +94,53 @@ internal class LeanSensorCapture(context: Context, private val onRecord: (LeanIm
 
 /** Bounded reference statistics, not a chassis-bank estimate or complete three-axis calibration. */
 internal class LeanCalibrationAccumulator {
-    private val samples = arrayOf(ArrayList<LeanImuRecord>(160), ArrayList<LeanImuRecord>(160))
+    private val accel = ReferenceStatistics()
+    private val gyro = ReferenceStatistics()
+
     @Synchronized fun add(record: LeanImuRecord) {
-        val slot = if (record.kind == LeanSensorKind.ACCELEROMETER) 0 else 1
-        if (record.accuracy <= 0 || listOf(record.x, record.y, record.z).any { !it.isFinite() } ||
-            samples[slot].size >= 200) return
-        samples[slot].add(record)
+        (if (record.kind == LeanSensorKind.ACCELEROMETER) accel else gyro).add(record)
     }
-    @Synchronized fun finish(epoch: String, createdAt: Long): LeanCalibration? {
-        if (samples.any { it.size < 75 || it.last().elapsedNanos - it.first().elapsedNanos < 2_000_000_000L }) return null
-        fun vector(list: List<LeanImuRecord>): List<Double> = listOf(list.map { it.x }.average(),
-            list.map { it.y }.average(), list.map { it.z }.average())
-        fun variance(list: List<LeanImuRecord>, mean: List<Double>): Double = list.sumOf { record ->
-            (record.x - mean[0]) * (record.x - mean[0]) + (record.y - mean[1]) * (record.y - mean[1]) +
-                (record.z - mean[2]) * (record.z - mean[2])
-        } / list.size
-        val gravity = vector(samples[0]); val bias = vector(samples[1])
-        if (sqrt(gravity.sumOf { it * it }) !in 8.8..10.8 || variance(samples[0], gravity) > .15 * .15 ||
-            variance(samples[1], bias) > .03 * .03 || sqrt(bias.sumOf { it * it }) > .1) return null
-        return LeanCalibration(epoch, createdAt, gravity, bias).takeIf(::validLeanReference)
+
+    @Synchronized fun finish(epoch: String, createdAt: Long): CalibrationResult {
+        val failure = accel.failure() ?: gyro.failure() ?: when {
+            accel.mean.norm() !in 8.8..10.8 -> CalibrationFailure.GRAVITY
+            accel.variance > .15 * .15 || gyro.variance > .03 * .03 -> CalibrationFailure.MOVEMENT
+            gyro.mean.norm() > .1 -> CalibrationFailure.GYRO_DRIFT
+            else -> null
+        }
+        if (failure != null) return CalibrationResult.Failed(failure)
+        return CalibrationResult.Ready(LeanCalibration(epoch, createdAt, accel.mean.values(), gyro.mean.values()))
+    }
+}
+
+/** Streaming population variance covers the full measurement window at any delivered sample rate. */
+private class ReferenceStatistics {
+    private var count = 0
+    private var unreliable = 0
+    private var firstNanos = 0L
+    private var lastNanos = 0L
+    var mean = LeanVector(0.0, 0.0, 0.0)
+        private set
+    private var squaredDeviations = 0.0
+    val variance get() = squaredDeviations / count
+
+    fun add(record: LeanImuRecord) {
+        if (record.accuracy <= 0) { unreliable++; return }
+        if (!record.x.isFinite() || !record.y.isFinite() || !record.z.isFinite() || record.elapsedNanos <= lastNanos) return
+        if (count == 0) firstNanos = record.elapsedNanos
+        lastNanos = record.elapsedNanos
+        count++
+        val point = LeanVector(record.x, record.y, record.z)
+        val delta = point - mean
+        mean = LeanVector(mean.x + delta.x / count, mean.y + delta.y / count, mean.z + delta.z / count)
+        squaredDeviations += delta.dot(point - mean)
+    }
+
+    fun failure(): CalibrationFailure? = when {
+        count < 75 && unreliable > 0 && count + unreliable >= 75 -> CalibrationFailure.UNRELIABLE_SAMPLES
+        count < 75 -> CalibrationFailure.INSUFFICIENT_SAMPLES
+        lastNanos - firstNanos < 2_000_000_000L -> CalibrationFailure.SHORT_WINDOW
+        else -> null
     }
 }
 /** Sequence is per sensor stream, never per batch. Observed dropped events still consume a number. */
