@@ -6,6 +6,8 @@ import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.iz.navigation.IzApplication
 import org.iz.navigation.MainActivity
+import org.iz.navigation.lean.LeanMount
+import org.iz.navigation.lean.LeanSettingsStore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -27,6 +29,40 @@ class NavigationHomeShellTest {
         compose.onNodeWithTag("navigation-home-map").assertIsDisplayed()
         assertEquals(before.journey?.id, navigation.state.value.journey?.id)
         assertEquals(before.guidance, navigation.state.value.guidance)
+    }
+
+    @Test fun liveLeanSettingsOnBothMountsLeaveReportRecordingOff() {
+        val app = compose.activity.application
+        val report = LeanSettingsStore.get(app)
+        val display = LiveLeanDisplaySettings.get(app)
+        val original = report.state.value
+        val originalDisplay = display.enabled.value
+        try {
+            report.enabled(false)
+            report.mount(LeanMount.UNKNOWN)
+            display.setEnabled(false)
+            compose.onNodeWithTag("home-menu").performClick()
+            compose.onNodeWithTag("menu-settings").performScrollTo().performClick()
+            compose.onNodeWithTag("settings").performScrollToNode(hasTestTag("settings-open-calibrate"))
+            compose.onNodeWithTag("settings-open-calibrate").performClick()
+            val option = compose.onNodeWithTag("live-lean-setting")
+            option.performScrollTo().assertTextContains("Canlı yatış tahmini").assertIsNotEnabled()
+            for ((label, mount) in listOf("Gidon" to LeanMount.HANDLEBAR, "Gövde" to LeanMount.BODY)) {
+                compose.onNodeWithText(label).performScrollTo().performClick()
+                option.performScrollTo().assertIsEnabled().assertIsOff().performClick().assertIsOn()
+                compose.runOnIdle {
+                    assertEquals(mount, report.state.value.mount)
+                    assertTrue(display.enabled.value)
+                    assertEquals(false, report.state.value.enabled)
+                }
+                option.performClick().assertIsOff()
+            }
+        } finally {
+            report.mount(original.mount)
+            original.calibration?.let(report::reference) ?: report.clearCalibration()
+            report.enabled(original.enabled)
+            display.setEnabled(originalDisplay)
+        }
     }
 
     @Test fun idleBarOpensHistoryDestinationsAndLeavesMapControlsVisible() {

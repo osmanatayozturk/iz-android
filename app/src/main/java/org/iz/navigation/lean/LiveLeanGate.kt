@@ -1,10 +1,24 @@
 package org.iz.navigation.lean
 
-import org.iz.navigation.BuildConfig
+import org.iz.navigation.data.JourneyStatus
+import org.iz.navigation.data.Transport
+import org.iz.navigation.navigation.NavigationState
 
-/** Field acceptance is mount-specific. This gate only controls the new foreground dial. */
-internal object LiveLeanGate {
-    fun allows(mount: LeanMount): Boolean =
-        BuildConfig.DEBUG && BuildConfig.APPLICATION_ID == "org.iz.navigation.qaredesign20261119" &&
-            (mount == LeanMount.BODY || mount == LeanMount.HANDLEBAR)
+internal fun NavigationState.liveLeanSessionId(): String? {
+    if (simulation || sessionTransport != Transport.MOTORCYCLE) return null
+    if (recording) {
+        val trip = journey ?: return null
+        if (trip.transport != Transport.MOTORCYCLE || trip.status != JourneyStatus.CONFIRMED ||
+            trip.endedAt != null || trip.interrupted) return null
+    } else if (!guidance) return null
+    return sessionId
 }
+
+internal fun NavigationState.hasLiveLeanFix() =
+    fix != null && !gpsStale && !paused && plannedBreak == null && approximateOrigin == null
+
+/** A recorder may attach to an existing navigation session with a different ID. */
+internal fun NavigationState.liveLeanLocationSession(sourceId: String, fromRecording: Boolean): String? =
+    liveLeanSessionId()?.takeIf { session ->
+        hasLiveLeanFix() && if (fromRecording) recording && journey?.id == sourceId else !recording && session == sourceId
+    }

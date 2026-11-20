@@ -306,7 +306,7 @@ class HandlebarLeanEstimator : LeanEstimator {
             imu: List<LeanImuRecord>): Double? {
             if (first.elapsedNanos <= 0 || first.utcMillis <= 0 ||
                 last.elapsedNanos - first.elapsedNanos !in MIN_GNSS_STEP..MAX_GNSS_STEP ||
-                imu.size > 360) return null
+                imu.size > LiveLeanSampleWindow.MAX_RECORDS) return null
             val reference = if (calibration.bodyConfirmed) {
                 if (!validLeanReference(calibration)) return null
                 val gravity = calibration.uprightGravity

@@ -79,6 +79,19 @@ class RedesignFirstSliceUiTest {
         dial.assertIsDisplayed().assertContentDescriptionEquals("Tahmini yatış, ölçüm yok")
     }
 
+    @Test fun liveLeanDialExpiresWithoutAnotherReading() {
+        val reading = mutableStateOf<LiveLeanReading?>(null)
+        compose.setContent { IzTheme { LiveLeanDial("continuous-ride", reading.value) } }
+        compose.runOnIdle {
+            reading.value = LiveLeanReading("continuous-ride", 19.0, SystemClock.elapsedRealtime())
+        }
+        val dial = compose.onNodeWithTag("live-lean-dial", useUnmergedTree = true)
+        dial.assertContentDescriptionEquals("Tahmini yatış, Sağ 19 derece")
+        compose.mainClock.advanceTimeBy(LiveLeanLifetimeMillis + 50)
+        dial.assertContentDescriptionEquals("Tahmini yatış, ölçüm yok")
+        compose.onNodeWithTag("live-lean-value", useUnmergedTree = true).assertDoesNotExist()
+    }
+
     @Test fun largeTextRouteFailureCanRetryWithTheSameDestinationAndRecordingChoice() {
         val start = WeatherCoordinate(1.0, 1.0)
         val finish = WeatherCoordinate(1.01, 1.01)

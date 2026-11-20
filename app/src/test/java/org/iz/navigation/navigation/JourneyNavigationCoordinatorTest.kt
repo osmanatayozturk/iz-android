@@ -3,6 +3,8 @@ package org.iz.navigation.navigation
 import org.iz.navigation.data.*
 import org.iz.navigation.weather.*
 import org.iz.navigation.gpx.*
+import org.iz.navigation.lean.liveLeanLocationSession
+import org.iz.navigation.lean.liveLeanSessionId
 import java.io.File
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -709,6 +711,43 @@ class JourneyNavigationCoordinatorTest {
         assertTrue(runCatching { controller.startGuidance(route(), recordJourney = false) }.isFailure)
         assertTrue(controller.state.value.recording)
         assertEquals(0, runtime.finished)
+    }
+
+    @Test fun liveLeanRoutesMotorcycleServiceFixesToTheCurrentDisplaySession() = runTest {
+        val runtime = Runtime()
+        val controller = JourneyNavigationCoordinator(runtime, null, { 1000L }, backgroundScope)
+        val motoRoute = route().copy(transport = Transport.MOTORCYCLE)
+        val fix = NavigationFix(motoRoute.stops.first().coordinate, 1000L, 5f)
+        val guided = controller.startGuidance(motoRoute, recordJourney = false)
+        controller.onAcceptedLocation(guided, fix)
+        val guidance = withContext(Dispatchers.Default) {
+            withTimeout(5_000) { controller.state.first { it.fix == fix && !it.gpsStale } }
+        }
+        assertFalse(guidance.recording)
+        assertEquals(guided, guidance.liveLeanSessionId())
+        assertEquals(guided, guidance.liveLeanLocationSession(guided, fromRecording = false))
+        assertNull(guidance.liveLeanLocationSession(guided, fromRecording = true))
+        controller.finishSession(guided)
+
+        val recording = controller.startFreeDrive(Transport.MOTORCYCLE, recordJourney = true)
+        val recorder = requireNotNull(runtime.recordingId())
+        controller.onAcceptedLocation(recorder, fix)
+        runCurrent()
+        val free = controller.state.value
+        assertTrue(free.recording)
+        assertFalse(free.guidance)
+        assertNull(free.route)
+        assertEquals(recording, free.liveLeanSessionId())
+        assertEquals(recording, free.liveLeanLocationSession(recorder, fromRecording = true))
+        assertEquals("separate", free.copy(sessionId = "separate").liveLeanLocationSession(recorder, fromRecording = true))
+        assertNull(free.liveLeanLocationSession(guided, fromRecording = true))
+        assertNull(free.liveLeanLocationSession(recording, fromRecording = false))
+        for (blocked in listOf(free.copy(simulation = true), free.copy(paused = true), free.copy(gpsStale = true),
+            free.copy(fix = null), free.copy(approximateOrigin = fix.coordinate), free.copy(sessionTransport = Transport.CAR),
+            free.copy(plannedBreak = PlannedBreakState(1, "Mola", 60, 1000L, 0.0, 60.0)),
+            free.copy(journey = free.journey?.copy(status = JourneyStatus.TEMPORARY)))) {
+            assertNull(blocked.liveLeanLocationSession(recorder, fromRecording = true))
+        }
     }
 
     @Test fun noRecordStartupSuppressesDetectionAcrossAsyncReadsAndReleasesGuardOnFailure() = runTest {

@@ -41,8 +41,7 @@ internal fun LeanSetupPanel(onMessage: (String) -> Unit) {
     val liveDisplay = remember(app) { LiveLeanDisplaySettings.get(app) }
     val liveEnabled by liveDisplay.enabled.collectAsStateWithLifecycle()
     val config by settings.state.collectAsStateWithLifecycle()
-    val liveOptionVisible = LiveLeanGate.allows(LeanMount.BODY) || LiveLeanGate.allows(LeanMount.HANDLEBAR)
-    val liveAllowed = LiveLeanGate.allows(config.mount)
+    val liveAllowed = config.mount != LeanMount.UNKNOWN
     fun save(action: () -> Unit) {
         try { action() } catch (_: Exception) { onMessage("Ölçüm ayarları kaydedilemedi. Yeniden deneyebilirsin.") }
     }
@@ -63,15 +62,16 @@ internal fun LeanSetupPanel(onMessage: (String) -> Unit) {
                     }, { Text(label) })
                 }
             }
-            if (liveOptionVisible) {
-                Row(Modifier.heightIn(min = 48.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    Text("Canlı tahmin", Modifier.weight(1f))
-                    Switch(liveEnabled && liveAllowed, { enabled -> liveDisplay.setEnabled(enabled) },
-                        enabled = liveAllowed,
-                        modifier = Modifier.testTag("live-lean-setting").semantics { contentDescription = "Canlı yatış tahmini" })
-                }
-                if (!liveAllowed) Text("Canlı tahmin için gidon veya gövde montajını seç.", style = MaterialTheme.typography.bodySmall)
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("live-lean-setting")
+                .toggleable(value = liveEnabled && liveAllowed, enabled = liveAllowed, role = Role.Switch,
+                    onValueChange = liveDisplay::setEnabled),
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text("Canlı yatış tahmini", Modifier.weight(1f))
+                Switch(checked = liveEnabled && liveAllowed, onCheckedChange = null, enabled = liveAllowed)
             }
+            if (!liveAllowed) Text("Canlı tahmin için gidon veya gövde montajını seç.", style = MaterialTheme.typography.bodySmall)
+            else if (config.liveReference() == null) Text("Sürüşte açıyı görmek için park hâlinde kalibrasyonu tamamla.",
+                style = MaterialTheme.typography.bodySmall)
             if (config.mount == LeanMount.HANDLEBAR) {
                 HandlebarCalibrationControl(
                     hasProfile = validHandlebarReference(config.calibration),
@@ -174,7 +174,7 @@ internal fun BodyCalibrationControl(
     }
     if (calibrating) TextButton(onClick = ::cancel) { Text("İptal") }
     if (hasProfile) {
-        Text("Dik referans hazır. Sayısal sonuç için sürüş sonrası üç eksen doğrulaması da gerekir.", style = MaterialTheme.typography.bodySmall)
+        Text("Dik referans hazır. Sürüş sonrası rapor için ayrıca üç eksen doğrulaması gerekir.", style = MaterialTheme.typography.bodySmall)
         TextButton(onClick = { cancel(); upright = false; bodyError = null; onReset() }) { Text("Bağlantı değişti · Referansı sıfırla") }
     }
 }

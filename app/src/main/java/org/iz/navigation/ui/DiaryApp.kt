@@ -850,7 +850,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                 )
                 uiEntry.page in journeyPages || uiEntry.page == UiPage.PLACE || uiEntry.page == UiPage.PUBLIC_PLACE -> Text("Kayıt açılıyor…", Modifier.padding(24.dp))
                 uiEntry.page == UiPage.MAP || navigationPage -> NavigationScreen(onClose = { navigationPage = false; navigationTarget = null; navigationShared = null },
-                    vm = phoneModel(uiEntry), liveLeanReadings = liveLeanReadings(navigationState),
+                    vm = phoneModel(uiEntry),
                     idleNavigationBar = if (uiEntry.page == UiPage.MAP) {
                         { HomeNavigationBar(::returnToMap, { tab = 1 }, { contributionHub = true }) }
                     } else null,

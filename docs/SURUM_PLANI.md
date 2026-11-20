@@ -4,7 +4,11 @@
 
 Genel telefon sürümünde iki montaj da park hâlinde kalibre edilebilir. Sürüş sonrası sensör kaydı ayrı bir tercihtir. Kalibrasyon başarısız olduğunda nedeni ekranda görünür. Gidonda yalnız başarısız adım tekrarlanabilir. Tamamlanan motosiklet yolculuklarında yeterli sensör ve GPS verisi olan bölümler için yatış tahmini gösterilir.
 
-65 birim testi ve Android 17 emülatöründe 7 entegrasyon ve arayüz testi geçti. Normal menüden kayıt kapalıyken gidon kalibrasyonuna erişim ve sanal sensörle gövde referansı alma doğrulandı. Gerçek motosiklette tahminin açısal doğruluğu henüz ölçülmedi.
+Kalibrasyon ve sürüş sonrası rapor için 65 birim testi ve Android 17 emülatöründe 7 entegrasyon ve arayüz testi geçti. Normal menüden kayıt kapalıyken gidon kalibrasyonuna erişim ve sanal sensörle gövde referansı alma doğrulandı. Gerçek motosiklette tahminin açısal doğruluğu henüz ölçülmedi.
+
+Canlı yatış göstergesi de seçilen montajın kalibrasyonunu kullanır. Gösterge motosiklet navigasyonunda ve rotasız kayıtta harita üzerindedir. Yön ve açı ancak güncel GPS ve hareket sensörü ölçümlerinden hesaplanabildiğinde gösterilir.
+
+Canlı gösterge için 12 birim testi ve Android 17 emülatöründe 3 arayüz testi geçti. Ayarlardan iki montajda göstergeyi açma, sürüş sonrası sensör kaydını kapalı tutma, sentetik açıyı gösterme ve ölçüm eskidiğinde kaldırma doğrulandı. Optimize telefon APK’sında ayarlar ekranından göstergeye erişen kod da denetlendi. Gerçek sürüşte açısal doğruluk ve ekrandaki gecikme henüz ölçülmedi.
 
 ## Arayüz yenilemesi — kaynak teslimi
 

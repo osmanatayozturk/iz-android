@@ -18,28 +18,29 @@ class HandlebarLeanEstimatorTest {
 
     /** Local synthetic arc with independent headings and coordinates, not measured chassis truth. */
     private fun ride(speed: Double = 12.0, yaw: Double = .30, steeringRate: Double = 0.0,
-        turnStarts: Double = 0.0, turnEnds: Double = 12.0, stationaryUntil: Double = 0.0): List<LeanRecord> = buildList {
+        turnStarts: Double = 0.0, turnEnds: Double = 12.0, stationaryUntil: Double = 0.0,
+        sensorHz: Int = 50): List<LeanRecord> = buildList {
         var north = 0.0
         var east = 0.0
         var course = 350.0
-        for (i in 0..600) {
-            val t = i / 50.0
+        for (i in 0..12 * sensorHz) {
+            val t = i.toDouble() / sensorHz
             val sampleSpeed = if (t < stationaryUntil) 0.0 else speed
             val turn = if (t in turnStarts..<turnEnds) yaw else 0.0
             val bank = atan(sampleSpeed * turn / g)
-            val ns = start + i * 20_000_000L
+            val ns = start + i * second / sensorHz
             // Right-positive course rotates clockwise around world up. Lean changes its projection in device coordinates.
             add(LeanImuRecord(LeanSensorKind.ACCELEROMETER, i.toLong(), ns,
                 0.0, 0.0, hypot(g, sampleSpeed * turn), 3))
             add(LeanImuRecord(LeanSensorKind.GYROSCOPE, i.toLong(), ns,
                 axis[0] * steeringRate, -turn * sin(bank), .02 - turn * cos(bank) + axis[2] * steeringRate, 3))
-            if (i % 50 == 0) add(LeanGnssRecord(ns, utc + i * 20L, Math.toDegrees(north / 6_371_000),
+            if (i % sensorHz == 0) add(LeanGnssRecord(ns, utc + i * 1000L / sensorHz, Math.toDegrees(north / 6_371_000),
                 Math.toDegrees(east / 6_371_000), 1.0, sampleSpeed, (course % 360 + 360) % 360,
                 .2, 1.0, 1_000_000.0, false, "gps"))
-            val mid = Math.toRadians(course) + turn / 100.0
-            north += sampleSpeed / 50 * cos(mid)
-            east += sampleSpeed / 50 * sin(mid)
-            course += Math.toDegrees(turn / 50.0)
+            val mid = Math.toRadians(course) + turn / (2 * sensorHz)
+            north += sampleSpeed / sensorHz * cos(mid)
+            east += sampleSpeed / sensorHz * sin(mid)
+            course += Math.toDegrees(turn / sensorHz)
         }
     }
 
@@ -70,6 +71,49 @@ class HandlebarLeanEstimatorTest {
                 assertNotNull("mount=${mount.epoch} speed=$speed yaw=$yaw", actual)
                 assertEquals(expected, requireNotNull(actual), .01)
             }
+        }
+    }
+
+    @Test fun highRateRollingWindowKeepsEverySupportedTurnAndBoundsMemory() {
+        for (hz in listOf(100, 200, 1000)) {
+            val buffer = LiveLeanSampleWindow()
+            var previous: LeanGnssRecord? = null
+            var intervals = 0
+            for (row in ride(sensorHz = hz)) when (row) {
+                is LeanImuRecord -> buffer.add(row)
+                is LeanGnssRecord -> {
+                    val samples = buffer.before(row.elapsedNanos)
+                    assertTrue(samples.size <= LiveLeanSampleWindow.MAX_RECORDS)
+                    previous?.let { first ->
+                        for (mount in mounts) {
+                            val angle = HandlebarLeanEstimator.liveDegrees(mount, first, row, samples)
+                            if (hz <= 200) assertEquals("interval=$intervals Hz=$hz", 20.158, requireNotNull(angle), .01)
+                            else assertNull("Incomplete interval at $hz Hz", angle)
+                        }
+                        intervals++
+                    }
+                    previous = row
+                }
+            }
+            assertEquals(12, intervals)
+        }
+    }
+
+    @Test fun delayedFixUsesOnlyImuUpToItsTimestamp() {
+        val rows = ride(sensorHz = 200)
+        val fixes = rows.filterIsInstance<LeanGnssRecord>()
+        val buffer = LiveLeanSampleWindow()
+        rows.filterIsInstance<LeanImuRecord>().takeWhile { it.elapsedNanos <= start + 4_250_000_000L }.forEach(buffer::add)
+        val first = fixes[2]
+        val last = fixes[3]
+        val atFix = buffer.before(last.elapsedNanos)
+        assertTrue(atFix.all { it.elapsedNanos < last.elapsedNanos })
+        for (kind in LeanSensorKind.entries) {
+            assertEquals(200, atFix.count { it.kind == kind && it.elapsedNanos >= first.elapsedNanos })
+        }
+        for (mount in mounts) {
+            assertEquals(20.158, requireNotNull(HandlebarLeanEstimator.liveDegrees(mount, first, last, atFix)), .01)
+            assertNull(HandlebarLeanEstimator.liveDegrees(mount, fixes[0], fixes[1], buffer.before(fixes[1].elapsedNanos)))
         }
     }
 

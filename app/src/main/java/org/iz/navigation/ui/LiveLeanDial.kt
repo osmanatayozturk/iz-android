@@ -32,8 +32,9 @@ internal fun LiveLeanDial(sessionId: String, reading: LiveLeanReading?, modifier
     var expired by remember(sessionId, reading) { mutableStateOf(false) }
     val degrees = if (expired) null else validLiveLeanDegrees(reading, sessionId, SystemClock.elapsedRealtime())
     LaunchedEffect(sessionId, reading) {
-        if (reading != null && validLiveLeanDegrees(reading, sessionId, SystemClock.elapsedRealtime()) != null) {
-            delay((LiveLeanLifetimeMillis - (SystemClock.elapsedRealtime() - reading.measuredElapsedMillis)).coerceAtLeast(0))
+        if (reading != null && reading.sessionId == sessionId) {
+            val age = SystemClock.elapsedRealtime() - reading.measuredElapsedMillis
+            if (age in 0 until LiveLeanLifetimeMillis) delay(LiveLeanLifetimeMillis - age)
             expired = true
         }
     }

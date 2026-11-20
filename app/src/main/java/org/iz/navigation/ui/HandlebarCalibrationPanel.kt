@@ -108,7 +108,7 @@ internal fun HandlebarCalibrationControl(
                 opener.requestFocus(FocusDirection.Enter)) restoreFocus = false
         }
     }
-    Text("Gidon yatışı deneysel bir sürüş sonrası tahmindir.")
+    Text("Gidona sabitlenen telefonla yatış açısı, GPS ve hareket sensörlerinden tahmin edilir.")
     Button(onClick = { interrupted = false; restoreFocus = false; open = true }, modifier = Modifier.calibrationFocus(opener)
         .heightIn(min = 48.dp).testTag("handlebar-calibration-open")) {
         Text(if (hasProfile) "Gidonu yeniden kalibre et" else "Gidonu kalibre et")

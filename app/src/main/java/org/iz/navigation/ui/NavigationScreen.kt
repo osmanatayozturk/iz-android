@@ -28,7 +28,9 @@ import org.iz.navigation.car.SharedMapStop
 import androidx.compose.runtime.saveable.rememberSaveable
 import org.iz.navigation.data.*
 import org.iz.navigation.lean.LeanSettingsStore
-import org.iz.navigation.lean.LiveLeanGate
+import org.iz.navigation.lean.hasLiveLeanFix
+import org.iz.navigation.lean.liveLeanSessionId
+import org.iz.navigation.lean.liveReference
 import org.iz.navigation.weather.*
 import org.iz.navigation.navigation.TrackReplacementConsent
 import org.iz.navigation.navigation.NavigationState
@@ -378,7 +380,6 @@ internal fun NavigationScreen(
     layersRequest: Int = 0,
     onAssignShortcut: (DestinationShortcutKind) -> Unit = {},
     onOsmPlaceClick: ((SelectedOsmPlace) -> Unit)? = null,
-    liveLeanReadings: StateFlow<LiveLeanReading?>? = null,
     idleNavigationBar: (@Composable () -> Unit)? = null,
 ) {
     val context = LocalContext.current
@@ -387,11 +388,8 @@ internal fun NavigationScreen(
     val nav by vm.navigation.state.collectAsStateWithLifecycle()
     val liveLeanEnabled by remember(context) { LiveLeanDisplaySettings.get(context) }.enabled.collectAsStateWithLifecycle()
     val leanSettings by remember(context) { LeanSettingsStore.get(context) }.state.collectAsStateWithLifecycle()
-    val leanReading = liveLeanReadings?.collectAsStateWithLifecycle()?.value
-    val leanSession = nav.sessionId?.takeIf {
-        liveLeanEnabled && LiveLeanGate.allows(leanSettings.mount) && !nav.simulation && nav.sessionTransport == Transport.MOTORCYCLE &&
-            (nav.guidance || nav.recording)
-    }
+    val leanSession = nav.liveLeanSessionId()?.takeIf { liveLeanEnabled }
+    val leanReference = leanSettings.liveReference()
     val routeEdits by vm.navigation.edits.collectAsStateWithLifecycle()
     // Live recording and simulation intentionally publish position only, never a colored trail.
     val points = emptyList<TrackPoint>()
@@ -842,11 +840,9 @@ internal fun NavigationScreen(
         onOsmPlaceClick = onOsmPlaceClick,
         placeInformationIdentity = entryId,
         idleNavigationBar = idleNavigationBar,
-        leanInstrument = leanSession?.let { session -> @Composable {
-            LiveLeanDial(session, leanReading.takeUnless {
-                nav.fix == null || nav.gpsStale || nav.paused || nav.plannedBreak != null || nav.approximateOrigin != null
-            })
-        } },
+        leanInstrument = if (leanSession != null && leanReference != null) {
+            { LiveRideLeanDial(leanSession, leanReference, nav.hasLiveLeanFix()) }
+        } else null,
         onResumePlannedBreak = resumePlannedBreak, plannedBreakResumeEnabled = plannedBreakResumeEnabled,
         layersRequest = layersRequest,
         onRecoverRecording = {

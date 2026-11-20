@@ -2,6 +2,7 @@
 
 ## Telefon 0.14.0 (36) · Motosiklet yatış raporu
 
+- Kalibre edilmiş gidon veya gövde montajıyla sürüş haritasında canlı yatış açısı ve yönü görülebilir. Gösterge yol tarifinde ve rotasız motosiklet kaydında çalışır. Canlı gösterim ve sürüş sonrası rapor için ayrı tercihler bulunur.
 - Genel telefon sürümünde gidona sabitlenen telefonla sürüş sonrası yatış tahmini alınabilir. Gidon ve gövde için park hâlinde ayrı kalibrasyon yapılır.
 - Kalibrasyon tamamlanamadığında ekran ilgili nedeni gösterir. Sensör veya GPS verisi yetersiz kalan sürüş bölümlerinde sayısal yatış gösterilmez. Gidon tahmininin açısal doğruluğu bağımsız bir şasi ölçümüyle henüz doğrulanmadı.
 

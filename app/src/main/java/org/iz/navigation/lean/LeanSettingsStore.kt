@@ -34,6 +34,9 @@ private fun matchesMount(mount: LeanMount, reference: LeanCalibration?): Boolean
         LeanMount.UNKNOWN -> false
     }
 
+internal fun LeanCaptureSettings.liveReference(): LeanCalibration? =
+    calibration?.takeIf { matchesMount(mount, it) }
+
 internal fun leanCaptureEligible(journey: Journey?, settings: LeanCaptureSettings): Boolean =
     settings.enabled && matchesMount(settings.mount, settings.calibration) &&
         journey?.transport == Transport.MOTORCYCLE && journey.status == JourneyStatus.CONFIRMED && journey.endedAt == null

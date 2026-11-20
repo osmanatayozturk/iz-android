@@ -28,6 +28,7 @@ import kotlinx.coroutines.sync.withLock
 import org.iz.navigation.power.PostJourneyAnalysis
 import org.iz.navigation.power.PowerDiagnostics
 import org.iz.navigation.lean.LiveLeanCapture
+import org.iz.navigation.lean.liveLeanLocationSession
 import org.iz.navigation.lean.LeanCaptureController
 import org.iz.navigation.lean.LeanSettingsStore
 import kotlinx.coroutines.flow.combine
@@ -68,7 +69,8 @@ class TrackingService : Service() {
                         val now = System.currentTimeMillis()
                         for (location in result.locations.sortedBy { it.time }) {
                             if (location.time < session.startedAt) continue
-                            LiveLeanCapture.accept(session.id, location)
+                            val nav = (applicationContext as org.iz.navigation.IzApplication).navigation.state.value
+                            LiveLeanCapture.accept(nav.liveLeanLocationSession(session.id, fromRecording = false), location)
                             val accepted = sessionFilter.accept(PositionSample(location.latitude, location.longitude, location.time,
                                 if (location.hasAccuracy()) location.accuracy else Float.POSITIVE_INFINITY,
                                 if (location.hasSpeed()) location.speed else null), now) ?: continue
@@ -93,7 +95,7 @@ class TrackingService : Service() {
                         leanCapture.onLocation(journey.id, location)
                         if (location.time < journey.startedAt) continue
                         val nav = (applicationContext as org.iz.navigation.IzApplication).navigation.state.value
-                        if (nav.journey?.id == journey.id || nav.sessionId == journey.id) LiveLeanCapture.accept(nav.sessionId, location)
+                        LiveLeanCapture.accept(nav.liveLeanLocationSession(journey.id, fromRecording = true), location)
                         if (TrackingPolicy.automaticCandidateDeadline(journey)?.let { location.time >= it } == true) continue
                         val sample = PositionSample(
                             location.latitude, location.longitude, location.time,

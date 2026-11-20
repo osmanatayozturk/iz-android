@@ -19,25 +19,24 @@ internal fun Location.toLeanFix(): LeanGnssRecord? {
         }, mock, provider?.take(64))
 }
 
-/** Foreground display only. Borrows fixes from the existing navigation service and retains at most two seconds of IMU. */
+/** Borrows navigation fixes for the foreground display. IMU samples stay in a bounded in-memory window. */
 internal object LiveLeanCapture {
-    private class Window(val sessionId: String, val calibration: LeanCalibration) {
+    private class Window(val sessionId: String, val calibration: LeanCalibration, val publish: (LiveLeanReading?) -> Unit) {
         val since = SystemClock.elapsedRealtimeNanos()
-        val samples = ArrayDeque<LeanImuRecord>()
+        val samples = LiveLeanSampleWindow()
         var lastFix: LeanGnssRecord? = null
         fun reset() { lastFix = null; samples.clear() }
     }
 
-    private val mutableReading = MutableStateFlow<LiveLeanReading?>(null)
-    val readings = mutableReading.asStateFlow()
     private val mutableDemand = MutableStateFlow<String?>(null)
     val demand = mutableDemand.asStateFlow()
     private var current: Window? = null
     private var sensors: LeanSensorCapture? = null
 
-    @Synchronized fun attach(context: Context, sessionId: String, calibration: LeanCalibration): () -> Unit {
+    @Synchronized fun attach(context: Context, sessionId: String, calibration: LeanCalibration,
+        publish: (LiveLeanReading?) -> Unit): () -> Unit {
         stop()
-        val window = Window(sessionId, calibration)
+        val window = Window(sessionId, calibration, publish)
         val capture = LeanSensorCapture(context, { record -> receiveImu(window, record) }, { invalidate(window) })
         current = window
         if (capture.startOrFailure() == null) {
@@ -48,25 +47,23 @@ internal object LiveLeanCapture {
     }
 
     private fun stop() {
+        current?.publish(null)
         current = null
         sensors?.stop()
         sensors = null
         mutableDemand.value = null
-        mutableReading.value = null
     }
 
     @Synchronized private fun invalidate(owner: Window) {
         if (current === owner) {
             owner.reset()
-            mutableReading.value = null
+            owner.publish(null)
         }
     }
 
     @Synchronized private fun receiveImu(owner: Window, record: LeanImuRecord) {
         if (current !== owner || record.elapsedNanos < owner.since) return
-        val buffer = owner.samples
-        while (buffer.isNotEmpty() && record.elapsedNanos - buffer.first().elapsedNanos > 2_000_000_000L) buffer.removeFirst()
-        if (buffer.size >= 360) invalidate(owner) else buffer.addLast(record)
+        owner.samples.add(record)
     }
 
     @Synchronized fun accept(sessionId: String?, location: Location) {
@@ -80,8 +77,8 @@ internal object LiveLeanCapture {
         val previous = window.lastFix
         window.lastFix = fix
         val degrees = previous?.let {
-            HandlebarLeanEstimator.liveDegrees(window.calibration, it, fix, window.samples.toList())
+            HandlebarLeanEstimator.liveDegrees(window.calibration, it, fix, window.samples.before(fix.elapsedNanos))
         }
-        mutableReading.value = degrees?.let { LiveLeanReading(window.sessionId, it, fix.elapsedNanos / 1_000_000L) }
+        window.publish(degrees?.let { LiveLeanReading(window.sessionId, it, fix.elapsedNanos / 1_000_000L) })
     }
 }
