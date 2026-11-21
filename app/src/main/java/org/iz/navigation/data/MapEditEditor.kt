@@ -6,7 +6,7 @@ import org.iz.navigation.osmcatalog.OsmPresetTagTransition
 import org.iz.navigation.osmcatalog.OsmPresetCatalog
 import org.json.JSONObject
 
-/** Local UI/saved-place label only; never substitute this for the public OSM name tag. */
+/** Label for the local contribution history. Only an explicit name belongs in the public OSM tag. */
 fun MapEditDraft.displayLabel(): String = name.ifBlank {
     if (editorVersion == 2) {
         runCatching {

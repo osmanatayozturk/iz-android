@@ -6,6 +6,27 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CarNavigationMetadataTest {
+    @Test fun directionGlyphsPreserveShapeAndSideAndDeferSpecializedManeuversToHost() {
+        assertEquals(CarTurnGlyph(CarTurnShape.STRAIGHT), carTurnGlyph(8))
+        for ((right, left, shape) in listOf(Triple(9, 16, CarTurnShape.SLIGHT),
+            Triple(10, 15, CarTurnShape.TURN), Triple(11, 14, CarTurnShape.SHARP),
+            Triple(12, 13, CarTurnShape.U_TURN), Triple(23, 24, CarTurnShape.FORK),
+            Triple(20, 21, CarTurnShape.FORK))) {
+            assertEquals(CarTurnGlyph(shape), carTurnGlyph(right))
+            assertEquals(CarTurnGlyph(shape, left = true), carTurnGlyph(left))
+        }
+        for (type in listOf(4, 18, 25, 26, 27, 28, 37, 999)) assertNull(carTurnGlyph(type))
+    }
+    @Test fun turnIncludesNamedRoadOnceAndFallsBackToSpokenInstruction() {
+        val turn = org.iz.navigation.weather.RouteManeuver(10, "Sağa dönün", "Sağa dönün",
+            listOf(" ", " Test Caddesi "), 0, 1, 0.0, 12.0)
+        assertEquals("Sağa dönün · Test Caddesi", turn.turnInstruction())
+        val complete = "Test Caddesi yönünde sağa dönün"
+        assertEquals(complete, turn.copy(instruction = complete).turnInstruction())
+        assertEquals("Sağa dönün", turn.copy(instruction = "", streetNames = emptyList()).turnInstruction())
+        assertEquals("Rotayı takip edin", turn.copy(instruction = "", verbalInstruction = "",
+            streetNames = emptyList()).turnInstruction())
+    }
     @Test fun unknownAndAmbiguousRoundaboutsNeverInventDirection() {
         listOf(0, 26, 27, 999).forEach { assertEquals(Maneuver.TYPE_UNKNOWN, carManeuverType(it)) }
     }

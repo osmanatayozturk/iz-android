@@ -164,7 +164,7 @@ class OsmLightEditorPersistenceTest {
         assertTrue(again.mapEdits.first().isEmpty())
     }
 
-    @Test fun confirmedUnnamedTreeWithLegacyCafeCarryoverCreatesFrozenLabelPlaceAndSurvivesReopen() = runBlocking {
+    @Test fun confirmedUnnamedTreeKeepsContributionWithoutAddingAPersonalPlaceAfterReopen() = runBlocking {
         val catalog = OsmPresetCatalog.load(app.assets.open(OsmPresetCatalog.BUNDLED_ASSET))
         val tree = catalog.snapshot("natural/tree", OsmPresetGeometry.POINT)
         val frozenName = "Frozen synthetic tree"
@@ -193,14 +193,7 @@ class OsmLightEditorPersistenceTest {
             remoteNodeId = 770031, remoteNodeVersion = 1)
         assertTrue(resumed.compareAndSetMapEdit(receipt, sent))
         assertFalse(resumed.compareAndSetMapEdit(receipt, sent))
-        val place = resumed.snapshot().places.single()
-        assertEquals(frozenName, place.name) // Independent literal, never displayLabel() as the oracle.
-        assertNotEquals(MapPlacePreset.CAFE.label, place.name)
-        assertEquals(OsmType.NODE, place.osmType)
-        assertEquals(770031L, place.osmId)
-        assertEquals(draft.latitude, requireNotNull(place.latitude), 0.0)
-        assertEquals(draft.longitude, requireNotNull(place.longitude), 0.0)
-        assertEquals(PlaceSource.OSM, place.source)
+        assertTrue(resumed.snapshot().places.isEmpty())
         assertEquals("", sent.name)
         assertEquals(mapOf("natural" to "tree"), sent.publicTags())
 
@@ -212,7 +205,8 @@ class OsmLightEditorPersistenceTest {
         assertEquals("", restoredDraft.name)
         assertEquals(MapEditFieldAction.UNTOUCHED, restoredDraft.nameAction)
         assertEquals(mapOf("natural" to "tree"), restoredDraft.publicTags())
-        assertEquals(listOf(place), reopened.snapshot().places)
+        assertEquals(frozenName, restoredDraft.displayLabel())
+        assertTrue(reopened.snapshot().places.isEmpty())
     }
 
     private fun open(): DiaryDatabase = Room.databaseBuilder(app, DiaryDatabase::class.java, name)

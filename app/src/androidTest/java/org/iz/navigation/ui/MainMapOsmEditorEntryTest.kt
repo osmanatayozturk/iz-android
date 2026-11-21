@@ -220,6 +220,11 @@ class MainMapOsmEditorEntryTest {
 
     private fun discoverSynthetic(app: Context, host: ActivityScenario<MainActivity>, view: MapView, map: MapLibreMap,
         count: Int = 2, area: Boolean = false, information: Boolean = false): SyntheticSelection {
+        if (compose.onAllNodesWithTag("map-inspection-close").fetchSemanticsNodes().isEmpty()) {
+            compose.onNodeWithTag("home-menu").performClick()
+            compose.onNodeWithTag("menu-inspect-map-place").performScrollTo().performClick()
+            compose.onNodeWithTag("map-inspection-close").assertIsDisplayed()
+        }
         val nonce = UUID.randomUUID().mostSignificantBits and 0x7fffffff
         val id = 8_000_000_000_000L + nonce * 10
         val fixture = SyntheticSelection(id + 2, "Synthetic QA point $nonce", "Synthetic QA area $nonce")

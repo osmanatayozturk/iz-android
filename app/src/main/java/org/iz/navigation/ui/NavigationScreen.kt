@@ -381,6 +381,8 @@ internal fun NavigationScreen(
     onAssignShortcut: (DestinationShortcutKind) -> Unit = {},
     onOsmPlaceClick: ((SelectedOsmPlace) -> Unit)? = null,
     idleNavigationBar: (@Composable () -> Unit)? = null,
+    mainMap: Boolean = false,
+    inspectMapPlaceRequest: Int = 0,
 ) {
     val context = LocalContext.current
     val ui by vm.ui.collectAsStateWithLifecycle()
@@ -838,6 +840,15 @@ internal fun NavigationScreen(
         onMute = { vm.navigation.setMuted(!nav.muted) }, onManageSession = { showPlanning = true; onPlannerOpened() },
         onLocate = { requestAction(DirectionsAction.CURRENT_ORIGIN) }, onPin = onPin,
         onOsmPlaceClick = onOsmPlaceClick,
+        inspectMapPlaceRequest = inspectMapPlaceRequest,
+        onPointDirections = if (mainMap && !commandBusy && !ui.starting && quickDirections == null) { point ->
+            if (quickEntryCurrent() && vm.navigation.state.value.acceptsIdleMapTap() &&
+                !vm.commandBusy.value && !vm.ui.value.starting && quickDirections == null) {
+                shortcutJob?.cancel()
+                val label = java.lang.String.format(java.util.Locale.ROOT, "%.6f, %.6f", point.latitude, point.longitude)
+                quickDirections = QuickDirectionsEntry(RouteStop(label, WeatherCoordinate(point.latitude, point.longitude)))
+            }
+        } else null,
         placeInformationIdentity = entryId,
         idleNavigationBar = idleNavigationBar,
         leanInstrument = if (leanSession != null && leanReference != null) {

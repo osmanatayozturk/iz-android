@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -97,6 +98,8 @@ internal fun NavigationHomeContent(
     placeInformationIdentity: Any? = null,
     leanInstrument: (@Composable () -> Unit)? = null,
     idleNavigationBar: (@Composable () -> Unit)? = null,
+    onPointDirections: ((GeoCoordinate) -> Unit)? = null,
+    inspectMapPlaceRequest: Int = 0,
     planner: @Composable () -> Unit,
 ) {
     val plannerPresentation = navigationMapPresentation(ui, nav, points, showPlanner, editPreview)
@@ -112,6 +115,31 @@ internal fun NavigationHomeContent(
     val textMeasurer = rememberTextMeasurer()
     val dashboardVisible = showDashboard && dashboard != null
     val baseShowBrand = !live && !showPlanner && !dashboardVisible
+    val idleMainMap = baseShowBrand && nav.acceptsIdleMapTap() && onPointDirections != null
+    var tappedPoint by remember(placeInformationIdentity, idleMainMap) { mutableStateOf<GeoCoordinate?>(null) }
+    var inspectingPlaces by remember(placeInformationIdentity, idleMainMap) { mutableStateOf(false) }
+    var seenInspectionRequest by remember { mutableIntStateOf(inspectMapPlaceRequest) }
+    LaunchedEffect(inspectMapPlaceRequest) {
+        if (seenInspectionRequest != inspectMapPlaceRequest) {
+            seenInspectionRequest = inspectMapPlaceRequest
+            inspectingPlaces = idleMainMap
+        }
+    }
+    BackHandler(enabled = inspectingPlaces) { inspectingPlaces = false }
+    LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) {
+        tappedPoint = null
+        inspectingPlaces = false
+    }
+    tappedPoint?.let { point ->
+        AlertDialog(onDismissRequest = { tappedPoint = null }, title = { Text("Haritada seçilen nokta") },
+            confirmButton = {
+                TextButton(onClick = { tappedPoint = null; onPointDirections?.invoke(point) },
+                    modifier = Modifier.testTag("map-point-directions")) { Text("Yol tarifi") }
+            }, dismissButton = {
+                TextButton(onClick = { tappedPoint = null; onPin(point) },
+                    modifier = Modifier.testTag("map-point-add")) { Text("Yer ekle") }
+            })
+    }
     val showShortcuts = !nav.guidance && !showPlanner && !dashboardVisible && (!live || shortcuts.isNotEmpty())
     val showDestinationHeader = !nav.guidance && !dashboardVisible
     val externalHeader = !showPlanner && !dashboardVisible && nav.guidance
@@ -202,7 +230,15 @@ internal fun NavigationHomeContent(
             if (showDestinationHeader) {
                 val headerModifier = Modifier.fillMaxWidth()
                     .onSizeChanged { headerMeasurement = headerKey to with(density) { it.height.toDp() } }
-                if (baseShowBrand) {
+                if (inspectingPlaces) {
+                    Surface(headerModifier, shape = MaterialTheme.shapes.large, shadowElevation = 4.dp) {
+                        Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("İncelemek istediğin yere dokun", Modifier.weight(1f))
+                            TextButton({ inspectingPlaces = false }, Modifier.heightIn(min = 48.dp)
+                                .testTag("map-inspection-close")) { Text("Vazgeç") }
+                        }
+                    }
+                } else if (baseShowBrand) {
                     HomeSearchBar(onSearch, onMenu, headerModifier)
                 } else {
                     Surface(onClick = onSearch, modifier = headerModifier.heightIn(min = 48.dp).testTag("open-navigation"),
@@ -257,6 +293,9 @@ internal fun NavigationHomeContent(
                 bottom = if (dashboardBottomHeight > 0.dp) dashboardBottomHeight + 112.dp else if (showPlanner && !dashboardVisible) maxHeight * .64f + 24.dp else dockCameraInset + dashboardButtonHeight),
             navigationHeader = if (externalHeader) navigationHeader else null, layersRequest = layersRequest,
             onOsmPlaceClick = onOsmPlaceClick, placeInformationIdentity = placeInformationIdentity,
+            onMapPointTap = if (idleMainMap && !inspectingPlaces && onOsmPlaceClick != null) {
+                { point -> tappedPoint = point }
+            } else null,
             selectionPanelInsets = PaddingValues(top = if (externalHeader) 0.dp else selectionTopInset,
                 bottom = bottomActionsHeight), compactSelectionPanel = compactSelection,
             onMultiSelectionOpenChanged = { multiSelectionOpen = it })

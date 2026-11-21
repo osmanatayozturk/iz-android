@@ -1,5 +1,12 @@
 # Değişiklik geçmişi
 
+## Geliştirme sürümü · Harita ve Android Auto
+
+- Telefonun ana haritasında bir noktaya dokununca **Yol tarifi** ve **Yer ekle** seçenekleri açılır. İlki seçilen konuma yol tarifi için vasıta seçimini, ikincisi aynı konumda OSM mekân düzenleyicisini açar.
+- Haritadaki mevcut bir mekânın bilgilerine **Menü → Haritada yer incele** üzerinden ulaşılır.
+- Haritadan OSM’ye gönderilen yeni mekânlar Katkı Merkezi’nde görünür. Kişisel **Kayıtlı yerler** listesine ekleme kullanıcının seçimine bağlıdır.
+- Android Auto haritasında konumu bir araba simgesi gösterir. Sürüşte sol üstte hız ve biliniyorsa hız sınırı, yol tarifi sırasında da yaklaşan dönüşün metni ve mesafesi gösterilir.
+
 ## Telefon 0.14.0 (36) · Motosiklet yatış raporu
 
 - Kalibre edilmiş gidon veya gövde montajıyla sürüş haritasında canlı yatış açısı ve yönü görülebilir. Gösterge yol tarifinde ve rotasız motosiklet kaydında çalışır. Canlı gösterim ve sürüş sonrası rapor için ayrı tercihler bulunur.

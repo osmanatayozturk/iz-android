@@ -132,6 +132,9 @@ class PlaceInformationEntrypointUiTest {
             compose.waitUntil(15_000) { compose.onAllNodesWithTag("home-menu").fetchSemanticsNodes().size == 1 }
             compose.onNodeWithTag("place-information-card").assertDoesNotExist()
             if (index == 0) {
+                compose.onNodeWithTag("home-menu").performClick()
+                compose.onNodeWithTag("menu-inspect-map-place").performScrollTo().performClick()
+                compose.onNodeWithTag("map-inspection-close").assertIsDisplayed()
                 compose.waitUntil(15_000) { native.get() != null &&
                     compose.onAllNodesWithTag("navigation-home-map").fetchSemanticsNodes().size == 1 }
                 compose.waitForIdle()
@@ -206,7 +209,7 @@ class PlaceInformationEntrypointUiTest {
                 compose.onNodeWithTag("place-info-close").performClick()
                 compose.onNodeWithTag("place-information-card").assertDoesNotExist()
                 compose.onNodeWithTag("navigation-home-map").assertIsDisplayed()
-                receipt.put("entryPath", "native MapView touch -> production nearby cache/parser/discovery -> DiaryApp modal -> close")
+                receipt.put("entryPath", "map menu inspection -> native MapView touch -> production nearby cache/parser/discovery -> DiaryApp modal -> close")
             } else {
                 compose.onNodeWithTag("home-menu").performClick()
                 compose.onNodeWithTag("menu-places").performScrollTo().performClick()

@@ -398,12 +398,9 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
         require(expected.appliedVersion == null || updated.appliedVersion == expected.appliedVersion)
         validateMapEdit(updated)
         mapDao.save(updated)
-        if (expected.targetType == null && expected.remoteNodeId == null && updated.remoteNodeId != null) {
-            val place = expected.placeId?.let { id -> dao.allPlaces().firstOrNull { it.id == id } }
+        if (expected.placeId != null && expected.targetType == null && expected.remoteNodeId == null && updated.remoteNodeId != null) {
+            val place = dao.place(expected.placeId)
             if (place != null) dao.save(place.copy(osmType = OsmType.NODE, osmId = updated.remoteNodeId, source = PlaceSource.OSM))
-            else if (expected.placeId == null) savePlace(Place(name = updated.displayLabel(),
-                latitude = updated.latitude, longitude = updated.longitude, osmType = OsmType.NODE,
-                osmId = updated.remoteNodeId, source = PlaceSource.OSM))
         }
         true
     }

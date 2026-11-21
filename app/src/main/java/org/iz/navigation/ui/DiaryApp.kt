@@ -189,6 +189,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     }
     var navigationDashboardRequest by remember { mutableIntStateOf(0) }
     var navigationLayersRequest by remember { mutableIntStateOf(0) }
+    var inspectMapPlaceRequest by remember { mutableIntStateOf(0) }
     var settingsLayersOpen by rememberSaveable(uiEntry.key) { mutableStateOf(false) }
     var navigationInitialPlan by remember { mutableStateOf<SavedWeatherPlan?>(null) }
     var libraryOpen by navigator.pageFlag(UiPage.ROUTES)
@@ -857,6 +858,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     incomingTarget = navigationTarget, initialStops = navigationStops, initialTransport = navigationTransport,
                     incomingShared = navigationShared.takeIf { navigationPage },
                     dashboardRequest = navigationDashboardRequest, layersRequest = navigationLayersRequest,
+                    mainMap = uiEntry.page == UiPage.MAP, inspectMapPlaceRequest = inspectMapPlaceRequest,
                     onSharedMap = { input -> exitGuard.requestExit {
                         navigationShared = input; navigationTarget = null; navigationInitialPlan = null
                         navigationStops = null; navigationTransport = null
@@ -943,6 +945,10 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
             if (uiEntry.page in setOf(UiPage.MAP, UiPage.DIRECTIONS)) {
                 TextButton({ open { navigationDashboardRequest++ } }, Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("menu-navigation-dashboard")) { Text("Yolculuk göstergesi") }
                 TextButton({ open { navigationLayersRequest++ } }, Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("menu-map-layers")) { Text("Harita katmanları") }
+            }
+            if (uiEntry.page == UiPage.MAP && navigationState.acceptsIdleMapTap()) {
+                TextButton({ open { inspectMapPlaceRequest++ } }, Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                    .testTag("menu-inspect-map-place")) { Text("Haritada yer incele") }
             }
             HorizontalDivider()
             TextButton({ open { tab = 1 } }, Modifier.fillMaxWidth().testTag("menu-journeys")) { Text("Yolculuklar") }

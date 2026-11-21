@@ -1,5 +1,9 @@
 # İz sürüm değişikliği planı
 
+## Geliştirme sürümü · Harita ve Android Auto
+
+Telefonun ana haritasında seçilen koordinat yol tarifine veya OSM düzenleyicisine aktarılır. Yeni mekân gönderimi katkı geçmişine işlenir. Kullanıcının kişisel yerleri ve sıraları korunur. Android Auto’da araç işaretinin okunabilirliği ve dönüş, hız ve hız sınırı bilgilerinin sol üstte birlikte izlenebilmesi bu güncellemenin kapsamındadır.
+
 ## Telefon 0.14.0 (36) · Gidon ve gövde kalibrasyonu
 
 Genel telefon sürümünde iki montaj da park hâlinde kalibre edilebilir. Sürüş sonrası sensör kaydı ayrı bir tercihtir. Kalibrasyon başarısız olduğunda nedeni ekranda görünür. Gidonda yalnız başarısız adım tekrarlanabilir. Tamamlanan motosiklet yolculuklarında yeterli sensör ve GPS verisi olan bölümler için yatış tahmini gösterilir.

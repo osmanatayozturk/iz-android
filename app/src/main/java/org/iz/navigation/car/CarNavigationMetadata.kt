@@ -39,12 +39,23 @@ internal fun carManeuverType(type: Int): Int = when (type) {
     else -> Maneuver.TYPE_UNKNOWN
 }
 
+private fun RouteManeuver.turnRoad() = streetNames.firstOrNull { it.isNotBlank() }?.trim()
+
+internal fun RouteManeuver.turnInstruction(): String {
+    val instruction = this.instruction.trim().ifBlank { verbalInstruction.trim().ifBlank { "Rotayı takip edin" } }
+    val road = turnRoad() ?: return instruction
+    return if (instruction.contains(road, ignoreCase = true)) instruction else "$instruction · $road"
+}
+
 internal fun carStep(maneuver: RouteManeuver, simulation: Boolean = false, voiceWarning: String? = null): Step {
-    val cue = CarText.Builder(carManeuverCue(maneuver.instruction, simulation, voiceWarning)).apply {
+    val instruction = maneuver.turnInstruction()
+    val cue = CarText.Builder(carManeuverCue(instruction, simulation, voiceWarning)).apply {
         // Narrow hosts retain the maneuver. Warning visibility requires actual host verification.
-        if (voiceWarning != null) addVariant(carManeuverCue(maneuver.instruction, simulation))
+        if (voiceWarning != null) addVariant(carManeuverCue(instruction, simulation))
     }.build()
-    return Step.Builder(cue).setManeuver(Maneuver.Builder(carManeuverType(maneuver.type)).build()).build()
+    return Step.Builder(cue).setManeuver(Maneuver.Builder(carManeuverType(maneuver.type)).build()).apply {
+        maneuver.turnRoad()?.let { setRoad(it) }
+    }.build()
 }
 
 internal fun carDistance(meters: Double): Distance = Distance.create(meters.coerceAtLeast(0.0), Distance.UNIT_METERS)

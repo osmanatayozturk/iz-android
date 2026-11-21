@@ -3,11 +3,7 @@ package org.iz.navigation.car
 import android.app.Presentation
 import android.content.ComponentCallbacks2
 import android.content.res.Configuration
-import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.Path
 import android.graphics.drawable.GradientDrawable
 import androidx.compose.ui.graphics.toArgb
 import org.iz.navigation.ui.IzPalette
@@ -24,7 +20,6 @@ import android.view.Gravity
 import android.view.Surface
 import android.view.View
 import android.widget.FrameLayout
-import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.car.app.CarContext
 import androidx.car.app.SurfaceCallback
@@ -32,7 +27,6 @@ import androidx.car.app.SurfaceContainer
 import org.iz.navigation.integration.*
 import org.iz.navigation.navigation.*
 import org.iz.navigation.weather.PlannedRoute
-import org.iz.navigation.speed.roadSpeedPresentation
 import org.iz.navigation.power.PowerDiagnostics
 import org.json.JSONArray
 import org.json.JSONObject
@@ -46,7 +40,7 @@ import kotlin.math.ln
 /** Host Surface -> VirtualDisplay -> Presentation -> an independent MapLibre texture MapView.
  * See developer.android.com/training/cars/apps/library/draw-maps. No screenshots/phone View reuse.
  */
-internal class CarMapSurface(private val context: CarContext, private val paletteChanged: () -> Unit = {}) : SurfaceCallback {
+internal class CarMapSurface(private val context: CarContext, private val templateChanged: () -> Unit = {}) : SurfaceCallback {
     private var display: VirtualDisplay? = null
     private var presentation: Presentation? = null
     private var view: MapView? = null
@@ -54,9 +48,12 @@ internal class CarMapSurface(private val context: CarContext, private val palett
     private var cameraAnimator: DriveCameraAnimator? = null
     private var surface: Surface? = null
     private var attribution: TextView? = null
-    private var speedPanel: LinearLayout? = null
-    private var ownSpeedLabel: TextView? = null
-    private var speedLimitLabel: TextView? = null
+    private var drivingPanel: CarDrivingPanel? = null
+    var showsTurn = false
+        private set(value) {
+            if (field != value) { field = value; templateChanged() }
+        }
+    private var voiceWarning: String? = null
     private var trailLegend: TextView? = null
     private var width = 0
     private var height = 0
@@ -92,7 +89,7 @@ internal class CarMapSurface(private val context: CarContext, private val palett
     private val stopObservingPalette = observePaletteChanges(context) {
         palette = IzPalette.fromId(selectedPaletteId(context))
         nightChanged()
-        paletteChanged()
+        templateChanged()
     }
     val guidanceBackground get() = palette.let {
         androidx.car.app.model.CarColor.createCustom(it.day.brand.toArgb(), it.night.brand.toArgb())
@@ -151,23 +148,9 @@ internal class CarMapSurface(private val context: CarContext, private val palett
                     }
                 }
             }.also { frame.addView(it, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.RIGHT)) }
-            speedPanel = LinearLayout(p.context).apply {
-                orientation = LinearLayout.HORIZONTAL
-                visibility = View.GONE
-                fun valueLabel(): TextView = TextView(p.context).apply {
-                    textSize = 17f
-                    setPadding(12, 8, 12, 8)
-                    setTextColor(Color.BLACK)
-                    setBackgroundColor(0xeefafafa.toInt())
-                }
-                ownSpeedLabel = valueLabel().also { addView(it) }
-                speedLimitLabel = valueLabel().also { addView(it, LinearLayout.LayoutParams(-2, -2).apply { marginStart = 8 }) }
-            }.also { frame.addView(it, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.LEFT)) }
-            speedPanel?.addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
-                if (token == generation &&
-                    (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop)) {
-                    displayOutput { render() }
-                }
+            drivingPanel = CarDrivingPanel(p.context).also {
+                it.setColors(if (context.isDarkMode) palette.night else palette.day)
+                frame.addView(it, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.LEFT))
             }
             trailLegend = TextView(p.context).apply {
                 textSize = 11f
@@ -266,7 +249,7 @@ internal class CarMapSurface(private val context: CarContext, private val palett
     }
     private fun syncVisibility() {
         val shown = active && displayAvailable && !safeArea().isEmpty
-        if (!shown) cancelOwnedCamera()
+        if (!shown) { cancelOwnedCamera(); hideDrivingPanel() }
         view?.let {
             if (shown && !resumed) { it.onResume(); resumed = true }
             if (!shown && resumed) { it.onPause(); resumed = false }
@@ -274,8 +257,9 @@ internal class CarMapSurface(private val context: CarContext, private val palett
         if (shown) displayOutput { render(forceCamera = true) }
     }
 
-    fun update(value: NavigationState) {
+    fun update(value: NavigationState, warning: String? = null) {
         state = value
+        voiceWarning = warning
         displayOutput { render() }
     }
 
@@ -315,12 +299,13 @@ internal class CarMapSurface(private val context: CarContext, private val palett
             listOf("car-route", "car-fix"), """
             {"id":"route-outline","type":"line","source":"car-route","layout":{"line-cap":"round","line-join":"round"},"paint":{"line-color":"$outline","line-width":9}},
             {"id":"route","type":"line","source":"car-route","layout":{"line-cap":"round","line-join":"round"},"paint":{"line-color":"$routeColor","line-width":6}},
-            {"id":"fix","type":"circle","source":"car-fix","filter":["!has","bearing"],"paint":{"circle-color":"$routeColor","circle-radius":8,"circle-stroke-color":"$outline","circle-stroke-width":2}},
-            {"id":"heading","type":"symbol","source":"car-fix","filter":["has","bearing"],"layout":{"icon-image":"car-heading","icon-size":0.65,"icon-rotate":["get","bearing"],"icon-rotation-alignment":"map","icon-allow-overlap":true}}
+            {"id":"fix","type":"symbol","source":"car-fix","filter":["!has","bearing"],"layout":{"icon-image":["get","badge"],"icon-rotation-alignment":"viewport","icon-pitch-alignment":"viewport","icon-allow-overlap":true}},
+            {"id":"heading","type":"symbol","source":"car-fix","filter":["has","bearing"],"layout":{"icon-image":"car-heading","icon-rotate":["get","bearing"],"icon-rotation-alignment":"map","icon-pitch-alignment":"viewport","icon-allow-overlap":true}}
             """))
         if (dark) json.getJSONArray("layers").getJSONObject(0).put("paint", JSONObject()
             .put("raster-brightness-max", 0.35).put("raster-saturation", -0.6))
-        listOfNotNull(attribution, ownSpeedLabel, speedLimitLabel, trailLegend).forEach { label ->
+        drivingPanel?.setColors(colors)
+        listOfNotNull(attribution, trailLegend).forEach { label ->
             label.setTextColor(colors.ink.toArgb())
             label.background = GradientDrawable().apply {
                 setColor(colors.surface.toArgb())
@@ -330,28 +315,14 @@ internal class CarMapSurface(private val context: CarContext, private val palett
         current.setStyle(Style.Builder().fromJson(json.toString())) { loaded ->
             if (token == generation && map === current) displayOutput {
                 if (current.style !== loaded) return@displayOutput
-                loaded.addImage("car-heading", directionMarker(colors.route.toArgb(), colors.surface.toArgb()))
+                loaded.addImage("car-heading", carPositionMarker(colors, dark, directional = true))
+                loaded.addImage("car-position", carPositionMarker(colors, dark, directional = false))
+                loaded.addImage("car-last-position", carPositionMarker(colors, dark, directional = false, stale = true))
                 paintedRouteJson = null; paintedFixJson = null; legacyFix = null
                 applyPadding(); render(forceCamera = true)
                 if (preview != null) framePreview()
             }
         }
-    }
-
-    private fun directionMarker(color: Int, outline: Int): Bitmap {
-        val bitmap = Bitmap.createBitmap(48, 48, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        val arrow = Path().apply {
-            moveTo(24f, 4f); lineTo(40f, 40f); lineTo(24f, 33f); lineTo(8f, 40f); close()
-        }
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            this.color = outline; style = Paint.Style.STROKE; strokeWidth = 5f; strokeJoin = Paint.Join.ROUND
-        }
-        canvas.drawPath(arrow, paint)
-        paint.color = color
-        paint.style = Paint.Style.FILL
-        canvas.drawPath(arrow, paint)
-        return bitmap
     }
 
     private fun applyPadding() {
@@ -366,14 +337,6 @@ internal class CarMapSurface(private val context: CarContext, private val palett
             label.layoutParams = (label.layoutParams as FrameLayout.LayoutParams).apply {
                 rightMargin = this@CarMapSurface.width - safe.right + 8
                 bottomMargin = this@CarMapSurface.height - safe.bottom + 8
-            }
-        }
-        speedPanel?.let { panel ->
-            val available = (safe.width() - 32).coerceAtLeast(1)
-            ownSpeedLabel?.maxWidth = (available * .3).toInt().coerceAtLeast(1)
-            speedLimitLabel?.maxWidth = (available * .7).toInt().coerceAtLeast(1)
-            panel.layoutParams = (panel.layoutParams as FrameLayout.LayoutParams).apply {
-                leftMargin = safe.left + 12; topMargin = safe.top + 12
             }
         }
         trailLegend?.let { label ->
@@ -403,12 +366,8 @@ internal class CarMapSurface(private val context: CarContext, private val palett
 
     private fun cameraViewport(): DriveCameraViewport {
         val safe = safeArea()
-        val speedHeight = speedPanel?.takeIf { it.visibility == View.VISIBLE }?.let { panel ->
-            maxOf(panel.height, speedLimitLabel?.let { it.lineHeight * 3 + it.paddingTop + it.paddingBottom } ?: 0,
-                ownSpeedLabel?.let { it.lineHeight * 2 + it.paddingTop + it.paddingBottom } ?: 0)
-        } ?: 0
         val attributionHeight = attribution?.let { it.height.coerceAtLeast(it.lineHeight + it.paddingTop + it.paddingBottom) } ?: 0
-        return DriveCameraViewport(width, height, safe.left, safe.top + if (speedHeight > 0) speedHeight + 12 else 0,
+        return DriveCameraViewport(width, height, safe.left, safe.top + (drivingPanel?.reservedTop ?: 0),
             width - safe.right, height - safe.bottom + attributionHeight + 8,
             known = stableKnown && visibleKnown && !safe.isEmpty)
     }
@@ -433,7 +392,14 @@ internal class CarMapSurface(private val context: CarContext, private val palett
     private fun render(forceCamera: Boolean = false) {
         if (!active || !resumed || !displayAvailable || safeArea().isEmpty) {
             cancelOwnedCamera()
+            hideDrivingPanel()
             return
+        }
+        val safe = safeArea()
+        drivingPanel?.let { panel ->
+            if (preview != null || !stableKnown || !visibleKnown) panel.clear()
+            else panel.update(state, voiceWarning, safe, (attribution?.height ?: 0) + 8)
+            showsTurn = panel.showsTurn
         }
         val current = map ?: return
         val fix = state.fix
@@ -450,13 +416,10 @@ internal class CarMapSurface(private val context: CarContext, private val palett
             current.updateMeasuredGeoJson("car-route", routeJson, PowerDiagnostics.Metric.MAP_ROUTE)
             paintedRouteJson = routeJson
         }
-        speedPanel?.visibility = if (state.roadSpeed.visible && preview == null) View.VISIBLE else View.GONE
-        val speed = roadSpeedPresentation(state.roadSpeed)
-        ownSpeedLabel?.text = "Hızım\n${speed.ownText} km/sa"
-        speedLimitLabel?.text = "Hız sınırı\n${speed.limitText} km/sa\n${speed.sourceText}"
         trailLegend?.visibility = View.GONE
         val marker = fix?.let {
             pointFeature(it.coordinate.latitude, it.coordinate.longitude).apply {
+                getJSONObject("properties").put("badge", if (state.gpsStale) "car-last-position" else "car-position")
                 if (!state.gpsStale) it.bearingDegrees?.takeIf { bearing -> bearing.isFinite() && bearing in 0f..360f }
                     ?.let { bearing -> getJSONObject("properties").put("bearing", bearing.toDouble()) }
             }
@@ -512,13 +475,18 @@ internal class CarMapSurface(private val context: CarContext, private val palett
 
     private inline fun displayOutput(block: () -> Unit) {
         if (!safelyUpdateCarDisplay(block)) {
-            safelyUpdateCarDisplay { cancelOwnedCamera() }
+            safelyUpdateCarDisplay { hideDrivingPanel(); cancelOwnedCamera() }
             recordDisplayFailure()
         }
     }
 
     private fun cancelOwnedCamera() {
         if (cameraAnimator?.cancel() == true) cameraPolicy.requestRefresh()
+    }
+
+    private fun hideDrivingPanel() {
+        drivingPanel?.clear()
+        showsTurn = false
     }
 
     private fun recordDisplayFailure() {
@@ -543,7 +511,7 @@ internal class CarMapSurface(private val context: CarContext, private val palett
         surface = null
         displayPaused = false
         attribution = null
-        speedPanel = null; ownSpeedLabel = null; speedLimitLabel = null; trailLegend = null
+        drivingPanel = null; showsTurn = false; trailLegend = null
         paintedRouteJson = null; paintedFixJson = null
         cameraPolicy.reset(); drivingCamera = false; adaptiveAreaSafe = false; legacyFix = null; legacyCameraAt = Long.MIN_VALUE
     }

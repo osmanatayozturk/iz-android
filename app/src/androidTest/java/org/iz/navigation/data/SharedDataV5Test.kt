@@ -125,7 +125,9 @@ class SharedDataV5Test {
         assertTrue(requireNotNull(repository.recordLocalMapEditChangeset(second, 8)).localChangesetCreated)
     }
 
-    @Test fun aPublishedNodeCreatesOneLocalPlaceAndClosingDoesNotDuplicateIt() = runBlocking {
+    @Test fun publishingAndClosingAnUnlinkedNodePreservesThePersonalPlaceList() = runBlocking {
+        val existingPlace = Place(name = "Personal label", latitude = 41.0, longitude = 29.0)
+        repository.savePlace(existingPlace)
         val draft = draft(); repository.saveMapEdit(draft)
         val first = repository.beginMapEditSend(draft.id, 77, 200)!!
         val uploading = first.copy(changesetId = 7, stage = MapEditStage.UPLOAD_NODE)
@@ -134,11 +136,9 @@ class SharedDataV5Test {
         assertTrue(repository.compareAndSetMapEdit(uploading, sent))
         assertFalse(repository.compareAndSetMapEdit(uploading, sent))
         assertTrue(repository.compareAndSetMapEdit(sent, sent.copy(changesetClosed = true)))
-        val place = repository.snapshot().places.single()
-        assertEquals(MapPlacePreset.DRINKING_WATER.label, place.name)
-        assertEquals(OsmType.NODE, place.osmType)
-        assertEquals(123L, place.osmId)
-        assertEquals(PlaceSource.OSM, place.source)
+        val snapshot = repository.snapshot()
+        assertEquals(listOf(existingPlace), snapshot.places)
+        assertEquals(sent.copy(changesetClosed = true), snapshot.mapEdits.single())
         assertFalse(sent.publicTags().containsKey("name"))
     }
 
@@ -242,42 +242,43 @@ class SharedDataV5Test {
         assertTrue(repository.snapshot().watchHealthSamples.isEmpty())
     }
 
-    @Test fun uploadedNewPlaceAppendsAfterManualOrderAndRenameKeepsItLast() = runBlocking {
-        verifyUploadedPlaceAppends(compactOverflow = false)
+    @Test fun uploadPreservesManualOrderAndExplicitSaveAppends() = runBlocking {
+        verifyPersonalOrderAfterUpload(atRankLimit = false)
     }
 
-    @Test fun uploadedNewPlaceCompactsRankOverflowWithoutChangingRelativeOrder() = runBlocking {
-        verifyUploadedPlaceAppends(compactOverflow = true)
+    @Test fun uploadPreservesRankLimitUntilExplicitSaveCompactsOrder() = runBlocking {
+        verifyPersonalOrderAfterUpload(atRankLimit = true)
     }
 
-    private suspend fun verifyUploadedPlaceAppends(compactOverflow: Boolean) {
+    private suspend fun verifyPersonalOrderAfterUpload(atRankLimit: Boolean) {
         val first = Place(id = "first-order", name = "Zulu")
         val second = Place(id = "second-order", name = "Yankee")
         repository.savePlace(first); repository.savePlace(second)
         repository.reorderPlaces(listOf(first.id, second.id), listOf(second.id, first.id))
-        if (compactOverflow) {
+        if (atRankLimit) {
             val snapshot = repository.snapshot()
             repository.restore(snapshot.copy(places = snapshot.places.map {
                 if (it.id == first.id) it.copy(sortOrder = PlaceOrderRules.MAX_ORDER) else it
             }))
         }
-        val before = repository.snapshot().places.map { it.id }
+        val before = repository.snapshot().places
         val pending = draft().copy(name = "A new uploaded place")
         repository.saveMapEdit(pending)
         val sending = requireNotNull(repository.beginMapEditSend(pending.id, 77, 200))
         val uploading = sending.copy(changesetId = 7, stage = MapEditStage.UPLOAD_NODE)
         assertTrue(repository.compareAndSetMapEdit(sending, uploading))
         assertTrue(repository.compareAndSetMapEdit(uploading, uploaded(uploading)))
-        val places = repository.snapshot().places
-        val created = places.single { it.id !in before }
-        assertEquals(before + created.id, places.map { it.id })
-        assertTrue(created.sortOrder > places.dropLast(1).maxOf { it.sortOrder })
-        assertEquals(OsmType.NODE, created.osmType)
-        assertEquals(123L, created.osmId)
-        repository.savePlace(created.copy(name = "AAA renamed"))
-        assertEquals(before + created.id, repository.snapshot().places.map { it.id })
         assertFalse(repository.compareAndSetMapEdit(uploading, uploaded(uploading)))
-        assertEquals(3, repository.snapshot().places.size)
+        assertEquals(before, repository.snapshot().places)
+
+        val personal = Place(name = "Explicitly saved")
+        repository.savePlace(personal)
+        val expectedIds = before.map { it.id } + personal.id
+        val places = repository.snapshot().places
+        assertEquals(expectedIds, places.map { it.id })
+        assertTrue(places.last().sortOrder > places.dropLast(1).maxOf { it.sortOrder })
+        repository.savePlace(personal.copy(name = "AAA renamed"))
+        assertEquals(expectedIds, repository.snapshot().places.map { it.id })
     }
     private fun uploaded(value: MapEditDraft) = value.copy(status = MapEditStatus.SENT, stage = MapEditStage.CLOSE_CHANGESET,
         remoteNodeId = 123, remoteNodeVersion = 1)

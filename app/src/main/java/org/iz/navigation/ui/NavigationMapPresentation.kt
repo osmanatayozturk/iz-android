@@ -19,6 +19,10 @@ internal data class NavigationMapPresentation(
     val editPreviewLabel: String? = null,
 )
 
+internal fun NavigationState.acceptsIdleMapTap(): Boolean =
+    sessionId == null && !guidance && !recording && !locationActive && !recordingPending &&
+        trackFollow == null && !simulation && !loading
+
 internal fun navigationMapPresentation(ui: PhoneDirectionsState, nav: NavigationState,
     points: List<TrackPoint>, planning: Boolean, editPreview: RouteEditPreview? = null): NavigationMapPresentation {
     val active = nav.sessionId != null || nav.guidance || nav.recording || nav.locationActive

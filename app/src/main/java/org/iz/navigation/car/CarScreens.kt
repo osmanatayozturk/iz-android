@@ -108,9 +108,13 @@ internal class CarHomeScreen(context: CarContext, private val surface: CarMapSur
     var selectedMode = Transport.CAR
     val mode get() = effectiveCarMode(state, selectedMode)
     val measurementSessionActive get() = state.recording || state.guidance || state.simulation
-    fun refresh(value: NavigationState) { state = value; surface.update(state); safeInvalidate() }
+    fun refresh(value: NavigationState) {
+        state = value
+        surface.update(state, carVoiceWarning(state, speechStatus))
+        safeInvalidate()
+    }
     fun refreshSpeech(value: SpeechStatus) {
-        if (speechStatus != value) { speechStatus = value; safeInvalidate() }
+        if (speechStatus != value) { speechStatus = value; refresh(state) }
     }
     val voiceNotice get() = carVoiceNotice(speechStatus, state.muted)
     val cameraMode get() = surface.cameraMode
@@ -194,9 +198,11 @@ internal class CarHomeScreen(context: CarContext, private val surface: CarMapSur
                 builder.setNavigationInfo(MessageInfo.Builder(title).setText(voiceNotice).build())
             } else {
                 val currentProgress = checkNotNull(progress)
-                builder.setNavigationInfo(RoutingInfo.Builder().setCurrentStep(carStep(checkNotNull(step), state.simulation,
-                    carVoiceWarning(state, speechStatus)),
-                    carDistance(currentProgress.nextManeuverDistanceMeters)).build())
+                if (!surface.showsTurn) {
+                    builder.setNavigationInfo(RoutingInfo.Builder().setCurrentStep(carStep(checkNotNull(step), state.simulation,
+                        carVoiceWarning(state, speechStatus)),
+                        carDistance(currentProgress.nextManeuverDistanceMeters)).build())
+                }
                 builder.setDestinationTravelEstimate(carDestinationEstimate(state))
             }
             return builder.build()

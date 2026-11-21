@@ -199,6 +199,7 @@ fun WeatherRouteMap(
     compactSelectionPanel: Boolean = false,
     onMultiSelectionOpenChanged: (Boolean) -> Unit = {},
     layerSettingsMaxHeight: Dp? = null,
+    onMapPointTap: ((GeoCoordinate) -> Unit)? = null,
     overlay: @Composable BoxScope.() -> Unit = {},
 ) {
     ExpandableMap(modifier = modifier, title = title, expandable = expandable) { mapModifier ->
@@ -209,7 +210,7 @@ fun WeatherRouteMap(
                     members, onLocate, attributionBottomInset, cameraViewportInsets, navigationControlsTopInset,
                     navigationControlsHorizontal, drivingCamera, cameraViewportReady, navigationControlsReady,
                     preparedRoutes, navigationHeader, layersRequest, onOsmPlaceClick, placeInformationIdentity,
-                    selectionPanelInsets, compactSelectionPanel, onMultiSelectionOpenChanged, layerSettingsMaxHeight)
+                    selectionPanelInsets, compactSelectionPanel, onMultiSelectionOpenChanged, layerSettingsMaxHeight, onMapPointTap)
             }
             overlay()
         }
@@ -248,6 +249,7 @@ private fun ColumnScope.WeatherRouteMapContent(
     compactSelectionPanel: Boolean,
     onMultiSelectionOpenChanged: (Boolean) -> Unit,
     layerSettingsMaxHeight: Dp?,
+    onMapPointTap: ((GeoCoordinate) -> Unit)?,
 ) {
     val context = LocalContext.current
     val selectOsmPlace by rememberUpdatedState(onOsmPlaceClick)
@@ -256,7 +258,7 @@ private fun ColumnScope.WeatherRouteMapContent(
     val places = remember(context.applicationContext) { OsmPlaces(context.applicationContext) }
     val placeServices = remember(context.applicationContext) { OsmServiceSettings(context.applicationContext) }
     val discoveryLifecycle = LocalLifecycleOwner.current.lifecycle
-    val discovery = remember(discoveryScope, places, placeInformationIdentity) {
+    val discovery = remember(discoveryScope, places, placeInformationIdentity, onMapPointTap != null) {
         PlaceInformationDiscoveryOwner(discoveryScope, places::nearbyCandidates, { selectOsmPlace?.invoke(it) },
             identity = { currentPlaceInformationIdentity to placeServices.read().overpass },
             stillCurrent = { currentPlaceInformationIdentity == placeInformationIdentity &&
@@ -559,7 +561,13 @@ private fun ColumnScope.WeatherRouteMapContent(
                 val index = target.queryRenderedFeatures(point, SAMPLE_LAYER).firstOrNull()?.getNumberProperty("sampleIndex")?.toInt()
                 val sample = index?.let { assessment?.samples?.getOrNull(it) }
                 if (sample != null) { discovery.close(); onSampleClick(sample); true }
-                else if (selectOsmPlace != null && map === target) {
+                else if (onMapPointTap != null && map === target) {
+                    val wrapped = coordinate.mapCoordinate().wrap()
+                    if (validCoordinate(wrapped.latitude, wrapped.longitude)) {
+                        onMapPointTap(GeoCoordinate(wrapped.latitude, wrapped.longitude))
+                    }
+                    true
+                } else if (selectOsmPlace != null && map === target) {
                     val radius = with(density) { 24.dp.toPx() }
                     val selected = target.queryRenderedFeatures(android.graphics.RectF(point.x - radius, point.y - radius,
                         point.x + radius, point.y + radius), PLACE_INFO_LAYER).mapNotNull { parseRenderedOsmPlace(it.toJson()) }
