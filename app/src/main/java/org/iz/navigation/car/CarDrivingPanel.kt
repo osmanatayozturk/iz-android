@@ -83,17 +83,22 @@ internal class CarDrivingPanel(context: Context) : LinearLayout(context) {
             return
         }
         val progressValid = carCanPresentProgress(state)
+        val now = System.currentTimeMillis()
         val speed = when {
-            state.gpsStale || state.fix == null || !speedFixFresh(state.fix, System.currentTimeMillis()) -> RoadSpeedState()
+            state.gpsStale || state.fix == null || !speedFixFresh(state.fix, now) -> RoadSpeedState()
             state.simulation || state.paused || state.loading || state.arrived ||
                 state.guidance && !progressValid -> state.roadSpeed.copy(limit = null)
             else -> state.roadSpeed
         }
-        val values = roadSpeedPresentation(if (compact && !state.gpsStale)
-            speed.copy(ownKmh = ownSpeedKmh(state.fix, System.currentTimeMillis())) else speed)
+        val displayed = if (compact) speed.copy(
+            ownKmh = if (state.gpsStale) null else ownSpeedKmh(state.fix, now),
+            limit = speed.limit?.takeIf { speed.visible && it.valueKmh?.let { value -> value.isFinite() && value > 0.0 } == true })
+            else speed
+        val values = roadSpeedPresentation(displayed)
         ownSpeed.textSize = if (compact) 26f else 24f
         limit.textSize = if (compact) 18f else 24f
-        limit.visibility = if (compact && speed.limit == null) View.GONE else View.VISIBLE
+        ownSpeed.visibility = if (compact && displayed.ownKmh == null) View.GONE else View.VISIBLE
+        limit.visibility = if (compact && displayed.limit == null) View.GONE else View.VISIBLE
         if (compact) {
             ownSpeed.setValue("${values.ownText} km/sa")
             limit.setValue("Sınır ${values.limitText}")
@@ -107,6 +112,12 @@ internal class CarDrivingPanel(context: Context) : LinearLayout(context) {
             source.setValue(values.sourceText)
             source.textSize = 14f
             source.visibility = View.VISIBLE
+        }
+        speeds.visibility = if (ownSpeed.visibility == View.GONE && limit.visibility == View.GONE) View.GONE else View.VISIBLE
+        (limit.layoutParams as LayoutParams).leftMargin = if (ownSpeed.visibility == View.VISIBLE) dp(12) else 0
+        if (compact && speeds.visibility == View.GONE && source.visibility == View.GONE) {
+            clear()
+            return
         }
         val margin = dp(8)
         val width = minOf(safe.width() - margin * 2, dp(344))
@@ -138,10 +149,11 @@ internal class CarDrivingPanel(context: Context) : LinearLayout(context) {
         }
         // A very narrow host can leave less than one complete speed row.
         val lines = if (compact) 1 else 2
-        val limitWidth = if (limit.visibility == View.VISIBLE) dp(12) + limit.measuredWidth else 0
-        if (measuredHeight > height || ownSpeed.lineCount != lines ||
+        val ownWidth = if (ownSpeed.visibility == View.VISIBLE) ownSpeed.measuredWidth else 0
+        val limitWidth = if (limit.visibility == View.VISIBLE) (limit.layoutParams as LayoutParams).leftMargin + limit.measuredWidth else 0
+        if (measuredHeight > height || ownSpeed.visibility == View.VISIBLE && ownSpeed.lineCount != lines ||
             limit.visibility == View.VISIBLE && limit.lineCount != lines ||
-            ownSpeed.measuredWidth + limitWidth > measuredWidth - paddingLeft - paddingRight) {
+            ownWidth + limitWidth > measuredWidth - paddingLeft - paddingRight) {
             clear()
             return
         }
