@@ -373,12 +373,15 @@ class CarMapLocationAcceptanceTest {
                             withContext(Dispatchers.Main) {
                                 surface.panMode(true)
                                 surface.onScroll(168f, -96f)
-                                surface.zoom(1.0)
                             }
-                            val manual = awaitCamera(surface, "manual pan and zoom") { camera ->
+                            val panned = awaitCamera(surface, "manual pan from $following") { camera ->
                                 val target = camera.target
-                                target != null && abs(camera.zoom - following.zoom) > .25 &&
+                                target != null &&
                                     abs(target.latitude - original.latitude) + abs(target.longitude - original.longitude) > 1e-5
+                            }
+                            withContext(Dispatchers.Main) { surface.zoom(1.0) }
+                            val manual = awaitCamera(surface, "manual zoom after $panned") { camera ->
+                                camera.target != null && abs(camera.zoom - panned.zoom) > .25
                             }
                             val manualTarget = checkNotNull(manual.target)
                             withContext(Dispatchers.Main) {

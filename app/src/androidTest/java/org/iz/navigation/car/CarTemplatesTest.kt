@@ -8,6 +8,7 @@ import androidx.car.app.ScreenManager
 import androidx.car.app.Session
 import androidx.car.app.model.*
 import androidx.car.app.navigation.model.*
+import androidx.car.app.testing.ScreenController
 import androidx.car.app.testing.SessionController
 import androidx.car.app.testing.TestCarContext
 import androidx.lifecycle.Lifecycle
@@ -93,12 +94,14 @@ class CarTemplatesTest {
         val screens = context.getCarService(ScreenManager::class.java)
         try {
             assertSame(home, screens.top)
+            ScreenController(home).moveToState(Lifecycle.State.STARTED)
             assertTrue(home.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
             val map = home.onGetTemplate() as NavigationTemplate
             val directions = map.actionStrip!!.actions.single { it.title.toString() == "Yol tarifi" }
             requireNotNull(directions.onClickDelegate).sendClick(object : OnDoneCallback {})
 
             val menu = screens.top as CarMenuScreen
+            ScreenController(menu).moveToState(Lifecycle.State.STARTED)
             val rows = (menu.onGetTemplate() as ListTemplate).singleList!!.items.filterIsInstance<Row>()
             assertEquals(listOf("Hedef ara", "Kayıtlı ve son yerler", "Kaydı başlat"),
                 rows.take(3).map { it.title.toString() })
@@ -107,12 +110,14 @@ class CarTemplatesTest {
             val options = rows.single { it.title.toString() == "Sürüş ve harita" }
             requireNotNull(options.onClickDelegate).sendClick(object : OnDoneCallback {})
             val driving = screens.top as CarDrivingOptionsScreen
+            ScreenController(driving).moveToState(Lifecycle.State.STARTED)
             val drivingRows = (driving.onGetTemplate() as ListTemplate).singleList!!.items.filterIsInstance<Row>()
             assertTrue(drivingRows.any { it.title.toString() == "Hazır rotalar" })
 
             val planned = route()
             home.preview(planned)
             val preview = screens.top as CarPreviewScreen
+            ScreenController(preview).moveToState(Lifecycle.State.STARTED)
             assertTrue(preview.lifecycle.currentState.isAtLeast(Lifecycle.State.CREATED))
             val pane = (preview.onGetTemplate() as MapWithContentTemplate).contentTemplate as PaneTemplate
             assertTrue(pane.pane.rows.any { it.title.toString() == planned.stops.last().label })
