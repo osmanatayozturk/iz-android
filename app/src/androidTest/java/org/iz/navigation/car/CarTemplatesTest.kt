@@ -93,7 +93,8 @@ class CarTemplatesTest {
 
             val menu = screens.top as CarMenuScreen
             val rows = (menu.onGetTemplate() as ListTemplate).singleList!!.items.filterIsInstance<Row>()
-            assertTrue(rows.any { it.title.toString() == "Hedef ara" })
+            assertEquals(listOf("Hedef ara", "Kayıtlı ve son yerler", "Kaydı başlat"),
+                rows.take(3).map { it.title.toString() })
             assertTrue(rows.any { it.title.toString() == "İstatistikler" })
             assertTrue(rows.none { it.title.toString() == "Hazır rotalar" })
             val options = rows.single { it.title.toString() == "Sürüş ve harita" }
