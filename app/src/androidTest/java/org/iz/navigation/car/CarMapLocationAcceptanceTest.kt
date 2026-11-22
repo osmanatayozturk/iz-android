@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.PixelFormat
+import android.graphics.PointF
 import android.graphics.Rect
 import android.location.Location
 import android.location.LocationManager
@@ -24,6 +25,7 @@ import androidx.car.app.testing.SessionController
 import androidx.car.app.testing.TestAppManager
 import androidx.car.app.testing.TestCarContext
 import androidx.car.app.testing.TestScreenManager
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
@@ -40,6 +42,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.iz.navigation.IzApplication
 import org.iz.navigation.data.DiaryRepository
+import org.iz.navigation.data.JourneyStatus
 import org.iz.navigation.data.Transport
 import org.iz.navigation.navigation.NavigationFix
 import org.iz.navigation.tracking.CarMapLocation
@@ -54,9 +57,12 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Point
+import org.json.JSONObject
 
 @RunWith(AndroidJUnit4::class)
 @SdkSuppress(minSdkVersion = 31)
@@ -166,7 +172,8 @@ class CarMapLocationAcceptanceTest {
             val context = withContext(Dispatchers.Main) { TestCarContext.createCarContext(app) }
             val session = withContext(Dispatchers.Main) { SessionController(IzCarSession(), context, Intent()) }
             ImageReader.newInstance(640, 400, PixelFormat.RGBA_8888, 2).use { reader ->
-                reader.setOnImageAvailableListener({ it.acquireLatestImage()?.close() }, Handler(Looper.getMainLooper()))
+                val frames = MarkerFrames()
+                reader.setOnImageAvailableListener(frames::read, Handler(Looper.getMainLooper()))
                 val frame = SurfaceContainer(reader.surface, 640, 400, 160)
                 try {
                     val home = withContext(Dispatchers.Main) {
@@ -196,8 +203,9 @@ class CarMapLocationAcceptanceTest {
                     val nativeSurface = callback as CarMapSurface
                     for (index in 8..9) {
                         val coordinate = point(index)
+                        withContext(Dispatchers.Main) { frames.reset() }
                         gps.awaitFix(projectedGps, coordinate, (index + 2).toFloat())
-                        awaitNativeMapPosition(nativeSurface, coordinate)
+                        awaitNativeMapPosition(nativeSurface, coordinate, gps, frames)
                     }
                     assertEquals(before, DiaryRepository(app).snapshot())
 
@@ -254,6 +262,69 @@ class CarMapLocationAcceptanceTest {
         }
     }
 
+    @Test
+    fun automaticTransitionHonorsPreferenceAndCarSavePromotesTheSameJourney() = runBlocking<Unit> {
+        withSyntheticGps { app, source, gps ->
+            val repository = DiaryRepository(app)
+            val before = repository.snapshot()
+            val settings = TrackerSettings(app)
+            val enabledBefore = settings.enabled
+            var sessionId: String? = null
+            var ownedId: String? = null
+            fun detected() {
+                ContextCompat.startForegroundService(app, Intent(app, TrackingService::class.java)
+                    .setAction(TrackingService.ACTION_DETECTED).putExtra("suggestedTransport", Transport.CAR.name))
+            }
+            try {
+                settings.enabled = false
+                withContext(Dispatchers.Main) { source.setVisible(true) }
+                gps.awaitFix(source, point(13), 13f)
+                detected()
+                delay(1_000)
+                await("Disabled detection left the recorder active") { !TrackingService.isRunning }
+                assertNull(repository.activeJourney())
+                assertEquals(before, repository.snapshot())
+                gps.awaitFix(source, point(14), 14f)
+
+                settings.enabled = true
+                detected()
+                await("Enabled detection did not park a candidate and release display GPS") {
+                    TrackingService.runningJourneyId != null && source.fix.value == null &&
+                        app.navigation.state.value.journey?.status == JourneyStatus.TEMPORARY
+                }
+                val candidate = checkNotNull(repository.activeJourney())
+                ownedId = candidate.id
+                assertEquals(candidate.id, TrackingService.runningJourneyId)
+                assertEquals(JourneyStatus.TEMPORARY, candidate.status)
+                val request = checkNotNull(carRecordingRequest(app.navigation.state.value, Transport.CAR))
+                assertEquals(CarRecordingAction.SAVE, request.action)
+                assertEquals(candidate.id, request.journeyId)
+                sessionId = app.navigation.startCarRecording(request.mode, request.journeyId) {
+                    app.navigation.state.value.journey?.id == candidate.id
+                }
+                assertEquals(candidate.id, repository.activeJourney()?.id)
+                assertEquals(JourneyStatus.CONFIRMED, repository.getJourney(candidate.id)?.status)
+                assertEquals(before.journeys.size + 1, repository.snapshot().journeys.size)
+                assertNoFix(source)
+
+                app.navigation.finishSession(checkNotNull(sessionId))
+                await("Finished recorder did not release GPS") { !TrackingService.isRunning }
+                gps.awaitFix(source, point(15), 15f)
+            } finally {
+                settings.enabled = enabledBefore
+                sessionId?.let { app.navigation.finishSession(it) }
+                val pending = repository.activeJourney()
+                if (pending != null && before.journeys.none { it.id == pending.id }) {
+                    ownedId = pending.id
+                    app.navigation.finishJourney(pending.id)
+                }
+                await("Synthetic recorder remained active after cleanup") { !TrackingService.isRunning }
+                ownedId?.let { if (repository.getJourney(it) != null) repository.deleteJourney(it) }
+            }
+            assertEquals(before, repository.snapshot())
+        }
+    }
+
     private suspend fun withSyntheticGps(test: suspend (IzApplication, CarMapLocation, SyntheticGps) -> Unit) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val app = ApplicationProvider.getApplicationContext<IzApplication>()
@@ -303,29 +374,102 @@ class CarMapLocationAcceptanceTest {
             FileInputStream(descriptor.fileDescriptor).use { it.readBytes().toString(Charsets.UTF_8).trim() }
         }
 
-    private suspend fun awaitNativeMapPosition(surface: CarMapSurface, expected: WeatherCoordinate) {
+    private suspend fun awaitNativeMapPosition(
+        surface: CarMapSurface, expected: WeatherCoordinate, gps: SyntheticGps, frames: MarkerFrames,
+    ) {
         val mapField = CarMapSurface::class.java.getDeclaredField("map").apply { isAccessible = true }
+        val submittedField = CarMapSurface::class.java.getDeclaredField("paintedFixJson").apply { isAccessible = true }
         var observation = "map unavailable"
+        var nextGps = 0L
         val followed = withTimeoutOrNull(10_000) {
             var matched: Boolean
             do {
+                val now = SystemClock.uptimeMillis()
+                if (now >= nextGps) {
+                    gps.send(expected, 10f)
+                    nextGps = now + 1_000L
+                }
                 matched = withContext(Dispatchers.Main) {
                     val map = mapField.get(surface) as? MapLibreMap
+                    val style = map?.style
                     val target = map?.cameraPosition?.target
-                    val marker = map?.style?.getSourceAs<GeoJsonSource>("car-fix")
-                        ?.querySourceFeatures(null)?.singleOrNull()?.geometry() as? Point
-                    observation = "target=$target marker=$marker"
-                    target != null && marker != null &&
-                        abs(target.latitude - expected.latitude) < 1e-6 &&
-                        abs(target.longitude - expected.longitude) < 1e-6 &&
-                        abs(marker.latitude() - expected.latitude) < 1e-6 &&
-                        abs(marker.longitude() - expected.longitude) < 1e-6
+                    val features = style?.getSourceAs<GeoJsonSource>("car-fix")
+                        ?.querySourceFeatures(null).orEmpty()
+                    val positions = features.mapNotNull { it.geometry() as? Point }
+                        .map { it.latitude() to it.longitude() }.distinct()
+                    val visibleLayer = listOf("fix", "heading").any {
+                        style?.getLayer(it)?.visibility?.value == Property.VISIBLE
+                    }
+                    val submitted = (submittedField.get(surface) as? String)?.let {
+                        JSONObject(it).optJSONArray("features")?.optJSONObject(0)
+                            ?.optJSONObject("geometry")?.optJSONArray("coordinates")
+                    }
+                    val ready = style?.isFullyLoaded == true && target != null && matches(target.latitude, target.longitude, expected) &&
+                        submitted != null && matches(submitted.optDouble(1), submitted.optDouble(0), expected) && visibleLayer
+                    if (ready && !frames.armed) {
+                        frames.arm(checkNotNull(map).projection.toScreenLocation(LatLng(expected.latitude, expected.longitude)))
+                    }
+                    observation = "styleLoaded=${style?.isFullyLoaded} target=$target sourceFeatures=${features.size} " +
+                        "sourceCoordinates=$positions visibleLayer=$visibleLayer submitted=$submitted image=${frames.evidence}"
+                    ready && frames.matchesCurrentImage()
                 }
                 if (!matched) delay(100)
             } while (!matched)
             true
         }
-        assertTrue("Native camera and car-fix did not follow $expected: $observation", followed == true)
+        assertTrue("Native camera and fresh marker pixels did not follow $expected: $observation", followed == true)
+    }
+
+    private fun matches(latitude: Double, longitude: Double, expected: WeatherCoordinate) =
+        abs(latitude - expected.latitude) < 1e-6 && abs(longitude - expected.longitude) < 1e-6
+
+    private class MarkerFrames {
+        private var center: PointF? = null
+        private var last = Long.MIN_VALUE
+        private var baseline = Long.MIN_VALUE
+        private var sampled = Long.MIN_VALUE
+        private var glassPixels = 0
+        val armed get() = center != null
+        val evidence get() = "baseline=$baseline timestamp=$sampled glassPixels=$glassPixels"
+
+        fun reset() {
+            center = null
+            glassPixels = 0
+        }
+
+        fun arm(projected: PointF) {
+            center = projected
+            baseline = last
+            sampled = Long.MIN_VALUE
+            glassPixels = 0
+        }
+
+        fun matchesCurrentImage() = sampled > baseline && glassPixels >= 8
+
+        fun read(reader: ImageReader) {
+            reader.acquireLatestImage()?.use { image ->
+                val timestamp = image.timestamp
+                if (timestamp <= last) return@use
+                last = timestamp
+                val point = center ?: return@use
+                if (timestamp <= baseline) return@use
+                val plane = image.planes.first()
+                if (plane.pixelStride < 4) return@use
+                val pixels = plane.buffer
+                var count = 0
+                for (y in (point.y.toInt() - 24).coerceAtLeast(0)..(point.y.toInt() + 24).coerceAtMost(image.height - 1)) {
+                    for (x in (point.x.toInt() - 24).coerceAtLeast(0)..(point.x.toInt() + 24).coerceAtMost(image.width - 1)) {
+                        val offset = y * plane.rowStride + x * plane.pixelStride
+                        if (offset + 2 >= pixels.limit()) continue
+                        val rgb = ((pixels.get(offset).toInt() and 255) shl 16) or
+                            ((pixels.get(offset + 1).toInt() and 255) shl 8) or (pixels.get(offset + 2).toInt() and 255)
+                        if (rgb == 0xb3dfee || rgb == 0x263d50) count++
+                    }
+                }
+                sampled = timestamp
+                glassPixels = count
+            }
+        }
     }
 
     private suspend fun assertNoFix(source: CarMapLocation) {

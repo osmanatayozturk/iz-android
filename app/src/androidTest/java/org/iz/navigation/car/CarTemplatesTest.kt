@@ -1,11 +1,14 @@
 package org.iz.navigation.car
 
 import android.Manifest
+import android.content.Intent
 import androidx.car.app.OnDoneCallback
+import androidx.car.app.Screen
 import androidx.car.app.ScreenManager
+import androidx.car.app.Session
 import androidx.car.app.model.*
 import androidx.car.app.navigation.model.*
-import androidx.car.app.testing.ScreenController
+import androidx.car.app.testing.SessionController
 import androidx.car.app.testing.TestCarContext
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ApplicationProvider
@@ -84,9 +87,13 @@ class CarTemplatesTest {
     }
 
     @Test fun routeLessDirectionsActionOpensMenuAndPreviewKeepsGuidanceSeparate() = onCar { context, _, home ->
-        val controller = ScreenController(home).moveToState(Lifecycle.State.STARTED)
+        val controller = SessionController(object : Session() {
+            override fun onCreateScreen(intent: Intent): Screen = home
+        }, context, Intent()).moveToState(Lifecycle.State.STARTED)
         val screens = context.getCarService(ScreenManager::class.java)
         try {
+            assertSame(home, screens.top)
+            assertTrue(home.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
             val map = home.onGetTemplate() as NavigationTemplate
             val directions = map.actionStrip!!.actions.single { it.title.toString() == "Yol tarifi" }
             requireNotNull(directions.onClickDelegate).sendClick(object : OnDoneCallback {})
@@ -106,6 +113,7 @@ class CarTemplatesTest {
             val planned = route()
             home.preview(planned)
             val preview = screens.top as CarPreviewScreen
+            assertTrue(preview.lifecycle.currentState.isAtLeast(Lifecycle.State.CREATED))
             val pane = (preview.onGetTemplate() as MapWithContentTemplate).contentTemplate as PaneTemplate
             assertTrue(pane.pane.rows.any { it.title.toString() == planned.stops.last().label })
             assertTrue(pane.pane.actions.any { it.title.toString() == "Başlat" })
