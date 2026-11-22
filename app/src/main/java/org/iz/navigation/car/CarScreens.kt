@@ -252,8 +252,9 @@ internal class CarHomeScreen(context: CarContext, private val surface: CarMapSur
             org.iz.navigation.R.drawable.car_zoom_out)).build()).setOnClickListener { display { surface.zoom(-1.0) } }.build()).build()
 
     override fun onGetTemplate(): Template {
-        if (state.guidance && ContextCompat.checkSelfPermission(carContext,
-                Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+        val locationGranted = ContextCompat.checkSelfPermission(carContext,
+            Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (state.guidance && !locationGranted) {
             return MessageTemplate.Builder("Park edin ve telefonda İz'i açarak hassas konum iznini verin. Ardından buraya dönün.")
                 .setTitle("Telefonda kurulumu tamamlayın").setHeaderAction(Action.APP_ICON)
                 .addAction(phoneAction("Telefonda aç", "OPEN_LOCATION_SETUP"))
@@ -301,7 +302,7 @@ internal class CarHomeScreen(context: CarContext, private val surface: CarMapSur
                 .setFlags(Action.FLAG_IS_PERSISTENT).setOnClickListener { display {
                     screenManager.push(CarMenuScreen(carContext, this))
                 } }.build()).apply {
-                    if (!carUsesNavigationFix(state) && mapLocation.recoveryNeeded.value)
+                    if (!carUsesNavigationFix(state) && (!locationGranted || mapLocation.recoveryNeeded.value))
                         addAction(phoneAction("Konumu düzelt", "OPEN_LOCATION_SETUP"))
                 }.build()).setPanModeListener { display { surface.panMode(it) } }.build()
     }
@@ -331,7 +332,6 @@ internal class CarMenuScreen(context: CarContext, private val home: CarHomeScree
             })
             addAll(listOf(
                 row("Sürüş ve harita", modeLabel(home.mode)) { screenManager.push(CarDrivingOptionsScreen(carContext, home)) },
-                row("Hazır rotalar") { screenManager.push(CarRoutesScreen(carContext, home)) },
                 row("Hava durumu") { screenManager.push(CarWeatherScreen(carContext)) },
                 row("İstatistikler") { screenManager.push(CarStatisticsScreen(carContext, home)) },
             ))
@@ -347,6 +347,7 @@ internal class CarDrivingOptionsScreen(context: CarContext, private val home: Ca
         .setSingleList(ItemList.Builder()
             .addItem(row("Sürüş türü", modeLabel(home.mode)) { screenManager.push(CarModeScreen(carContext, home)) })
             .addItem(row("Harita görünümü", if (home.cameraMode == DriveCameraMode.ADAPTIVE) "Uyarlamalı" else "Kuzey yukarı 2D") { screenManager.push(CarCameraScreen(carContext, home)) })
+            .addItem(row("Hazır rotalar") { screenManager.push(CarRoutesScreen(carContext, home)) })
             .addItem(phoneRow("Ses ayarları", currentVoiceNotice, "OPEN_VOICE_SETTINGS")).build())
         .setActionStrip(ActionStrip.Builder().addAction(mapReturn()).build()).build()
 }
