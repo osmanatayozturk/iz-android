@@ -1,9 +1,13 @@
 package org.iz.navigation.car
 
 import android.Manifest
+import androidx.car.app.OnDoneCallback
+import androidx.car.app.ScreenManager
 import androidx.car.app.model.*
 import androidx.car.app.navigation.model.*
+import androidx.car.app.testing.ScreenController
 import androidx.car.app.testing.TestCarContext
+import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.SdkSuppress
@@ -44,14 +48,25 @@ class CarTemplatesTest {
                 listOf("Test Caddesi"), 0, 1, 0.0, 60.0)))
     }
 
-    @Test fun freeDriveAndTemporaryCandidateUseMapContentWithoutNavigationTemplate() = onCar { _, _, home ->
-        home.refresh(NavigationState())
-        assertTrue(home.onGetTemplate() is MapWithContentTemplate)
-        home.refresh(NavigationState(journey = Journey(transport = Transport.CAR), recording = true))
-        assertTrue(home.onGetTemplate() is MapWithContentTemplate)
-        home.refresh(NavigationState(journey = Journey(transport = Transport.CAR, status = JourneyStatus.TEMPORARY), recording = true))
-        val template = home.onGetTemplate() as MapWithContentTemplate
-        assertTrue((template.contentTemplate as PaneTemplate).title.toString().contains("Geçici"))
+    @Test fun routeLessHomeRecordingAndCandidateHaveActionsWithoutRouteGuidance() = onCar { _, _, home ->
+        val states = listOf(
+            "idle" to NavigationState(),
+            "recording" to NavigationState(journey = Journey(transport = Transport.CAR), recording = true),
+            "temporary" to NavigationState(
+                journey = Journey(transport = Transport.CAR, status = JourneyStatus.TEMPORARY),
+                recording = true,
+            ),
+        )
+        for ((name, state) in states) {
+            home.refresh(state)
+            val template = home.onGetTemplate()
+            assertTrue("$name must expose the route-less map", template is NavigationTemplate)
+            template as NavigationTemplate
+            assertNull("$name navigation instructions", template.navigationInfo)
+            assertNull("$name destination estimate", template.destinationTravelEstimate)
+            assertTrue("$name directions action",
+                template.actionStrip?.actions.orEmpty().any { it.title.toString() == "Yol tarifi" })
+        }
     }
 
     @Test fun guidanceStaleGpsOffRouteAndNoManeuverAllBuildValidTemplates() = onCar { _, _, home ->
@@ -66,6 +81,38 @@ class CarTemplatesTest {
         assertTrue((home.onGetTemplate() as NavigationTemplate).navigationInfo is MessageInfo)
         home.refresh(current.copy(progress = current.progress.copy(maneuverIndex = -1)))
         assertTrue((home.onGetTemplate() as NavigationTemplate).navigationInfo is MessageInfo)
+    }
+
+    @Test fun routeLessDirectionsActionOpensMenuAndPreviewKeepsGuidanceSeparate() = onCar { context, _, home ->
+        val controller = ScreenController(home).moveToState(Lifecycle.State.STARTED)
+        val screens = context.getCarService(ScreenManager::class.java)
+        try {
+            val map = home.onGetTemplate() as NavigationTemplate
+            val directions = map.actionStrip!!.actions.single { it.title.toString() == "Yol tarifi" }
+            requireNotNull(directions.onClickDelegate).sendClick(object : OnDoneCallback {})
+
+            val menu = screens.top as CarMenuScreen
+            val rows = (menu.onGetTemplate() as ListTemplate).singleList!!.items.filterIsInstance<Row>()
+            assertTrue(rows.any { it.title.toString() == "Hedef ara" })
+            assertTrue(rows.any { it.title.toString() == "Hazır rotalar" })
+
+            val planned = route()
+            home.preview(planned)
+            val preview = screens.top as CarPreviewScreen
+            val pane = (preview.onGetTemplate() as MapWithContentTemplate).contentTemplate as PaneTemplate
+            assertTrue(pane.pane.rows.any { it.title.toString() == planned.stops.last().label })
+            assertTrue(pane.pane.actions.any { it.title.toString() == "Başlat" })
+            assertNull((home.onGetTemplate() as NavigationTemplate).destinationTravelEstimate)
+
+            screens.popToRoot()
+            home.refresh(NavigationState(guidance = true, route = planned, gpsStale = false,
+                progress = NavigationProgress(0.0, 60.0, 140.0, 0.0, 0, 50.0)))
+            val guidance = home.onGetTemplate() as NavigationTemplate
+            assertNotNull(guidance.destinationTravelEstimate)
+            assertTrue(guidance.actionStrip!!.actions.none { it.title.toString() == "Yol tarifi" })
+        } finally {
+            controller.moveToState(Lifecycle.State.DESTROYED)
+        }
     }
 
     @Test fun savedPlacesTemplateOffersSearchAndBackOnEntry() = onCar { context, _, home ->

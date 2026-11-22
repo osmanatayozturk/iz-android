@@ -23,8 +23,10 @@ data class RoadSpeedPresentation(val ownText: String, val limitText: String, val
 fun ownSpeedKmh(fix: NavigationFix?, now: Long): Double? = fix?.takeIf { speedFixFresh(it, now) }
     ?.speedMps?.takeIf { it.isFinite() && it in 0f..100f }?.toDouble()?.times(3.6)
 
+internal const val ROAD_SPEED_FIX_MAX_AGE_MS = 5_000L
+
 internal fun speedFixFresh(fix: NavigationFix, now: Long): Boolean =
-    now - fix.recordedAt in 0..5_000 && fix.accuracyMeters.isFinite() && fix.accuracyMeters in 0f..50f
+    now - fix.recordedAt in 0..ROAD_SPEED_FIX_MAX_AGE_MS && fix.accuracyMeters.isFinite() && fix.accuracyMeters in 0f..50f
 
 internal fun speedMode(transport: Transport?): Boolean = transport == Transport.CAR || transport == Transport.MOTORCYCLE
 

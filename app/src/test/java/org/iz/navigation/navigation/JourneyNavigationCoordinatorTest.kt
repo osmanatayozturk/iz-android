@@ -87,6 +87,28 @@ class JourneyNavigationCoordinatorTest {
         1110.0, 100.0, 1000, listOf(0.0,100.0), Transport.CAR,
         maneuvers = listOf(RouteManeuver(1,"Kuzeye ilerleyin","Kuzeye ilerleyin", emptyList(),0,1,0.0,100.0)))
 
+    @Test fun carMenuCannotStartOrPromoteAReplacedRecorder() = runTest {
+        val runtime = Runtime()
+        val controller = JourneyNavigationCoordinator(runtime, null, { 1000L }, backgroundScope)
+        var menuCurrent = true
+        runtime.onActive = { menuCurrent = false }
+        assertTrue(runCatching { controller.startCarRecording(Transport.CAR, null) { menuCurrent } }.isFailure)
+        assertEquals(0, runtime.started)
+        runtime.onActive = null
+        val candidate = Journey(id = "current", startedAt = 1000, transport = Transport.CAR, status = JourneyStatus.TEMPORARY)
+        runtime.authoritativeJourney = candidate
+        runtime.running = candidate.id
+        assertTrue(runCatching { controller.startCarRecording(Transport.CAR, null) { true } }.isFailure)
+        assertTrue(runCatching { controller.startCarRecording(Transport.CAR, "retired") { true } }.isFailure)
+        assertEquals(0, runtime.confirmed)
+        assertEquals(0, runtime.started)
+        runtime.authoritativeJourney = null
+        runtime.journeys.value = listOf(candidate)
+        assertEquals(candidate.id, controller.startCarRecording(Transport.CAR, candidate.id) { true })
+        assertEquals(1, runtime.confirmed)
+        assertEquals(0, runtime.started)
+    }
+
     @Test fun queuedMuteRechecksOwnerBeforeSpeechAndStateMutation() = runTest {
         val runtime = Runtime()
         val controller = JourneyNavigationCoordinator(runtime, null, { 1000L }, backgroundScope)

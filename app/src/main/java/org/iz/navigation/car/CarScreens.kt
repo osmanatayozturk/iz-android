@@ -23,6 +23,9 @@ import org.iz.navigation.navigation.DriveCameraMode
 import org.iz.navigation.navigation.SpeechStatus
 import org.iz.navigation.navigation.NavigationSpeech
 import org.iz.navigation.power.PostJourneyAnalysis
+import org.iz.navigation.tracking.CarMapLocation
+import org.iz.navigation.speed.AutoOsmRoadSpeedResolver
+import org.iz.navigation.speed.RoadSpeedState
 import org.iz.navigation.weather.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
@@ -31,6 +34,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import java.util.Locale
 
 /** Each visible consumer owns its subscription; stopped screens do not receive queued notices. */
@@ -101,16 +106,79 @@ internal abstract class CarScreen(context: CarContext) : Screen(context) {
 
 internal class CarHomeScreen(context: CarContext, private val surface: CarMapSurface) : CarScreen(context) {
     private var state = navigation.state.value
-    private var error: String? = null
-    private var starting = false
-    private var idleLocationJob: Job? = null
+    val recordingStatus = MutableStateFlow(CarRecordingStatus())
+    private val mapLocation = CarMapLocation(context)
+    private val mapSpeeds = AutoOsmRoadSpeedResolver(context)
+    private val mapVisible = MutableStateFlow(false)
+    private var idleSpeed = RoadSpeedState()
+    private var homeVisible = false
+    private var sessionVisible = false
+    private var surfaceVisible = false
+    private var mapClosed = false
     private var speechStatus = SpeechStatus()
     var selectedMode = Transport.CAR
     val mode get() = effectiveCarMode(state, selectedMode)
     val measurementSessionActive get() = state.recording || state.guidance || state.simulation
+    init {
+        lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onStart(owner: LifecycleOwner) { homeVisible = true; syncMapLocation() }
+            override fun onStop(owner: LifecycleOwner) { homeVisible = false; syncMapLocation(); renderSurface() }
+            override fun onDestroy(owner: LifecycleOwner) { closeMapLocation() }
+        })
+        scope.launch { mapLocation.fix.collect { renderSurface() } }
+        scope.launch { mapLocation.recoveryNeeded.collect { safeInvalidate() } }
+        scope.launch {
+            mapVisible.collectLatest { visible ->
+                idleSpeed = RoadSpeedState()
+                if (visible) mapSpeeds.states(mapLocation.fix, mode).collect { speed ->
+                    idleSpeed = speed
+                    renderSurface()
+                }
+            }
+        }
+        scope.launch {
+            lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (isActive) {
+                    // Permission return and GNSS silence must work without a new location emission.
+                    syncMapLocation()
+                    renderSurface()
+                    delay(1_000)
+                }
+            }
+        }
+    }
+    private fun syncMapLocation() {
+        val visible = !mapClosed && carMapLocationVisible(homeVisible, sessionVisible, surfaceVisible, state)
+        if (!visible) idleSpeed = RoadSpeedState()
+        mapVisible.value = visible
+        mapLocation.setVisible(visible)
+    }
+    private fun renderSurface() {
+        val fix = mapLocation.fix.value.takeIf { mapVisible.value }
+        surface.update(carMapDisplayState(state, fix, idleSpeed, System.currentTimeMillis(), mode),
+            carVoiceWarning(state, speechStatus))
+    }
+    fun setSessionVisible(visible: Boolean) {
+        sessionVisible = visible
+        syncMapLocation()
+        renderSurface()
+    }
+    fun setSurfaceVisible(visible: Boolean) {
+        if (surfaceVisible == visible) return
+        surfaceVisible = visible
+        syncMapLocation()
+        renderSurface()
+    }
+    fun closeMapLocation() {
+        mapClosed = true
+        mapVisible.value = false
+        idleSpeed = RoadSpeedState()
+        mapLocation.close()
+    }
     fun refresh(value: NavigationState) {
         state = value
-        surface.update(state, carVoiceWarning(state, speechStatus))
+        syncMapLocation()
+        renderSurface()
         safeInvalidate()
     }
     fun refreshSpeech(value: SpeechStatus) {
@@ -125,14 +193,9 @@ internal class CarHomeScreen(context: CarContext, private val surface: CarMapSur
     fun preview(route: PlannedRoute) { screenManager.push(CarPreviewScreen(carContext, this, surface, route)) }
 
     fun requestIdleLocation() {
-        if (state.sessionId != null || state.recording || (state.fix != null && !state.gpsStale) || idleLocationJob?.isActive == true ||
-            ContextCompat.checkSelfPermission(carContext, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
-        idleLocationJob = scope.launch {
-            try { navigation.currentLocation(); error = null }
-            catch (cancelled: CancellationException) { throw cancelled }
-            catch (failure: Exception) { error = failure.message ?: "Konum alınamadı. Telefonda konum ayarlarını kontrol edin." }
-            finally { safeInvalidate() }
-        }
+        syncMapLocation()
+        renderSurface()
+        safeInvalidate()
     }
 
     fun openTarget(target: NavigationTarget) {
@@ -145,16 +208,39 @@ internal class CarHomeScreen(context: CarContext, private val surface: CarMapSur
         screenManager.push(CarPreviewScreen(carContext, this, surface, destination = destination))
     }
 
-    private fun start() {
-        if (starting) return
-        starting = true
-        safeInvalidate()
+    private fun start(request: CarRecordingRequest, stillVisible: () -> Boolean, onStarted: () -> Unit) {
+        if (recordingStatus.value.starting) return
+        recordingStatus.value = CarRecordingStatus(starting = true)
         scope.launch {
-            try { navigation.startFreeDrive(mode); error = null }
+            try {
+                navigation.startCarRecording(request.mode,
+                    request.journeyId.takeIf { request.action == CarRecordingAction.SAVE },
+                    stillCurrent = { !mapClosed && stillVisible() && request == currentRecordingRequest() })
+                ensureActive()
+                if (stillVisible()) display(onStarted)
+            }
             catch (cancelled: CancellationException) { throw cancelled }
-            catch (failure: Exception) { error = failure.message ?: "Kayıt başlatılamadı. Telefonda İz'i açın." }
-            finally { starting = false; safeInvalidate() }
+            catch (failure: Exception) { recordingStatus.value = CarRecordingStatus(
+                error = failure.message ?: "Kayıt başlatılamadı. Telefonda İz'i açın.") }
+            finally { recordingStatus.value = recordingStatus.value.copy(starting = false); safeInvalidate() }
         }
+    }
+
+    fun currentRecordingRequest(): CarRecordingRequest? {
+        val current = navigation.state.value
+        return carRecordingRequest(current, effectiveCarMode(current, selectedMode))
+    }
+    fun changeRecording(request: CarRecordingRequest, stillVisible: () -> Boolean, onStarted: () -> Unit) {
+        if (mapClosed || !stillVisible() || request != currentRecordingRequest()) {
+            recordingStatus.value = CarRecordingStatus(error = "Yolculuk değişti. Haritaya dönüp yeniden seçin.")
+            return
+        }
+        if (request.action != CarRecordingAction.FINISH) { start(request, stillVisible, onStarted); return }
+        val current = navigation.state.value
+        val expected = NavigationStopSnapshot.from(current)
+        val journeyId = current.journey?.id
+        if (expected != null) screenManager.push(CarFinishScreen(carContext, expected))
+        else if (journeyId != null) screenManager.push(CarFinishScreen(carContext, journeyId))
     }
 
     private fun mapActions(): ActionStrip = ActionStrip.Builder().addAction(Action.PAN)
@@ -166,7 +252,8 @@ internal class CarHomeScreen(context: CarContext, private val surface: CarMapSur
             org.iz.navigation.R.drawable.car_zoom_out)).build()).setOnClickListener { display { surface.zoom(-1.0) } }.build()).build()
 
     override fun onGetTemplate(): Template {
-        if (ContextCompat.checkSelfPermission(carContext, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+        if (state.guidance && ContextCompat.checkSelfPermission(carContext,
+                Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             return MessageTemplate.Builder("Park edin ve telefonda İz'i açarak hassas konum iznini verin. Ardından buraya dönün.")
                 .setTitle("Telefonda kurulumu tamamlayın").setHeaderAction(Action.APP_ICON)
                 .addAction(phoneAction("Telefonda aç", "OPEN_LOCATION_SETUP"))
@@ -207,55 +294,48 @@ internal class CarHomeScreen(context: CarContext, private val surface: CarMapSur
             }
             return builder.build()
         }
-        val temporary = state.journey?.status == JourneyStatus.TEMPORARY
-        val menu = action("Menü") { screenManager.push(CarMenuScreen(carContext, this)) }
-        val title = when {
-            state.simulation -> "Simülasyon · Günlüğe yazılmaz"
-            temporary -> "Geçici sürüş · ${modeLabel(mode)}"
-            state.recording -> "Kayıt sürüyor · ${modeLabel(mode)}"
-            else -> "Nereye?"
-        }
-        val content = if (state.recording || temporary) {
-            val speed = state.fix?.speedMps?.takeIf { !state.gpsStale && it.isFinite() && it in 0f..100f }
-            val expected = NavigationStopSnapshot.from(state)
-            val journeyId = state.journey?.id
-            val pane = Pane.Builder().addRow(row(
-                if (temporary) "Geçici yolculuk" else "Hedefsiz kayıt",
-                error ?: notice ?: state.message ?: speed?.let { "${(it * 3.6).toInt()} km/sa" }.orEmpty()))
-                .addAction(action("Hedef ara") { screenManager.push(CarSearchScreen(carContext, this)) })
-                .apply {
-                    if (temporary) addAction(action(if (starting) "Kaydediliyor…" else "Sürüşü kaydet") { start() })
-                    else if (expected != null || journeyId != null) addAction(action("Kaydı bitir") {
-                        screenManager.push(if (expected != null) CarFinishScreen(carContext, expected)
-                            else CarFinishScreen(carContext, requireNotNull(journeyId)))
-                    })
-                }.build()
-            PaneTemplate.Builder(pane).setTitle(title).setHeaderAction(Action.APP_ICON).build()
-        } else {
-            val rows = listOf(
-                row("Hedef ara", "Ad veya adres") { screenManager.push(CarSearchScreen(carContext, this)) },
-                row("Ev / İş", "Kayıtlı ve son yerler") { screenManager.push(CarPlacesScreen(carContext, this)) },
-                row(if (starting) "Kayıt başlatılıyor…" else "Hedefsiz kayıt", error ?: notice ?: modeLabel(mode)) { start() },
-            )
-            ListTemplate.Builder().setTitle(title).setHeaderAction(Action.APP_ICON)
-                .setSingleList(ItemList.Builder().apply { rows.take(listLimit()).forEach(::addItem) }.build()).build()
-        }
-        return MapWithContentTemplate.Builder().setContentTemplate(content)
-            .setActionStrip(ActionStrip.Builder().addAction(menu).build())
-            .setMapController(MapController.Builder().setMapActionStrip(controls)
-                .setPanModeListener { display { surface.panMode(it) } }.build()).build()
+        // NavigationTemplate permits a map with no routing information or travel estimate.
+        // https://developer.android.com/reference/androidx/car/app/navigation/model/NavigationTemplate
+        return NavigationTemplate.Builder().setMapActionStrip(controls)
+            .setActionStrip(ActionStrip.Builder().addAction(Action.Builder().setTitle("Yol tarifi")
+                .setFlags(Action.FLAG_IS_PERSISTENT).setOnClickListener { display {
+                    screenManager.push(CarMenuScreen(carContext, this))
+                } }.build()).apply {
+                    if (!carUsesNavigationFix(state) && mapLocation.recoveryNeeded.value)
+                        addAction(phoneAction("Konumu düzelt", "OPEN_LOCATION_SETUP"))
+                }.build()).setPanModeListener { display { surface.panMode(it) } }.build()
     }
 }
 
 internal class CarMenuScreen(context: CarContext, private val home: CarHomeScreen) : CarScreen(context) {
+    init {
+        scope.launch {
+            lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                combine(navigation.state.map { carRecordingRequest(it, effectiveCarMode(it, home.selectedMode)) }
+                    .distinctUntilChanged(), home.recordingStatus) { _, _ -> Unit }
+                    .collect { safeInvalidate() }
+            }
+        }
+    }
     override fun onGetTemplate(): Template {
-        val rows = listOf(
-            row("Hedef ve yerler", "Ev, İş ve son yerler") { screenManager.push(CarPlacesScreen(carContext, home)) },
-            row("Sürüş ve harita", modeLabel(home.mode)) { screenManager.push(CarDrivingOptionsScreen(carContext, home)) },
-            row("Hazır rotalar") { screenManager.push(CarRoutesScreen(carContext, home)) },
-            row("Hava durumu") { screenManager.push(CarWeatherScreen(carContext)) },
-            row("İstatistikler") { screenManager.push(CarStatisticsScreen(carContext, home)) },
-        )
+        val request = home.currentRecordingRequest()
+        val status = home.recordingStatus.value
+        val rows = buildList {
+            add(row("Hedef ara", "Ad veya adres") { screenManager.push(CarSearchScreen(carContext, home)) })
+            add(row("Kayıtlı ve son yerler", "Ev, İş ve son yerler") { screenManager.push(CarPlacesScreen(carContext, home)) })
+            if (request != null) add(row(if (status.starting) "Kaydediliyor…" else request.action.title,
+                status.error.orEmpty()) {
+                home.changeRecording(request,
+                    stillVisible = { lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) && screenManager.top === this },
+                    onStarted = { screenManager.popToRoot() })
+            })
+            addAll(listOf(
+                row("Sürüş ve harita", modeLabel(home.mode)) { screenManager.push(CarDrivingOptionsScreen(carContext, home)) },
+                row("Hazır rotalar") { screenManager.push(CarRoutesScreen(carContext, home)) },
+                row("Hava durumu") { screenManager.push(CarWeatherScreen(carContext)) },
+                row("İstatistikler") { screenManager.push(CarStatisticsScreen(carContext, home)) },
+            ))
+        }
         return ListTemplate.Builder().setTitle("Sürüş menüsü").setHeaderAction(Action.BACK)
             .setSingleList(ItemList.Builder().apply { rows.take(listLimit()).forEach(::addItem) }.build()).build()
     }

@@ -20,8 +20,11 @@ import androidx.car.app.navigation.model.Maneuver
 import androidx.compose.ui.graphics.toArgb
 import androidx.core.graphics.PathParser
 import org.iz.navigation.navigation.NavigationState
+import org.iz.navigation.data.JourneyStatus
 import org.iz.navigation.speed.RoadSpeedState
 import org.iz.navigation.speed.roadSpeedPresentation
+import org.iz.navigation.speed.ownSpeedKmh
+import org.iz.navigation.speed.speedFixFresh
 import org.iz.navigation.ui.PaletteColors
 import org.iz.navigation.ui.formatDistance
 import kotlin.math.roundToInt
@@ -74,21 +77,37 @@ internal class CarDrivingPanel(context: Context) : LinearLayout(context) {
     }
 
     fun update(state: NavigationState, warning: String?, safe: Rect, bottomInset: Int) {
-        if (!state.roadSpeed.visible || safe.isEmpty) {
+        val compact = !state.guidance
+        if ((!compact && !state.roadSpeed.visible) || safe.isEmpty) {
             clear()
             return
         }
         val progressValid = carCanPresentProgress(state)
         val speed = when {
-            state.gpsStale || state.fix == null -> RoadSpeedState()
+            state.gpsStale || state.fix == null || !speedFixFresh(state.fix, System.currentTimeMillis()) -> RoadSpeedState()
             state.simulation || state.paused || state.loading || state.arrived ||
                 state.guidance && !progressValid -> state.roadSpeed.copy(limit = null)
             else -> state.roadSpeed
         }
-        val values = roadSpeedPresentation(speed)
-        ownSpeed.setMetric("Hızım", "${values.ownText} km/sa")
-        limit.setMetric("Hız sınırı", values.limitText + if (speed.limit?.valueKmh != null) " km/sa" else "")
-        source.setValue(values.sourceText)
+        val values = roadSpeedPresentation(if (compact && !state.gpsStale)
+            speed.copy(ownKmh = ownSpeedKmh(state.fix, System.currentTimeMillis())) else speed)
+        ownSpeed.textSize = if (compact) 26f else 24f
+        limit.textSize = if (compact) 18f else 24f
+        limit.visibility = if (compact && speed.limit == null) View.GONE else View.VISIBLE
+        if (compact) {
+            ownSpeed.setValue("${values.ownText} km/sa")
+            limit.setValue("Sınır ${values.limitText}")
+            source.setValue("● Kayıt")
+            source.textSize = 12f
+            source.visibility = if (state.recording && state.journey?.status == JourneyStatus.CONFIRMED)
+                View.VISIBLE else View.GONE
+        } else {
+            ownSpeed.setMetric("Hızım", "${values.ownText} km/sa")
+            limit.setMetric("Hız sınırı", values.limitText + if (speed.limit?.valueKmh != null) " km/sa" else "")
+            source.setValue(values.sourceText)
+            source.textSize = 14f
+            source.visibility = View.VISIBLE
+        }
         val margin = dp(8)
         val width = minOf(safe.width() - margin * 2, dp(344))
         // Reserve room for the position marker and attribution below the panel.
@@ -99,7 +118,7 @@ internal class CarDrivingPanel(context: Context) : LinearLayout(context) {
         }
         val widthSpec = MeasureSpec.makeMeasureSpec(width, MeasureSpec.AT_MOST)
         val heightSpec = MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED)
-        val maneuver = state.progress?.takeIf { progressValid }?.let { state.route?.maneuvers?.get(it.maneuverIndex) }
+        val maneuver = state.progress?.takeIf { state.guidance && progressValid }?.let { state.route?.maneuvers?.get(it.maneuverIndex) }
         val glyph = maneuver?.let { carTurnGlyph(it.type) }
         if (maneuver != null && glyph != null) {
             val progress = checkNotNull(state.progress)
@@ -118,8 +137,11 @@ internal class CarDrivingPanel(context: Context) : LinearLayout(context) {
             measure(widthSpec, heightSpec)
         }
         // A very narrow host can leave less than one complete speed row.
-        if (measuredHeight > height || ownSpeed.lineCount != 2 || limit.lineCount != 2 ||
-            ownSpeed.measuredWidth + dp(12) + limit.measuredWidth > measuredWidth - paddingLeft - paddingRight) {
+        val lines = if (compact) 1 else 2
+        val limitWidth = if (limit.visibility == View.VISIBLE) dp(12) + limit.measuredWidth else 0
+        if (measuredHeight > height || ownSpeed.lineCount != lines ||
+            limit.visibility == View.VISIBLE && limit.lineCount != lines ||
+            ownSpeed.measuredWidth + limitWidth > measuredWidth - paddingLeft - paddingRight) {
             clear()
             return
         }

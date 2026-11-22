@@ -2,6 +2,7 @@ package org.iz.navigation.speed
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.iz.navigation.integration.OsmPlaces
 import org.iz.navigation.weather.WeatherCoordinate
@@ -24,7 +25,10 @@ internal class OsmRoadRepository(
 ) {
     constructor(context: Context) : this(File(context.noBackupFilesDir, "osm_road_queries"), OsmPlaces(context)::roadNetwork)
 
-    suspend fun nearby(point: WeatherCoordinate): RoadRegion = withContext(Dispatchers.IO) {
+    suspend fun nearby(point: WeatherCoordinate): RoadRegion = checkNotNull(nearby(point) { true })
+
+    /** Check the shared road cache before asking the caller for permission to query OSM. */
+    suspend fun nearby(point: WeatherCoordinate, shouldRequest: () -> Boolean): RoadRegion? = withContext(Dispatchers.IO) {
         // Approximately one kilometre grid; the surrounding 1.5 km query includes every nearby road.
         val lat = (round(point.latitude / .008) * .008).coerceIn(-89.98, 89.98)
         val lonStep = (.008 / cos(Math.toRadians(lat)).coerceAtLeast(.05)).coerceAtMost(.16)
@@ -38,6 +42,8 @@ internal class OsmRoadRepository(
                 RoadRegion(center, parseOsmRoads(target.readText()), target.lastModified()) else null
         }.getOrNull()
         if (cached != null) return@withContext cached
+        ensureActive()
+        if (!shouldRequest()) return@withContext null
         val dLat = 1_500.0 / 111_320
         val dLon = dLat / cos(Math.toRadians(lat)).coerceAtLeast(.05)
         require(lat - dLat >= -90 && lat + dLat <= 90 && lon - dLon >= -180 && lon + dLon <= 180)
@@ -49,17 +55,18 @@ internal class OsmRoadRepository(
         val result = RoadRegion(center, parseOsmRoads(json), clock())
         runCatching {
             directory.mkdirs()
-            val temporary = File(directory, "$key.tmp")
+            val temporary = Files.createTempFile(directory.toPath(), "$key.", ".tmp").toFile()
             try {
                 temporary.writeText(json, Charsets.UTF_8)
+                temporary.setLastModified(result.fetchedAt)
                 Files.move(temporary.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
-                target.setLastModified(result.fetchedAt)
             } finally { temporary.delete() }
             var bytes = 0L
-            directory.listFiles()?.sortedByDescending { it.lastModified() }?.forEach { file ->
-                bytes += file.length()
-                if (bytes > 16_000_000 || clock() - file.lastModified() !in 0..86_400_000) file.delete()
-            }
+            directory.listFiles { file -> file.isFile && file.extension == "json" }
+                ?.sortedByDescending { it.lastModified() }?.forEach { file ->
+                    bytes += file.length()
+                    if (bytes > 16_000_000 || clock() - file.lastModified() !in 0..86_400_000) file.delete()
+                }
         }
         result
     }

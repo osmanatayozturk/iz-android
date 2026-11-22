@@ -28,6 +28,22 @@ class TrackingController(context: Context) {
     fun disableDetection() = DetectionRegistrationRuntime.get(context).disable()
 
     suspend fun startManual(transport: Transport, stillCurrent: () -> Boolean = { true }): String = TrackingCoordinator.mutex.withLock {
+        startManualLocked(transport, stillCurrent)
+    }
+
+    internal suspend fun acquireCarRecorder(transport: Transport, candidate: String?, stillCurrent: () -> Boolean): String =
+        TrackingCoordinator.mutex.withLock {
+            val existing = repository.activeJourney()
+            check(stillCurrent() && existing?.id == candidate) { "Kayıt durumu değişti." }
+            if (candidate == null) return@withLock startManualLocked(transport, stillCurrent)
+            check(existing?.status == JourneyStatus.TEMPORARY && TrackingService.runningJourneyId == candidate) {
+                "Geçici sürüş artık açık değil."
+            }
+            confirmLocked(requireNotNull(existing), transport)
+            candidate
+        }
+
+    private suspend fun startManualLocked(transport: Transport, stillCurrent: () -> Boolean): String {
         check(stillCurrent()) { "Yolculuk başlatma işlemi iptal edildi." }
         check(hasFineLocation(context)) { "Yolculuk için hassas konum izni ver." }
         check(TrackingService.compatibleSessionTransport(transport)) { "Canlı yolculuğun türü farklı. Önce mevcut yolculuğu bitir." }
@@ -49,14 +65,18 @@ class TrackingController(context: Context) {
             throw IllegalStateException(settings.lastError, error)
         }
         ExpirationWorker.schedule(context)
-        journey.id
+        return journey.id
     }
 
     suspend fun confirm(id: String, transport: Transport) = TrackingCoordinator.mutex.withLock {
         val journey = repository.getJourney(id) ?: return@withLock
-        if (journey.status != JourneyStatus.TEMPORARY) return@withLock
+        confirmLocked(journey, transport)
+    }
+
+    private suspend fun confirmLocked(journey: Journey, transport: Transport) {
+        if (journey.status != JourneyStatus.TEMPORARY) return
         check(!TrackingPolicy.expired(journey.expiresAt, System.currentTimeMillis())) { "Geçici kaydın onay süresi doldu." }
-        repository.confirmJourney(id, transport)
+        repository.confirmJourney(journey.id, transport)
         androidx.core.app.NotificationManagerCompat.from(context).cancel(TrackingNotifications.PROMPT_ID)
         TrackingService.refresh(context)
     }

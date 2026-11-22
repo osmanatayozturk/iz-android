@@ -33,6 +33,8 @@ import org.iz.navigation.lean.LeanCaptureController
 import org.iz.navigation.lean.LeanSettingsStore
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 class TrackingService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -152,7 +154,7 @@ class TrackingService : Service() {
         try {
             startForeground(TrackingNotifications.RECORDING_ID,
                 TrackingNotifications.recording(this, null), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
-            isRunning = true
+            mutableRunning.value = true
             PostJourneyAnalysis.get(this).onRuntimeChanged()
         } catch (_: RuntimeException) {
             settings.lastError = "Konum servisi açılamadı. Konum izinlerini kontrol edip uygulama içinden başlat."
@@ -563,10 +565,10 @@ class TrackingService : Service() {
         if (navigationJourneyId == id) navigationJourneyId = null
         stopWalkingSensor()
         if (runningJourneyId == id) runningJourneyId = null
-        isRunning = false
-        PostJourneyAnalysis.get(this).onRuntimeChanged()
         locationClient.removeLocationUpdates(callback)
         locationClient.removeLocationUpdates(dwellCallback)
+        mutableRunning.value = false
+        PostJourneyAnalysis.get(this).onRuntimeChanged()
         scope.cancel()
         stopForeground(STOP_FOREGROUND_REMOVE)
         if (id != null) {
@@ -635,8 +637,9 @@ class TrackingService : Service() {
         const val ACTION_DETECTED = "org.iz.navigation.tracking.DETECTED"
         const val ACTION_STOP = "org.iz.navigation.tracking.STOP"
         const val ACTION_REFRESH = "org.iz.navigation.tracking.REFRESH"
-        @Volatile var isRunning: Boolean = false
-            private set
+        private val mutableRunning = MutableStateFlow(false)
+        internal val running: StateFlow<Boolean> = mutableRunning
+        val isRunning: Boolean get() = running.value
         @Volatile var runningJourneyId: String? = null
             private set
         @Volatile private var navigationJourneyId: String? = null

@@ -35,6 +35,7 @@ internal class IzCarSession : Session() {
         val manager = carContext.getCarService(NavigationManager::class.java)
         surface = CarMapSurface(carContext) { if (::home.isInitialized) home.safeInvalidate() }
         home = CarHomeScreen(carContext, surface)
+        surface.onVisibilityChanged = home::setSurfaceVisible
         displayUpdate { carContext.getCarService(AppManager::class.java).setSurfaceCallback(surface) }
         displayUpdate { manager.setNavigationManagerCallback(object : NavigationManagerCallback {
             override fun onStopNavigation() { coordinator.stopGuidance() }
@@ -60,10 +61,11 @@ internal class IzCarSession : Session() {
         // Observe the existing phone owner; reading status never prepares TTS or acquires focus.
         scope.launch { NavigationSpeech.get(app).status.collect { displayUpdate { home.refreshSpeech(it) } } }
         lifecycle.addObserver(object : DefaultLifecycleObserver {
-            override fun onStart(owner: LifecycleOwner) { displayUpdate { surface.setActive(true); home.requestIdleLocation() } }
-            override fun onStop(owner: LifecycleOwner) { displayUpdate { surface.setActive(false) } }
+            override fun onStart(owner: LifecycleOwner) { displayUpdate { home.setSessionVisible(true); surface.setActive(true) } }
+            override fun onStop(owner: LifecycleOwner) { displayUpdate { home.setSessionVisible(false); surface.setActive(false) } }
             override fun onDestroy(owner: LifecycleOwner) {
                 scope.cancel()
+                home.closeMapLocation()
                 displayUpdate { manager.clearNavigationManagerCallback() }
                 if (hostNavigating) runCatching { manager.navigationEnded() }
                 hostNavigating = false

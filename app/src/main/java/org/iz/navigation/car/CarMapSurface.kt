@@ -80,6 +80,8 @@ internal class CarMapSurface(private val context: CarContext, private val templa
     private var displayPaused = false
     private var closed = false
     private val displayAvailable get() = !displayPaused && surface?.isValid == true
+    var onVisibilityChanged: ((Boolean) -> Unit)? = null
+        set(value) { field = value; value?.invoke(active && displayAvailable && !safeArea().isEmpty) }
     private val memoryCallbacks = object : ComponentCallbacks2 {
         override fun onConfigurationChanged(newConfig: Configuration) = Unit
         override fun onLowMemory() { lowMemory() }
@@ -163,6 +165,7 @@ internal class CarMapSurface(private val context: CarContext, private val templa
             p.show()
             mapView.onStart()
             if (active) { mapView.onResume(); resumed = true }
+            onVisibilityChanged?.invoke(active && displayAvailable && !safeArea().isEmpty)
             mapView.getMapAsync { ready ->
                 if (token != generation || surface?.isValid != true) return@getMapAsync
                 displayOutput {
@@ -254,6 +257,7 @@ internal class CarMapSurface(private val context: CarContext, private val templa
             if (shown && !resumed) { it.onResume(); resumed = true }
             if (!shown && resumed) { it.onPause(); resumed = false }
         }
+        onVisibilityChanged?.invoke(shown)
         if (shown) displayOutput { render(forceCamera = true) }
     }
 
@@ -514,6 +518,7 @@ internal class CarMapSurface(private val context: CarContext, private val templa
         drivingPanel = null; showsTurn = false; trailLegend = null
         paintedRouteJson = null; paintedFixJson = null
         cameraPolicy.reset(); drivingCamera = false; adaptiveAreaSafe = false; legacyFix = null; legacyCameraAt = Long.MIN_VALUE
+        onVisibilityChanged?.invoke(false)
     }
 
     fun close() {
@@ -521,6 +526,7 @@ internal class CarMapSurface(private val context: CarContext, private val templa
         closed = true
         stopObservingPalette()
         release()
+        onVisibilityChanged = null
         context.unregisterComponentCallbacks(memoryCallbacks)
     }
 }

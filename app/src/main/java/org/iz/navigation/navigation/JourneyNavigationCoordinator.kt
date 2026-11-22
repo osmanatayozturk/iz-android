@@ -20,6 +20,15 @@ interface NavigationRuntime : NavigationCueRuntime {
     suspend fun activeJourney(): Journey?
     suspend fun start(transport: Transport, stillCurrent: () -> Boolean = { true }): String
     suspend fun confirm(id: String, transport: Transport)
+    /** Acquire only the recorder named by the displayed car action. Android checks under the writer mutex. */
+    suspend fun acquireCarRecorder(transport: Transport, candidate: String?, stillCurrent: () -> Boolean): String {
+        val existing = activeJourney()
+        check(stillCurrent() && existing?.id == candidate) { "Kayıt durumu değişti." }
+        if (candidate == null) return start(transport, stillCurrent)
+        check(existing?.status == JourneyStatus.TEMPORARY && recordingId() == candidate) { "Geçici sürüş artık açık değil." }
+        confirm(candidate, transport)
+        return candidate
+    }
     suspend fun finish(id: String)
     /** Conservative default: adapters must opt into the recorder-atomic unattached finish. */
     suspend fun finishUnattached(id: String, stillUnattached: () -> Boolean): Boolean = false
@@ -325,15 +334,26 @@ class JourneyNavigationCoordinator(
     }
 
     suspend fun startFreeDrive(transport: Transport, recordJourney: Boolean = true): String = commands.withLock {
-        require(transport != Transport.UNKNOWN) { "Yolculuk türünü seç." }
-        check(!simulationEnabled && !mutableState.value.simulation) { "Önce deneme sürüşünü bitir." }
-        val id = ensureSession(transport, recordJourney)
-        if (mutableState.value.route == null) freeDrive = true
-        publish(mutableState.value)
-        id
+        startFreeDriveLocked(transport, recordJourney)
     }
 
-    private suspend fun ensureSession(transport: Transport, recordJourney: Boolean): String {
+    private class CarRecordingRequest(val candidate: String?, val stillCurrent: () -> Boolean)
+
+    suspend fun startCarRecording(transport: Transport, expectedCandidateId: String?, stillCurrent: () -> Boolean): String = commands.withLock {
+        check(stillCurrent() && !mutableState.value.guidance) { "Sürüş menüsü değişti." }
+        startFreeDriveLocked(transport, true, CarRecordingRequest(expectedCandidateId, stillCurrent))
+    }
+
+    private suspend fun startFreeDriveLocked(transport: Transport, recordJourney: Boolean, car: CarRecordingRequest? = null): String {
+        require(transport != Transport.UNKNOWN) { "Yolculuk türünü seç." }
+        check(!simulationEnabled && !mutableState.value.simulation) { "Önce deneme sürüşünü bitir." }
+        val id = ensureSession(transport, recordJourney, car)
+        if (mutableState.value.route == null) freeDrive = true
+        publish(mutableState.value)
+        return id
+    }
+
+    private suspend fun ensureSession(transport: Transport, recordJourney: Boolean, car: CarRecordingRequest? = null): String {
         val prior = mutableState.value
         require(prior.sessionId == null || prior.sessionTransport == transport ||
             prior.journey?.let { it.status == JourneyStatus.TEMPORARY && it.transport == Transport.UNKNOWN } == true) {
@@ -354,7 +374,7 @@ class JourneyNavigationCoordinator(
                 })
                 return requireNotNull(mutableState.value.sessionId)
             }
-            val journey = ensureRecording(transport)
+            val journey = ensureRecording(transport, car = car)
             val id = mutableState.value.sessionId ?: journey.id
             publish(mutableState.value.copy(sessionId = id, sessionTransport = transport,
                 journey = journey, recording = true, message = null))
@@ -558,13 +578,15 @@ class JourneyNavigationCoordinator(
         }
     }
 
-    private suspend fun ensureRecording(transport: Transport, quickStillCurrent: (() -> Boolean)? = null): Journey {
+    private suspend fun ensureRecording(transport: Transport, car: CarRecordingRequest? = null, quickStillCurrent: (() -> Boolean)? = null): Journey {
         val token = epoch
         val stillCurrent = { token == epoch && quickStillCurrent?.invoke() != false }
         var before = runtime.activeJourney()
         check(stillCurrent()) { "Başlatma işlemi iptal edildi." }
         check(quickStillCurrent == null || before == null) { "Başka bir kayıt başladı." }
-        if (before != null && runtime.recordingId() != before.id && !runtime.startPending(before.id)) {
+        if (car != null) {
+            check(car.stillCurrent() && before?.id == car.candidate) { "Kayıt durumu değişti." }
+        } else if (before != null && runtime.recordingId() != before.id && !runtime.startPending(before.id)) {
             val orphanId = before.id
             retireJourney(orphanId)
             // This deliberate interruption must not invalidate its own asynchronous Start.
@@ -579,10 +601,11 @@ class JourneyNavigationCoordinator(
                 "Açık yolculuğun türü farklı. Önce mevcut yolculuğu bitir veya türünü telefondan değiştir."
             }
             require(!before.interrupted) { "Kesilen yolculuğu telefondan kontrol et." }
-            if (before.status == JourneyStatus.TEMPORARY) runtime.confirm(before.id, transport)
+            if (car == null && before.status == JourneyStatus.TEMPORARY) runtime.confirm(before.id, transport)
         }
         check(stillCurrent()) { "Başlatma işlemi iptal edildi." }
-        val id = before?.id ?: runtime.start(transport, stillCurrent)
+        val id = if (car != null) runtime.acquireCarRecorder(transport, car.candidate) { stillCurrent() && car.stillCurrent() }
+            else before?.id ?: runtime.start(transport, stillCurrent)
         try {
             withTimeout(8000) {
                 while (runtime.recordingId() != id) {
@@ -1186,10 +1209,12 @@ class JourneyNavigationCoordinator(
     }
 
     companion object {
+        internal const val FIX_MAX_AGE_MS = 10_000L
+
         fun fresh(fix: NavigationFix, now: Long): Boolean =
             fix.coordinate.latitude.isFinite() && fix.coordinate.latitude in -90.0..90.0 &&
             fix.coordinate.longitude.isFinite() && fix.coordinate.longitude in -180.0..180.0 &&
-            now - fix.recordedAt in 0..10_000 &&
+            now - fix.recordedAt in 0..FIX_MAX_AGE_MS &&
             fix.accuracyMeters.isFinite() && fix.accuracyMeters in 0f..50f
     }
 }

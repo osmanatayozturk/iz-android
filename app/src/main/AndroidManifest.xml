@@ -107,6 +107,7 @@
             </intent-filter>
         </service>
         <service android:name=".tracking.TrackingService" android:exported="false" android:foregroundServiceType="location" />
+        <service android:name=".tracking.CarMapLocationService" android:exported="false" android:foregroundServiceType="location" />
         <receiver android:name=".tracking.ActivityTransitionReceiver" android:exported="false" />
         <receiver android:name=".tracking.DetectionRestoreReceiver" android:exported="false">
             <intent-filter>
