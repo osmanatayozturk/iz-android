@@ -15,10 +15,13 @@ import android.location.provider.ProviderProperties
 import android.media.ImageReader
 import android.net.ConnectivityManager
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import androidx.car.app.OnDoneCallback
 import androidx.car.app.SurfaceContainer
+import androidx.car.app.navigation.model.NavigationTemplate
 import androidx.activity.ComponentActivity
 import androidx.car.app.testing.ScreenController
 import androidx.car.app.testing.SessionController
@@ -54,9 +57,11 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.style.layers.Property
@@ -323,6 +328,128 @@ class CarMapLocationAcceptanceTest {
             }
             assertEquals(before, repository.snapshot())
         }
+    }
+
+    @Test
+    fun manualCameraAndRecordingSurviveMenuSurfaceReplacementThenRecenter() = runBlocking<Unit> {
+        withSyntheticGps { app, _, _ ->
+            val repository = DiaryRepository(app)
+            val before = repository.snapshot()
+            val navigation = app.navigation
+            val recordingSession = navigation.startFreeDrive(Transport.CAR)
+            val journeyId = checkNotNull(navigation.state.value.journey).id
+            try {
+                await("Synthetic recording service did not bind the journey") {
+                    TrackingService.runningJourneyId == journeyId && navigation.state.value.recording
+                }
+                val context = withContext(Dispatchers.Main) { TestCarContext.createCarContext(app) }
+                val host = withContext(Dispatchers.Main) { SessionController(IzCarSession(), context, Intent()) }
+                ImageReader.newInstance(640, 400, PixelFormat.RGBA_8888, 2).use { oldReader ->
+                    ImageReader.newInstance(800, 480, PixelFormat.RGBA_8888, 2).use { newReader ->
+                        val handler = Handler(Looper.getMainLooper())
+                        oldReader.setOnImageAvailableListener({ it.acquireLatestImage()?.close() }, handler)
+                        newReader.setOnImageAvailableListener({ it.acquireLatestImage()?.close() }, handler)
+                        val first = SurfaceContainer(oldReader.surface, 640, 400, 160)
+                        val replacement = SurfaceContainer(newReader.surface, 800, 480, 160)
+                        try {
+                            val (screens, home, surface) = withContext(Dispatchers.Main) {
+                                host.moveToState(Lifecycle.State.STARTED)
+                                val screens = context.getCarService(TestScreenManager::class.java)
+                                val home = screens.top as CarHomeScreen
+                                ScreenController(home).moveToState(Lifecycle.State.STARTED)
+                                val surface = context.getCarService(TestAppManager::class.java).surfaceCallback as CarMapSurface
+                                assertTrue(oldReader.surface.isValid)
+                                surface.onSurfaceAvailable(first)
+                                surface.onStableAreaChanged(Rect(0, 0, 640, 400))
+                                surface.onVisibleAreaChanged(Rect(0, 0, 640, 400))
+                                Triple(screens, home, surface)
+                            }
+                            val origin = point(20)
+                            navigation.onAcceptedLocation(journeyId, NavigationFix(origin, System.currentTimeMillis(), 5f, 12f))
+                            val following = awaitCamera(surface, "initial GPS follow") { camera ->
+                                camera.target?.let { matches(it.latitude, it.longitude, origin) } == true
+                            }
+                            val original = checkNotNull(following.target)
+                            withContext(Dispatchers.Main) {
+                                surface.panMode(true)
+                                surface.onScroll(168f, -96f)
+                                surface.zoom(1.0)
+                            }
+                            val manual = awaitCamera(surface, "manual pan and zoom") { camera ->
+                                val target = camera.target
+                                target != null && abs(camera.zoom - following.zoom) > .25 &&
+                                    abs(target.latitude - original.latitude) + abs(target.longitude - original.longitude) > 1e-5
+                            }
+                            val manualTarget = checkNotNull(manual.target)
+                            withContext(Dispatchers.Main) {
+                                val action = (home.onGetTemplate() as NavigationTemplate).actionStrip!!.actions
+                                    .single { it.title.toString() == "Yol tarifi" }
+                                requireNotNull(action.onClickDelegate).sendClick(object : OnDoneCallback {})
+                                val menu = screens.top as CarMenuScreen
+                                ScreenController(menu).moveToState(Lifecycle.State.STARTED)
+                                assertTrue(newReader.surface.isValid)
+                                surface.onSurfaceDestroyed(first)
+                                surface.onSurfaceAvailable(replacement)
+                                surface.onStableAreaChanged(Rect(0, 0, 800, 480))
+                                surface.onVisibleAreaChanged(Rect(0, 0, 800, 480))
+                                screens.pop()
+                                assertSame(home, screens.top)
+                            }
+                            val restored = awaitCamera(surface, "manual camera after menu surface replacement") { camera ->
+                                val target = camera.target
+                                target != null && abs(target.latitude - manualTarget.latitude) < 1e-6 &&
+                                    abs(target.longitude - manualTarget.longitude) < 1e-6 && abs(camera.zoom - manual.zoom) < .01
+                            }
+                            assertEquals(recordingSession, navigation.state.value.sessionId)
+                            assertTrue(navigation.state.value.recording)
+                            assertEquals(journeyId, TrackingService.runningJourneyId)
+                            assertEquals(journeyId, repository.activeJourney()?.id)
+                            assertEquals(before.journeys.size + 1, repository.snapshot().journeys.size)
+
+                            withContext(Dispatchers.Main) { home.recenter() }
+                            val next = point(21)
+                            navigation.onAcceptedLocation(journeyId, NavigationFix(next, System.currentTimeMillis(), 5f, 13f))
+                            val centered = awaitCamera(surface, "new GPS follow after recenter") { camera ->
+                                camera.target?.let { matches(it.latitude, it.longitude, next) } == true
+                            }
+                            assertEquals(journeyId, TrackingService.runningJourneyId)
+                            InstrumentationRegistry.getInstrumentation().sendStatus(2, Bundle().apply {
+                                putString("carManualCameraEvidence", "manual=$manual restored=$restored recentered=$centered")
+                            })
+                        } finally {
+                            withContext(Dispatchers.Main) { host.moveToState(Lifecycle.State.DESTROYED) }
+                        }
+                    }
+                }
+            } finally {
+                navigation.finishSession(recordingSession)
+                await("Synthetic recording did not finish during cleanup") { !TrackingService.isRunning }
+                if (repository.getJourney(journeyId) != null) repository.deleteJourney(journeyId)
+            }
+            assertEquals(before, repository.snapshot())
+        }
+    }
+
+    private suspend fun awaitCamera(
+        surface: CarMapSurface,
+        phase: String,
+        expected: (CameraPosition) -> Boolean,
+    ): CameraPosition {
+        val field = CarMapSurface::class.java.getDeclaredField("map").apply { isAccessible = true }
+        var latest: CameraPosition? = null
+        val match = withTimeoutOrNull(12_000) {
+            do {
+                latest = withContext(Dispatchers.Main) {
+                    val map = field.get(surface) as? MapLibreMap
+                    map?.cameraPosition?.takeIf { map.style?.isFullyLoaded == true }
+                }
+                val camera = latest
+                if (camera != null && expected(camera)) return@withTimeoutOrNull camera
+                delay(100)
+            } while (true)
+            null
+        }
+        return checkNotNull(match) { "$phase did not settle; latest=$latest" }
     }
 
     private suspend fun withSyntheticGps(test: suspend (IzApplication, CarMapLocation, SyntheticGps) -> Unit) {

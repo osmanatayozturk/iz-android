@@ -45,6 +45,7 @@ internal class CarMapSurface(private val context: CarContext, private val templa
     private var presentation: Presentation? = null
     private var view: MapView? = null
     private var map: MapLibreMap? = null
+    private var savedCamera: CameraPosition? = null
     private var cameraAnimator: DriveCameraAnimator? = null
     private var surface: Surface? = null
     private var attribution: TextView? = null
@@ -132,7 +133,9 @@ internal class CarMapSurface(private val context: CarContext, private val templa
             presentation = p
             val mapView = MapView(p.context, MapLibreMapOptions.createFromAttributes(p.context)
                 .textureMode(true).setPrefetchZoomDelta(0).attributionEnabled(false).logoEnabled(false)
-                .camera(CameraPosition.Builder().target(LatLng(39.0, 35.0)).zoom(4.5).build()))
+                .camera(savedCamera?.let { CameraPosition.Builder(it).bearing(0.0).tilt(0.0)
+                    .padding(doubleArrayOf(0.0, 0.0, 0.0, 0.0)).build() }
+                    ?: CameraPosition.Builder().target(LatLng(39.0, 35.0)).zoom(4.5).build()))
             view = mapView
             mapView.setMaximumFps(30)
             mapView.onCreate(null)
@@ -196,6 +199,7 @@ internal class CarMapSurface(private val context: CarContext, private val templa
         displayOutput { applyPadding(); syncVisibility() }
     }
     override fun onScroll(distanceX: Float, distanceY: Float) {
+        savedCamera = null
         interaction.manual()
         displayOutput {
             cancelOwnedCamera()
@@ -204,6 +208,7 @@ internal class CarMapSurface(private val context: CarContext, private val templa
     }
     override fun onScale(focusX: Float, focusY: Float, scaleFactor: Float) {
         if (scaleFactor.isFinite() && scaleFactor > 0) {
+            savedCamera = null
             interaction.manual()
             displayOutput {
                 cancelOwnedCamera()
@@ -214,6 +219,7 @@ internal class CarMapSurface(private val context: CarContext, private val templa
         }
     }
     fun recenter() {
+        savedCamera = null
         interaction.recenter()
         displayOutput {
             cancelOwnedCamera()
@@ -227,6 +233,7 @@ internal class CarMapSurface(private val context: CarContext, private val templa
         }
     }
     fun zoom(amount: Double) {
+        savedCamera = null
         interaction.manual()
         displayOutput {
             cancelOwnedCamera()
@@ -284,6 +291,7 @@ internal class CarMapSurface(private val context: CarContext, private val templa
         val current = map ?: return
         val vertices = route.vertices.map { LatLng(it.coordinate.latitude, it.coordinate.longitude) }.distinct()
         if (vertices.size < 2) return
+        savedCamera = null
         cancelOwnedCamera()
         // Recheck the live route before changing follow state: the menu may already be stale.
         if (hold) { interaction.manual(); flatCamera() }
@@ -323,7 +331,17 @@ internal class CarMapSurface(private val context: CarContext, private val templa
                 loaded.addImage("car-position", carPositionMarker(colors, dark, directional = false))
                 loaded.addImage("car-last-position", carPositionMarker(colors, dark, directional = false, stale = true))
                 paintedRouteJson = null; paintedFixJson = null; legacyFix = null
-                applyPadding(); render(forceCamera = true)
+                applyPadding()
+                savedCamera?.let { position ->
+                    savedCamera = null
+                    val viewport = cameraViewport()
+                    val adaptive = interaction.mode == DriveCameraMode.ADAPTIVE && viewport.hasSafeAdaptiveArea()
+                    current.moveCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder(position)
+                        .bearing(if (adaptive) position.bearing else 0.0)
+                        .tilt(if (adaptive) position.tilt else 0.0)
+                        .padding(current.cameraPosition.padding ?: doubleArrayOf(0.0, 0.0, 0.0, 0.0)).build()))
+                }
+                render(forceCamera = true)
                 if (preview != null) framePreview()
             }
         }
@@ -500,6 +518,13 @@ internal class CarMapSurface(private val context: CarContext, private val templa
 
     fun release() {
         generation++
+        // A host may replace its surface while keeping this car session and manual hold alive.
+        // Snapshot native state, not the endpoint of an interrupted animation, and never old insets.
+        if (closed) savedCamera = null
+        else map?.cameraPosition?.let { position ->
+            savedCamera = CameraPosition.Builder(position).target(position.target?.let { LatLng(it.latitude, it.longitude) })
+                .padding(doubleArrayOf(0.0, 0.0, 0.0, 0.0)).build()
+        }
         val animator = cameraAnimator
         cameraAnimator = null
         // This map is being discarded and its follow policy is reset below.
