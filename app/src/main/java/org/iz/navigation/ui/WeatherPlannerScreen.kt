@@ -40,6 +40,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
@@ -103,6 +104,8 @@ internal fun WeatherPlannerScreen(
     onDirectionsWithPlan: ((SavedWeatherPlan) -> Unit)? = null,
     vm: WeatherPlannerViewModel = viewModel(),
 ) {
+    DisposableEffect(vm.garageStart) { onDispose(vm.garageStart::dismiss) }
+    PhoneGarageChoice(vm.garageStart)
     LaunchedEffect(vm, initialPlan) {
         vm.enterUi(initialTransport, initialPlan)
     }

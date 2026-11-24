@@ -92,11 +92,22 @@ class GarageRepository internal constructor(private val app: IzApplication) {
                 "Sürüş veya araç değişti."
             }
             if (journeyId != null) assign(journeyId, vehicleId)
-            else unrecordedBinding.value = Binding(sessionId, vehicleId)
+            else rememberUnrecorded(sessionId, vehicleId)
         }
     }
 
     private suspend fun <T> mutate(block: suspend () -> T): T = changes.withLock { db.withTransaction { block() } }
+
+    internal fun rememberUnrecorded(session: String, id: String) {
+        unrecordedBinding.value = Binding(session, id)
+    }
+
+    internal suspend fun applyForProjection(vehicle: GarageVehicle, selectedId: String?, km: Double,
+        action: suspend () -> Boolean): Boolean = changes.withLock {
+        val options = dao.allVehicles().filter { it.transport == vehicle.transport }
+        val current = if (selectedId == null) options.singleOrNull() else options.find { it.id == selectedId }
+        if (current != vehicle || observeStats(vehicle.id).first()?.needsFuel(vehicle, km) != true) false else action()
+    }
 
     internal suspend fun applyForOwner(session: String, journey: String?, id: String, unrecordedKm: Double,
         action: suspend () -> Boolean): Boolean =
@@ -105,7 +116,7 @@ class GarageRepository internal constructor(private val app: IzApplication) {
                 else unrecordedBinding.value?.takeIf { it.sessionId == session }?.vehicleId
             val vehicle = dao.vehicle(id) ?: return@withLock false
             if (assigned != id) return@withLock false
-            if (stats(id).first().needsFuel(vehicle, unrecordedKm)) action() else false
+            if (observeStats(id).first()?.needsFuel(vehicle, unrecordedKm) == true) action() else false
         }
 
     /** A drive with insufficient fuel history should never read its GPS history to evaluate a prompt. */
@@ -114,11 +125,13 @@ class GarageRepository internal constructor(private val app: IzApplication) {
         .map { FuelHistory.calculate(vehicle, it, vehicle.odometerKm).learningFullCount >= 5 }
         .distinctUntilChanged().flatMapLatest { ready -> if (ready) stats(vehicle.id) else flowOf(null) }
 
+    fun stats(vehicleId: String): Flow<FuelStats> = observeStats(vehicleId).filterNotNull()
+
     @OptIn(ExperimentalCoroutinesApi::class)
-    fun stats(vehicleId: String): Flow<FuelStats> =
+    private fun observeStats(vehicleId: String): Flow<FuelStats?> =
         combine(dao.observeVehicle(vehicleId), dao.fills(vehicleId)) { vehicle, fills -> vehicle to fills }
             .flatMapLatest { (vehicle, fills) ->
-                if (vehicle == null) return@flatMapLatest emptyFlow()
+                if (vehicle == null) return@flatMapLatest flowOf(null)
                 val lastFill = fills.lastOrNull()?.takeIf { it.at >= vehicle.odometerAt }
                 val since = lastFill?.at ?: vehicle.odometerAt
                 val baseline = lastFill?.odometerKm ?: vehicle.odometerKm

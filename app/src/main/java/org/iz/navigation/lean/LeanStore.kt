@@ -67,19 +67,22 @@ class LeanStore internal constructor(
         }
     }
 
-    suspend fun append(token: LeanSessionToken, records: List<LeanRecord>): Boolean = withContext(Dispatchers.IO) {
-        if (records.isEmpty()) return@withContext true
+    suspend fun append(token: LeanSessionToken, records: List<LeanRecord>): Boolean =
+        appendCaptureBatch(token, records) != null
+
+    internal suspend fun appendCaptureBatch(token: LeanSessionToken, records: List<LeanRecord>): LeanPersistedBatch? = withContext(Dispatchers.IO) {
+        if (records.isEmpty()) return@withContext LeanPersistedBatch()
         require(records.size <= LeanCodec.MAX_RECORDS)
         withSnapshotLease {
-            val row = dao.session(token.id) ?: return@withSnapshotLease false
+            val row = dao.session(token.id) ?: return@withSnapshotLease null
             if (!row.matches(token) || row.state != "CAPTURING" ||
-                LeanCodec.reasons(row.reasonsJson).any { it in setOf("RAW_BUDGET", "CHUNK_LIMIT") }) return@withSnapshotLease false
-            val trip = db.diaryDao().journey(row.journeyId) ?: return@withSnapshotLease false
+                LeanCodec.reasons(row.reasonsJson).any { it in setOf("RAW_BUDGET", "CHUNK_LIMIT") }) return@withSnapshotLease null
+            val trip = db.diaryDao().journey(row.journeyId) ?: return@withSnapshotLease null
             // A valid writer may drain after finish; deleted, changed-mode and temporary trips cannot write.
-            if (trip.transport != Transport.MOTORCYCLE || trip.status != JourneyStatus.CONFIRMED) return@withSnapshotLease false
+            if (trip.transport != Transport.MOTORCYCLE || trip.status != JourneyStatus.CONFIRMED) return@withSnapshotLease null
             val accepted = records.filter { it.elapsedNanos >= row.startedAtElapsedNanos &&
                 (row.endedAtElapsedNanos == null || it.elapsedNanos <= row.endedAtElapsedNanos) }
-            if (accepted.isEmpty()) return@withSnapshotLease true
+            if (accepted.isEmpty()) return@withSnapshotLease LeanPersistedBatch()
             val payload = LeanCodec.encodeRecords(accepted)
             val capacityReason = when {
                 dao.rawBytes() + 2L * payload.size + ioReserve > byteBudget -> "RAW_BUDGET"
@@ -88,15 +91,23 @@ class LeanStore internal constructor(
             }
             if (capacityReason != null) {
                 dao.update(row.copy(reasonsJson = LeanCodec.reasonsJson(LeanCodec.reasons(row.reasonsJson) + capacityReason)))
-                return@withSnapshotLease false
+                return@withSnapshotLease null
             }
             db.withTransaction {
-                val current = dao.session(token.id) ?: return@withTransaction false
-                if (!current.matches(token) || current.state != "CAPTURING") return@withTransaction false
+                val current = dao.session(token.id) ?: return@withTransaction null
+                if (!current.matches(token) || current.state != "CAPTURING") return@withTransaction null
                 val index = dao.chunkInfos(token.id).lastOrNull()?.partIndex?.plus(1) ?: 0
                 dao.insert(LeanChunkEntity(token.id, index, payload, LeanCodec.sha256(payload), accepted.size,
                     accepted.minOf { it.elapsedNanos }, accepted.maxOf { it.elapsedNanos }))
-                true
+                var accelerometer: Long? = null
+                var gyroscope: Long? = null
+                for (record in accepted) if (record is LeanImuRecord) {
+                    when (record.kind) {
+                        LeanSensorKind.ACCELEROMETER -> accelerometer = maxOf(accelerometer ?: record.elapsedNanos, record.elapsedNanos)
+                        LeanSensorKind.GYROSCOPE -> gyroscope = maxOf(gyroscope ?: record.elapsedNanos, record.elapsedNanos)
+                    }
+                }
+                LeanPersistedBatch(accelerometer, gyroscope)
             }
         }
     }

@@ -73,6 +73,9 @@ interface NavigationRuntime : NavigationCueRuntime {
     suspend fun plan(stops: List<RouteStop>, transport: Transport): PlannedRoute
     suspend fun plan(stops: List<RouteStop>, transport: Transport, preferences: RoutePreferences,
         travelSpeedKmh: Double?): PlannedRoute = plan(stops, transport)
+    suspend fun fuelStations(fix: NavigationFix, transport: Transport, route: PlannedRoute?,
+        progress: NavigationProgress?): List<SelectedOsmPlace> = emptyList()
+    fun fuelRoutePreferences(transport: Transport): RoutePreferences = RoutePreferences.defaults(transport)
     suspend fun locate(): NavigationFix
     fun hasPreciseLocation(): Boolean = false
     fun canLocateQuickly(): Boolean = hasPreciseLocation()
@@ -333,8 +336,9 @@ class JourneyNavigationCoordinator(
         }
     }
 
-    suspend fun startFreeDrive(transport: Transport, recordJourney: Boolean = true): String = commands.withLock {
-        startFreeDriveLocked(transport, recordJourney)
+    suspend fun startFreeDrive(transport: Transport, recordJourney: Boolean = true,
+        stillCurrent: () -> Boolean = { true }): String = commands.withLock {
+        startFreeDriveLocked(transport, recordJourney, stillCurrent = stillCurrent)
     }
 
     private class CarRecordingRequest(val candidate: String?, val stillCurrent: () -> Boolean)
@@ -344,16 +348,19 @@ class JourneyNavigationCoordinator(
         startFreeDriveLocked(transport, true, CarRecordingRequest(expectedCandidateId, stillCurrent))
     }
 
-    private suspend fun startFreeDriveLocked(transport: Transport, recordJourney: Boolean, car: CarRecordingRequest? = null): String {
+    private suspend fun startFreeDriveLocked(transport: Transport, recordJourney: Boolean, car: CarRecordingRequest? = null,
+        stillCurrent: () -> Boolean = { true }): String {
         require(transport != Transport.UNKNOWN) { "Yolculuk türünü seç." }
         check(!simulationEnabled && !mutableState.value.simulation) { "Önce deneme sürüşünü bitir." }
-        val id = ensureSession(transport, recordJourney, car)
+        val id = ensureSession(transport, recordJourney, car, stillCurrent)
         if (mutableState.value.route == null) freeDrive = true
         publish(mutableState.value)
         return id
     }
 
-    private suspend fun ensureSession(transport: Transport, recordJourney: Boolean, car: CarRecordingRequest? = null): String {
+    private suspend fun ensureSession(transport: Transport, recordJourney: Boolean, car: CarRecordingRequest? = null,
+        startStillCurrent: () -> Boolean = { true }): String {
+        check(startStillCurrent()) { "Başlatma isteği artık güncel değil." }
         val prior = mutableState.value
         require(prior.sessionId == null || prior.sessionTransport == transport ||
             prior.journey?.let { it.status == JourneyStatus.TEMPORARY && it.transport == Transport.UNKNOWN } == true) {
@@ -363,7 +370,10 @@ class JourneyNavigationCoordinator(
         try {
             val token = epoch
             if (!recordJourney) {
-                runtime.prepareNoRecordSession(stillCurrent = { token == epoch }, onDiscard = { existing ->
+                var ownTransition = false
+                runtime.prepareNoRecordSession(stillCurrent = { token == epoch && (ownTransition || startStillCurrent()) }, onDiscard = { existing ->
+                    // The caller's snapshot can legitimately change once this command starts replacing the old row.
+                    ownTransition = true
                     retireJourney(existing.id)
                     publish(mutableState.value.copy(journey = null, recording = false,
                         sessionId = mutableState.value.sessionId.takeUnless { it == existing.id }))
@@ -374,7 +384,7 @@ class JourneyNavigationCoordinator(
                 })
                 return requireNotNull(mutableState.value.sessionId)
             }
-            val journey = ensureRecording(transport, car = car)
+            val journey = ensureRecording(transport, car = car, startStillCurrent = startStillCurrent)
             val id = mutableState.value.sessionId ?: journey.id
             publish(mutableState.value.copy(sessionId = id, sessionTransport = transport,
                 journey = journey, recording = true, message = null))
@@ -399,8 +409,9 @@ class JourneyNavigationCoordinator(
     }
 
     suspend fun startGuidance(route: PlannedRoute, recordJourney: Boolean = true, replaceTrackFollow: Boolean = false,
-        expectedTrackFollowKey: String? = null): String =
-        activate(route, true, recordJourney, replaceTrackFollow, expectedTrackFollowKey)
+        expectedTrackFollowKey: String? = null, stillCurrent: () -> Boolean = { true }): String =
+        activate(route, true, recordJourney, replaceTrackFollow, expectedTrackFollowKey,
+            startStillCurrent = stillCurrent)
     suspend fun activateRoute(route: PlannedRoute, replaceTrackFollow: Boolean = false): String = activate(route, false, true, replaceTrackFollow)
 
     internal suspend fun quickSearchCoordinate(): WeatherCoordinate? = findQuickSearchCoordinate(
@@ -506,8 +517,9 @@ class JourneyNavigationCoordinator(
         }
         val activationEpoch = epoch
         check(!simulated || runtime.activeJourney() == null) { "Deneme sürüşü için önce gerçek yolculuğu bitir." }
-        check(activationEpoch == epoch) { "Başlatma işlemi iptal edildi." }
-        val sessionId = if (simulated) "simulation-${UUID.randomUUID()}" else ensureSession(route.transport, recordJourney)
+        check(activationEpoch == epoch && startStillCurrent()) { "Başlatma işlemi iptal edildi." }
+        val sessionId = if (simulated) "simulation-${UUID.randomUUID()}" else
+            ensureSession(route.transport, recordJourney, startStillCurrent = startStillCurrent)
         val journey = if (simulated) Journey(id = sessionId, transport = route.transport, startedAt = clock()) else mutableState.value.journey
         check(activationEpoch == epoch && stillPrepared()) { "Hazır rota veya yolculuk durumu değişti." }
         val initialFix = if (preparedFingerprint != null) {
@@ -578,16 +590,20 @@ class JourneyNavigationCoordinator(
         }
     }
 
-    private suspend fun ensureRecording(transport: Transport, car: CarRecordingRequest? = null, quickStillCurrent: (() -> Boolean)? = null): Journey {
+    private suspend fun ensureRecording(transport: Transport, car: CarRecordingRequest? = null,
+        startStillCurrent: () -> Boolean = { true }, quickStillCurrent: (() -> Boolean)? = null): Journey {
         val token = epoch
         val stillCurrent = { token == epoch && quickStillCurrent?.invoke() != false }
+        var ownTransition = false
+        fun mayStart() = stillCurrent() && (ownTransition || startStillCurrent())
         var before = runtime.activeJourney()
-        check(stillCurrent()) { "Başlatma işlemi iptal edildi." }
+        check(mayStart()) { "Başlatma işlemi iptal edildi." }
         check(quickStillCurrent == null || before == null) { "Başka bir kayıt başladı." }
         if (car != null) {
             check(car.stillCurrent() && before?.id == car.candidate) { "Kayıt durumu değişti." }
         } else if (before != null && runtime.recordingId() != before.id && !runtime.startPending(before.id)) {
             val orphanId = before.id
+            ownTransition = true
             retireJourney(orphanId)
             // This deliberate interruption must not invalidate its own asynchronous Start.
             publish(mutableState.value.copy(journey = null, recording = false,
@@ -601,11 +617,16 @@ class JourneyNavigationCoordinator(
                 "Açık yolculuğun türü farklı. Önce mevcut yolculuğu bitir veya türünü telefondan değiştir."
             }
             require(!before.interrupted) { "Kesilen yolculuğu telefondan kontrol et." }
-            if (car == null && before.status == JourneyStatus.TEMPORARY) runtime.confirm(before.id, transport)
+            if (car == null && before.status == JourneyStatus.TEMPORARY) {
+                check(mayStart()) { "Başlatma işlemi iptal edildi." }
+                ownTransition = true
+                runtime.confirm(before.id, transport)
+            }
         }
-        check(stillCurrent()) { "Başlatma işlemi iptal edildi." }
+        check(mayStart()) { "Başlatma işlemi iptal edildi." }
         val id = if (car != null) runtime.acquireCarRecorder(transport, car.candidate) { stillCurrent() && car.stillCurrent() }
-            else before?.id ?: runtime.start(transport, stillCurrent)
+            else before?.id ?: runtime.start(transport, ::mayStart)
+        if (before == null || car != null) ownTransition = true
         try {
             withTimeout(8000) {
                 while (runtime.recordingId() != id) {
@@ -614,9 +635,9 @@ class JourneyNavigationCoordinator(
                     delay(100)
                 }
             }
-            check(stillCurrent()) { "Yolculuk durumu değişti." }
+            check(mayStart()) { "Yolculuk durumu değişti." }
             val actual = runtime.activeJourney()
-            check(stillCurrent()) { "Yolculuk durumu değişti." }
+            check(mayStart()) { "Yolculuk durumu değişti." }
             check(actual?.id == id && actual.status == JourneyStatus.CONFIRMED) { "Yolculuk artık açık değil." }
             publish(mutableState.value.copy(journey = actual, recording = true,
                 fix = mutableState.value.fix.takeIf { mutableState.value.journey?.id == id }, message = null))
@@ -918,6 +939,126 @@ class JourneyNavigationCoordinator(
 
     fun remainingStopIndices(expected: RouteEditOwner): List<Int> =
         if (expected.matches(state.value)) remainingRouteStopIndices() else emptyList()
+
+    internal suspend fun findFuelStation(): FuelStationPlan? = findFuelStationInternal(null, null) { true }
+
+    internal suspend fun findFuelStation(transport: Transport, fix: NavigationFix,
+        stillCurrent: () -> Boolean): FuelStationPlan? = findFuelStationInternal(transport, fix, stillCurrent)
+
+    private suspend fun findFuelStationInternal(transport: Transport?, externalFix: NavigationFix?,
+        stillCurrent: () -> Boolean): FuelStationPlan? {
+        val capture = commands.withLock {
+            val before = state.value
+            val mode = transport ?: before.sessionTransport ?: return null
+            if (!speedMode(mode) || !stillCurrent()) return null
+            val fix = fuelFix(before, externalFix) ?: return null
+            val route = before.route
+            val progress = before.progress?.takeUnless { it.offRoute }
+            if (route != null && progress == null) return null
+            val owner = FuelStationOwner(epoch, before.sessionId, before.journey?.id, before.recording,
+                route?.id, before.routeRevision, mode, fix, remainingRouteStopIndices())
+            if (!fuelOwnerCurrent(owner, externalFix)) return null
+            FuelStationSearch(owner, route?.copy(stops = route.stops.mapIndexed { index, stop ->
+                breaks?.stopForRequest(index) ?: stop
+            }), progress)
+        }
+        suspend fun current() = commands.withLock { stillCurrent() && fuelOwnerCurrent(capture.owner, externalFix) }
+        val origin = RouteStop("Mevcut konum", capture.owner.fix.coordinate)
+        val departureAt = clock()
+        val stations = try {
+            runtime.fuelStations(capture.owner.fix, capture.owner.transport, capture.route, capture.progress)
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { return null }
+        if (!current()) return null
+        val selected = FuelStationRouting.choose(capture.owner, capture.route, capture.progress, stations, { stop ->
+            val route = capture.route
+            if (route == null) RouteModificationRequest(listOf(origin, stop), departureAt, capture.owner.transport,
+                null, runtime.fuelRoutePreferences(capture.owner.transport))
+            else runCatching {
+                RouteEditPolicy.prepare(route, requireNotNull(capture.progress).elapsedSeconds, origin.coordinate,
+                    departureAt, RouteEditAction.AddStop(stop), capture.owner.remainingStops)
+            }.getOrNull()
+        }, ::planModified, ::current)
+        return commands.withLock {
+            val fix = fuelFix(state.value, externalFix)
+            selected?.takeIf {
+                stillCurrent() && fuelOwnerCurrent(capture.owner, externalFix) &&
+                    fix != null && fuelApproach(it, fix) != null
+            }
+        }
+    }
+
+    private data class FuelStationSearch(val owner: FuelStationOwner, val route: PlannedRoute?,
+        val progress: NavigationProgress?)
+
+    internal suspend fun acceptFuelStation(plan: FuelStationPlan, stillCurrent: () -> Boolean): Boolean =
+        acceptFuelStationInternal(plan, null, stillCurrent)
+
+    internal suspend fun acceptFuelStation(plan: FuelStationPlan, fix: NavigationFix,
+        stillCurrent: () -> Boolean): Boolean = acceptFuelStationInternal(plan, fix, stillCurrent)
+
+    private suspend fun acceptFuelStationInternal(plan: FuelStationPlan, externalFix: NavigationFix?,
+        stillCurrent: () -> Boolean): Boolean = commands.withLock {
+        val context = currentCoroutineContext()
+        fun current() = context.isActive && stillCurrent() && fuelOwnerCurrent(plan.owner, externalFix)
+        if (!current()) return@withLock false
+        var accepted = false
+        try {
+            // This shares the Android recording mutex with start/finish and never opens a recorder.
+            runtime.prepareQuickSession(plan.owner.transport, ::current) commit@{ recording ->
+                if (!current() || recording?.id != plan.owner.journeyId ||
+                    (recording != null) != plan.owner.recording) return@commit
+                val before = state.value
+                val fix = fuelFix(before, externalFix) ?: return@commit
+                val (replacement, progress) = fuelApproach(plan, fix) ?: return@commit
+                if (!current()) return@commit
+                val session = before.sessionId ?: recording?.id ?: UUID.randomUUID().toString()
+                epoch++
+                rerouteJob?.cancel(); rerouteJob = null
+                invalidateEdits()
+                freeDrive = false
+                quickSessionId = if (before.route == null) session else quickSessionId
+                engine = replacement; breaks = PlannedBreakTracker(plan.route); cues.reset()
+                runCatching { runtime.cancelSpeech() }
+                lastRerouteAttempt = null; lastTrafficCheckAt = clock()
+                publish(before.copy(journey = recording, recording = recording != null, route = plan.route,
+                    sessionId = session, sessionTransport = plan.owner.transport, guidance = true, arrived = false,
+                    fix = fix, gpsStale = false, progress = progress, routeRevision = epoch, loading = false,
+                    paused = false, message = null, preparedRouteFingerprint = null, progressUpdatedAt = fix.recordedAt))
+                accepted = true
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: IllegalArgumentException) { return@withLock false }
+        catch (_: IllegalStateException) { return@withLock false }
+        if (accepted) {
+            prepareGuidanceSpeech(prepared = false)
+            saveRoute(plan.route)
+        }
+        accepted
+    }
+
+    private fun fuelOwnerCurrent(owner: FuelStationOwner, externalFix: NavigationFix?): Boolean {
+        val state = state.value
+        if (simulationEnabled || !owner.matches(state, epoch, remainingRouteStopIndices()) ||
+            state.journey?.status == JourneyStatus.TEMPORARY || state.progress?.offRoute == true) return false
+        val fix = fuelFix(state, externalFix) ?: return false
+        return fix.recordedAt >= owner.fix.recordedAt &&
+            WeatherEngine.distanceMeters(fix.coordinate, owner.fix.coordinate) <= FuelStationRouting.MAX_ORIGIN_DRIFT_METERS
+    }
+
+    private fun fuelApproach(plan: FuelStationPlan, fix: NavigationFix): Pair<NavigationEngine, NavigationProgress>? {
+        val replacement = NavigationEngine(plan.route)
+        val progress = replacement.update(fix, clock()) ?: return null
+        if (progress.offRoute || progress.distanceFromRouteMeters > maxOf(25.0, fix.accuracyMeters * 1.5) ||
+            replacement.distanceToStopMeters(1)?.let { it > 5.0 } != true) return null
+        return replacement to progress
+    }
+
+    private fun fuelFix(state: NavigationState, externalFix: NavigationFix?): NavigationFix? {
+        if (!runtime.hasPreciseLocation()) return null
+        val fix = if (state.sessionId == null) externalFix else state.fix.takeUnless { state.gpsStale }
+        return fix?.takeIf { fresh(it, clock()) }
+    }
 
     /** A provider result is a preview only. Recorder and active geometry remain untouched. */
     suspend fun previewEdit(action: RouteEditAction, expected: RouteEditOwner): String? = coroutineScope {

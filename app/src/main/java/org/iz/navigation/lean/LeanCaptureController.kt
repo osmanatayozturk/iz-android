@@ -6,8 +6,11 @@ import android.os.SystemClock
 import android.provider.Settings
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ChannelResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.selects.onTimeout
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.iz.navigation.data.Journey
@@ -22,12 +25,19 @@ internal class LeanCaptureController(context: Context, private val onCaptureChan
     private val io = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutex = Mutex()
     private val generation = AtomicLong()
-    private val mutableStatus = MutableStateFlow<String?>(null)
-    val status = mutableStatus.asStateFlow()
+    private val owner = Any()
+    init {
+        synchronized(statusLock) {
+            statusOwner = owner
+            mutableStatus.value = null
+        }
+    }
     @Volatile private var closed = false
     @Volatile private var active: Capture? = null
     @Volatile private var blockedKey: String? = null
-    private class Capture(val token: LeanSessionToken, val identity: String, val generation: Long, val start: Long) {
+    private class Capture(val token: LeanSessionToken, val identity: String, val calibrationEpoch: String,
+        val generation: Long, val start: Long) {
+        val progress = LeanSensorCommitProgress(start)
         val records = Channel<LeanRecord>(512)
         val dropped = AtomicLong()
         @Volatile var accepting = true
@@ -44,6 +54,7 @@ internal class LeanCaptureController(context: Context, private val onCaptureChan
         if (closed || !leanCaptureEligible(journey, config)) {
             stopLocked(if (journey?.endedAt == null && active != null) "capture_disabled" else null)
             blockedKey = null
+            publish(null)
             return@withLock
         }
         val reference = requireNotNull(config.calibration)
@@ -51,28 +62,34 @@ internal class LeanCaptureController(context: Context, private val onCaptureChan
         if (active?.let { it.identity == identity && it.accepting } == true || blockedKey == identity) return@withLock
         stopLocked("calibration_changed")
         blockedKey = identity // Never retry a missing sensor/full store on each GPS callback.
+        publish(LeanRecordingStatus(journey.id, reference.epoch, LeanRecordingPhase.WAITING_FOR_DATA))
         val elapsed = SystemClock.elapsedRealtimeNanos()
         val boot = runCatching { Settings.Global.getInt(context.contentResolver, Settings.Global.BOOT_COUNT).toString() }
             .getOrDefault("unknown") + ":" + processEpoch
         val token = try { store.begin(journey.id, reference, boot, System.currentTimeMillis(), elapsed) }
             catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { mutableStatus.value = "storage_unavailable"; return@withLock }
-        if (token == null) { mutableStatus.value = "unavailable_or_capacity"; return@withLock }
-        if (closed) {
-            try { withContext(NonCancellable) { store.seal(token, SystemClock.elapsedRealtimeNanos(), "capture_interrupted") } }
-            catch (_: Exception) { mutableStatus.value = "seal_pending_recovery" }
+            catch (_: Exception) { null }
+        if (token == null) {
+            publish(LeanRecordingStatus(journey.id, reference.epoch, LeanRecordingPhase.STORAGE_UNAVAILABLE))
             return@withLock
         }
-        val session = Capture(token, identity, generation.incrementAndGet(), elapsed)
+        if (closed) {
+            try { withContext(NonCancellable) { store.seal(token, SystemClock.elapsedRealtimeNanos(), "capture_interrupted") } }
+            catch (_: Exception) { /* Recover the unsealed session on the next store access. */ }
+            return@withLock
+        }
+        val session = Capture(token, identity, reference.epoch, generation.incrementAndGet(), elapsed)
         session.sensor = LeanSensorCapture(context, { record -> offer(session, record) }, { session.dropped.incrementAndGet() })
         session.writer = io.launch(start = CoroutineStart.LAZY) { write(session) }
         active = session
         session.writer.start()
         if (closed) { stopLocked("capture_interrupted"); return@withLock }
-        if (session.sensor.startOrFailure() != null) {
+        val failure = session.sensor.startOrFailure()
+        if (failure != null) {
             session.reason = "sensor_unavailable"
             stopLocked("sensor_unavailable")
-        } else if (session.accepting) { mutableStatus.value = null; onCaptureChanged() }
+            publish(LeanRecordingStatus(journey.id, reference.epoch, LeanRecordingPhase.SENSOR_UNAVAILABLE, failure))
+        } else if (session.accepting) onCaptureChanged()
     }
 
     private fun offer(session: Capture, record: LeanRecord) {
@@ -89,21 +106,49 @@ internal class LeanCaptureController(context: Context, private val onCaptureChan
         if (fix == null) session.dropped.incrementAndGet() else offer(session, fix)
     }
 
+    private fun publish(status: LeanRecordingStatus?) = synchronized(statusLock) {
+        if (statusOwner === owner) mutableStatus.value = status
+    }
+
+    private fun publishProgress(session: Capture) = synchronized(statusLock) {
+        if (statusOwner === owner && active === session && session.accepting) {
+            mutableStatus.value = LeanRecordingStatus(session.token.journeyId, session.calibrationEpoch,
+                session.progress.phase(SystemClock.elapsedRealtimeNanos()))
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private suspend fun receive(session: Capture, timeoutMs: Long): ChannelResult<LeanRecord>? = select {
+        session.records.onReceiveCatching { it }
+        onTimeout(timeoutMs) { null }
+    }
+
     private suspend fun write(session: Capture) {
         var unpersisted: List<LeanRecord> = emptyList()
         try {
             while (true) {
-                val first = session.records.receiveCatching().getOrNull() ?: break
+                val next = receive(session, 1_000)
+                if (next == null) {
+                    publishProgress(session)
+                    continue
+                }
+                val first = next.getOrNull() ?: break
                 val batch = ArrayList<LeanRecord>(256).apply { add(first) }
                 unpersisted = batch
-                withTimeoutOrNull(1_000) {
-                    while (batch.size < 256) batch.add(session.records.receiveCatching().getOrNull() ?: break)
+                val deadline = SystemClock.elapsedRealtime() + 1_000
+                while (batch.size < 256) {
+                    val remaining = deadline - SystemClock.elapsedRealtime()
+                    if (remaining <= 0) break
+                    batch.add(receive(session, remaining)?.getOrNull() ?: break)
                 }
-                if (!store.append(session.token, batch)) {
+                val committed = store.appendCaptureBatch(session.token, batch)
+                if (committed == null) {
                     session.reason = "raw_capacity_or_invalidated"
                     break
                 }
                 unpersisted = emptyList()
+                session.progress.commit(committed)
+                publishProgress(session)
             }
         } catch (cancelled: CancellationException) { session.reason = "capture_interrupted"; throw cancelled }
         catch (_: Exception) { session.reason = "storage_unavailable" }
@@ -115,10 +160,16 @@ internal class LeanCaptureController(context: Context, private val onCaptureChan
             while (session.records.tryReceive().getOrNull() != null) session.dropped.incrementAndGet()
             withContext(NonCancellable) {
                 try { store.seal(session.token, session.end ?: SystemClock.elapsedRealtimeNanos(), session.reason, session.dropped.get()) }
-                catch (_: Exception) { mutableStatus.value = "seal_pending_recovery" }
+                catch (_: Exception) { session.reason = "storage_unavailable" }
             }
-            if (active === session) active = null
-            if (session.reason != null) mutableStatus.value = session.reason
+            if (active === session) {
+                active = null
+                when (session.reason) {
+                    "storage_unavailable", "raw_capacity_or_invalidated" -> publish(LeanRecordingStatus(
+                        session.token.journeyId, session.calibrationEpoch, LeanRecordingPhase.STORAGE_UNAVAILABLE))
+                    else -> publish(null)
+                }
+            }
             onCaptureChanged()
         }
     }
@@ -126,6 +177,7 @@ internal class LeanCaptureController(context: Context, private val onCaptureChan
     private suspend fun stopLocked(reason: String?) {
         val session = active ?: return
         session.accepting = false
+        publish(null)
         generation.incrementAndGet()
         if (session.end == null) session.end = SystemClock.elapsedRealtimeNanos()
         if (session.reason == null) session.reason = reason
@@ -141,6 +193,12 @@ internal class LeanCaptureController(context: Context, private val onCaptureChan
     /** Android onDestroy cannot suspend. Stop producer now; independent IO owner drains/seals once. */
     fun close() {
         closed = true
+        synchronized(statusLock) {
+            if (statusOwner === owner) {
+                statusOwner = null
+                mutableStatus.value = null
+            }
+        }
         val session = active
         session?.let {
             it.accepting = false; generation.incrementAndGet()
@@ -153,5 +211,11 @@ internal class LeanCaptureController(context: Context, private val onCaptureChan
             io.cancel()
         }
     }
-    companion object { private val processEpoch = UUID.randomUUID().toString() }
+    companion object {
+        private val processEpoch = UUID.randomUUID().toString()
+        private val statusLock = Any()
+        private var statusOwner: Any? = null
+        private val mutableStatus = MutableStateFlow<LeanRecordingStatus?>(null)
+        val recordingStatus = mutableStatus.asStateFlow()
+    }
 }

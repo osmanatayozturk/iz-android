@@ -8,7 +8,7 @@ class BackupIdentityCompatibilityTest {
     @Test fun exporterUsesNeutralMarkerWithCurrentVersionPayload() {
         val encoded = BackupJson.encode(LegacyBackupFixture.expected(), includeHealth = true)
         assertEquals("org.iz.navigation.backup", encoded.getString("format"))
-        assertEquals(12, encoded.getInt("version"))
+        assertEquals(13, encoded.getInt("version"))
         assertEquals(LegacyBackupFixture.expected(), BackupJson.decode(JSONObject(encoded.toString())))
     }
 

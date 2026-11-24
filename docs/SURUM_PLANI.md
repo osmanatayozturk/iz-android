@@ -1,5 +1,17 @@
 # İz sürüm değişikliği planı
 
+## Geliştirme sürümü · Motosiklet sürüşü ve Garaj
+
+| Aşama | Kullanıcıya dönük değişiklik | Hedefli QA kapsamı |
+|---|---|---|
+| Yatış kaydı | Telefonda tarifli ve tarifsiz motosiklet kaydında yatış durumunu görün, gerekirse kaydı sürüş sırasında açın. GPS kaydı bağımsız sürer. | Sürüş ekranından açma, kalibrasyon ve sensör/depolama durumları, iki sensörün aynı yolculuğa yazılması. |
+| Viraj karşılaştırması | **Yolculuk → Raporlar → GPS virajları** içinde aynı virajın aynı yöndeki uygun geçmiş geçişini seçin. Hız ve süreyi, ölçüm varsa yatışı karşılaştırın. | Eş yön ve ortak mesafe, ters yön/paralel yol/farklı kavşak kolu, GPS boşluğu ve yatış ölçümsüz eski kayıt. Eşleştirme cihazda yapılır. |
+| Garaj ve yakıt | Araç bazında sayaç, dolum, maliyet ve menzili izleyin. Yeterli veri ve uygun istasyon olduğunda telefonda veya Android Auto’da 20 saniyelik teklifi değerlendirin. | Çoklu araç seçimi ve sonradan atama, sayaçta çift sayım, tam/kısmi ve atlanmış dolumlar, Room 11 → 12 geçişi ve ZIP uyumluluğu. Telefon ve Android Auto’da kabul, ret, zaman aşımı ve teklif geçerliyken rota güncellemesi. |
+
+Garaj, araç bağlantıları ve dolumlar ZIP v13’e kaydedilir. Garaj verisi içermeyen eski yedekler boş garajla açılır.
+
+**Kaynak ve QA kapsamı.** Telefon ve Android Auto için geliştirme kaynakları, testler ve belgeler bu adayın kapsamındadır. Adaya bağlı hedefli birim testi, lint, izole Debug uygulama ve AndroidTest APK’ları ile sentetik kabul sonuçları teslim kaydında izlenir. Kişisel cihaz kurulumu, canlı servis kabulü ve mağaza dağıtımı ayrı kapsamlardır.
+
 ## Geliştirme sürümü · Harita ve Android Auto
 
 Telefonun ana haritasında seçilen koordinat yol tarifine veya OSM düzenleyicisine aktarılır. Yeni mekân gönderimi katkı geçmişine işlenir. Kullanıcının kişisel yerleri ve sıraları korunur. Android Auto’da araç işaretinin okunabilirliği ve dönüş, hız ve hız sınırı bilgilerinin sol üstte birlikte izlenebilmesi bu güncellemenin kapsamındadır.

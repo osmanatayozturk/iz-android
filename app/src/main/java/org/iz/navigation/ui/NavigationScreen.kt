@@ -27,6 +27,7 @@ import org.iz.navigation.car.SharedMapLinks
 import org.iz.navigation.car.SharedMapStop
 import androidx.compose.runtime.saveable.rememberSaveable
 import org.iz.navigation.data.*
+import org.iz.navigation.lean.LeanCaptureController
 import org.iz.navigation.lean.LeanSettingsStore
 import org.iz.navigation.lean.hasLiveLeanFix
 import org.iz.navigation.lean.liveLeanSessionId
@@ -94,10 +95,15 @@ internal class PhoneNavigationViewModel(application: Application) : AndroidViewM
     private val repository = DiaryRepository(application)
     private val settingsStore = WeatherSettingsStore(application)
     private val trackConsent = TrackReplacementConsent()
+    internal val garageStart = PhoneGarageStart(application as IzApplication)
     private suspend fun activateDirections(route: PlannedRoute, record: Boolean): String {
+        val entry = currentUiEntry
+        val revision = directions.revisionToken
         val key = navigation.state.value.trackReplacementKey()
         val replace = trackConsent.consume(key)
-        return navigation.startGuidance(route, record, replace, key.takeIf { replace })
+        return garageStart.start(route.transport, { currentUiEntry == entry && directions.revisionToken == revision }) { current ->
+            navigation.startGuidance(route, record, replace, key.takeIf { replace }, stillCurrent = current)
+        }
     }
     fun approveTrackReplacement(key: String?) = trackConsent.approve(key)
     val directions = PhoneDirectionsCoordinator(viewModelScope,
@@ -164,7 +170,11 @@ internal class PhoneNavigationViewModel(application: Application) : AndroidViewM
                         corridor.fromMeters, corridor.toMeters, corridor.halfWidthMeters), token.generation)
                 }
                 PreparedRouteUiAction.USE_PREPARED -> {
-                    preparedRoutes.start(token.generation, recordJourney) { ownsPrepared(entryId, token) && !ui.value.busy }
+                    val route = preparedRoutes.state.value.route ?: return@mutate
+                    val current = { ownsPrepared(entryId, token) && !ui.value.busy }
+                    garageStart.start(route.transport, current) { ownsStart ->
+                        preparedRoutes.start(token.generation, recordJourney, ownsStart)
+                    }
                     if (currentUiEntry == entryId && directions.revisionToken == inputRevision) directions.sessionStarted()
                 }
                 else -> {
@@ -313,8 +323,13 @@ internal class PhoneNavigationViewModel(application: Application) : AndroidViewM
     }
     fun freeDrive() {
         if (ui.value.busy) return
+        val input = ui.value
+        val revision = directions.revisionToken
+        val entry = currentUiEntry
         work.mutate {
-            navigation.startFreeDrive(ui.value.transport, ui.value.recordJourney)
+            garageStart.start(input.transport, { currentUiEntry == entry && directions.revisionToken == revision }) { current ->
+                navigation.startFreeDrive(input.transport, input.recordJourney, stillCurrent = current)
+            }
             directions.sessionStarted()
         }
     }
@@ -385,11 +400,19 @@ internal fun NavigationScreen(
     inspectMapPlaceRequest: Int = 0,
 ) {
     val context = LocalContext.current
+    DisposableEffect(vm.garageStart, entryId) { onDispose(vm.garageStart::dismiss) }
+    PhoneGarageChoice(vm.garageStart)
     val ui by vm.ui.collectAsStateWithLifecycle()
     androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) { vm.directions.refreshCredentials() }
     val nav by vm.navigation.state.collectAsStateWithLifecycle()
     val liveLeanEnabled by remember(context) { LiveLeanDisplaySettings.get(context) }.enabled.collectAsStateWithLifecycle()
-    val leanSettings by remember(context) { LeanSettingsStore.get(context) }.state.collectAsStateWithLifecycle()
+    val leanSettingsStore = remember(context) { LeanSettingsStore.get(context) }
+    val leanSettings by leanSettingsStore.state.collectAsStateWithLifecycle()
+    val leanRecordingStatus by LeanCaptureController.recordingStatus.collectAsStateWithLifecycle()
+    val leanRecordingJourney = nav.journey?.takeIf {
+        nav.recording && !nav.simulation && it.transport == Transport.MOTORCYCLE &&
+            it.status == org.iz.navigation.data.JourneyStatus.CONFIRMED && it.endedAt == null && !it.interrupted
+    }
     val leanSession = nav.liveLeanSessionId()?.takeIf { liveLeanEnabled }
     val leanReference = leanSettings.liveReference()
     val routeEdits by vm.navigation.edits.collectAsStateWithLifecycle()
@@ -854,6 +877,9 @@ internal fun NavigationScreen(
         leanInstrument = if (leanSession != null && leanReference != null) {
             { LiveRideLeanDial(leanSession, leanReference, nav.hasLiveLeanFix()) }
         } else null,
+        leanRecordingNotice = leanRecordingJourney?.let { journey ->
+            { ActiveLeanRecordingNotice(journey.id, leanSettings, leanRecordingStatus, leanSettingsStore) }
+        },
         onResumePlannedBreak = resumePlannedBreak, plannedBreakResumeEnabled = plannedBreakResumeEnabled,
         layersRequest = layersRequest,
         onRecoverRecording = {
@@ -907,7 +933,11 @@ internal fun NavigationScreen(
             searchOrigin = vm.navigation::quickSearchCoordinate,
             validateOrigin = vm.navigation::validateQuickOrigin,
             plan = vm.directions::planQuick,
-            activate = vm.navigation::startQuickGuidance,
+            activate = { route, origin, record ->
+                vm.garageStart.start(route.transport, { quickEntryCurrent() && quickDirections === quickEntry }) { _ ->
+                    vm.navigation.startQuickGuidance(route, origin, record)
+                }
+            },
             initialDestination = quickEntry.destination,
             sharedPreview = quickEntry.shared,
             configuration = { TrafficSettingsStore(context).read().revision },
@@ -945,6 +975,11 @@ internal fun NavigationScreen(
             if (nav.approximateOrigin != null) Text("Yaklaşık konum", style = MaterialTheme.typography.bodyMedium)
             if (nav.recordingPending) RecordingPendingWarning()
             voiceControls()
+            nav.journey?.takeIf { canAssignParkedVehicle(nav) }?.let { journey ->
+                JourneyGarageAssignment(journey, app.garage, parked = true, stillAssignable = {
+                    vm.navigation.state.value.let { it.journey?.id == journey.id && canAssignParkedVehicle(it) }
+                })
+            }
             if (nav.guidance) OutlinedButton({ requestEnd(PhoneSessionEnd.GUIDANCE) }, enabled = !commandBusy && !ui.starting) { Text(PhoneSessionEnd.GUIDANCE.label) }
             if (nav.recording) OutlinedButton({ requestEnd(PhoneSessionEnd.RECORDING) }, enabled = !commandBusy && !ui.starting) { Text(PhoneSessionEnd.RECORDING.label) }
             Button({ requestEnd(PhoneSessionEnd.ALL) }, enabled = !commandBusy && !ui.starting) { Text(PhoneSessionEnd.ALL.label) }

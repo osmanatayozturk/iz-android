@@ -61,10 +61,17 @@ internal class IzCarSession : Session() {
         // Observe the existing phone owner; reading status never prepares TTS or acquires focus.
         scope.launch { NavigationSpeech.get(app).status.collect { displayUpdate { home.refreshSpeech(it) } } }
         lifecycle.addObserver(object : DefaultLifecycleObserver {
-            override fun onStart(owner: LifecycleOwner) { displayUpdate { home.setSessionVisible(true); surface.setActive(true) } }
-            override fun onStop(owner: LifecycleOwner) { displayUpdate { home.setSessionVisible(false); surface.setActive(false) } }
+            override fun onStart(owner: LifecycleOwner) {
+                app.fuelOffers.setAutoVisible(this@IzCarSession, true, home)
+                displayUpdate { home.setSessionVisible(true); surface.setActive(true) }
+            }
+            override fun onStop(owner: LifecycleOwner) {
+                app.fuelOffers.setAutoVisible(this@IzCarSession, false)
+                displayUpdate { home.setSessionVisible(false); surface.setActive(false) }
+            }
             override fun onDestroy(owner: LifecycleOwner) {
                 scope.cancel()
+                app.fuelOffers.setAutoVisible(this@IzCarSession, false)
                 home.closeMapLocation()
                 displayUpdate { manager.clearNavigationManagerCallback() }
                 if (hostNavigating) runCatching { manager.navigationEnded() }

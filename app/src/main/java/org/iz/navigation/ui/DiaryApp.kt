@@ -209,7 +209,10 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     val gpxOwnerKey = entries.lastOrNull { it.page == UiPage.GPX }?.key ?: "map"
     val gpxImports = featureOwners.get("gpx", gpxOwnerKey, GpxImportViewModel::class.java, featureFactory)
     val importedGpx by gpxImports.state.collectAsStateWithLifecycle()
-    val navigation = (context.applicationContext as org.iz.navigation.IzApplication).navigation
+    val application = context.applicationContext as org.iz.navigation.IzApplication
+    val navigation = application.navigation
+    val garageStart = remember(application) { PhoneGarageStart(application) }
+    DisposableEffect(garageStart, uiEntry.key) { onDispose(garageStart::dismiss) }
     val navigationState by navigation.state.collectAsStateWithLifecycle()
     var contributionPicker by rememberUiEntryState<Boolean>(history) { false }
     var contributionLocation by rememberUiEntryState<SelectedOsmPlace?>(history) { null }
@@ -345,7 +348,11 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
         gpxStarting = true
         vm.execute {
             try {
-                navigation.startTrackFollow(request.track, request.selection, request.transport, request.replaceExisting, request.expectedReplacementKey)
+                val entry = history.current.key
+                garageStart.start(request.transport, { history.current.key == entry }) { _ ->
+                    navigation.startTrackFollow(request.track, request.selection, request.transport,
+                        request.replaceExisting, request.expectedReplacementKey)
+                }
                 exitGuard.update(null); history.toMap()
             }
             finally { gpxStarting = false }
@@ -532,6 +539,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     }
                 }
                 carAction == "OPEN_PLACES" -> history.openExternal(UiPage.PLACES, cold = incomingIsCold)
+                carAction == "OPEN_GARAGE" -> history.openExternal(UiPage.GARAGE, cold = incomingIsCold)
                 carAction == "OPEN_WEATHER" -> history.openExternal(UiPage.WEATHER, cold = incomingIsCold)
                 carAction == "OPEN_VOICE_SETTINGS" -> history.openExternal(UiPage.SETTINGS, "voice", cold = incomingIsCold)
                 carAction == "OPEN_LOCATION_SETUP" -> history.openExternal(UiPage.SETTINGS, "detection", cold = incomingIsCold)
@@ -797,6 +805,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     onCheck = ::checkMapNote,
                     onDelete = { draft -> deletion = Deletion("Bu kayıt yalnızca uygulamadaki katkı listenden silinecek. OSM’de yayımlanmış bildirim silinmez.") { vm.repository.deleteContribution(draft.id) } },
                 )
+                uiEntry.page == UiPage.GARAGE -> GarageScreen(application.garage, ::returnToParent)
                 journey != null -> JourneyDetail(journey, state, now, uiEntry.page,
                     onSection = { section -> navigator.open(section, journey.id) },
                     onCompare = { navigator.open(UiPage.COMPARISON) },
@@ -818,6 +827,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     onEditPhoto = { editPhoto = it },
                     onExportGpx = { gpxJourney = journey },
                     onOpenGpsTraces = { navigator.open(UiPage.COMMUNITY, OSM_GPS_JOURNEY_ENTRY) },
+                    garage = application.garage,
                     onSharePhotos = { photosToShare = state.photos.filter { it.journeyId == journey.id } },
                 )
                 place != null -> PlaceDetail(place, state,
@@ -1075,8 +1085,10 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                 when { action.split -> selectedJourney = vm.tracker.switchTransport(transport)
                     action.journeyId != null -> { check(vm.repository.getJourney(action.journeyId) != null) { "Bu kayıt artık bulunmuyor." }; vm.tracker.confirm(action.journeyId, transport); selectedJourney = action.journeyId }
                     else -> {
-                        val navigation = (context.applicationContext as org.iz.navigation.IzApplication).navigation
-                        navigation.startFreeDrive(transport, recordJourney = true)
+                        val entry = history.current.key
+                        garageStart.start(transport, { history.current.key == entry }) { current ->
+                            navigation.startFreeDrive(transport, recordJourney = true, stillCurrent = current)
+                        }
                         exitGuard.update(null); history.toMap()
                     } }
                 transportAction = null
@@ -1337,6 +1349,7 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
         dismissButton = { TextButton(onClick = { showBackupOptions = false }) { Text("Vazgeç") } })
     if (backupImportBusy) AlertDialog(onDismissRequest = {}, title = { Text("Arşivin hazırlanıyor") }, text = { Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) { CircularProgressIndicator(Modifier.size(28.dp)); Text("İşlem tamamlanana kadar lütfen bekle.") } }, confirmButton = {})
     BackupExportProgress(backupExport.phase, backupExport::cancel)
+    PhoneGarageChoice(garageStart)
     UiExitConfirmation(exitGuard)
     }
 }
@@ -1450,6 +1463,7 @@ private fun JourneysScreen(state: DiaryState, now: Long, onBrowse: (UiPage) -> U
         }
         }
         item { OutlinedButton(onClick = onStart, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.Add, null); Text("Yeni yolculuk") } }
+        item { JournalLink("Garaj", onClick = { onBrowse(UiPage.GARAGE) }) }
         item { FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf("Yerler" to UiPage.PLACES, "Rotalarım" to UiPage.ROUTES, "Geziler" to UiPage.COLLECTIONS,
                 "İstatistikler" to UiPage.STATISTICS, "Yoğunluk haritası" to UiPage.HEATMAP).forEach { (label, page) ->
@@ -1467,6 +1481,7 @@ private fun JourneyDetail(
     onAddPlace: () -> Unit, onPhoto: () -> Unit, onVisit: (Visit) -> Unit, onDelete: () -> Unit,
     onDeletePhoto: (Photo) -> Unit, onEditPhoto: (Photo) -> Unit, onExportGpx: () -> Unit,
     onOpenGpsTraces: () -> Unit, onSharePhotos: () -> Unit, listState: LazyListState,
+    garage: org.iz.navigation.garage.GarageRepository,
 ) {
     val prepared = state.prepared(journey)
     val visits = state.visits.filter { it.journeyId == journey.id }.sortedBy { it.visitedAt }
@@ -1541,6 +1556,7 @@ private fun JourneyDetail(
                     item { Notice("Otomatik kayıt için 500 metre bekleniyor · Sıfırlanmaya " + countdown(deadline - now)) }
                 }
                 if (journey.note.isNotBlank()) item { Text(journey.note) }
+                item { JourneyGarageAssignment(journey, garage) }
                 item { JournalLink("Ziyaretler", visits.size.toString(), { onSection(UiPage.JOURNEY_VISITS) }) }
                 item { JournalLink("Fotoğraflar", photos.size.toString(), { onSection(UiPage.JOURNEY_PHOTOS) }) }
                 item { JournalLink("Raporlar", onClick = { onSection(UiPage.JOURNEY_REPORTS) }) }

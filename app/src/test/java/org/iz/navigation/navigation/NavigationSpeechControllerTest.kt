@@ -5,6 +5,31 @@ import org.junit.Test
 import org.iz.navigation.weather.*
 
 class NavigationSpeechControllerTest {
+    @Test fun optionalSpeechNeverDisplacesAnActiveOrPendingTurn() {
+        for (startReady in listOf(false, true)) {
+            val f = Fixture()
+            if (startReady) f.ready()
+            f.subject.speakTurn("Turn")
+            val results = mutableListOf<CueDelivery>()
+            f.subject.speakWhenIdle(NavigationCueRequest("Optional fuel offer") { results += it })
+            assertEquals(listOf(CueDelivery.REJECTED), results)
+            if (!startReady) f.engine.ready(EngineReadiness.READY)
+            assertEquals(1, f.engine.spoken.size)
+        }
+    }
+
+    @Test fun optionalSpeechUsesNormalExpiryAndOwnershipChecksWhenIdle() {
+        val f = Fixture()
+        f.ready()
+        val results = mutableListOf<CueDelivery>()
+        f.subject.speakWhenIdle(NavigationCueRequest("Expired", expiresAtMillis = 0) { results += it })
+        f.subject.speakWhenIdle(NavigationCueRequest("Old owner", stillCurrent = { false }) { results += it })
+        assertEquals(listOf(CueDelivery.EXPIRED, CueDelivery.CANCELLED), results)
+        assertTrue(f.engine.spoken.isEmpty())
+        f.subject.speakWhenIdle(NavigationCueRequest("Current offer") {})
+        assertEquals(1, f.engine.spoken.size)
+    }
+
     @Test fun committedPreparationIsSilentAndBecomesReady() {
         val f = Fixture()
         assertEquals(EngineReadiness.UNCHECKED, f.subject.status.value.readiness)

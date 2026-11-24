@@ -97,6 +97,7 @@ internal fun NavigationHomeContent(
     onOsmPlaceClick: ((org.iz.navigation.data.SelectedOsmPlace) -> Unit)? = null,
     placeInformationIdentity: Any? = null,
     leanInstrument: (@Composable () -> Unit)? = null,
+    leanRecordingNotice: (@Composable () -> Unit)? = null,
     idleNavigationBar: (@Composable () -> Unit)? = null,
     onPointDirections: ((GeoCoordinate) -> Unit)? = null,
     inspectMapPlaceRequest: Int = 0,
@@ -190,7 +191,7 @@ internal fun NavigationHomeContent(
             showDestinationHeader, live, nav.guidance, nav.recording, nav.recordingPending, nav.simulation, nav.gpsStale,
             nav.approximateOrigin != null, preciseLocationAllowed,
             nav.locationActive, nav.sessionTransport, nav.message, ui.message, weatherLabel, current == null, ui.locating, voiceFault, presentation.editPreviewLabel,
-            showShortcuts)
+            showShortcuts, leanRecordingNotice != null)
         // Slot labels are single-line and keep the same row dimensions when assignments change.
         val shortcutKey = listOf(maxWidth, maxHeight, density.density, density.fontScale)
         val headerKey = shortcutKey + baseShowBrand
@@ -268,7 +269,12 @@ internal fun NavigationHomeContent(
                 onMute, onManageSession, onWeather,
                 onRecoverRecording = onRecoverRecording?.takeIf { nav.recordingPending && !preciseLocationAllowed },
                 onResumeBreak = onResumePlannedBreak.takeIf { nav.plannedBreak != null },
-                resumeEnabled = plannedBreakResumeEnabled, disclosure = preparedNotice, controls = controls)
+                resumeEnabled = plannedBreakResumeEnabled, disclosure = {
+                    Column {
+                        preparedNotice()
+                        leanRecordingNotice?.invoke()
+                    }
+                }, controls = controls)
         }
         WeatherRouteMap(route = route, assessment = null, modifier = Modifier.fillMaxSize().padding(end = dashboardSideWidth),
             expandable = false, stops = presentation.stops, liveCoordinate = current,
@@ -312,6 +318,7 @@ internal fun NavigationHomeContent(
                 HomeSessionCard(nav, onMute, onManageSession, Modifier.padding(end = 60.dp),
                     plannedBreakResumeEnabled = plannedBreakResumeEnabled, onResumePlannedBreak = onResumePlannedBreak) {
                     HomeSessionWarnings(nav, voiceFault, preciseLocationAllowed)
+                    leanRecordingNotice?.invoke()
                 }
                 if (nav.roadSpeed.visible) {
                     val speed = compactRoadSpeedReadout(nav.roadSpeed)

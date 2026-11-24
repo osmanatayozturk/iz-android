@@ -54,6 +54,7 @@ class NavigationSpeech private constructor(context: Context) {
     }
     fun speakTurn(text: String) = post { controller.speakTurn(text) }
     fun speakTurn(request: NavigationCueRequest) = post { controller.speakTurn(request) }
+    fun speakWhenIdle(request: NavigationCueRequest) = post { controller.speakWhenIdle(request) }
     fun speakWeather(text: String) = post { controller.speakWeather(text) }
     fun testWeather() = post {
         when (controller.testVoice(SpeechChannel.WEATHER)) {

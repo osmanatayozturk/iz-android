@@ -10,6 +10,7 @@ import androidx.core.content.ContextCompat
 import org.iz.navigation.data.*
 import org.iz.navigation.tracking.*
 import org.iz.navigation.weather.*
+import org.iz.navigation.integration.OsmPlaces
 import com.google.android.gms.location.*
 import com.google.android.gms.tasks.CancellationTokenSource
 import kotlinx.coroutines.tasks.await
@@ -131,6 +132,13 @@ internal class AndroidNavigationRuntime(private val context: Context) : Navigati
             stops, System.currentTimeMillis(), transport, travelSpeedKmh, preferences)
     override suspend fun planModified(request: RouteModificationRequest): PlannedRoute =
         ConfiguredRoutePlanner(context).planModified(request)
+    private val osmFuelPlaces by lazy { OsmPlaces(context.applicationContext) }
+    override suspend fun fuelStations(fix: NavigationFix, transport: Transport, route: PlannedRoute?,
+        progress: NavigationProgress?): List<SelectedOsmPlace> {
+        if (context.checkSelfPermission(Manifest.permission.INTERNET) != PackageManager.PERMISSION_GRANTED) return emptyList()
+        return osmFuelPlaces.fuelStations(fix.coordinate, transport, route, progress?.elapsedSeconds)
+    }
+    override fun fuelRoutePreferences(transport: Transport) = WeatherSettingsStore(context).read(transport).preferences
     override fun trafficRefreshEnabled(route: PlannedRoute): Boolean {
         if (!org.iz.navigation.weather.RoutingPolicy.usesTomTomRouting(route.transport)) return false
         return TrafficSettingsStore(context).read().let { it.enabled && it.hasKey && it.freePlanAcknowledged }

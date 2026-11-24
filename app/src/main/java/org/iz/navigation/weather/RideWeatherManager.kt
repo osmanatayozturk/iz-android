@@ -73,6 +73,10 @@ interface RideWeatherNavigationSource {
         check(expectedTrackFollowKey == null) { "GPX takibini değiştirme bu bağlantıda desteklenmiyor." }
         return startGuidance(route)
     }
+    suspend fun startGuidance(route: PlannedRoute, expectedTrackFollowKey: String?, stillCurrent: () -> Boolean): String {
+        check(stillCurrent()) { "Başlatma isteği artık güncel değil." }
+        return startGuidance(route, expectedTrackFollowKey)
+    }
 }
 
 interface RideWeatherAlertOutput {
@@ -104,6 +108,9 @@ class RideWeatherManager(
             override suspend fun startGuidance(route: PlannedRoute, expectedTrackFollowKey: String?) =
                 owner.startGuidance(route, replaceTrackFollow = expectedTrackFollowKey != null,
                     expectedTrackFollowKey = expectedTrackFollowKey)
+            override suspend fun startGuidance(route: PlannedRoute, expectedTrackFollowKey: String?, stillCurrent: () -> Boolean) =
+                owner.startGuidance(route, replaceTrackFollow = expectedTrackFollowKey != null,
+                    expectedTrackFollowKey = expectedTrackFollowKey, stillCurrent = stillCurrent)
         }
     },
     private val readSettings: (Transport) -> RideWeatherSettings = WeatherSettingsStore(context)::read,
@@ -237,11 +244,11 @@ class RideWeatherManager(
 
     /** Explicit planner Start records and enables turn guidance through the shared owner. */
     suspend fun activateGuidance(route: PlannedRoute, forecasts: List<LocationForecast>,
-        expectedTrackFollowKey: String? = null): String =
+        expectedTrackFollowKey: String? = null, stillCurrent: () -> Boolean = { true }): String =
         withContext(Dispatchers.Main.immediate) {
             activationMutex.withLock {
                 val source = checkNotNull(navigationSource) { "Sesli yol tarifi şu an kullanılamıyor." }
-                val id = source.startGuidance(route, expectedTrackFollowKey)
+                val id = source.startGuidance(route, expectedTrackFollowKey, stillCurrent)
                 currentCoroutineContext().ensureActive()
                 // Starting again explicitly also resumes weather disabled earlier on this trip.
                 disabledJourneyId = null

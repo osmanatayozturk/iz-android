@@ -7,6 +7,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -114,6 +115,14 @@ internal fun RecordedCurvePanel(journey: Journey, state: DiaryState) {
                     }
                     selected?.let { curve ->
                         RecordedCurveDetailValues(curve)
+                        if (current.transport == Transport.MOTORCYCLE && current.endedAt != null) {
+                            var comparing by remember(curve) { mutableStateOf(false) }
+                            OutlinedButton(onClick = { comparing = true },
+                                modifier = Modifier.testTag("gps-curve-compare")) {
+                                Text("Önceki geçişlerle karşılaştır")
+                            }
+                            if (comparing) CurvePassComparisonDialog(curve) { comparing = false }
+                        }
                         TextButton(onClick = { selectedId = null }) { Text("Seçili ayrıntıyı kapat") }
                     }
                 }

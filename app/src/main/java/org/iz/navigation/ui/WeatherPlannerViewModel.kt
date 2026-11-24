@@ -757,6 +757,7 @@ internal class WeatherPlannerViewModel(application: Application) : AndroidViewMo
     private val planStore = WeatherPlanStore(application)
     private val manager = (application as IzApplication).weatherManager
     val navigation = (application as IzApplication).navigation
+    internal val garageStart = PhoneGarageStart(application as IzApplication)
     private val trackConsent = TrackReplacementConsent()
     fun approveTrackReplacement(key: String?) = trackConsent.approve(key)
     private val coordinator = WeatherPlannerCoordinator(
@@ -771,7 +772,9 @@ internal class WeatherPlannerViewModel(application: Application) : AndroidViewMo
             activate = { route, forecasts ->
                 val key = navigation.state.value.trackReplacementKey()
                 val replace = trackConsent.consume(key)
-                manager.activateGuidance(route, forecasts, key.takeIf { replace })
+                garageStart.start(route.transport) { stillCurrent ->
+                    manager.activateGuidance(route, forecasts, key.takeIf { replace }, stillCurrent = stillCurrent)
+                }
             },
             startRoutePlanner = { ConfiguredRoutePlanner(application) },
             verificationPlanner = { VerifiedTomTomRoutePlanner(application) },

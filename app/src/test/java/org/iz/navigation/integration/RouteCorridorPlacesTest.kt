@@ -3,6 +3,7 @@ package org.iz.navigation.integration
 import org.iz.navigation.data.OsmRef
 import org.iz.navigation.data.OsmType
 import org.iz.navigation.data.SelectedOsmPlace
+import org.iz.navigation.data.Transport
 import org.iz.navigation.weather.*
 import org.junit.Assert.*
 import org.junit.Test
@@ -95,5 +96,17 @@ class RouteCorridorPlacesTest {
             RouteCorridorPlaces.parseTyped("""{"elements":[],"remark":"runtime error: Query timed out"}""")
         }
         assertTrue(RouteCorridorPlaces.parseTyped("""{"elements":[]}""").isEmpty())
+    }
+
+    @Test fun fuelAccessRejectsPrivateAndConditionalStationsAndHonorsVehicleOverrides() {
+        val stations = RouteCorridorPlaces.parseTyped("""{"elements":[
+          {"type":"node","id":1,"lat":0,"lon":0.01,"tags":{"amenity":"fuel","access":"private"}},
+          {"type":"node","id":2,"lat":0,"lon":0.02,"tags":{"amenity":"fuel","motor_vehicle":"no","motorcycle":"yes"}},
+          {"type":"node","id":3,"lat":0,"lon":0.03,"tags":{"amenity":"fuel","access:conditional":"no @ (Mo-Fr)"}},
+          {"type":"node","id":4,"lat":0,"lon":0.04,"tags":{"amenity":"fuel","access":"customers"}}
+        ]}""")
+        assertEquals(listOf(4L), stations.filter { it.allowsFuelVehicle(Transport.CAR) }.map { it.place.osmRef!!.id })
+        assertEquals(listOf(2L, 4L), stations.filter { it.allowsFuelVehicle(Transport.MOTORCYCLE) }.map { it.place.osmRef!!.id })
+        assertTrue(stations.none { it.allowsFuelVehicle(Transport.PASSENGER) })
     }
 }

@@ -125,7 +125,7 @@ internal object FuelHistory {
         val remaining = if (travelled != null && rate != null && range != null)
             (range + litres / rate - travelled).coerceIn(0.0, range) else null
         return FuelStats(odometer, if (learned) 5 else streak, rate?.times(100), range, typical,
-            if (learned && km > 0) recent.sumOf { it.cost } / km else null, remaining,
+            if (km > 0) recent.sumOf { it.cost } / km else null, remaining,
             if (typical != null && travelled != null && !partial) typical - travelled else null)
     }
 }

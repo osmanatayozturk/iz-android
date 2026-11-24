@@ -6,6 +6,7 @@ import org.json.JSONObject
 import org.iz.navigation.data.OsmRef
 import org.iz.navigation.data.OsmType
 import org.iz.navigation.data.SelectedOsmPlace
+import org.iz.navigation.data.Transport
 import org.iz.navigation.weather.PlannedRoute
 import org.iz.navigation.weather.WeatherCoordinate
 import org.iz.navigation.weather.WeatherEngine
@@ -13,7 +14,21 @@ import org.iz.navigation.weather.WeatherEngine
 enum class RouteCorridorKind { UNKNOWN, FUEL, REST }
 data class RouteCorridorPlace(val place: SelectedOsmPlace, val offsetMeters: Double, val forwardMeters: Double,
     val kind: RouteCorridorKind = RouteCorridorKind.UNKNOWN)
-internal data class ParsedRouteCorridorPlace(val place: SelectedOsmPlace, val kind: RouteCorridorKind)
+internal data class ParsedRouteCorridorPlace(val place: SelectedOsmPlace, val kind: RouteCorridorKind,
+    val access: Map<String, String> = emptyMap()) {
+    fun allowsFuelVehicle(transport: Transport): Boolean {
+        if (kind != RouteCorridorKind.FUEL) return false
+        val mode = when (transport) {
+            Transport.CAR -> "motorcar"
+            Transport.MOTORCYCLE -> "motorcycle"
+            else -> return false
+        }
+        val keys = listOf(mode, "motor_vehicle", "vehicle", "access")
+        if (keys.any { "$it:conditional" in access }) return false
+        val value = keys.firstNotNullOfOrNull { access[it] } ?: return true
+        return value in setOf("yes", "permissive", "designated", "destination", "customers")
+    }
+}
 internal data class RouteCorridorSlice(val routeId: String, val points: List<WeatherCoordinate>,
     val original: List<WeatherCoordinate>, val context: List<WeatherCoordinate>,
     val startMeters: Double, val contextStartMeters: Double, val distanceMeters: Double)
@@ -83,6 +98,11 @@ internal object RouteCorridorPlaces {
             ");out body center qt 200;"
     }
 
+    fun fuelQuery(origin: WeatherCoordinate): String {
+        val point = String.format(Locale.US, "%.6f,%.6f", origin.latitude, origin.longitude)
+        return "[out:json][timeout:15][maxsize:16777216];nwr[amenity=fuel](around:5000,$point);out body center qt 200;"
+    }
+
     fun project(slice: RouteCorridorSlice, places: List<SelectedOsmPlace>,
         kinds: Map<OsmRef, RouteCorridorKind> = emptyMap()): List<RouteCorridorPlace> {
         if (slice.context.size < 2) return emptyList()
@@ -147,7 +167,10 @@ internal object RouteCorridorPlaces {
             val street = listOfNotNull(tag("addr:street"), tag("addr:housenumber")).joinToString(" ")
             val address = tag("addr:full") ?: listOfNotNull(street.takeIf { it.isNotBlank() },
                 tag("addr:city"), tag("addr:province")).joinToString(", ").takeIf { it.isNotBlank() }
-            ParsedRouteCorridorPlace(SelectedOsmPlace(name, lat, lon, OsmRef(type, id), address), kind)
+            val access = listOf("access", "vehicle", "motor_vehicle", "motorcar", "motorcycle")
+                .flatMap { listOf(it, "$it:conditional") }
+                .mapNotNull { key -> tag(key)?.lowercase(Locale.ROOT)?.let { key to it } }.toMap()
+            ParsedRouteCorridorPlace(SelectedOsmPlace(name, lat, lon, OsmRef(type, id), address), kind, access)
         }.distinctBy { it.place.osmRef }
     }
 }

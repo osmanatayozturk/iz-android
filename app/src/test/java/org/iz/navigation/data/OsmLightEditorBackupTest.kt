@@ -34,7 +34,7 @@ class OsmLightEditorBackupTest {
                 },
             )
             val json = BackupJson.encode(DiarySnapshot(mapEdits = listOf(draft)))
-            assertEquals(12, json.getInt("version"))
+            assertEquals(13, json.getInt("version"))
             // Parse serialized JSON too: retaining the original JSONObject is not a portable round trip.
             val restored = BackupJson.decode(JSONObject(json.toString())).mapEdits.single()
             val label = "name=$nameAction phone=$phoneAction"
@@ -93,7 +93,7 @@ class OsmLightEditorBackupTest {
                 restored.mapEdits.single().publicTags(),
             )
             val reexported = BackupJson.encode(restored)
-            assertEquals(12, reexported.getInt("version"))
+            assertEquals(13, reexported.getInt("version"))
             assertEquals(expected, BackupJson.decode(JSONObject(reexported.toString())).mapEdits.single())
         }
     }
@@ -170,7 +170,7 @@ class OsmLightEditorBackupTest {
         var restored = DiarySnapshot(osmPresetFavorites = input)
         repeat(2) {
             val json = BackupJson.encode(restored)
-            assertEquals(12, json.getInt("version"))
+            assertEquals(13, json.getInt("version"))
             restored = BackupJson.decode(JSONObject(json.toString()))
             val ids = restored.osmPresetFavorites.map { it.presetId }
             assertEquals(expectedIds, ids)

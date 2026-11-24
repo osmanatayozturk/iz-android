@@ -86,6 +86,11 @@ internal class NavigationSpeechController(
     fun speakTurn(request: NavigationCueRequest) {
         if (!submit(request.text, SpeechChannel.TURN, request = request)) request.finish(CueDelivery.REJECTED)
     }
+    fun speakWhenIdle(request: NavigationCueRequest) {
+        reconcileDeadlines()
+        if (active != null || pending != null) request.finish(CueDelivery.REJECTED)
+        else speakTurn(request)
+    }
     fun speakWeather(text: String) { submit(text, SpeechChannel.WEATHER) }
     fun testVoice(owner: SpeechChannel = SpeechChannel.TURN): SpeechTestResult {
         require(owner == SpeechChannel.TURN || owner == SpeechChannel.WEATHER)

@@ -5,12 +5,14 @@ import org.iz.navigation.BuildConfig
 import org.iz.navigation.data.OsmRef
 import org.iz.navigation.data.OsmType
 import org.iz.navigation.data.SelectedOsmPlace
+import org.iz.navigation.data.Transport
 import org.iz.navigation.osmcatalog.OsmPresetCatalog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlin.coroutines.coroutineContext
 import org.iz.navigation.weather.PlannedRoute
 import org.iz.navigation.weather.WeatherCoordinate
+import org.iz.navigation.weather.WeatherEngine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -147,30 +149,44 @@ class OsmPlaces(context: Context) {
     suspend fun routeFuelAndRest(route: PlannedRoute, elapsedSeconds: Double): List<RouteCorridorPlace> =
         withContext(Dispatchers.IO) {
             val slice = RouteCorridorPlaces.slice(route, elapsedSeconds) ?: return@withContext emptyList()
-            val query = RouteCorridorPlaces.query(slice)
-            overpassLock.withLock {
-                coroutineContext.ensureActive()
-                val endpoint = settings.read().overpass
-                val key = "route-stops:v1:$endpoint:$query"
-                val file = File(cacheDirectory, cacheKey(key))
-                val cached = runCatching {
-                    if (!file.isFile || file.length() > 512_000 ||
-                        System.currentTimeMillis() - file.lastModified() !in 0..600_000) null
-                    else RouteCorridorPlaces.parseTyped(file.readText())
-                }.getOrNull()
-                val fresh = cached == null
-                val json = if (fresh) performOverpass(query, endpoint) else null
-                coroutineContext.ensureActive()
-                if (settings.read().overpass != endpoint)
-                    throw kotlinx.coroutines.CancellationException("Harita servisi değişti; eski yanıt iptal edildi.")
-                val typed = cached ?: RouteCorridorPlaces.parseTyped(requireNotNull(json))
-                val kinds = typed.associate { requireNotNull(it.place.osmRef) to it.kind }
-                val result = RouteCorridorPlaces.project(slice, typed.map { it.place }, kinds)
-                coroutineContext.ensureActive()
-                if (fresh) storeCache(key, requireNotNull(json))
-                result
-            }
+            val typed = readRouteStops(RouteCorridorPlaces.query(slice))
+            RouteCorridorPlaces.project(slice, typed.map { it.place }, typed.associate { requireNotNull(it.place.osmRef) to it.kind })
         }
+
+    /** A single offer may use the existing budget and private cache. The planner verifies road access. */
+    internal suspend fun fuelStations(origin: WeatherCoordinate, transport: Transport,
+        route: PlannedRoute?, elapsedSeconds: Double?): List<SelectedOsmPlace> = withContext(Dispatchers.IO) {
+        if (route == null) {
+            readRouteStops(RouteCorridorPlaces.fuelQuery(origin)).filter { it.allowsFuelVehicle(transport) }
+                .map { it.place }.sortedBy {
+                    WeatherEngine.distanceMeters(origin, WeatherCoordinate(it.latitude, it.longitude))
+                }
+        } else {
+            val slice = RouteCorridorPlaces.slice(route, requireNotNull(elapsedSeconds)) ?: return@withContext emptyList()
+            val typed = readRouteStops(RouteCorridorPlaces.query(slice)).filter { it.allowsFuelVehicle(transport) }
+            RouteCorridorPlaces.project(slice, typed.map { it.place }, typed.associate { requireNotNull(it.place.osmRef) to it.kind })
+                .map { it.place }
+        }
+    }
+
+    private suspend fun readRouteStops(query: String): List<ParsedRouteCorridorPlace> = overpassLock.withLock {
+        coroutineContext.ensureActive()
+        val endpoint = settings.read().overpass
+        val key = "route-stops:v1:$endpoint:$query"
+        val file = File(cacheDirectory, cacheKey(key))
+        val cached = runCatching {
+            if (!file.isFile || file.length() > 512_000 ||
+                System.currentTimeMillis() - file.lastModified() !in 0..600_000) null
+            else RouteCorridorPlaces.parseTyped(file.readText())
+        }.getOrNull()
+        val json = if (cached == null) performOverpass(query, endpoint) else null
+        coroutineContext.ensureActive()
+        if (settings.read().overpass != endpoint)
+            throw kotlinx.coroutines.CancellationException("Harita servisi değişti; eski yanıt iptal edildi.")
+        val parsed = cached ?: RouteCorridorPlaces.parseTyped(requireNotNull(json))
+        if (json != null) storeCache(key, json)
+        parsed
+    }
 
     /** Roads and POIs use the same process lock, persisted query count and byte reservation. */
     internal suspend fun roadNetwork(query: String): String = withContext(Dispatchers.IO) {

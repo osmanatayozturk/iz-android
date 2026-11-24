@@ -3,6 +3,7 @@ package org.iz.navigation.car
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.SystemClock
 import androidx.car.app.*
 import androidx.car.app.constraints.ConstraintManager
 import androidx.car.app.model.*
@@ -52,9 +53,55 @@ internal abstract class CarScreen(context: CarContext) : Screen(context) {
     protected val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     protected val app get() = carContext.applicationContext as IzApplication
     protected val navigation get() = app.navigation
+    protected var vehicleChoosing = false
+        private set
+    protected var vehicleChoiceError: String? = null
+        private set
     init { lifecycle.addObserver(object : DefaultLifecycleObserver {
         override fun onDestroy(owner: LifecycleOwner) { scope.cancel() }
-    }) }
+    })
+    }
+    protected fun isVisibleScreen() = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) && screenManager.top === this
+    protected fun selectManualVehicle(transport: Transport,
+        operation: suspend (String?, () -> Boolean) -> Unit) {
+        if (vehicleChoosing) return
+        vehicleChoosing = true
+        vehicleChoiceError = null
+        val expected = carVehicleStartSnapshot(navigation.state.value, transport)
+        safeInvalidate()
+        scope.launch {
+            try {
+                resolveCarStartVehicle(app.garage.vehicles, transport,
+                    stillCurrent = { isVisibleScreen() &&
+                        expected == carVehicleStartSnapshot(navigation.state.value, transport) },
+                    start = { id -> operation(id, ::isVisibleScreen) },
+                    choose = { showVehiclePicker(transport, expected, operation = operation) })
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { vehicleChoiceError = failure.message ?: "Araçlar okunamadı. Yeniden deneyin." }
+            finally { vehicleChoosing = false; safeInvalidate() }
+        }
+    }
+    protected fun showVehiclePicker(transport: Transport, expected: CarVehicleStartSnapshot,
+        parkedOnly: Boolean = false, journeyId: String? = null,
+        operation: suspend (String?, () -> Boolean) -> Unit) {
+        screenManager.push(CarVehicleScreen(carContext, transport, expected, parkedOnly, journeyId, operation))
+    }
+    protected fun planWithVehicle(home: CarHomeScreen, destination: RouteStop) {
+        if (navigation.state.value.sessionId != null) {
+            home.plan(destination, vehicleChosen = true)
+            return
+        }
+        selectManualVehicle(home.mode) { vehicleId, visible ->
+            if (visible()) home.plan(destination, vehicleId, vehicleChosen = true)
+        }
+    }
+    protected abstract fun carTemplate(): Template
+    protected open fun templateBuilt(template: Template) = Unit
+    final override fun onGetTemplate(): Template {
+        val template = carTemplate()
+        templateBuilt(template)
+        return template
+    }
     fun safeInvalidate() = display { invalidate() }
     protected fun display(block: () -> Unit) {
         if (!safelyUpdateCarDisplay(block)) {
@@ -115,18 +162,37 @@ internal class CarHomeScreen(context: CarContext, private val surface: CarMapSur
     private var sessionVisible = false
     private var surfaceVisible = false
     private var mapClosed = false
+    private var navigationTemplateVisible = false
+    private val fuelAlerts by lazy { CarFuelAlerts(scope, SystemClock::elapsedRealtime,
+        visible = { !mapClosed && homeVisible && sessionVisible && surfaceVisible && navigationTemplateVisible &&
+            isVisibleScreen() && app.fuelOffers.isAutoMapActive(this) },
+        current = { app.fuelOffers.offer.value }, host = NativeCarFuelAlertHost(carContext),
+        accept = { app.fuelOffers.accept(it) }, reject = { app.fuelOffers.reject(it) },
+        failed = { display { CarToast.makeText(carContext, "İstasyon eklenemedi; yolculuk korunuyor.", CarToast.LENGTH_LONG).show() } }) }
     private var speechStatus = SpeechStatus()
     var selectedMode = Transport.CAR
+        set(value) {
+            if (field == value) return
+            field = value
+            app.fuelOffers.setAutoMapFix(this, value, null)
+        }
     val mode get() = effectiveCarMode(state, selectedMode)
     val measurementSessionActive get() = state.recording || state.guidance || state.simulation
     init {
         lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) { homeVisible = true; syncMapLocation() }
-            override fun onStop(owner: LifecycleOwner) { homeVisible = false; syncMapLocation(); renderSurface() }
+            override fun onStop(owner: LifecycleOwner) {
+                homeVisible = false; navigationTemplateVisible = false
+                syncFuelVisibility(); syncMapLocation(); renderSurface()
+            }
             override fun onDestroy(owner: LifecycleOwner) { closeMapLocation() }
         })
         scope.launch { mapLocation.fix.collect { renderSurface() } }
         scope.launch { mapLocation.recoveryNeeded.collect { safeInvalidate() } }
+        scope.launch { lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            combine(app.fuelOffers.offer, app.fuelOffers.autoVisible) { _, _ -> Unit }
+                .collect { fuelAlerts.update() }
+        } }
         scope.launch {
             mapVisible.collectLatest { visible ->
                 idleSpeed = RoadSpeedState()
@@ -147,6 +213,16 @@ internal class CarHomeScreen(context: CarContext, private val surface: CarMapSur
             }
         }
     }
+    private fun syncFuelVisibility() {
+        app.fuelOffers.setAutoMapVisible(this, !mapClosed && homeVisible && sessionVisible && surfaceVisible && navigationTemplateVisible)
+        publishFuelMapFix()
+        fuelAlerts.update()
+    }
+    override fun templateBuilt(template: Template) {
+        navigationTemplateVisible = template is NavigationTemplate
+        // Deliver the navigation template before asking the host to overlay its native Alert.
+        scope.launch { yield(); syncFuelVisibility() }
+    }
     private fun syncMapLocation() {
         val visible = !mapClosed && carMapLocationVisible(homeVisible, sessionVisible, surfaceVisible, state)
         if (!visible) idleSpeed = RoadSpeedState()
@@ -155,22 +231,35 @@ internal class CarHomeScreen(context: CarContext, private val surface: CarMapSur
     }
     private fun renderSurface() {
         val fix = mapLocation.fix.value.takeIf { mapVisible.value }
-        surface.update(carMapDisplayState(state, fix, idleSpeed, System.currentTimeMillis(), mode),
-            carVoiceWarning(state, speechStatus))
+        val shown = carMapDisplayState(state, fix, idleSpeed, System.currentTimeMillis(), mode)
+        publishFuelMapFix(shown)
+        surface.update(shown, carVoiceWarning(state, speechStatus))
+    }
+    private fun publishFuelMapFix(shown: NavigationState? = null) {
+        when {
+            mapClosed || !sessionVisible || carUsesNavigationFix(state) -> app.fuelOffers.setAutoMapFix(this, mode, null)
+            mapVisible.value -> app.fuelOffers.setAutoMapFix(this, mode, (shown ?: carMapDisplayState(state,
+                mapLocation.fix.value, idleSpeed, System.currentTimeMillis(), mode)).fix)
+            // A menu hides this source; keep the pending offer's original deadline without acquiring fixes.
+        }
     }
     fun setSessionVisible(visible: Boolean) {
         sessionVisible = visible
+        syncFuelVisibility()
         syncMapLocation()
         renderSurface()
     }
     fun setSurfaceVisible(visible: Boolean) {
         if (surfaceVisible == visible) return
         surfaceVisible = visible
+        syncFuelVisibility()
         syncMapLocation()
         renderSurface()
     }
     fun closeMapLocation() {
         mapClosed = true
+        app.fuelOffers.setAutoMapFix(this, mode, null)
+        syncFuelVisibility()
         mapVisible.value = false
         idleSpeed = RoadSpeedState()
         mapLocation.close()
@@ -190,7 +279,10 @@ internal class CarHomeScreen(context: CarContext, private val surface: CarMapSur
     fun setCameraMode(value: DriveCameraMode) { surface.cameraMode(value) }
     fun showOverview() { surface.overview() }
     fun recenter() = surface.recenter()
-    fun preview(route: PlannedRoute) { screenManager.push(CarPreviewScreen(carContext, this, surface, route)) }
+    fun preview(route: PlannedRoute, vehicleId: String? = null, vehicleChosen: Boolean = false) {
+        screenManager.push(CarPreviewScreen(carContext, this, surface, route, selectedVehicleId = vehicleId,
+            vehicleChoiceOwner = carVehicleStartSnapshot(navigation.state.value, route.transport).takeIf { vehicleChosen }))
+    }
 
     fun requestIdleLocation() {
         syncMapLocation()
@@ -204,38 +296,45 @@ internal class CarHomeScreen(context: CarContext, private val surface: CarMapSur
         } else plan(RouteStop(target.query.ifBlank { "Hedef" }.take(300), target.coordinate))
     }
 
-    fun plan(destination: RouteStop) {
-        screenManager.push(CarPreviewScreen(carContext, this, surface, destination = destination))
+    fun plan(destination: RouteStop, vehicleId: String? = null, vehicleChosen: Boolean = false) {
+        screenManager.push(CarPreviewScreen(carContext, this, surface, destination = destination, selectedVehicleId = vehicleId,
+            vehicleChoiceOwner = carVehicleStartSnapshot(navigation.state.value, mode).takeIf { vehicleChosen }))
     }
 
-    private fun start(request: CarRecordingRequest, stillVisible: () -> Boolean, onStarted: () -> Unit) {
+    private suspend fun start(request: CarRecordingRequest, vehicleId: String?, stillVisible: () -> Boolean, onStarted: () -> Unit) {
         if (recordingStatus.value.starting) return
         recordingStatus.value = CarRecordingStatus(starting = true)
-        scope.launch {
-            try {
-                navigation.startCarRecording(request.mode,
-                    request.journeyId.takeIf { request.action == CarRecordingAction.SAVE },
-                    stillCurrent = { !mapClosed && stillVisible() && request == currentRecordingRequest() })
-                ensureActive()
-                if (stillVisible()) display(onStarted)
-            }
-            catch (cancelled: CancellationException) { throw cancelled }
-            catch (failure: Exception) { recordingStatus.value = CarRecordingStatus(
-                error = failure.message ?: "Kayıt başlatılamadı. Telefonda İz'i açın.") }
-            finally { recordingStatus.value = recordingStatus.value.copy(starting = false); safeInvalidate() }
+        var startedSession: String? = null
+        try {
+            val session = navigation.startCarRecording(request.mode,
+                request.journeyId.takeIf { request.action == CarRecordingAction.SAVE },
+                stillCurrent = { !mapClosed && stillVisible() && request == currentRecordingRequest() })
+            startedSession = session
+            if (request.action == CarRecordingAction.START) app.garage.bindSession(session,
+                navigation.state.value.takeIf { it.sessionId == session }?.journey?.id, vehicleId, request.mode)
+            if (stillVisible()) display(onStarted)
         }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) {
+            val message = if (startedSession != null) "Kayıt başladı; araç atanamadı. Park halinde yeniden atayın."
+                else failure.message ?: "Kayıt başlatılamadı. Telefonda İz'i açın."
+            recordingStatus.value = CarRecordingStatus(error = message)
+            throw IllegalStateException(message, failure)
+        }
+        finally { recordingStatus.value = recordingStatus.value.copy(starting = false); safeInvalidate() }
     }
 
     fun currentRecordingRequest(): CarRecordingRequest? {
         val current = navigation.state.value
         return carRecordingRequest(current, effectiveCarMode(current, selectedMode))
     }
-    fun changeRecording(request: CarRecordingRequest, stillVisible: () -> Boolean, onStarted: () -> Unit) {
+    suspend fun changeRecording(request: CarRecordingRequest, stillVisible: () -> Boolean, onStarted: () -> Unit,
+        vehicleId: String? = null) {
         if (mapClosed || !stillVisible() || request != currentRecordingRequest()) {
             recordingStatus.value = CarRecordingStatus(error = "Yolculuk değişti. Haritaya dönüp yeniden seçin.")
             return
         }
-        if (request.action != CarRecordingAction.FINISH) { start(request, stillVisible, onStarted); return }
+        if (request.action != CarRecordingAction.FINISH) { start(request, vehicleId, stillVisible, onStarted); return }
         val current = navigation.state.value
         val expected = NavigationStopSnapshot.from(current)
         val journeyId = current.journey?.id
@@ -251,7 +350,7 @@ internal class CarHomeScreen(context: CarContext, private val surface: CarMapSur
         .addAction(Action.Builder().setIcon(CarIcon.Builder(IconCompat.createWithResource(carContext,
             org.iz.navigation.R.drawable.car_zoom_out)).build()).setOnClickListener { display { surface.zoom(-1.0) } }.build()).build()
 
-    override fun onGetTemplate(): Template {
+    override fun carTemplate(): Template {
         val locationGranted = ContextCompat.checkSelfPermission(carContext,
             Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         if (state.guidance && !locationGranted) {
@@ -318,17 +417,21 @@ internal class CarMenuScreen(context: CarContext, private val home: CarHomeScree
             }
         }
     }
-    override fun onGetTemplate(): Template {
+    override fun carTemplate(): Template {
         val request = home.currentRecordingRequest()
         val status = home.recordingStatus.value
         val rows = buildList {
             add(row("Hedef ara", "Ad veya adres") { screenManager.push(CarSearchScreen(carContext, home)) })
             add(row("Kayıtlı ve son yerler", "Ev, İş ve son yerler") { screenManager.push(CarPlacesScreen(carContext, home)) })
-            if (request != null) add(row(if (status.starting) "Kaydediliyor…" else request.action.title,
-                status.error.orEmpty()) {
-                home.changeRecording(request,
-                    stillVisible = { lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) && screenManager.top === this },
-                    onStarted = { screenManager.popToRoot() })
+            if (request != null) add(row(if (status.starting || vehicleChoosing) "Hazırlanıyor…" else request.action.title,
+                vehicleChoiceError ?: status.error.orEmpty()) {
+                if (request.action != CarRecordingAction.START) scope.launch {
+                    try { home.changeRecording(request, ::isVisibleScreen, { screenManager.popToRoot() }) }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { safeInvalidate() } // The shared recording status contains the error.
+                } else if (!status.starting) selectManualVehicle(request.mode) { vehicleId, visible ->
+                    home.changeRecording(request, visible, { screenManager.popToRoot() }, vehicleId)
+                }
             })
             addAll(listOf(
                 row("Sürüş ve harita", modeLabel(home.mode)) { screenManager.push(CarDrivingOptionsScreen(carContext, home)) },
@@ -342,18 +445,54 @@ internal class CarMenuScreen(context: CarContext, private val home: CarHomeScree
 }
 
 internal class CarDrivingOptionsScreen(context: CarContext, private val home: CarHomeScreen) : CarScreen(context) {
-    init { observeVoice() }
-    override fun onGetTemplate(): Template = ListTemplate.Builder().setTitle("Sürüş ve harita").setHeaderAction(Action.BACK)
+    init {
+        observeVoice()
+        scope.launch { lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            navigation.state.map { carVehicleStartSnapshot(it, home.mode) }.distinctUntilChanged().collect { safeInvalidate() }
+        } }
+    }
+    override fun carTemplate(): Template {
+        val current = navigation.state.value
+        val journey = current.journey?.takeIf { it.status == JourneyStatus.CONFIRMED &&
+            it.transport in setOf(Transport.CAR, Transport.MOTORCYCLE) && current.sessionId != null &&
+            (current.recording || current.guidance) && !current.simulation }
+        val expected = carVehicleStartSnapshot(current, journey?.transport ?: home.mode)
+        val idleMap = !carUsesNavigationFix(current) && home.mode in setOf(Transport.CAR, Transport.MOTORCYCLE)
+        return ListTemplate.Builder().setTitle("Sürüş ve harita").setHeaderAction(Action.BACK)
         .setSingleList(ItemList.Builder()
             .addItem(row("Sürüş türü", modeLabel(home.mode)) { screenManager.push(CarModeScreen(carContext, home)) })
             .addItem(row("Harita görünümü", if (home.cameraMode == DriveCameraMode.ADAPTIVE) "Uyarlamalı" else "Kuzey yukarı 2D") { screenManager.push(CarCameraScreen(carContext, home)) })
             .addItem(row("Hazır rotalar") { screenManager.push(CarRoutesScreen(carContext, home)) })
-            .addItem(phoneRow("Ses ayarları", currentVoiceNotice, "OPEN_VOICE_SETTINGS")).build())
+            .addItem(phoneRow("Ses ayarları", currentVoiceNotice, "OPEN_VOICE_SETTINGS"))
+            .addItem(phoneRow("Garaj ve yakıt", "Park halinde telefonda düzenle", "OPEN_GARAGE"))
+            .apply { if (journey != null) addItem(Row.Builder().setTitle("Yolculuğa araç ata")
+                .addText("Park halinde bu yolculuğun aracını seç")
+                .setOnClickListener(ParkedOnlyOnClickListener.create { display {
+                    if (isVisibleScreen() && expected == carVehicleStartSnapshot(navigation.state.value, journey.transport))
+                        showVehiclePicker(journey.transport, expected,
+                            parkedOnly = true, journeyId = journey.id) { vehicleId, visible ->
+                            check(visible()) { "Atama ekranı değişti." }
+                            app.garage.assignJourney(journey.id, requireNotNull(vehicleId))
+                            if (visible()) screenManager.pop()
+                        }
+                } }).build())
+                else if (idleMap) addItem(Row.Builder().setTitle("Haritadaki araç")
+                    .addText("Yakıt önerileri için park halinde seç")
+                    .setOnClickListener(ParkedOnlyOnClickListener.create { display {
+                        val mode = home.mode
+                        if (isVisibleScreen() && expected == carVehicleStartSnapshot(navigation.state.value, mode))
+                            showVehiclePicker(mode, expected, parkedOnly = true) { vehicleId, visible ->
+                                check(visible()) { "Araç seçim ekranı değişti." }
+                                app.fuelOffers.selectAutoVehicle(requireNotNull(vehicleId), mode)
+                                if (visible()) screenManager.pop()
+                            }
+                    } }).build()) }.build())
         .setActionStrip(ActionStrip.Builder().addAction(mapReturn()).build()).build()
+    }
 }
 
 internal class CarCameraScreen(context: CarContext, private val home: CarHomeScreen) : CarScreen(context) {
-    override fun onGetTemplate(): Template = ListTemplate.Builder().setTitle("Araç kamerası").setHeaderAction(Action.BACK)
+    override fun carTemplate(): Template = ListTemplate.Builder().setTitle("Araç kamerası").setHeaderAction(Action.BACK)
         .setActionStrip(ActionStrip.Builder().addAction(action("Konumum") {
             home.recenter(); screenManager.popToRoot()
         }).build())
@@ -372,8 +511,16 @@ internal class CarCameraScreen(context: CarContext, private val home: CarHomeScr
 internal class CarRoutesScreen(context: CarContext, private val home: CarHomeScreen) : CarScreen(context) {
     private var saved = emptyList<SavedRoutePlan>()
     private var readError = false
+    private var fleet: List<org.iz.navigation.garage.GarageVehicle>? = null
+    private var vehicleError: String? = null
+    private var page = 0
     init {
         observePrepared()
+        scope.launch { lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            try { app.garage.vehicles.collect { fleet = it; vehicleError = null; safeInvalidate() } }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { vehicleError = failure.message ?: "Araçlar okunamadı."; safeInvalidate() }
+        } }
         scope.launch {
             lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 try {
@@ -386,12 +533,33 @@ internal class CarRoutesScreen(context: CarContext, private val home: CarHomeScr
         }
     }
 
-    override fun onGetTemplate(): Template {
+    override fun carTemplate(): Template {
         val prepared = preparedNotice()
         val rows = buildList {
             (navigation.state.value.route ?: navigation.lastRoute)?.let { route ->
                 route.stops.lastOrNull()?.let { target ->
-                    add(row("Yüklü rota", target.label) { home.preview(route) })
+                    val expected = carVehicleStartSnapshot(navigation.state.value, route.transport)
+                    val vehicles = fleet?.filter { it.transport == route.transport }
+                    fun open(id: String?) { scope.launch {
+                        try {
+                            check(expected == carVehicleStartSnapshot(navigation.state.value, route.transport) && isVisibleScreen()) {
+                                "Yolculuk değişti. Yeniden seçin."
+                            }
+                            if (expected.sessionId == null) {
+                                val latest = app.garage.vehicles.first().filter { it.transport == route.transport }
+                                check(latest.map { it.id }.toSet() == vehicles.orEmpty().map { it.id }.toSet()) { "Garaj değişti. Yeniden seçin." }
+                            }
+                            if (isVisibleScreen()) home.preview(route, id, vehicleChosen = true)
+                        } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (failure: Exception) { vehicleError = failure.message; safeInvalidate() }
+                    } }
+                    when {
+                        expected.sessionId != null -> add(row("Yüklü rota", target.label) { open(null) })
+                        vehicleError != null -> add(row("Yüklü rota", vehicleError.orEmpty()))
+                        vehicles == null -> add(row("Yüklü rota", "Araçlar yükleniyor…"))
+                        vehicles.size <= 1 -> add(row("Yüklü rota", target.label) { open(vehicles.singleOrNull()?.id) })
+                        else -> vehicles.forEach { vehicle -> add(row(vehicle.name, "Yüklü rota · ${target.label}") { open(vehicle.id) }) }
+                    }
                 }
             }
             val draft = WeatherPlanStore(carContext).read()
@@ -399,17 +567,23 @@ internal class CarRoutesScreen(context: CarContext, private val home: CarHomeScr
             add(phoneRow("Telefondaki plan", detail, "OPEN_ROUTE_PLAN"))
             add(row("Harita hazırlığı", "${prepared.route} ${prepared.map}"))
             if (readError) add(row("Kayıtlı planlar okunamadı"))
-            saved.take((listLimit() - size).coerceAtLeast(0)).forEach { plan ->
+            saved.forEach { plan ->
                 add(phoneRow(plan.name, "${plan.stops.size} nokta · Telefonda devam et", "OPEN_ROUTE_PLAN", plan.id))
             }
         }
+        val limit = listLimit()
+        val lastPage = (rows.size - 1).coerceAtLeast(0) / limit
+        page = page.coerceIn(0, lastPage)
         return ListTemplate.Builder().setTitle("Hazır rotalar").setHeaderAction(Action.BACK)
-            .setSingleList(ItemList.Builder().apply { rows.take(listLimit()).forEach(::addItem) }.build()).build()
+            .setSingleList(ItemList.Builder().apply { rows.drop(page * limit).take(limit).forEach(::addItem) }.build())
+            .apply { if (lastPage > 0) setActionStrip(ActionStrip.Builder().addAction(action("Diğer") {
+                page = (page + 1) % (lastPage + 1); safeInvalidate()
+            }).build()) }.build()
     }
 }
 
 internal class CarModeScreen(context: CarContext, private val home: CarHomeScreen) : CarScreen(context) {
-    override fun onGetTemplate(): Template {
+    override fun carTemplate(): Template {
         if (!canSelectCarMode(navigation.state.value)) return MessageTemplate.Builder(
             "${modeLabel(home.mode)} seçili. Vasıtayı değiştirmek için sürüşü bitirin.")
             .setTitle("Aktif sürüş kullanılıyor").setHeaderAction(Action.BACK).build()
@@ -433,7 +607,7 @@ internal class CarSearchScreen(context: CarContext, private val home: CarHomeScr
     private var message = ""
     private var submitted = false
     private val requests = LatestCarRequest(scope)
-    override fun onGetTemplate(): Template = SearchTemplate.Builder(object : SearchTemplate.SearchCallback {
+    override fun carTemplate(): Template = SearchTemplate.Builder(object : SearchTemplate.SearchCallback {
         override fun onSearchTextChanged(searchText: String) { query = searchText }
         override fun onSearchSubmitted(searchText: String) {
             val term = searchText.trim()
@@ -456,10 +630,10 @@ internal class CarSearchScreen(context: CarContext, private val home: CarHomeScr
             if (!searching) setItemList(ItemList.Builder().setNoItemsMessage(message).apply {
                 if (!submitted) addItem(row("Son yerler", "Ev, İş ve kayıtlı yerler") {
                     if (screenManager.screenStack.any { it.marker == "carplaces" }) screenManager.popTo("carplaces")
-                    else screenManager.push(CarPlacesScreen(carContext, home))
+                    else { screenManager.pop(); screenManager.push(CarPlacesScreen(carContext, home)) }
                 })
                 results.take(listLimit()).forEach { place -> addItem(row(place.name, carSearchSubtitle(place)) {
-                    home.plan(RouteStop(place.name.take(300), WeatherCoordinate(place.latitude, place.longitude)))
+                    planWithVehicle(home, RouteStop(place.name.take(300), WeatherCoordinate(place.latitude, place.longitude)))
                 }) }
             }.build())
         }.build()
@@ -492,10 +666,10 @@ internal class CarPlacesScreen(context: CarContext, private val home: CarHomeScr
         catch (_: Exception) { message = "Yerler okunamadı; telefonda İz'i açın" }
         finally { loading = false; safeInvalidate() }
     } }
-    override fun onGetTemplate(): Template = ListTemplate.Builder().setTitle("Hedef ve yerler")
+    override fun carTemplate(): Template = ListTemplate.Builder().setTitle("Hedef ve yerler")
         .setActionStrip(ActionStrip.Builder().addAction(action("Hedef ara") {
             if (screenManager.screenStack.any { it.marker == "carsearch" }) screenManager.popTo("carsearch")
-            else screenManager.push(CarSearchScreen(carContext, home))
+            else { screenManager.pop(); screenManager.push(CarSearchScreen(carContext, home)) }
         }).build())
         .setHeaderAction(Action.BACK).setLoading(loading).apply {
             if (!loading) setSingleList(ItemList.Builder().setNoItemsMessage(message).apply {
@@ -508,11 +682,11 @@ internal class CarPlacesScreen(context: CarContext, private val home: CarHomeScr
                         else row(label, target.label) { openShortcut(kind) })
                 }
                 navigation.lastRoute?.stops?.lastOrNull()?.let { last ->
-                    rows.add(row(last.label, "Son hedef") { home.plan(last) })
+                    rows.add(row(last.label, "Son hedef") { planWithVehicle(home, last) })
                 }
                 if (destinations.isEmpty()) rows.add(row("Kayıtlı yerler", message))
                 destinations.take((listLimit() - rows.size).coerceAtLeast(0)).forEach { (destination, recent) ->
-                    rows.add(row(destination.label, if (recent) "Son ziyaret" else "Kayıtlı yer") { home.plan(destination) })
+                    rows.add(row(destination.label, if (recent) "Son ziyaret" else "Kayıtlı yer") { planWithVehicle(home, destination) })
                 }
                 rows.take(listLimit()).forEach(::addItem)
             }.build())
@@ -523,7 +697,7 @@ internal class CarPlacesScreen(context: CarContext, private val home: CarHomeScr
             val target = library.destinationShortcuts.first().firstOrNull { it.kind == kind }?.let(::carShortcutStop)
                 ?: error("Hedef değişmiş veya kaldırılmış. Telefonda yeniden seçin.")
             shortcutError = null
-            home.plan(target)
+            planWithVehicle(home, target)
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (failure: Exception) { shortcutError = failure.message ?: "Hedef okunamadı"; safeInvalidate() }
     } }
@@ -531,14 +705,24 @@ internal class CarPlacesScreen(context: CarContext, private val home: CarHomeScr
 
 internal class CarPreviewScreen(context: CarContext, private val home: CarHomeScreen,
     private val surface: CarMapSurface, initialRoute: PlannedRoute? = null,
-    private val destination: RouteStop? = null) : CarScreen(context) {
+    private val destination: RouteStop? = null, private val selectedVehicleId: String? = null,
+    private val vehicleChoiceOwner: CarVehicleStartSnapshot? = null) : CarScreen(context) {
+    // Capture before this screen is pushed; the fifth step must stay a terminal type throughout.
+    private val terminalPane = screenManager.screenStack.size >= 4
     private var route = initialRoute
     private var starting = false
     private var planning = false
     private var error: String? = null
+    private var selectedVehicleName: String? = null
 
     init {
         observePrepared(initialRoute)
+        if (selectedVehicleId != null) scope.launch { lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            app.garage.vehicles.collect { vehicles ->
+                selectedVehicleName = vehicles.firstOrNull { it.id == selectedVehicleId }?.name
+                safeInvalidate()
+            }
+        } }
         lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) {
                 display { surface.preview(route) }
@@ -576,7 +760,7 @@ internal class CarPreviewScreen(context: CarContext, private val home: CarHomeSc
         }
     }
 
-    override fun onGetTemplate(): Template {
+    override fun carTemplate(): Template {
         val selected = route
         val pane = Pane.Builder()
         if (selected == null) {
@@ -586,28 +770,55 @@ internal class CarPreviewScreen(context: CarContext, private val home: CarHomeSc
             val information = carRoutePreviewPresentation(selected, System.currentTimeMillis())
             val prepared = preparedNotice(selected)
             pane.addRow(row(selected.stops.last().label,
-                "${(selected.durationSeconds / 60).toInt()} dk · ${km(selected.distanceMeters)} km · ${modeLabel(selected.transport)}"))
-            if (error != null) pane.addRow(row("Başlatılamadı", error.orEmpty()))
+                "${(selected.durationSeconds / 60).toInt()} dk · ${km(selected.distanceMeters)} km · ${selectedVehicleName ?: modeLabel(selected.transport)}"))
+            (error ?: vehicleChoiceError)?.let { pane.addRow(row("İşlem tamamlanamadı", it)) }
             pane.addRow(row("Kaynak ve trafik", information.source))
             information.warnings?.let { pane.addRow(row("Rota uyarıları", it)) }
             pane.addRow(row("Hazırlık", "${prepared.route} ${prepared.map}"))
-            pane.addAction(Action.Builder().setTitle(if (starting) "Başlatılıyor…" else "Başlat")
-                .setFlags(Action.FLAG_PRIMARY).setEnabled(!starting).setOnClickListener { display { start(selected) } }.build())
+            pane.addAction(Action.Builder().setTitle(if (starting || vehicleChoosing) "Başlatılıyor…" else "Başlat")
+                .setFlags(Action.FLAG_PRIMARY).setEnabled(!starting && !vehicleChoosing).setOnClickListener { display { start(selected) } }.build())
         }
-        return MapWithContentTemplate.Builder().setContentTemplate(PaneTemplate.Builder(pane.build())
-            .setTitle("Rota önizlemesi").setHeaderAction(Action.BACK).build()).build()
+        val content = PaneTemplate.Builder(pane.build()).setTitle("Rota önizlemesi").setHeaderAction(Action.BACK).build()
+        return if (terminalPane) content else MapWithContentTemplate.Builder().setContentTemplate(content).build()
     }
 
     private fun start(selected: PlannedRoute) {
-        if (starting) return
-        starting = true
+        if (starting || vehicleChoosing) return
         error = null
-        safeInvalidate()
-        scope.launch {
-            try { navigation.startGuidance(selected); screenManager.popToRoot() }
+        suspend fun begin(vehicleId: String?, visible: () -> Boolean, expected: CarVehicleStartSnapshot) {
+            starting = true
+            safeInvalidate()
+            var startedSession: String? = null
+            try {
+                check(visible()) { "Başlatma ekranı değişti." }
+                if (expected.sessionId == null) {
+                    val matching = app.garage.vehicles.first().filter { it.transport == selected.transport }
+                    check(if (vehicleId == null) matching.isEmpty() else matching.any { it.id == vehicleId }) {
+                        "Garaj değişti. Geri dönüp aracı yeniden seçin."
+                    }
+                }
+                val session = navigation.startGuidance(selected, stillCurrent = { visible() &&
+                    expected == carVehicleStartSnapshot(navigation.state.value, selected.transport) })
+                startedSession = session
+                app.garage.bindSession(session, navigation.state.value.takeIf { it.sessionId == session }?.journey?.id,
+                    vehicleId, selected.transport)
+                if (visible()) screenManager.popToRoot()
+            }
             catch (cancelled: CancellationException) { throw cancelled }
-            catch (failure: Exception) { error = failure.message ?: "Telefonda izinleri kontrol edin." }
+            catch (failure: Exception) {
+                if (startedSession != null) throw IllegalStateException("Yol tarifi başladı; araç atanamadı. Park halinde yeniden atayın.", failure)
+                throw failure
+            }
             finally { starting = false; safeInvalidate() }
+        }
+        val existing = vehicleChoiceOwner ?: carVehicleStartSnapshot(navigation.state.value, selected.transport)
+            .takeIf { it.sessionId != null }
+        if (existing != null) scope.launch {
+            try { begin(selectedVehicleId, ::isVisibleScreen, existing) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { error = failure.message ?: "Başlatılamadı."; safeInvalidate() }
+        } else selectManualVehicle(selected.transport) { id, visible ->
+            begin(id, visible, carVehicleStartSnapshot(navigation.state.value, selected.transport))
         }
     }
 }
@@ -631,7 +842,7 @@ internal class CarFinishScreen private constructor(context: CarContext, private 
         }
     }.joinToString(" ")
 
-    override fun onGetTemplate(): Template = MessageTemplate.Builder(error ?: explanation)
+    override fun carTemplate(): Template = MessageTemplate.Builder(error ?: explanation)
         .setTitle(if (guidanceOnly) "Yol tarifi bitsin mi?" else "Sürüş bitsin mi?").setHeaderAction(Action.BACK)
         .addAction(action(if (busy) "Bitiriliyor…" else "Bitir") {
             if (!busy) {
@@ -658,7 +869,7 @@ internal class CarWeatherScreen(
     private val refreshWeather: () -> Unit = { (context.applicationContext as IzApplication).weatherManager.refresh(); Unit },
 ) : CarScreen(context) {
     init { observeWeather() }
-    override fun onGetTemplate(): Template {
+    override fun carTemplate(): Template {
         val weather = carWeatherPresentation(app.weatherManager.state.value)
         return MessageTemplate.Builder(weather.detail).setTitle(weather.title)
             .setHeaderAction(Action.BACK).addAction(action("Yenile") {
@@ -693,7 +904,7 @@ internal class CarStatisticsScreen(context: CarContext, private val home: CarHom
         }
     }
 
-    override fun onGetTemplate(): Template {
+    override fun carTemplate(): Template {
         val active = home.measurementSessionActive
         val journey = lastCompleted
         val state = analysis.state.value

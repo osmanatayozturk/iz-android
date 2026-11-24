@@ -12,7 +12,6 @@ import java.util.UUID
 data class FuelOffer(val id: String, val title: String, val expiresAtElapsedMs: Long,
     val distanceToStationMeters: Double, val additionalSeconds: Double?)
 
-/** One decision per drive. The screen may change while the same elapsed-time deadline runs. */
 @OptIn(ExperimentalCoroutinesApi::class)
 class FuelOfferController internal constructor(
     app: IzApplication,
@@ -23,12 +22,17 @@ class FuelOfferController internal constructor(
     private val applyPlan: suspend (FuelStationPlan, () -> Boolean) -> Boolean = { plan, valid ->
         navigation.acceptFuelStation(plan, valid)
     },
-    private val announce: () -> Unit = { NavigationSpeech.get(app).speakTurn("Yakında bir yakıt istasyonu var.") },
+    private val announce: (NavigationCueRequest) -> Unit = { NavigationSpeech.get(app).speakWhenIdle(it) },
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
     private val wallClock: () -> Long = System::currentTimeMillis,
+    private val externalSearch: suspend (Transport, NavigationFix, () -> Boolean) -> FuelStationPlan? =
+        { mode, fix, valid -> navigation.findFuelStation(mode, fix, valid) },
+    private val externalApply: suspend (FuelStationPlan, NavigationFix, () -> Boolean) -> Boolean =
+        { plan, fix, valid -> navigation.acceptFuelStation(plan, fix, valid) },
 ) {
     private val phoneOwners = mutableSetOf<Any>()
-    private val autoOwners = mutableSetOf<Any>()
+    private val autoOwners = linkedMapOf<Any, Any>()
+    private val activeMapOwner get() = autoOwners.values.lastOrNull()
     private val autoMapOwners = mutableSetOf<Any>()
     private val presentable = MutableStateFlow(false)
     private val audience = MutableStateFlow(false)
@@ -38,31 +42,69 @@ class FuelOfferController internal constructor(
     private val mutableOffer = MutableStateFlow<FuelOffer?>(null)
     val offer = mutableOffer.asStateFlow()
 
-    private data class Source(val session: String, val journey: String?, val vehicle: GarageVehicle, val stats: FuelStats)
-    private data class Owner(val session: String, val journey: String?, val revision: Long, val vehicle: String)
+    // Display-only identity lives for this projection. It never starts a diary or navigation session.
+    private data class Projection(val id: String, val mode: Transport? = null, val fix: NavigationFix? = null,
+        val selectedVehicle: String? = null)
+    private val projection = MutableStateFlow<Projection?>(null)
+    private data class Drive(val id: String, val journey: String?, val mode: Transport, val external: Boolean)
+    private data class Selection(val drive: Drive, val vehicle: GarageVehicle)
+    private data class Owner(val selection: Selection, val revision: Long)
     private data class Pending(val owner: Owner, val plan: FuelStationPlan, val offer: FuelOffer)
-    private var attempted: String? = null
+    private val attempted = LinkedHashSet<String>()
     private var pending: Pending? = null
     private var accepting: String? = null
     private val eligibleOwner = MutableStateFlow<Owner?>(null)
     private val liveDistance = MutableStateFlow(0.0)
 
+    private fun drive(state: NavigationState, display: Projection?): Drive? {
+        if (state.simulation) return null
+        if (state.sessionId != null) return state.sessionTransport?.let {
+            Drive(state.sessionId, state.journey?.id, it, false)
+        }
+        if (state.recording || state.journey != null || state.route != null || state.trackFollow != null) return null
+        return display?.mode?.let { Drive(display.id, null, it, true) }
+    }
+
+    private fun selection(drive: Drive): Flow<Selection?> {
+        val selected = when {
+            drive.external -> projection.map { it?.takeIf { p -> p.id == drive.id }?.selectedVehicle }
+            drive.journey != null -> garage.assignedVehicleId(drive.journey)
+            else -> garage.unrecordedBinding.map { it?.takeIf { b -> b.sessionId == drive.id }?.vehicleId }
+        }
+        return combine(garage.vehicles, selected.distinctUntilChanged()) { fleet, id ->
+            val options = fleet.filter { it.transport == drive.mode }
+            val vehicle = if (drive.external && id == null) options.singleOrNull() else options.find { it.id == id }
+            vehicle?.let { Selection(drive, it) }
+        }.distinctUntilChanged()
+    }
+
+    private fun usableFix(d: Drive, state: NavigationState, display: Projection?): NavigationFix? {
+        if (d != drive(state, display) || state.paused || state.arrived || state.loading || state.recordingPending ||
+            state.journey?.status == JourneyStatus.TEMPORARY || state.trackFollow != null ||
+            state.guidance != (state.route != null) || (state.route != null && state.progress?.offRoute != false)) return null
+        val fix = if (d.external) display?.fix else state.fix.takeUnless { state.gpsStale }
+        return fix?.takeIf { JourneyNavigationCoordinator.fresh(it, wallClock()) }
+    }
+
     init {
+        val selected = combine(navigation.state, projection, ::drive).distinctUntilChanged()
+            .flatMapLatest { d -> if (d == null) flowOf(null) else selection(d).onStart { emit(null) } }
+            .stateIn(scope, SharingStarted.Eagerly, null)
+
         scope.launch {
-            var owner: GarageRepository.Binding? = null
+            var owner: Pair<Drive, String>? = null
             var previous: TrackPoint? = null
-            combine(navigation.state, garage.unrecordedBinding) { state, binding ->
-                state to binding?.takeIf { it.sessionId == state.sessionId && !state.recording && !state.simulation }
-            }.collect { (state, binding) ->
-                if (owner != binding) {
-                    owner = binding
+            combine(navigation.state, projection, selected) { state, display, choice ->
+                val key = choice?.takeIf { !state.recording && it.drive == drive(state, display) }?.let { it.drive to it.vehicle.id }
+                key to key?.let { usableFix(it.first, state, display) }
+            }.collect { (key, fix) ->
+                if (key != owner) {
+                    owner = key
                     previous = null
                     liveDistance.value = 0.0
                 }
-                if (binding == null) return@collect
-                val fix = state.fix
-                if (fix == null || state.gpsStale || state.paused) { previous = null; return@collect }
-                val p = TrackPoint(journeyId = binding.sessionId, latitude = fix.coordinate.latitude,
+                if (key == null || fix == null) { previous = null; return@collect }
+                val p = TrackPoint(journeyId = key.first.id, latitude = fix.coordinate.latitude,
                     longitude = fix.coordinate.longitude, accuracy = fix.accuracyMeters, recordedAt = fix.recordedAt)
                 val a = previous
                 if (a != null && p.recordedAt <= a.recordedAt) return@collect
@@ -71,85 +113,99 @@ class FuelOfferController internal constructor(
             }
         }
         scope.launch {
-            navigation.state.map { it.sessionId to it.journey?.id }.distinctUntilChanged()
-                .flatMapLatest { (session, journey) ->
-                    if (session == null) return@flatMapLatest flowOf(null)
-                    val assignment = if (journey == null) garage.unrecordedBinding.map { it?.takeIf { b -> b.sessionId == session }?.vehicleId }
-                        else garage.assignedVehicleId(journey)
-                    assignment.distinctUntilChanged().flatMapLatest { id ->
-                        if (id == null) flowOf(null)
-                        else garage.vehicles.map { fleet -> fleet.firstOrNull { it.id == id } }.distinctUntilChanged()
-                            .flatMapLatest { v ->
-                                if (v == null) flowOf(null) else garage.offerStats(v).map { stats ->
-                                    stats?.let { Source(session, journey, v, it) }
-                                }
-                            }
-                            .onStart { emit(null) }
-                    }.onStart { emit(null) }
-                }.combine(navigation.state) { data, state -> data to state }
-                .combine(liveDistance) { (data, state), extra ->
-                    if (data == null || data.session != state.sessionId || data.journey != state.journey?.id) return@combine null
-                    val vehicle = data.vehicle
-                    val stats = data.stats
-                    val session = data.session
-                    if (state.sessionTransport != vehicle.transport || !ready(state)) return@combine null
-                    val km = if (state.recording) 0.0 else extra
-                    if (!stats.needsFuel(vehicle, km)) return@combine null
-                    Owner(session, state.journey?.id, state.routeRevision, vehicle.id)
-                }.combine(audience) { owner, visible -> owner.takeIf { visible } }
-                .distinctUntilChanged().collectLatest { owner ->
-                    eligibleOwner.value = owner
-                    clear()
-                    if (owner == null || attempted == owner.session) return@collectLatest
-                    presentable.first { it }
-                    attempted = owner.session
-                    val plan = try { search() }
-                    catch (cancelled: CancellationException) { throw cancelled }
-                    catch (_: Exception) { null } ?: return@collectLatest
-                    presentable.first { it }
-                    if (!current(owner, plan)) return@collectLatest
-                    val item = FuelOffer(UUID.randomUUID().toString(), plan.title, elapsed() + 20_000,
-                        plan.distanceToStationMeters, plan.additionalSeconds)
-                    pending = Pending(owner, plan, item)
-                    mutableOffer.value = item
-                    if (!navigation.state.value.muted) announce()
-                    delay((item.expiresAtElapsedMs - elapsed()).coerceAtLeast(0))
-                    if (pending?.offer?.id == item.id) clear()
-                }
+            val history = selected.flatMapLatest { choice ->
+                if (choice == null) flowOf(null)
+                else garage.offerStats(choice.vehicle).map { stats -> stats?.let { choice to it } }.onStart { emit(null) }
+            }
+            combine(history, navigation.state, projection, liveDistance, audience) { data, state, display, km, visible ->
+                if (data == null || !visible) return@combine null
+                val (choice, stats) = data
+                if (choice != selected.value || usableFix(choice.drive, state, display) == null ||
+                    !stats.needsFuel(choice.vehicle, if (state.recording) 0.0 else km)) return@combine null
+                Owner(choice, state.routeRevision)
+            }.distinctUntilChanged().collectLatest { owner ->
+                eligibleOwner.value = owner
+                clear()
+                if (owner == null || owner.selection.drive.id in attempted) return@collectLatest
+                presentable.first { it }
+                val d = owner.selection.drive
+                fun owned() = eligibleOwner.value == owner && navigation.state.value.routeRevision == owner.revision &&
+                    selected.value == owner.selection && usableFix(d, navigation.state.value, projection.value) != null
+                val fix = usableFix(d, navigation.state.value, projection.value) ?: return@collectLatest
+                markAttempt(d.id)
+                val plan = try { if (d.external) externalSearch(d.mode, fix, ::owned) else search() }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { null } ?: return@collectLatest
+                presentable.first { it }
+                if (!current(owner, plan)) return@collectLatest
+                val item = FuelOffer(UUID.randomUUID().toString(), plan.title, elapsed() + 20_000,
+                    plan.distanceToStationMeters, plan.additionalSeconds)
+                pending = Pending(owner, plan, item)
+                mutableOffer.value = item
+                if (!navigation.state.value.muted) announce(NavigationCueRequest("Yakında bir yakıt istasyonu var.",
+                    item.expiresAtElapsedMs, stillCurrent = { pending?.offer?.id == item.id &&
+                        presentable.value && !navigation.state.value.muted }, onFinished = {}))
+                delay((item.expiresAtElapsedMs - elapsed()).coerceAtLeast(0))
+                if (pending?.offer?.id == item.id) clear()
+            }
         }
         scope.launch {
-            navigation.state.collect {
-                val active = pending ?: return@collect
-                if (!current(active.owner, active.plan)) clear()
+            combine(navigation.state, projection, selected) { _, _, choice -> choice }.collect { choice ->
+                val p = pending ?: return@collect
+                if (choice != p.owner.selection || !current(p.owner, p.plan)) clear()
             }
         }
     }
 
-    private fun ready(state: NavigationState): Boolean =
-        !state.simulation && !state.gpsStale && !state.paused && !state.arrived && !state.loading &&
-            !state.recordingPending && state.trackFollow == null && state.journey?.status != JourneyStatus.TEMPORARY &&
-            state.guidance == (state.route != null) && (state.route == null || state.progress?.offRoute == false) &&
-            state.fix?.let { JourneyNavigationCoordinator.fresh(it, wallClock()) } == true
+    private fun markAttempt(id: String) {
+        attempted.add(id)
+        if (attempted.size > 8) attempted.remove(attempted.first { it != projection.value?.id })
+    }
 
     private fun current(owner: Owner, plan: FuelStationPlan): Boolean {
         val state = navigation.state.value
-        val fix = state.fix ?: return false
-        return eligibleOwner.value == owner && state.sessionId == owner.session && state.journey?.id == owner.journey &&
-            state.routeRevision == owner.revision && ready(state) && audience.value &&
+        val display = projection.value
+        if (owner.selection.drive.external && display?.selectedVehicle?.let { it != owner.selection.vehicle.id } == true)
+            return false
+        val fix = usableFix(owner.selection.drive, state, display) ?: return false
+        return eligibleOwner.value == owner && state.routeRevision == owner.revision && audience.value &&
             fix.recordedAt >= plan.owner.fix.recordedAt &&
             WeatherEngine.distanceMeters(fix.coordinate, plan.owner.fix.coordinate) <= FuelStationRouting.MAX_ORIGIN_DRIFT_METERS
     }
 
-    fun setAutoVisible(owner: Any, visible: Boolean) {
-        if (visible) autoOwners.add(owner) else autoOwners.remove(owner)
-        if (car.value != autoOwners.isNotEmpty()) displayEpoch++
-        car.value = autoOwners.isNotEmpty()
+    fun setAutoVisible(owner: Any, visible: Boolean, mapOwner: Any = owner) {
+        val previous = activeMapOwner
+        if (visible) autoOwners[owner] = mapOwner else autoOwners.remove(owner)?.let(autoMapOwners::remove)
+        if (previous !== activeMapOwner) {
+            displayEpoch++
+            car.value = autoOwners.isNotEmpty()
+            projection.value = if (car.value) Projection(UUID.randomUUID().toString()) else null
+        }
         updateDisplay()
     }
+
+    fun isAutoMapActive(owner: Any): Boolean = owner === activeMapOwner && owner in autoMapOwners
 
     fun setAutoMapVisible(owner: Any, visible: Boolean) {
         if (visible) autoMapOwners.add(owner) else autoMapOwners.remove(owner)
         updateDisplay()
+    }
+
+    fun setAutoMapFix(owner: Any, transport: Transport, fix: NavigationFix?) {
+        val display = projection.value ?: return
+        if (owner !== activeMapOwner || (fix != null && owner !in autoMapOwners)) return
+        projection.value = display.copy(mode = transport, fix = fix,
+            selectedVehicle = display.selectedVehicle.takeIf { display.mode == transport })
+    }
+
+    suspend fun selectAutoVehicle(vehicleId: String, transport: Transport) {
+        val display = requireNotNull(projection.value)
+        val vehicle = garage.vehicles.first().find { it.id == vehicleId && it.transport == transport }
+        require(vehicle != null && projection.value?.id == display.id && (projection.value?.mode == null || projection.value?.mode == transport) &&
+            navigation.state.value.sessionId == null && navigation.state.value.journey == null) {
+            "Araç veya sürüş değişti."
+        }
+        projection.value = requireNotNull(projection.value).copy(mode = transport, selectedVehicle = vehicleId)
     }
 
     fun setPhoneVisible(owner: Any, visible: Boolean) {
@@ -158,7 +214,7 @@ class FuelOfferController internal constructor(
     }
 
     private fun updateDisplay() {
-        val ready = if (car.value) autoMapOwners.isNotEmpty() else phoneOwners.isNotEmpty()
+        val ready = if (car.value) activeMapOwner?.let(autoMapOwners::contains) == true else phoneOwners.isNotEmpty()
         if (presentable.value != ready) displayEpoch++
         presentable.value = ready
         audience.value = car.value || phoneOwners.isNotEmpty()
@@ -171,12 +227,24 @@ class FuelOfferController internal constructor(
             elapsed() < p.offer.expiresAtElapsedMs && current(p.owner, p.plan)
         if (!valid() || accepting != null) return@withContext false
         accepting = id
+        val choice = p.owner.selection
+        val d = choice.drive
         try {
-            garage.applyForOwner(p.owner.session, p.owner.journey, p.owner.vehicle, liveDistance.value) {
+            if (d.external) garage.applyForProjection(choice.vehicle, projection.value?.selectedVehicle, liveDistance.value) {
+                val fix = usableFix(d, navigation.state.value, projection.value)
+                if (fix == null || !valid()) false else externalApply(p.plan, fix, ::valid).also { applied ->
+                    if (applied) navigation.state.value.takeIf { !it.recording && it.journey == null }?.sessionId?.let { session ->
+                        markAttempt(session)
+                        garage.rememberUnrecorded(session, choice.vehicle.id)
+                    }
+                }
+            } else garage.applyForOwner(d.id, d.journey, choice.vehicle.id, liveDistance.value) {
                 valid() && applyPlan(p.plan, ::valid)
             }
+        } finally {
+            if (pending === p && epoch == displayEpoch) clear()
+            accepting = null
         }
-        finally { if (pending === p) clear(); accepting = null }
     }
 
     fun reject(id: String) {

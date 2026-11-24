@@ -15,6 +15,7 @@ import androidx.core.app.NotificationManagerCompat
 import org.iz.navigation.R
 import org.iz.navigation.data.DiaryRepository
 import org.iz.navigation.data.Transport
+import org.iz.navigation.garage.GarageVehicle
 import org.iz.navigation.power.PostJourneyAnalysis
 import org.iz.navigation.power.PowerDiagnostics
 import org.iz.navigation.tracking.TrackingController
@@ -41,6 +42,7 @@ internal class WearPhoneBridge(private val context: Context) {
     private val store = WearCommandStore(context)
     private val repository = DiaryRepository(context)
     private val controller = TrackingController(context)
+    private val garage get() = (context.applicationContext as org.iz.navigation.IzApplication).garage
     private val watchHealth = WatchHealthPhoneBridge(context)
     private val mutex = Mutex()
     private val publishMutex = Mutex()
@@ -173,7 +175,12 @@ internal class WearPhoneBridge(private val context: Context) {
         val result = when (command.action) {
             WearAction.START -> when {
                 repository.activeJourney() != null -> rejected(command, "Önce devam eden yolculuğu bitir.")
-                foreground && TrackingController.hasFineLocation(context) -> start(command)
+                foreground && TrackingController.hasFineLocation(context) -> {
+                    val started = start(command)
+                    if (started.code == WearResultCode.NEEDS_PHONE && store.pending(System.currentTimeMillis()) != null)
+                        rejected(command, "Telefonda bekleyen başlatma isteğini tamamla.")
+                    else started
+                }
                 store.pending(now) != null -> rejected(command, "Telefonda bekleyen başlatma isteğini tamamla.")
                 else -> WearResult(command.id, WearResultCode.NEEDS_PHONE,
                     if (TrackingNotifications.allowed(context)) "Telefondaki İz bildirimine dokun ve Başlat’a bas."
@@ -200,10 +207,24 @@ internal class WearPhoneBridge(private val context: Context) {
     } }
 
     suspend fun pendingKey(): String? = mutex.withLock { store.pending(System.currentTimeMillis())?.key }
-    suspend fun pending(key: String): WearCommand? = mutex.withLock {
-        store.get(key)?.takeIf { it.result.code == WearResultCode.NEEDS_PHONE &&
+    private fun pendingCommand(key: String): WearCommand? = store.get(key)
+        ?.takeIf { it.result.code == WearResultCode.NEEDS_PHONE && it.command.action == WearAction.START &&
             WearProtocol.isFreshCommand(it.command, System.currentTimeMillis()) }?.command
+
+    suspend fun pending(key: String): WearCommand? = mutex.withLock { pendingCommand(key) }
+
+    data class StartReview(val command: WearCommand, val vehicles: List<GarageVehicle>)
+
+    suspend fun pendingStartReview(key: String): StartReview? = mutex.withLock {
+        val command = pendingCommand(key) ?: return@withLock null
+        val mode = command.mode ?: return@withLock null
+        val vehicles = matchingVehicles(Transport.valueOf(mode.name))
+        if (WearProtocol.isFreshCommand(command, System.currentTimeMillis())) StartReview(command, vehicles) else null
     }
+
+    private suspend fun matchingVehicles(mode: Transport): List<GarageVehicle> =
+        if (mode == Transport.CAR || mode == Transport.MOTORCYCLE) garage.vehicles.first().filter { it.transport == mode }
+        else emptyList()
 
     suspend fun requestingWatchName(key: String): String? {
         val source = mutex.withLock { store.get(key)?.source } ?: return null
@@ -216,9 +237,10 @@ internal class WearPhoneBridge(private val context: Context) {
         catch (_: Exception) { null }
     }
 
-    suspend fun confirmOnPhone(key: String): WearResult = completePending(key, cancel = false)
+    suspend fun confirmOnPhone(key: String, vehicleId: String? = null): WearResult =
+        completePending(key, cancel = false, vehicleId = vehicleId)
     suspend fun cancelOnPhone(key: String): WearResult = completePending(key, cancel = true)
-    private suspend fun completePending(key: String, cancel: Boolean): WearResult {
+    private suspend fun completePending(key: String, cancel: Boolean, vehicleId: String? = null): WearResult {
         var source: String? = null
         var protocolVersion = 1
         // Rotation/back navigation cannot cancel between the database commit, service start and receipt.
@@ -232,15 +254,16 @@ internal class WearPhoneBridge(private val context: Context) {
             val outcome = when {
                 !WearProtocol.isFreshCommand(command, now) -> rejected(command, "İsteğin süresi doldu. Saatten tekrar dene.")
                 cancel -> rejected(command, "Başlatma iptal edildi.")
+                command.action != WearAction.START -> rejected(command, "Başlatma isteği artık geçerli değil.")
                 resumed == 0 || !TrackingController.hasFineLocation(context) -> return@withLock WearResult(command.id,
                     WearResultCode.NEEDS_PHONE, "Telefon açıkken hassas konum izni ver ve tekrar Başlat’a bas.")
-                else -> {
+                else -> start(command, vehicleId) {
                     store.save(entry.source, command, WearResult(command.id, WearResultCode.ERROR, "Başlatma kesildi. Telefonda kaydı kontrol et."), now, protocolVersion)
-                    start(command)
                 }
             }
-            store.save(entry.source, command, outcome, now, protocolVersion)
-            NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
+            val saved = store.save(entry.source, command, outcome, now, protocolVersion)
+            if (outcome.code == WearResultCode.NEEDS_PHONE) notifyPending(saved)
+            else NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
             outcome
         } }
         source?.let { sendResult(it, result, protocolVersion) }
@@ -248,14 +271,31 @@ internal class WearPhoneBridge(private val context: Context) {
         return result
     }
 
-    private suspend fun start(command: WearCommand): WearResult {
+    private suspend fun start(command: WearCommand, selectedVehicleId: String? = null,
+        beforeStart: () -> Unit = {}): WearResult {
         var createdId: String? = null
+        fun fresh() = WearProtocol.isFreshCommand(command, System.currentTimeMillis())
         return try {
-            val id = controller.startManual(Transport.valueOf(requireNotNull(command.mode).name))
+            val mode = Transport.valueOf(requireNotNull(command.mode).name)
+            val selection = wearGarageSelection(mode, matchingVehicles(mode), selectedVehicleId)
+            if (!fresh()) return rejected(command, "İsteğin süresi doldu. Saatten tekrar dene.")
+            if (selection == WearGarageSelection.NeedsPhone) return WearResult(command.id, WearResultCode.NEEDS_PHONE,
+                "Park halinde telefonda aracı seçip Başlat'a bas.")
+            if (selection == WearGarageSelection.Invalid) return WearResult(command.id, WearResultCode.NEEDS_PHONE,
+                "Araç değişti. Telefonda yeniden seçip Başlat'a bas.")
+            beforeStart()
+            val id = controller.startManual(mode) { fresh() && resumed > 0 }
             createdId = id
             withTimeout(8_000) { while (!TrackingService.isRunning || TrackingService.runningJourneyId != id) delay(100) }
-            WearResult(command.id, WearResultCode.STARTED, "Telefonda kayıt başladı.", id)
+            val vehicle = (selection as WearGarageSelection.Ready).vehicleId
+            val assigned = vehicle == null || runCatching { garage.assignJourney(id, vehicle) }.isSuccess
+            val message = if (assigned) "Telefonda kayıt başladı."
+                else "Telefonda kayıt başladı. Araç bağlanamadı; yolculuk ayrıntısından seçebilirsin."
+            WearResult(command.id, WearResultCode.STARTED, message, id)
         } catch (_: Exception) {
+            if (createdId == null && !fresh()) return rejected(command, "İsteğin süresi doldu. Saatten tekrar dene.")
+            if (createdId == null && resumed == 0) return WearResult(command.id, WearResultCode.NEEDS_PHONE,
+                "Telefonu açık tut ve tekrar Başlat'a bas.")
             withContext(NonCancellable) { createdId?.let { repository.markInterrupted(it); controller.finish(it) } }
             WearResult(command.id, WearResultCode.ERROR, "Kayıt başlatılamadı. Telefonda konum iznini ve aktif yolculuğu kontrol et.")
         }

@@ -6,6 +6,13 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -37,7 +44,16 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             runCatching { TrackingController(this@MainActivity).recoverInterrupted() }
         }
-        setContent { IzTheme { DiaryApp(incoming, consumeIntent = { incoming = null }, incomingIsCold = incomingIsCold) } }
+        setContent {
+            IzTheme {
+                Box(Modifier.fillMaxSize()) {
+                    DiaryApp(incoming, consumeIntent = { incoming = null }, incomingIsCold = incomingIsCold)
+                    org.iz.navigation.ui.PhoneFuelOfferBanner(application as IzApplication,
+                        Modifier.align(Alignment.BottomCenter).navigationBarsPadding()
+                            .padding(start = 12.dp, end = 12.dp, bottom = 88.dp))
+                }
+            }
+        }
         // Own the window policy here so internal screens and dialogs share it.
         lifecycleScope.launch {
             val guidance = (application as IzApplication).navigation.state.map { it.guidance }
@@ -67,6 +83,14 @@ class MainActivity : ComponentActivity() {
         PostJourneyAnalysis.get(this).setForeground(true)
         (application as IzApplication).healthManager.setForeground(true)
         org.iz.navigation.health.DailyActivityManager.get(this).setForeground(true)
+    }
+    override fun onResume() {
+        super.onResume()
+        (application as IzApplication).fuelOffers.setPhoneVisible(this, true)
+    }
+    override fun onPause() {
+        (application as IzApplication).fuelOffers.setPhoneVisible(this, false)
+        super.onPause()
     }
     override fun onStop() {
         PowerDiagnostics.foreground(false)

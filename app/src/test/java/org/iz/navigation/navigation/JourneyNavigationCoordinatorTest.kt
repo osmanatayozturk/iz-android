@@ -35,6 +35,7 @@ class JourneyNavigationCoordinatorTest {
         var onStopRecording: (suspend () -> Unit)? = null
         var planCalls = 0
         var onPlan: (suspend (List<RouteStop>, Transport) -> PlannedRoute)? = null
+        var fuelCandidates = emptyList<SelectedOsmPlace>()
         var preciseLocation = true
         var cachedLocation: NavigationFix? = null
         var onCachedLocation: (suspend (Boolean) -> NavigationFix?)? = null
@@ -76,6 +77,8 @@ class JourneyNavigationCoordinatorTest {
             planCalls++
             return requireNotNull(onPlan) { "Not used" }(stops, transport)
         }
+        override suspend fun fuelStations(fix: NavigationFix, transport: Transport, route: PlannedRoute?,
+            progress: NavigationProgress?) = fuelCandidates
         override suspend fun locate() = NavigationFix(WeatherCoordinate(40.0, 29.0), 1000, 5f)
         override fun render(state: NavigationState) { if (renderFailure) throw IllegalStateException("Disconnected display") }
         override fun prepareSpeech() { voicePreparations++; prepareVoiceFailure?.let { throw it } }
@@ -86,6 +89,108 @@ class JourneyNavigationCoordinatorTest {
         listOf(RouteVertex(WeatherCoordinate(40.0, 29.0), 0.0), RouteVertex(WeatherCoordinate(40.01, 29.0), 100.0)),
         1110.0, 100.0, 1000, listOf(0.0,100.0), Transport.CAR,
         maneuvers = listOf(RouteManeuver(1,"Kuzeye ilerleyin","Kuzeye ilerleyin", emptyList(),0,1,0.0,100.0)))
+
+    @Test fun acceptingFuelStationKeepsRecordingIdentityAndAppliesOnce() = runTest {
+        val runtime = Runtime()
+        val controller = JourneyNavigationCoordinator(runtime, null, { 1000L }, backgroundScope)
+        val session = controller.startFreeDrive(Transport.CAR)
+        val baseline = route()
+        runtime.fuelCandidates = listOf(SelectedOsmPlace("Station", baseline.stops.last().coordinate.latitude,
+            baseline.stops.last().coordinate.longitude, OsmRef(OsmType.NODE, 1)))
+        runtime.onPlan = { stops, _ -> baseline.copy(stops = stops) }
+        controller.onAcceptedLocation(session, NavigationFix(baseline.stops.first().coordinate, 1000, 5f))
+        runCurrent()
+        val plan = requireNotNull(controller.findFuelStation())
+        assertNull(controller.state.value.route)
+        assertFalse(controller.acceptFuelStation(plan) { false })
+        assertTrue(controller.acceptFuelStation(plan) { true })
+        assertTrue(controller.state.value.guidance)
+        assertEquals("Station", controller.state.value.route?.stops?.last()?.label)
+        assertEquals(session, controller.state.value.journey?.id)
+        assertEquals(1, runtime.started)
+        assertEquals(0, runtime.finished)
+        assertFalse(controller.acceptFuelStation(plan) { true })
+    }
+
+    @Test fun acceptingAnUnrecordedFuelPlanNeverStartsARecorderAndChecksAtCommit() = runTest {
+        val runtime = Runtime()
+        val controller = JourneyNavigationCoordinator(runtime, null, { 1000L }, backgroundScope)
+        val baseline = route()
+        val fix = NavigationFix(baseline.stops.first().coordinate, 1000, 5f)
+        runtime.fuelCandidates = listOf(SelectedOsmPlace("Station", baseline.stops.last().coordinate.latitude,
+            baseline.stops.last().coordinate.longitude, OsmRef(OsmType.NODE, 1)))
+        runtime.onPlan = { stops, _ -> baseline.copy(stops = stops) }
+        val plan = requireNotNull(controller.findFuelStation(Transport.CAR, fix) { true })
+        var owned = true
+        runtime.onActive = { owned = false }
+        assertFalse(controller.acceptFuelStation(plan, fix) { owned })
+        assertNull(controller.state.value.route)
+        runtime.onActive = null
+        assertTrue(controller.acceptFuelStation(plan, fix) { true })
+        assertTrue(controller.state.value.guidance)
+        assertFalse(controller.state.value.recording)
+        assertNull(controller.state.value.journey)
+        assertEquals(0, runtime.started)
+    }
+
+    @Test fun queuedGuidanceRechecksThePreviewOwnerBeforeStartingARecorder() = runTest {
+        val runtime = Runtime()
+        val controller = JourneyNavigationCoordinator(runtime, null, { 1000L }, backgroundScope)
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        runtime.onActive = {
+            if (entered.complete(Unit)) release.await()
+        }
+        val first = async { controller.startFreeDrive(Transport.CAR, recordJourney = false) }
+        entered.await()
+        val previewSession = controller.state.value.sessionId
+        val queued = async {
+            runCatching { controller.startGuidance(route(), stillCurrent = { controller.state.value.sessionId == previewSession }) }
+        }
+        runCurrent()
+        release.complete(Unit)
+        assertEquals(first.await(), controller.state.value.sessionId)
+        assertTrue(queued.await().isFailure)
+        assertFalse(controller.state.value.guidance)
+        assertEquals(0, runtime.started)
+    }
+
+    @Test fun queuedFreeDriveRechecksTheOwnerBeforeNoRecordEffects() = runTest {
+        val runtime = Runtime()
+        val controller = JourneyNavigationCoordinator(runtime, null, { 1000L }, backgroundScope)
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        runtime.onActive = {
+            if (entered.complete(Unit)) release.await()
+        }
+        val first = async { controller.startFreeDrive(Transport.CAR) }
+        entered.await()
+        var current = true
+        val queued = async {
+            runCatching { controller.startFreeDrive(Transport.CAR, recordJourney = false, stillCurrent = { current }) }
+        }
+        runCurrent()
+        current = false
+        release.complete(Unit)
+        val id = first.await()
+        assertTrue(queued.await().isFailure)
+        assertEquals(id, controller.state.value.journey?.id)
+        assertEquals(0, runtime.finished)
+        assertFalse(runtime.preparing)
+    }
+
+    @Test fun legitimateStartMayChangeItsOwnCapturedSession() = runTest {
+        val runtime = Runtime()
+        val controller = JourneyNavigationCoordinator(runtime, null, { 1000L }, backgroundScope)
+        val initial = controller.state.value
+        val session = controller.startGuidance(route(), stillCurrent = {
+            controller.state.value.sessionId == initial.sessionId && controller.state.value.journey?.id == initial.journey?.id
+        })
+        assertEquals(session, controller.state.value.sessionId)
+        assertTrue(controller.state.value.recording)
+        assertTrue(controller.state.value.guidance)
+        assertEquals(1, runtime.started)
+    }
 
     @Test fun carMenuCannotStartOrPromoteAReplacedRecorder() = runTest {
         val runtime = Runtime()
