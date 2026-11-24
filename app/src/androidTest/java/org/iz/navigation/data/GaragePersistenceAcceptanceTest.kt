@@ -47,8 +47,11 @@ class GaragePersistenceAcceptanceTest {
                 )
             }
             migration.runMigrationsAndValidate(databaseName, 12, true, DiaryDatabase.MIGRATION_11_12).close()
-            Room.databaseBuilder(context, DiaryDatabase::class.java, databaseName).build().use { migrated ->
+            val migrated: DiaryDatabase = Room.databaseBuilder(context, DiaryDatabase::class.java, databaseName).build()
+            try {
                 assertOldDiaryAndEmptyGarage(DiaryRepository(context, migrated).snapshot())
+            } finally {
+                migrated.close()
             }
         } finally {
             context.deleteDatabase(databaseName)
@@ -65,11 +68,14 @@ class GaragePersistenceAcceptanceTest {
                 zip.write(oldManifest.toByteArray(Charsets.UTF_8))
                 zip.closeEntry()
             }
-            Room.inMemoryDatabaseBuilder(context, DiaryDatabase::class.java).build().use { db ->
+            val db: DiaryDatabase = Room.inMemoryDatabaseBuilder(context, DiaryDatabase::class.java).build()
+            try {
                 val repository = DiaryRepository(context, db)
                 val input = FileProvider.getUriForFile(context, "${context.packageName}.files", archive)
                 DiaryBackup(context, repository).importFrom(input)
                 assertOldDiaryAndEmptyGarage(repository.snapshot())
+            } finally {
+                db.close()
             }
         } finally {
             archive.delete()
@@ -92,10 +98,13 @@ class GaragePersistenceAcceptanceTest {
             fuelFills = fills, journeyVehicles = listOf(JourneyVehicle(ride.id, moto.id)))
         try {
             val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", archive)
-            Room.inMemoryDatabaseBuilder(context, DiaryDatabase::class.java).build().use { source ->
+            val source: DiaryDatabase = Room.inMemoryDatabaseBuilder(context, DiaryDatabase::class.java).build()
+            try {
                 val repository = DiaryRepository(context, source)
                 repository.restore(expected)
                 DiaryBackup(context, repository).exportTo(uri)
+            } finally {
+                source.close()
             }
             ZipFile(archive).use { zip ->
                 val manifest = JSONObject(zip.getInputStream(zip.getEntry("manifest.json")).bufferedReader().use { it.readText() })
@@ -104,10 +113,13 @@ class GaragePersistenceAcceptanceTest {
                 assertEquals(3, manifest.getJSONArray("fuelFills").length())
                 assertEquals(1, manifest.getJSONArray("journeyVehicles").length())
             }
-            Room.inMemoryDatabaseBuilder(context, DiaryDatabase::class.java).build().use { target ->
+            val target: DiaryDatabase = Room.inMemoryDatabaseBuilder(context, DiaryDatabase::class.java).build()
+            try {
                 val repository = DiaryRepository(context, target)
                 DiaryBackup(context, repository).importFrom(uri)
                 assertEquals(expected, repository.snapshot())
+            } finally {
+                target.close()
             }
         } finally {
             archive.delete()
