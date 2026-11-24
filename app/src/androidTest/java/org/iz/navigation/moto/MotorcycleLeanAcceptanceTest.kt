@@ -74,7 +74,8 @@ class MotorcycleLeanAcceptanceTest {
 
     @Test fun persistedGnssAndSingleSensorAreInsufficientAndAStorageRejectionKeepsDiaryGps() = runBlocking<Unit>(Dispatchers.IO) {
         val context = requireMotorcycleQaTarget()
-        Room.inMemoryDatabaseBuilder(context, DiaryDatabase::class.java).build().use { db ->
+        val db: DiaryDatabase = Room.inMemoryDatabaseBuilder(context, DiaryDatabase::class.java).build()
+        try {
             val journey = Journey(transport = Transport.MOTORCYCLE, startedAt = 1_000)
             val dao = db.diaryDao()
             dao.save(journey)
@@ -110,6 +111,8 @@ class MotorcycleLeanAcceptanceTest {
             assertNull(store.appendCaptureBatch(token, oversize))
             assertEquals(before.map { it.sha256 }, db.leanDao().chunks(token.id).map { it.sha256 })
             assertEquals(listOf(diaryPoint), dao.journeyPoints(journey.id))
+        } finally {
+            db.close()
         }
     }
 
