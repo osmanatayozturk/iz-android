@@ -503,7 +503,9 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
             savedPlans = libraryDao.allPlans().map { it.model() }, importedTracks = libraryDao.allTracks().map { it.model() },
             collections = libraryDao.allCollections().map { it.model() }, memberships = libraryDao.allMemberships().map { it.model() },
             destinationShortcuts = libraryDao.allShortcuts().map { DestinationShortcutRef(DestinationShortcutKind.valueOf(it.kind), it.placeId) },
-            leanSessions = leanStore.snapshot(), osmPresetFavorites = favoriteDao.all())
+            leanSessions = leanStore.snapshot(), osmPresetFavorites = favoriteDao.all(),
+            garageVehicles = db.garageDao().allVehicles(), fuelFills = db.garageDao().allFills(),
+            journeyVehicles = db.garageDao().allAssignments())
     }
 
     suspend fun restore(snapshot: DiarySnapshot, leanRaw: Map<String, List<File>> = emptyMap()) {
@@ -532,7 +534,11 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
             dao.clearHealthSamples(); dao.clearHealthSyncs()
             watchDao.clearSamples(); watchDao.clearSessions(); mapDao.clear(); favoriteDao.clear()
             dao.clearContributions(); dao.clearDrafts(); dao.clearPhotos(); dao.clearVisits(); dao.clearPoints(); dao.clearJourneys(); dao.clearPlaces()
+            db.garageDao().clear()
             restoredJourneys.forEach { dao.save(it) }
+            snapshot.garageVehicles.forEach { db.garageDao().save(it) }
+            snapshot.fuelFills.forEach { db.garageDao().save(it) }
+            snapshot.journeyVehicles.forEach { db.garageDao().save(it) }
             restoredPlaces.forEach { dao.save(it) }
             snapshot.points.forEach { dao.save(it) }
             snapshot.visits.forEach { dao.save(it) }

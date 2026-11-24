@@ -1,5 +1,7 @@
 package org.iz.navigation.data
 
+import org.iz.navigation.garage.*
+
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -117,4 +119,7 @@ data class DiarySnapshot(
     val destinationShortcuts: List<DestinationShortcutRef> = emptyList(),
     val leanSessions: List<org.iz.navigation.lean.LeanBackupSession> = emptyList(),
     val osmPresetFavorites: List<OsmPresetFavorite> = emptyList(),
+    val garageVehicles: List<GarageVehicle> = emptyList(),
+    val fuelFills: List<FuelFill> = emptyList(),
+    val journeyVehicles: List<JourneyVehicle> = emptyList(),
 )

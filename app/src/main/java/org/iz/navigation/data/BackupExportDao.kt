@@ -1,10 +1,15 @@
 package org.iz.navigation.data
 
+import org.iz.navigation.garage.*
+
 import androidx.room.Dao
 import androidx.room.Embedded
 import androidx.room.Query
 
 internal interface BackupRecord<out T> { val backupKey: Long; val value: T }
+internal data class BackupGarageVehicleRow(override val backupKey: Long, @Embedded override val value: GarageVehicle) : BackupRecord<GarageVehicle>
+internal data class BackupFuelFillRow(override val backupKey: Long, @Embedded override val value: FuelFill) : BackupRecord<FuelFill>
+internal data class BackupJourneyVehicleRow(override val backupKey: Long, @Embedded override val value: JourneyVehicle) : BackupRecord<JourneyVehicle>
 internal data class BackupJourneysRow(override val backupKey: Long, @Embedded override val value: Journey) : BackupRecord<Journey>
 internal data class BackupPointsRow(override val backupKey: Long, @Embedded override val value: TrackPoint) : BackupRecord<TrackPoint>
 internal data class BackupPlacesRow(override val backupKey: Long, @Embedded override val value: Place) : BackupRecord<Place>
@@ -34,6 +39,12 @@ internal data class BackupPhotoReference(val id: String, val visitId: String?)
 /** Export-only stable key ranges; caller owns one Room transaction for all pages and references. */
 @Dao
 internal interface BackupExportDao {
+    @Query("SELECT t.rowid AS backupKey, t.* FROM garage_vehicles t WHERE t.rowid >= :first ORDER BY t.rowid LIMIT :limit")
+    suspend fun garageVehicles(first: Long, limit: Int): List<BackupGarageVehicleRow>
+    @Query("SELECT t.rowid AS backupKey, t.* FROM fuel_fills t WHERE t.rowid >= :first ORDER BY t.rowid LIMIT :limit")
+    suspend fun fuelFills(first: Long, limit: Int): List<BackupFuelFillRow>
+    @Query("SELECT t.rowid AS backupKey, t.* FROM journey_vehicles t WHERE t.rowid >= :first AND EXISTS (SELECT 1 FROM journeys j WHERE j.id=t.journeyId AND j.status='CONFIRMED') ORDER BY t.rowid LIMIT :limit")
+    suspend fun journeyVehicles(first: Long, limit: Int): List<BackupJourneyVehicleRow>
     @Query("SELECT t.rowid AS backupKey, t.* FROM journeys t WHERE t.rowid >= :first AND t.status = 'CONFIRMED' ORDER BY t.rowid LIMIT :limit")
     suspend fun journeys(first: Long, limit: Int): List<BackupJourneysRow>
     @Query("SELECT t.rowid AS backupKey, t.* FROM track_points t WHERE t.rowid >= :first AND EXISTS (SELECT 1 FROM journeys j WHERE j.id=t.journeyId AND j.status='CONFIRMED') ORDER BY t.rowid LIMIT :limit")

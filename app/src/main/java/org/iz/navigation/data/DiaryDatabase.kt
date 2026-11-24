@@ -1,5 +1,7 @@
 package org.iz.navigation.data
 
+import org.iz.navigation.garage.*
+
 import android.content.Context
 import androidx.room.*
 import androidx.room.migration.Migration
@@ -102,7 +104,8 @@ internal interface DiaryDao {
 @Database(entities = [Journey::class, TrackPoint::class, Place::class, Visit::class, Photo::class, ShareDraft::class, ContributionDraft::class,
     JourneyHealthSample::class, JourneyHealthSync::class, MapEditDraft::class, OsmPresetFavorite::class,
     WatchHealthSession::class, WatchHealthSample::class, SavedRoutePlanEntity::class, ImportedTrackEntity::class,
-    ImportedSegmentEntity::class, ImportedCoordinateEntity::class, JourneyCollectionEntity::class, CollectionMembershipEntity::class, DestinationShortcutEntity::class, LeanSessionEntity::class, LeanChunkEntity::class, LeanResultEntity::class], version = 11, exportSchema = true)
+    ImportedSegmentEntity::class, ImportedCoordinateEntity::class, JourneyCollectionEntity::class, CollectionMembershipEntity::class, DestinationShortcutEntity::class, LeanSessionEntity::class, LeanChunkEntity::class, LeanResultEntity::class,
+    GarageVehicle::class, FuelFill::class, JourneyVehicle::class], version = 12, exportSchema = true)
 @TypeConverters(DiaryConverters::class)
 internal abstract class DiaryDatabase : RoomDatabase() {
     abstract fun diaryDao(): DiaryDao
@@ -111,10 +114,27 @@ internal abstract class DiaryDatabase : RoomDatabase() {
     abstract fun osmPresetFavoriteDao(): OsmPresetFavoriteDao
     abstract fun watchHealthDao(): WatchHealthDao
     abstract fun travelLibraryDao(): TravelLibraryDao
+    abstract fun garageDao(): GarageDao
     abstract fun leanDao(): LeanDao
 
     companion object {
         // https://developer.android.com/training/data-storage/room/migrating-db-versions
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""CREATE TABLE garage_vehicles (id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL,
+                    transport TEXT NOT NULL, capacityLitres REAL NOT NULL, typicalThresholdKm REAL NOT NULL,
+                    rangeThresholdKm REAL NOT NULL, odometerKm REAL NOT NULL, odometerAt INTEGER NOT NULL)""")
+                db.execSQL("""CREATE TABLE fuel_fills (id TEXT NOT NULL PRIMARY KEY, vehicleId TEXT NOT NULL,
+                    at INTEGER NOT NULL, odometerKm REAL NOT NULL, litres REAL NOT NULL, pricePerLitre REAL NOT NULL,
+                    full INTEGER NOT NULL, missedBefore INTEGER NOT NULL,
+                    FOREIGN KEY(vehicleId) REFERENCES garage_vehicles(id) ON DELETE CASCADE)""")
+                db.execSQL("CREATE INDEX index_fuel_fills_vehicleId ON fuel_fills(vehicleId)")
+                db.execSQL("""CREATE TABLE journey_vehicles (journeyId TEXT NOT NULL PRIMARY KEY, vehicleId TEXT NOT NULL,
+                    FOREIGN KEY(vehicleId) REFERENCES garage_vehicles(id) ON DELETE CASCADE,
+                    FOREIGN KEY(journeyId) REFERENCES journeys(id) ON DELETE CASCADE)""")
+                db.execSQL("CREATE INDEX index_journey_vehicles_vehicleId ON journey_vehicles(vehicleId)")
+            }
+        }
         val MIGRATION_10_11 = object : Migration(10, 11) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE map_edit_drafts ADD COLUMN editorVersion INTEGER NOT NULL DEFAULT 1")
@@ -227,7 +247,7 @@ internal abstract class DiaryDatabase : RoomDatabase() {
         @Volatile private var instance: DiaryDatabase? = null
         fun get(context: Context): DiaryDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, DiaryDatabase::class.java, "iz-diary.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
                 .build().also { instance = it }
         }
     }

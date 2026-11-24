@@ -132,6 +132,9 @@ internal class PagedBackupExporter(
             HealthRules.validateSnapshot(DiarySnapshot(journeys = listOfNotNull(journey(it.journeyId)), healthSamples = listOf(it)))
             BackupJson.recordHealthSamples(it)
         }
+        array("garageVehicles", load = dao::garageVehicles) { BackupJson.recordGarageVehicle(it) }
+        array("fuelFills", load = dao::fuelFills) { BackupJson.recordFuelFill(it) }
+        array("journeyVehicles", load = dao::journeyVehicles) { BackupJson.recordJourneyVehicle(it) }
         array("mapEdits", load = dao::mapEdits) { validateMapEdit(it); BackupJson.recordMapEdits(it) }
         array("osmPresetFavorites", MAX_OSM_PRESET_FAVORITES, dao::osmPresetFavorites) {
             validateOsmPresetFavoriteId(it.presetId); BackupJson.recordOsmPresetFavorite(it)

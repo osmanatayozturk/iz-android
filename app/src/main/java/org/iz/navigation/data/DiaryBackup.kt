@@ -1,5 +1,7 @@
 package org.iz.navigation.data
 
+import org.iz.navigation.garage.*
+
 import android.content.Context
 import android.net.Uri
 import java.io.File
@@ -147,7 +149,7 @@ class DiaryBackup(context: Context, private val repository: DiaryRepository) {
     }
 }
 internal object BackupJson {
-    private const val VERSION = 12
+    private const val VERSION = 13
     private const val FORMAT = "org.iz.navigation.backup"
     // Read compatibility for user-created backups from the former application identity.
     private const val LEGACY_FORMAT = "com.atay.iz.backup"
@@ -202,6 +204,13 @@ internal object BackupJson {
             "phone" to value.phone, "nameAction" to value.nameAction.name, "phoneAction" to value.phoneAction.name,
             "typeChanged" to value.typeChanged, "legacyAddressIntent" to value.legacyAddressIntent)
 
+    internal fun recordGarageVehicle(v: GarageVehicle) = json("id" to v.id, "name" to v.name, "transport" to v.transport.name,
+        "capacityLitres" to v.capacityLitres, "typicalThresholdKm" to v.typicalThresholdKm, "rangeThresholdKm" to v.rangeThresholdKm,
+        "odometerKm" to v.odometerKm, "odometerAt" to v.odometerAt)
+    internal fun recordFuelFill(f: FuelFill) = json("id" to f.id, "vehicleId" to f.vehicleId, "at" to f.at,
+        "odometerKm" to f.odometerKm, "litres" to f.litres, "pricePerLitre" to f.pricePerLitre, "full" to f.full,
+        "missedBefore" to f.missedBefore)
+    internal fun recordJourneyVehicle(link: JourneyVehicle) = json("journeyId" to link.journeyId, "vehicleId" to link.vehicleId)
     internal fun recordOsmPresetFavorite(value: OsmPresetFavorite): JSONObject = json("presetId" to value.presetId)
 
     internal fun recordWatchHealthSessions(value: WatchHealthSession): JSONObject = json("id" to value.id, "journeyId" to value.journeyId, "watchId" to value.watchId,
@@ -223,6 +232,9 @@ internal object BackupJson {
         "contributions" to array(value.contributions, ::recordContributions),
         "healthSamples" to array(if (includeHealth) value.healthSamples else emptyList(), ::recordHealthSamples),
         "mapEdits" to array(value.mapEdits, ::recordMapEdits),
+        "garageVehicles" to array(value.garageVehicles, ::recordGarageVehicle),
+        "fuelFills" to array(value.fuelFills, ::recordFuelFill),
+        "journeyVehicles" to array(value.journeyVehicles, ::recordJourneyVehicle),
         "osmPresetFavorites" to array(value.osmPresetFavorites.sortedBy { it.presetId }, ::recordOsmPresetFavorite),
         "watchHealthSessions" to array(if (includeHealth) value.watchHealthSessions else emptyList(), ::recordWatchHealthSessions),
         "watchHealthSamples" to array(if (includeHealth) value.watchHealthSamples else emptyList(), ::recordWatchHealthSamples),
@@ -326,6 +338,18 @@ internal object BackupJson {
                     phoneAction = if (version < 12) MapEditFieldAction.UNTOUCHED else MapEditFieldAction.valueOf(it.strictString("phoneAction")),
                     typeChanged = version >= 12 && it.strictBoolean("typeChanged"),
                     legacyAddressIntent = version >= 12 && it.strictBoolean("legacyAddressIntent"))
+            },
+            garageVehicles = if (version < 13) emptyList() else records("garageVehicles") {
+                GarageVehicle(it.strictString("id"), it.strictString("name"), Transport.valueOf(it.strictString("transport")),
+                    it.strictDouble("capacityLitres"), it.strictDouble("typicalThresholdKm"), it.strictDouble("rangeThresholdKm"),
+                    it.strictDouble("odometerKm"), it.strictLong("odometerAt"))
+            },
+            fuelFills = if (version < 13) emptyList() else records("fuelFills") {
+                FuelFill(it.strictString("id"), it.strictString("vehicleId"), it.strictLong("at"), it.strictDouble("odometerKm"),
+                    it.strictDouble("litres"), it.strictDouble("pricePerLitre"), it.strictBoolean("full"), it.strictBoolean("missedBefore"))
+            },
+            journeyVehicles = if (version < 13) emptyList() else records("journeyVehicles") {
+                JourneyVehicle(it.strictString("journeyId"), it.strictString("vehicleId"))
             },
             osmPresetFavorites = if (version < 12) emptyList() else records("osmPresetFavorites") {
                 OsmPresetFavorite(it.strictString("presetId"))

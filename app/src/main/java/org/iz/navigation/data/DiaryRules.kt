@@ -1,5 +1,7 @@
 package org.iz.navigation.data
 
+import org.iz.navigation.garage.*
+
 import kotlin.math.*
 
 /** Pure recording/summary rules, shared by the UI and recording service. */
@@ -86,6 +88,18 @@ object DiaryRules {
         val journeys = ids(snapshot.journeys.map { it.id })
         require(snapshot.journeys.all { it.stepCount == null || (it.transport.supportsSteps && it.stepCount >= 0) }) {
             "Adım sayısı yalnızca yürüyüş ve koşu için sıfır veya pozitif olabilir."
+        }
+        ids(snapshot.garageVehicles.map { it.id })
+        ids(snapshot.fuelFills.map { it.id })
+        ids(snapshot.journeyVehicles.map { it.journeyId })
+        val fleet = snapshot.garageVehicles.associateBy { it.id }
+        val trips = snapshot.journeys.associateBy { it.id }
+        snapshot.garageVehicles.forEach { it.validate() }
+        snapshot.fuelFills.forEach { it.validate(); require(it.vehicleId in fleet) }
+        snapshot.fuelFills.groupBy { it.vehicleId }.values.forEach { fills -> validateFillOrder(fills.sortedBy { it.at }) }
+        snapshot.journeyVehicles.forEach { link ->
+            val journey = requireNotNull(trips[link.journeyId])
+            require(journey.status == JourneyStatus.CONFIRMED && journey.transport == fleet[link.vehicleId]?.transport)
         }
         ids(snapshot.points.map { it.id })
         PlaceOrderRules.validate(snapshot.places)
