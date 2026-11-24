@@ -172,7 +172,7 @@ class OsmLightEditorZipRestoreTest {
             assertTrue(pages.all { it in 0..1 })
             val json = manifest(archive)
             assertEquals("org.iz.navigation.backup", json.getString("format"))
-            assertEquals(12, json.getInt("version"))
+            assertEquals(13, json.getInt("version"))
             assertEquals(count, json.getJSONArray("mapEdits").length())
             return archive
         } finally { backup.discardPrepared(prepared) }

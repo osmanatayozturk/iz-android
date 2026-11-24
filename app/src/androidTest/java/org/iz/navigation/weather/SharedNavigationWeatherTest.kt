@@ -109,6 +109,14 @@ class SharedNavigationWeatherTest {
             manager.state.first { it.status == RideWeatherStatus.OFF }
             firstRequest.response.complete(emptyList())
             firstRequest.returned.await()
+            val stale = runCatching {
+                manager.activateGuidance(route("stale"), emptyList(), stillCurrent = { false })
+            }
+            assertTrue(stale.exceptionOrNull() is IllegalStateException)
+            assertEquals(0, owner.guidanceStarts)
+            assertEquals("first", owner.state.value.route?.id)
+            assertEquals(RideWeatherStatus.OFF, manager.state.value.status)
+
             assertEquals(journey.id, manager.activateGuidance(route("second"), emptyList()))
             val resumed = provider.requests.receive()
             assertEquals(1, owner.guidanceStarts)

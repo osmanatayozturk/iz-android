@@ -210,7 +210,7 @@ class OsmLightEditorPersistenceTest {
     }
 
     private fun open(): DiaryDatabase = Room.databaseBuilder(app, DiaryDatabase::class.java, name)
-        .addMigrations(DiaryDatabase.MIGRATION_10_11)
+        .addMigrations(DiaryDatabase.MIGRATION_10_11, DiaryDatabase.MIGRATION_11_12)
         .build().also { database = it }
 
     private fun reopen(): DiaryDatabase {

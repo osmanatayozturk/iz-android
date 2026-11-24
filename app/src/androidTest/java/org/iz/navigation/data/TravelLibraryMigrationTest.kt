@@ -37,7 +37,9 @@ class TravelLibraryMigrationTest {
                 db.execSQL("INSERT INTO share_drafts VALUES ('draft','visit','Review',4,'photo',NULL)")
             }
             helper.runMigrationsAndValidate(name, 10, true, *migrations).close()
-            val db = Room.databaseBuilder(context, DiaryDatabase::class.java, name).addMigrations(*migrations).build()
+            val db = Room.databaseBuilder(context, DiaryDatabase::class.java, name)
+                .addMigrations(*migrations, DiaryDatabase.MIGRATION_10_11, DiaryDatabase.MIGRATION_11_12)
+                .build()
             try {
                 val diary = db.diaryDao()
                 assertEquals("Note", diary.journey("trip")!!.note)
