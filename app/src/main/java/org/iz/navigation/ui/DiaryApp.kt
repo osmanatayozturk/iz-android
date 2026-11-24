@@ -1489,6 +1489,9 @@ private fun JourneyDetail(
     val places = state.places.filter { place -> visits.any { it.placeId == place.id } }
     val analysis = if (prepared == null) state.analysis.copy(pending = true) else state.analysis
     val title = journey.title.ifBlank { journey.transport.label() }
+    var comparisonCurve by remember(journey.id, journey.transport, journey.status, journey.endedAt, section) {
+        mutableStateOf<RecordedCurveDetail?>(null)
+    }
     if (section == UiPage.TRACK_MAP) {
         Column(Modifier.fillMaxSize()) {
             Text(title, Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.titleLarge)
@@ -1526,7 +1529,7 @@ private fun JourneyDetail(
             }
             UiPage.JOURNEY_REPORTS -> {
                 item { PageHeading("Viraj ve yatış raporu", title) }
-                item { RecordedCurvePanel(journey, state) }
+                item { RecordedCurvePanel(journey, state, onComparePrevious = { comparisonCurve = it }) }
                 item { LeanJourneyReportPanel(journey) }
                 item { JournalLink("İki yolculuğu karşılaştır", onClick = onCompare) }
             }
@@ -1568,6 +1571,15 @@ private fun JourneyDetail(
                 }
                 item { TextButton(onClick = onDelete) { Text("Yolculuğu sil", color = MaterialTheme.colorScheme.error) } }
             }
+        }
+    }
+    comparisonCurve?.let { curve ->
+        // Keep the open window independent of the list item and transient analysis refreshes.
+        val currentFingerprint = state.preparedRecorded(journey)?.fingerprint
+        if (currentFingerprint != null && currentFingerprint != curve.sourceFingerprint) {
+            LaunchedEffect(curve) { if (comparisonCurve == curve) comparisonCurve = null }
+        } else {
+            CurvePassComparisonDialog(curve) { comparisonCurve = null }
         }
     }
 }

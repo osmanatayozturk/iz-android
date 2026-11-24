@@ -26,7 +26,8 @@ private data class CurveRead(val key: CurveReadKey, val details: RecordedCurveDe
 
 /** Reads only the disposable prepared GPS-curve asset, never raw points or lean output. */
 @Composable
-internal fun RecordedCurvePanel(journey: Journey, state: DiaryState) {
+internal fun RecordedCurvePanel(journey: Journey, state: DiaryState,
+    onComparePrevious: ((RecordedCurveDetail) -> Unit)? = null) {
     val context = LocalContext.current.applicationContext
     val analysis = remember(context) { PostJourneyAnalysis.get(context) }
     val current = state.journeys.firstOrNull { it.id == journey.id && it.status == JourneyStatus.CONFIRMED }
@@ -115,13 +116,11 @@ internal fun RecordedCurvePanel(journey: Journey, state: DiaryState) {
                     }
                     selected?.let { curve ->
                         RecordedCurveDetailValues(curve)
-                        if (current.transport == Transport.MOTORCYCLE && current.endedAt != null) {
-                            var comparing by remember(curve) { mutableStateOf(false) }
-                            OutlinedButton(onClick = { comparing = true },
+                        if (onComparePrevious != null && current.transport == Transport.MOTORCYCLE && current.endedAt != null) {
+                            OutlinedButton(onClick = { onComparePrevious(curve) },
                                 modifier = Modifier.testTag("gps-curve-compare")) {
                                 Text("Önceki geçişlerle karşılaştır")
                             }
-                            if (comparing) CurvePassComparisonDialog(curve) { comparing = false }
                         }
                         TextButton(onClick = { selectedId = null }) { Text("Seçili ayrıntıyı kapat") }
                     }
