@@ -43,7 +43,7 @@ internal interface BackupExportDao {
     suspend fun garageVehicles(first: Long, limit: Int): List<BackupGarageVehicleRow>
     @Query("SELECT t.rowid AS backupKey, t.* FROM fuel_fills t WHERE t.rowid >= :first ORDER BY t.rowid LIMIT :limit")
     suspend fun fuelFills(first: Long, limit: Int): List<BackupFuelFillRow>
-    @Query("SELECT t.rowid AS backupKey, t.* FROM journey_vehicles t WHERE t.rowid >= :first AND EXISTS (SELECT 1 FROM journeys j WHERE j.id=t.journeyId AND j.status='CONFIRMED') ORDER BY t.rowid LIMIT :limit")
+    @Query("SELECT * FROM ($MATCHING_JOURNEY_VEHICLES) WHERE backupKey >= :first ORDER BY backupKey LIMIT :limit")
     suspend fun journeyVehicles(first: Long, limit: Int): List<BackupJourneyVehicleRow>
     @Query("SELECT t.rowid AS backupKey, t.* FROM journeys t WHERE t.rowid >= :first AND t.status = 'CONFIRMED' ORDER BY t.rowid LIMIT :limit")
     suspend fun journeys(first: Long, limit: Int): List<BackupJourneysRow>

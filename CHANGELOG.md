@@ -4,7 +4,7 @@
 
 - Telefonda tarifli veya tarifsiz motosiklet kaydı sırasında yatış kaydının durumunu görebilir ve kapalıysa sürüşü kesmeden açabilirsiniz. **Yatış sensörleri kaydediliyor** durumu, ivmeölçer ve jiroskop verileri o yolculuğa yazıldığında görünür. GPS kaydı ayrı devam eder.
 - Yolculuk raporunda bir GPS virajını seçip **Önceki geçişlerle karşılaştır** seçeneğiyle aynı yöndeki uygun bir geçmiş geçişi açabilirsiniz. Haritada aynı noktadaki hızları, geçiş sürelerini ve örneklenen hız aralıklarını karşılaştırabilirsiniz. Güvenilir yatış ölçümü varsa yatış tahmini ve montaj türü de gösterilir.
-- **Garaj** ile otomobil ve motosikletlerin kilometre sayacını, tam ve kısmi dolumlarını ve yakıt masraflarını ayrı izleyebilirsiniz. Yeterli dolum geçmişi oluştuğunda tahmini tam depo menzili ve bir sonraki tipik doluma kalan mesafe ayrı gösterilir. Garaj verileri günlük yedeğine dahildir.
+- **Garaj** ile otomobil ve motosikletlerin kilometre sayacını, tam ve kısmi dolumlarını ve yakıt masraflarını ayrı izleyebilirsiniz. Yeterli dolum geçmişi oluştuğunda tahmini tam depo menzili ve bir sonraki tipik doluma kalan mesafe ayrı gösterilir. Bir yolculuğun taşıt türünü değiştirirseniz yolculuk eski aracın sayacından düşer. Yalnızca başlığı veya notu değiştirirseniz araç bağlantısı korunur. Garaj verileri günlük yedeğine dahildir.
 - Yakıt eşiğine ulaşıldığında telefon veya Android Auto, uygun bir istasyon bulursa 20 saniyelik bir teklif gösterir. Kabul ederseniz istasyon tarifli sürüşte sıradaki durak olur, tarifsiz sürüşte istasyona yol tarifi açılır. Reddettiğinizde veya süre dolduğunda sürüş ve kayıt devam eder.
 
 Bu kayıt geliştirme adayının kaynak kapsamını gösterir. İzole QA sonuçları aynı adaya bağlandığında sürüm planında izlenir.

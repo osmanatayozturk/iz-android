@@ -12,22 +12,29 @@ import kotlinx.coroutines.sync.withLock
 import org.iz.navigation.IzApplication
 import org.iz.navigation.data.*
 
+// Previous versions could leave an assignment behind after the journey's transport changed.
+internal const val MATCHING_JOURNEY_VEHICLES = """SELECT l.rowid AS backupKey, l.journeyId, l.vehicleId
+    FROM journey_vehicles l
+    JOIN journeys j ON j.id = l.journeyId
+    JOIN garage_vehicles v ON v.id = l.vehicleId
+    WHERE j.status = 'CONFIRMED' AND j.transport = v.transport"""
+
 @Dao
 internal interface GarageDao {
     @Query("SELECT * FROM garage_vehicles ORDER BY name COLLATE NOCASE, id") fun vehicles(): Flow<List<GarageVehicle>>
     @Query("SELECT * FROM garage_vehicles WHERE id=:id") suspend fun vehicle(id: String): GarageVehicle?
     @Query("SELECT * FROM garage_vehicles WHERE id=:id") fun observeVehicle(id: String): Flow<GarageVehicle?>
     @Query("SELECT * FROM fuel_fills WHERE vehicleId=:id ORDER BY at,id") fun fills(id: String): Flow<List<FuelFill>>
-    @Query("SELECT vehicleId FROM journey_vehicles WHERE journeyId=:id") fun assignment(id: String): Flow<String?>
+    @Query("SELECT vehicleId FROM ($MATCHING_JOURNEY_VEHICLES) WHERE journeyId=:id") fun assignment(id: String): Flow<String?>
     @Query("SELECT * FROM fuel_fills WHERE vehicleId=:id ORDER BY at,id") suspend fun vehicleFills(id: String): List<FuelFill>
     @Query("SELECT * FROM fuel_fills WHERE id=:id") suspend fun fill(id: String): FuelFill?
     @Query("SELECT * FROM garage_vehicles ORDER BY id") suspend fun allVehicles(): List<GarageVehicle>
     @Query("SELECT * FROM fuel_fills ORDER BY at,id") suspend fun allFills(): List<FuelFill>
-    @Query("SELECT * FROM journey_vehicles ORDER BY journeyId") suspend fun allAssignments(): List<JourneyVehicle>
-    @Query("""SELECT p.* FROM track_points p JOIN journey_vehicles l ON l.journeyId=p.journeyId
+    @Query("SELECT journeyId, vehicleId FROM ($MATCHING_JOURNEY_VEHICLES) ORDER BY journeyId") suspend fun allAssignments(): List<JourneyVehicle>
+    @Query("""SELECT p.* FROM track_points p JOIN ($MATCHING_JOURNEY_VEHICLES) l ON l.journeyId=p.journeyId
         WHERE l.vehicleId=:vehicle AND p.recordedAt>=:since
         UNION ALL
-        SELECT p.* FROM journey_vehicles l JOIN track_points p ON p.id=(
+        SELECT p.* FROM ($MATCHING_JOURNEY_VEHICLES) l JOIN track_points p ON p.id=(
             SELECT q.id FROM track_points q WHERE q.journeyId=l.journeyId AND q.recordedAt<:since
             ORDER BY q.recordedAt DESC,q.id DESC LIMIT 1)
         WHERE l.vehicleId=:vehicle
@@ -36,6 +43,7 @@ internal interface GarageDao {
     @Upsert suspend fun save(vehicle: GarageVehicle)
     @Upsert suspend fun save(fill: FuelFill)
     @Upsert suspend fun save(link: JourneyVehicle)
+    @Query("DELETE FROM journey_vehicles WHERE journeyId=:id") suspend fun clearAssignment(id: String)
     @Query("DELETE FROM garage_vehicles WHERE id=:id") suspend fun deleteVehicle(id: String)
     @Query("DELETE FROM fuel_fills WHERE id=:id") suspend fun deleteFill(id: String)
     @Query("DELETE FROM garage_vehicles") suspend fun clear()
