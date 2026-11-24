@@ -1,6 +1,7 @@
 package org.iz.navigation.moto
 
 import android.content.Intent
+import android.os.Bundle
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
@@ -8,6 +9,7 @@ import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.room.withTransaction
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import java.util.UUID
 import kotlin.math.abs
 import kotlin.math.cos
@@ -111,7 +113,7 @@ class MotorcycleCurveAcceptanceTest {
         val hour = 3_600_000L
         val now = System.currentTimeMillis()
         val selected = ride("Seçili viraj", now - hour, arc(7), speed = 10f)
-        val previous = ride("Önceki viraj", now - 2 * hour, arc(5), speed = 8f)
+        val previous = ride("Önceki viraj", now - 2 * hour, arc(5, 1.0), speed = 8f, interval = 2_500L)
         val rides = listOf(selected, previous)
         try {
             runBlocking {
@@ -129,7 +131,12 @@ class MotorcycleCurveAcceptanceTest {
                     withTimeout(12_000) {
                         while (!analysis.canProcessNow()) delay(100)
                         withContext(Dispatchers.IO) { analysis.runPending() }
-                        analysis.state.first { it.ready(selected.journey.id) != null }
+                        val ready = analysis.state.first { it.ready(selected.journey.id) != null }
+                        val entry = requireNotNull(ready.ready(selected.journey.id))
+                        val curve = requireNotNull(analysis.cache.curves(selected.journey.id, entry.fingerprint)).curves.single()
+                        val expected = CurvePassComparisonRepository(context).candidates(curve)
+                        assertEquals("The prepared curve must resolve the stored earlier date",
+                            listOf(previous.journey.id), expected.map { it.journeyId })
                     }
                 }
                 compose.waitUntil(8_000) { compose.onAllNodesWithTag("home-menu").fetchSemanticsNodes().isNotEmpty() }
@@ -146,11 +153,24 @@ class MotorcycleCurveAcceptanceTest {
                 val compare = hasTestTag("gps-curve-compare")
                 compose.onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToNode(compare)
                 compose.onNode(compare).performClick()
-                compose.waitUntil(8_000) {
-                    compose.onAllNodesWithTag("curve-pass-candidate").fetchSemanticsNodes().isNotEmpty()
+                fun exists(matcher: SemanticsMatcher) =
+                    compose.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+                val candidate = hasTestTag("curve-pass-candidate")
+                val dialog = hasTestTag("curve-pass-comparison")
+                val empty = hasText("Karşılaştırılabilir geçiş bulunamadı.")
+                val unreadable = hasText("Önceki geçişler okunamadı.")
+                try {
+                    compose.waitUntil(8_000) { exists(candidate) || exists(empty) || exists(unreadable) }
+                } finally {
+                    InstrumentationRegistry.getInstrumentation().sendStatus(2, Bundle().apply {
+                        putString("curveCandidateUi", "dialog=${exists(dialog)} candidate=${exists(candidate)} " +
+                            "empty=${exists(empty)} unreadable=${exists(unreadable)}")
+                    })
                 }
-                compose.onAllNodesWithTag("curve-pass-candidate").assertCountEquals(1)
-                compose.onNodeWithTag("curve-pass-candidate").assertTextContains(previous.journey.title).performClick()
+                compose.onAllNodes(candidate, useUnmergedTree = true).assertCountEquals(1)
+                compose.onNode(hasText(previous.journey.title) and hasAnyAncestor(candidate), useUnmergedTree = true)
+                    .assertIsDisplayed()
+                compose.onNode(candidate, useUnmergedTree = true).performClick()
                 compose.waitUntil(8_000) {
                     compose.onAllNodesWithTag("curve-pass-map").fetchSemanticsNodes().isNotEmpty()
                 }

@@ -66,7 +66,11 @@ class MotorcyclePhoneEntryAcceptanceTest {
                 compose.waitUntil(6_000) { compose.onAllNodesWithTag("garage-vehicle-choice").fetchSemanticsNodes().isNotEmpty() }
                 assertNull(navigator.state.value.sessionId)
                 compose.onNodeWithTag("garage-choose-${bikes.last().id}").performClick()
-                compose.waitUntil(10_000) { navigator.state.value.recording && TrackingService.runningJourneyId != null }
+                compose.waitUntil(10_000) {
+                    val state = navigator.state.value
+                    state.recording && state.sessionId != null &&
+                        state.journey?.id?.let { it == TrackingService.runningJourneyId } == true
+                }
                 val free = navigator.state.value
                 val freeJourney = requireNotNull(free.journey).also { ownedTrips += it.id }
                 assertFalse(free.guidance)
@@ -91,7 +95,10 @@ class MotorcyclePhoneEntryAcceptanceTest {
                 compose.waitUntil(6_000) { !TrackingService.isRunning && navigator.state.value.sessionId == null }
 
                 runBlocking { withContext(Dispatchers.Main) { navigator.startGuidance(route(), recordJourney = true) } }
-                compose.waitUntil(10_000) { navigator.state.value.guidance && navigator.state.value.recording }
+                compose.waitUntil(10_000) {
+                    val state = navigator.state.value
+                    state.guidance && state.recording && state.sessionId != null && state.journey != null
+                }
                 val guided = navigator.state.value
                 val guidedJourney = requireNotNull(guided.journey).also { ownedTrips += it.id }
                 assertNotEquals(freeJourney.id, guidedJourney.id)

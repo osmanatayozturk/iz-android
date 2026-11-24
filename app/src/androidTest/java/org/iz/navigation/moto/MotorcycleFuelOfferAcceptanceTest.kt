@@ -80,6 +80,7 @@ class MotorcycleFuelOfferAcceptanceTest {
         val commits = AtomicInteger()
         var pauseApply = CompletableDeferred<Unit>()
         var arrivedAtApply = CompletableDeferred<Unit>()
+        var appliedReply = CompletableDeferred<Boolean>()
         var fixturePause = false
         val motorcycle = GarageVehicle(name = "QA Fuel", transport = Transport.MOTORCYCLE,
             capacityLitres = 12.0, typicalThresholdKm = 600.0, odometerAt = 0L)
@@ -105,8 +106,10 @@ class MotorcycleFuelOfferAcceptanceTest {
                     arrivedAtApply.complete(Unit)
                     pauseApply.await()
                 }
-                if (!current()) false
-                else navigation.acceptFuelStation(plan, current).also { if (it) commits.incrementAndGet() }
+                val applied = current() && navigation.acceptFuelStation(plan, current)
+                if (applied) commits.incrementAndGet()
+                appliedReply.complete(applied)
+                applied
             },
         )
         val host = OfferHost()
@@ -273,6 +276,7 @@ class MotorcycleFuelOfferAcceptanceTest {
             val accepted = nextOffer()
             pauseApply = CompletableDeferred()
             arrivedAtApply = CompletableDeferred()
+            appliedReply = CompletableDeferred()
             withContext(Dispatchers.Main) {
                 alerts.update()
                 val action = requireNotNull(host.shown)
@@ -283,6 +287,11 @@ class MotorcycleFuelOfferAcceptanceTest {
             withTimeout(4_000) { arrivedAtApply.await() }
             assertFalse(controller.accept(accepted.id))
             pauseApply.complete(Unit)
+            val applied = withTimeout(5_000) { appliedReply.await() }
+            val stateAfterApply = navigation.state.value
+            assertTrue("Apply returned false (sameSession=${stateAfterApply.sessionId == session}, " +
+                "gpsStale=${stateAfterApply.gpsStale}, guidance=${stateAfterApply.guidance}, " +
+                "sameTarget=${stateAfterApply.route?.stops?.lastOrNull() == target})", applied)
             withTimeout(5_000) { controller.offer.first { it == null } }
             assertEquals(1, commits.get())
             assertEquals(4, searches.get())
