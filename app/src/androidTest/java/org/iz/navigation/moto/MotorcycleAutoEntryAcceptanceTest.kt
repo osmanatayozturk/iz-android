@@ -107,7 +107,9 @@ class MotorcycleAutoEntryAcceptanceTest {
                             assertSame(picker, screens.top)
                             click(choices.single { it.title.toString() == beta.name })
                         }
-                        val active = withTimeout(8_000) { navigation.state.first { it.recording && it.journey != null } }
+                        val active = withTimeout(8_000) {
+                            navigation.state.first { it.recording && it.journey != null && it.sessionId != null }
+                        }
                         val trip = requireNotNull(active.journey)
                         assertEquals(Transport.CAR, trip.transport)
                         assertEquals(beta.id, withTimeout(5_000) { garage.assignedVehicleId(trip.id).first { it != null } })

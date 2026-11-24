@@ -13,6 +13,10 @@ import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.runBlocking
 import org.iz.navigation.MainActivity
 import org.iz.navigation.data.DiaryDatabase
@@ -121,6 +125,13 @@ class MotorcycleCurveAcceptanceTest {
             val analysis = PostJourneyAnalysis.get(context)
             analysis.request()
             ActivityScenario.launch<MainActivity>(Intent(context, MainActivity::class.java)).use {
+                runBlocking {
+                    withTimeout(12_000) {
+                        while (!analysis.canProcessNow()) delay(100)
+                        withContext(Dispatchers.IO) { analysis.runPending() }
+                        analysis.state.first { it.ready(selected.journey.id) != null }
+                    }
+                }
                 compose.waitUntil(8_000) { compose.onAllNodesWithTag("home-menu").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithTag("home-menu").performClick()
                 compose.onNodeWithTag("menu-journeys").performScrollTo().performClick()

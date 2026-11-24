@@ -74,11 +74,11 @@ class MotorcyclePhoneEntryAcceptanceTest {
                 assertEquals(bikes.last().id, runBlocking {
                     withTimeout(5_000) { app.garage.assignedVehicleId(freeJourney.id).first { it != null } }
                 })
-                compose.onNodeWithTag("lean-recording-status").assertTextContains("Yatış kaydı kapalı")
-                compose.onNodeWithTag("lean-recording-enable").performClick()
+                compose.onNodeWithTag("lean-recording-status", useUnmergedTree = true).assertTextContains("Yatış kaydı kapalı")
+                compose.onNodeWithTag("lean-recording-enable", useUnmergedTree = true).performClick()
                 compose.waitUntil(5_000) { LeanSettingsStore(context).state.value.enabled }
-                compose.onNodeWithTag("lean-recording-status").assertTextContains("montaj kalibrasyonu gerekli", substring = true)
-                compose.onNodeWithText("Yatış sensörleri kaydediliyor").assertDoesNotExist()
+                compose.onNodeWithTag("lean-recording-status", useUnmergedTree = true).assertTextContains("montaj kalibrasyonu gerekli", substring = true)
+                compose.onNodeWithText("Yatış sensörleri kaydediliyor", useUnmergedTree = true).assertDoesNotExist()
                 assertEquals(freeJourney.id, TrackingService.runningJourneyId)
 
                 val qaFix = TrackPoint(journeyId = freeJourney.id, latitude = .27, longitude = -140.0,
@@ -96,9 +96,9 @@ class MotorcyclePhoneEntryAcceptanceTest {
                 val guidedJourney = requireNotNull(guided.journey).also { ownedTrips += it.id }
                 assertNotEquals(freeJourney.id, guidedJourney.id)
                 assertEquals(Transport.MOTORCYCLE, guidedJourney.transport)
-                compose.onNodeWithTag("lean-recording-status").assertTextContains("montaj kalibrasyonu gerekli", substring = true)
-                compose.onNodeWithTag("lean-recording-enable").assertDoesNotExist()
-                compose.onNodeWithText("Yatış sensörleri kaydediliyor").assertDoesNotExist()
+                compose.onNodeWithTag("lean-recording-status", useUnmergedTree = true).assertTextContains("montaj kalibrasyonu gerekli", substring = true)
+                compose.onNodeWithTag("lean-recording-enable", useUnmergedTree = true).assertDoesNotExist()
+                compose.onNodeWithText("Yatış sensörleri kaydediliyor", useUnmergedTree = true).assertDoesNotExist()
             }
         } finally {
             runBlocking {

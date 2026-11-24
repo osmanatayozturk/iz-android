@@ -2,6 +2,8 @@ package org.iz.navigation.moto
 
 import android.Manifest
 import android.content.Intent
+import android.location.Location
+import android.os.Bundle
 import android.os.SystemClock
 import androidx.car.app.Screen
 import androidx.car.app.Session
@@ -10,8 +12,11 @@ import androidx.car.app.testing.ScreenController
 import androidx.car.app.testing.SessionController
 import androidx.car.app.testing.TestCarContext
 import androidx.lifecycle.Lifecycle
+import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.google.android.gms.location.LocationServices
+import java.io.FileInputStream
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CompletableDeferred
@@ -28,7 +33,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.tasks.await
 import org.iz.navigation.IzApplication
+import org.iz.navigation.MainActivity
 import org.iz.navigation.car.CarFuelAlertCancel
 import org.iz.navigation.car.CarFuelAlertHost
 import org.iz.navigation.car.CarFuelAlerts
@@ -48,6 +55,7 @@ import org.iz.navigation.weather.RouteManeuver
 import org.iz.navigation.weather.RouteStop
 import org.iz.navigation.weather.RouteVertex
 import org.iz.navigation.weather.WeatherCoordinate
+import org.iz.navigation.weather.WeatherEngine
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -57,7 +65,8 @@ class MotorcycleFuelOfferAcceptanceTest {
     @Test fun noVehicleRejectionExpiryHandoffAndDoubleAcceptanceShareOneDecisionPerDrive() = runBlocking<Unit> {
         val app = requireMotorcycleQaTarget().applicationContext as IzApplication
         val instrumentation = InstrumentationRegistry.getInstrumentation()
-        listOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION).forEach {
+        listOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.POST_NOTIFICATIONS).forEach {
             instrumentation.uiAutomation.grantRuntimePermission(app.packageName, it)
         }
         val navigation = app.navigation
@@ -106,11 +115,33 @@ class MotorcycleFuelOfferAcceptanceTest {
             visible = { controller.autoVisible.value && homeVisible }, current = { controller.offer.value },
             host = host, accept = controller::accept, reject = controller::reject, failed = {},
         )
+        val location = LocationServices.getFusedLocationProviderClient(app)
+        fun mockAccess(value: String) {
+            val command = "appops set ${app.packageName} android:mock_location $value"
+            instrumentation.uiAutomation.executeShellCommand(command).use { result ->
+                FileInputStream(result.fileDescriptor).use { it.readBytes() }
+            }
+        }
+        suspend fun deliverFix() {
+            val now = System.currentTimeMillis()
+            location.setMockLocation(Location("fused").apply {
+                latitude = origin.latitude
+                longitude = origin.longitude
+                accuracy = 3f
+                speed = 12f
+                time = now
+                elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
+            }).await()
+        }
         suspend fun start(assigned: Boolean): String {
             val id = withContext(Dispatchers.Main) { navigation.startFreeDrive(Transport.MOTORCYCLE, recordJourney = false) }
             if (assigned) garage.bindSession(id, null, motorcycle.id, Transport.MOTORCYCLE)
-            fix(id, navigation::onAcceptedLocation, origin)
-            withTimeout(4_000) { navigation.state.first { it.sessionId == id && it.fix?.coordinate == origin && !it.gpsStale } }
+            withTimeout(4_000) {
+                while (navigation.state.value.let { it.sessionId != id || it.fix?.coordinate != origin || it.gpsStale }) {
+                    deliverFix()
+                    delay(200)
+                }
+            }
             return id
         }
         suspend fun finish(id: String) {
@@ -123,7 +154,11 @@ class MotorcycleFuelOfferAcceptanceTest {
         val before = diary.snapshot().journeys
         navigation.setMuted(false)
         withTimeout(5_000) { navigation.state.first { !it.muted } }
+        mockAccess("allow")
+        var activity: ActivityScenario<MainActivity>? = null
         try {
+            location.setMockMode(true).await()
+            activity = ActivityScenario.launch<MainActivity>(Intent(app, MainActivity::class.java))
             garage.saveVehicle(motorcycle)
             repeat(5) { index ->
                 garage.saveFill(FuelFill(vehicleId = motorcycle.id, at = 1000L + index * 1000L,
@@ -139,7 +174,7 @@ class MotorcycleFuelOfferAcceptanceTest {
             withContext(Dispatchers.Main) { controller.reject(rejected.id) }
             assertFalse(controller.accept(rejected.id))
             val rejectedSession = session
-            fix(rejectedSession, navigation::onAcceptedLocation, origin)
+            deliverFix()
             delay(250)
             assertEquals(1, searches.get())
             assertNull(controller.offer.value)
@@ -150,19 +185,39 @@ class MotorcycleFuelOfferAcceptanceTest {
             val expiring = nextOffer()
             val liveSession = session
             coroutineScope {
+                fun observation(phase: String): String {
+                    val state = navigation.state.value
+                    val elapsed = SystemClock.elapsedRealtime()
+                    val distance = state.fix?.let { WeatherEngine.distanceMeters(origin, it.coordinate) }
+                    val age = state.fix?.let { System.currentTimeMillis() - it.recordedAt }
+                    val binding = garage.unrecordedBinding.value
+                    return "$phase elapsedMs=$elapsed remainingMs=${expiring.expiresAtElapsedMs - elapsed} " +
+                        "sameSession=${state.sessionId == liveSession} recording=${state.recording} " +
+                        "gpsStale=${state.gpsStale} fixAgeMs=$age originMeters=$distance " +
+                        "sameVehicle=${binding?.sessionId == liveSession && binding.vehicleId == motorcycle.id} " +
+                        "revision=${state.routeRevision} autoVisible=${controller.autoVisible.value}"
+                }
+                fun report(key: String, value: String) = instrumentation.sendStatus(2, Bundle().apply { putString(key, value) })
+                val disappearance = async {
+                    controller.offer.first { it == null }
+                    observation("offer cleared").also { report("fuelOfferDrop", it) }
+                }
                 val keepFresh = launch {
                     while (true) {
                         delay(700)
-                        fix(liveSession, navigation::onAcceptedLocation, origin)
+                        deliverFix()
                     }
                 }
                 try {
                     val remaining = expiring.expiresAtElapsedMs - SystemClock.elapsedRealtime()
                     assertTrue(remaining in 19_000..20_000)
                     delay(remaining - 1_200)
-                    assertEquals(expiring.id, controller.offer.value?.id)
-                    withTimeout(3_500) { controller.offer.first { it == null } }
-                    assertTrue(SystemClock.elapsedRealtime() >= expiring.expiresAtElapsedMs)
+                    val nearDeadline = observation("before deadline")
+                    report("fuelOfferBeforeDeadline", nearDeadline)
+                    val early = if (disappearance.isCompleted) disappearance.await() else ""
+                    assertEquals("$nearDeadline $early", expiring.id, controller.offer.value?.id)
+                    val ended = withTimeout(3_500) { disappearance.await() }
+                    assertTrue(ended, SystemClock.elapsedRealtime() >= expiring.expiresAtElapsedMs)
                     assertFalse(controller.accept(expiring.id))
                 } finally { keepFresh.cancel() }
             }
@@ -248,15 +303,24 @@ class MotorcycleFuelOfferAcceptanceTest {
             idleAutoHomeAcceptsOnlyOneSuitableVehicle(app, origin, target)
         } finally {
             pauseApply.complete(Unit)
-            withContext(Dispatchers.Main) {
-                alerts.hide()
-                controller.setAutoMapVisible(auto, false)
-                controller.setAutoVisible(auto, false)
-                controller.setPhoneVisible(phone, false)
-                navigation.state.value.sessionId?.let { navigation.finishSession(it) }
+            try {
+                withContext(Dispatchers.Main) {
+                    alerts.hide()
+                    controller.setAutoMapVisible(auto, false)
+                    controller.setAutoVisible(auto, false)
+                    controller.setPhoneVisible(phone, false)
+                    navigation.state.value.sessionId?.let { navigation.finishSession(it) }
+                }
+            } finally {
+                scope.cancel()
+                try {
+                    runCatching { location.setMockMode(false).await() }
+                    mockAccess("default")
+                    garage.deleteVehicle(motorcycle.id)
+                } finally {
+                    activity?.close()
+                }
             }
-            scope.cancel()
-            garage.deleteVehicle(motorcycle.id)
         }
     }
 
@@ -389,7 +453,4 @@ class MotorcycleFuelOfferAcceptanceTest {
         override fun dismiss() { shown = null }
     }
 
-    private fun fix(id: String, deliver: (String, NavigationFix) -> Unit, point: WeatherCoordinate) {
-        deliver(id, NavigationFix(point, System.currentTimeMillis(), 3f, 12f))
-    }
 }
