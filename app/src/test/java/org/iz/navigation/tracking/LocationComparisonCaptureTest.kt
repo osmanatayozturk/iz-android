@@ -7,6 +7,24 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class LocationComparisonCaptureTest {
+    @Test fun providerLossDuringRegistrationStopsThePendingPairWithoutWaitingForTimeout() = runTest {
+        var closed = 0
+        val sources = object : ComparisonSources {
+            override suspend fun open(source: ComparisonSourceId, samples: (List<ComparisonSample>) -> Unit,
+                availability: (Boolean) -> Unit, failure: (ComparisonIssue) -> Unit): ComparisonRegistration {
+                if (source == ComparisonSourceId.FUSED) try { awaitCancellation() } finally { closed++ }
+                failure(ComparisonIssue.PROVIDER_DISABLED)
+                return ComparisonRegistration { closed++ }
+            }
+        }
+        val capture = LocationComparisonCapture(sources, { currentTime * 1_000_000 + 1 }, { null })
+        val result = capture.measure()
+        assertEquals(ComparisonIssue.PROVIDER_DISABLED, result.issue)
+        assertEquals(ComparisonSourceId.GPS, result.issueSource)
+        assertNull(result.startedElapsedNanos)
+        assertEquals(2, closed)
+        assertEquals(100L, currentTime)
+    }
     @Test fun sharedWindowStartsOnlyAfterBothSubscriptionsAreReady() = runTest {
         val callbacks = mutableMapOf<ComparisonSourceId, (List<ComparisonSample>) -> Unit>()
         val sources = object : ComparisonSources {

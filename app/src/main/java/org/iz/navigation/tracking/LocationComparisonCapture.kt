@@ -50,7 +50,8 @@ internal class LocationComparisonCapture(private val sources: ComparisonSources,
             checkGuard()
             val ready = withTimeoutOrNull(5_000) {
                 coroutineScope {
-                    ComparisonSourceId.entries.map { source -> async {
+                    val monitor = launch { while (isActive) { delay(100); checkGuard() } }
+                    try { ComparisonSourceId.entries.map { source -> async {
                         registrations += sources.open(source, samples = { samples ->
                             if (active && epoch == token) {
                                 if (samples.any { it.motionEvidence(now()) })
@@ -63,7 +64,7 @@ internal class LocationComparisonCapture(private val sources: ComparisonSources,
                         }, failure = { reason ->
                             if (active && epoch == token) failure = ComparisonAcquisitionFailure(reason, source)
                         })
-                    } }.awaitAll()
+                    } }.awaitAll() } finally { monitor.cancel() }
                 }
                 true
             } ?: false
