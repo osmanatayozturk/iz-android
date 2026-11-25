@@ -63,7 +63,7 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class MotorcycleFuelOfferAcceptanceTest {
     @Test fun noVehicleRejectionExpiryHandoffAndDoubleAcceptanceShareOneDecisionPerDrive() = runBlocking<Unit> {
-        val app = requireMotorcycleQaTarget().applicationContext as IzApplication
+        val app = requireGarageQaTarget().applicationContext as IzApplication
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         listOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.POST_NOTIFICATIONS).forEach {
@@ -83,7 +83,7 @@ class MotorcycleFuelOfferAcceptanceTest {
         var appliedReply = CompletableDeferred<Boolean>()
         var fixturePause = false
         val motorcycle = GarageVehicle(name = "QA Fuel", transport = Transport.MOTORCYCLE,
-            capacityLitres = 12.0, typicalThresholdKm = 600.0, odometerAt = 0L)
+            capacityLitres = 12.0, odometerKm = 1990.0, odometerAt = 6000L)
         val origin = WeatherCoordinate(.27, -140.0)
         val station = WeatherCoordinate(.27, -139.998)
         val target = RouteStop("QA station", station)
@@ -163,7 +163,7 @@ class MotorcycleFuelOfferAcceptanceTest {
             location.setMockMode(true).await()
             activity = ActivityScenario.launch<MainActivity>(Intent(app, MainActivity::class.java))
             garage.saveVehicle(motorcycle)
-            repeat(5) { index ->
+            repeat(4) { index ->
                 garage.saveFill(FuelFill(vehicleId = motorcycle.id, at = 1000L + index * 1000L,
                     odometerKm = 1000.0 + index * 200.0, litres = 8.0, pricePerLitre = 50.0))
             }
@@ -173,6 +173,18 @@ class MotorcycleFuelOfferAcceptanceTest {
             assertNull(controller.offer.value)
             assertEquals(0, searches.get())
             garage.bindSession(session, null, motorcycle.id, Transport.MOTORCYCLE)
+            delay(300)
+            assertNull(controller.offer.value)
+            assertEquals(0, searches.get())
+            // Four full fills cannot start a lookup, even with 390 km since the last fill.
+            garage.saveFill(FuelFill(vehicleId = motorcycle.id, at = 5000L, odometerKm = 1800.0,
+                litres = 8.0, pricePerLitre = 50.0))
+            delay(300)
+            assertNull(controller.offer.value)
+            assertEquals(0, searches.get())
+            // At 1990 km the learned 200 km / 100 km thresholds are still clear.
+            // The persisted odometer reaching 2000 km triggers the shared decision.
+            garage.saveVehicle(motorcycle.copy(odometerKm = 2000.0, odometerAt = 7000L))
             val rejected = nextOffer()
             withContext(Dispatchers.Main) { controller.reject(rejected.id) }
             assertFalse(controller.accept(rejected.id))
@@ -304,6 +316,17 @@ class MotorcycleFuelOfferAcceptanceTest {
             assertNull(final.journey)
             assertEquals(before, diary.snapshot().journeys)
             finish(session)
+
+            session = start(assigned = true)
+            val beforeRefill = nextOffer()
+            garage.saveFill(FuelFill(vehicleId = motorcycle.id, at = 8000L, odometerKm = 2000.0,
+                litres = 8.0, pricePerLitre = 50.0))
+            assertFalse(controller.accept(beforeRefill.id))
+            withTimeout(5_000) { controller.offer.first { it == null } }
+            assertNull(navigation.state.value.route)
+            assertEquals(1, commits.get())
+            assertEquals(5, searches.get())
+            finish(session)
             withContext(Dispatchers.Main) {
                 alerts.hide()
                 controller.setAutoVisible(auto, false)
@@ -345,7 +368,7 @@ class MotorcycleFuelOfferAcceptanceTest {
         val delayedReply = CompletableDeferred<Unit>()
         val searches = AtomicInteger()
         val first = GarageVehicle(name = "QA Auto tek", transport = Transport.CAR, capacityLitres = 50.0,
-            typicalThresholdKm = 600.0, odometerAt = 0L)
+            odometerKm = 3500.0, odometerAt = 6000L)
         val second = first.copy(id = UUID.randomUUID().toString(), name = "QA Auto ikinci")
         val offers = FuelOfferController(app, announce = {}, scope = scope, externalSearch = { mode, fix, current ->
             assertEquals(Transport.CAR, mode)
@@ -402,7 +425,7 @@ class MotorcycleFuelOfferAcceptanceTest {
                 garage.saveVehicle(vehicle)
                 repeat(5) { index ->
                     garage.saveFill(FuelFill(vehicleId = vehicle.id, at = 1000L + index * 1000L,
-                        odometerKm = 1000.0 + index * 200.0, litres = 8.0, pricePerLitre = 50.0))
+                        odometerKm = 1000.0 + index * 500.0, litres = 40.0, pricePerLitre = 50.0))
                 }
             }
             display(true)

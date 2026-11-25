@@ -1,5 +1,11 @@
 # İz sürüm değişikliği planı
 
+## Geliştirme sürümü · Garaj menüsü ve yakıt öğrenmesi
+
+Telefonun **Menü** ekranından **Garaj** listesine ulaşılır. Araç ekleme ve dolum formları bu listeden açılır. Liste kapatıldığında Garaj’ı açan ekrana dönülür. Yakıt uyarısının zamanı, seçili aracın kendi dolum geçmişinden otomatik öğrenilen bilgilerle değerlendirilir.
+
+Yerel QA kapsamı menüden ve Yolculuklar’dan Garaj’a giriş, form erişimi, çağıran ekrana dönüş ve araç bazlı yakıt öğrenmesi kontrolleridir. Öğrenmenin sonucu yeterli ve yetersiz dolum geçmişiyle ayrı değerlendirilir.
+
 ## Geliştirme sürümü · Yatış sensörü ve GPS tanısı
 
 **Ayarlar → Motosiklet montajı ve kalibrasyon** ekranındaki **Sensörleri sına** ve **GPS kaynaklarını karşılaştır** girişleri park hâlinde kullanılır. Sensör sınaması iki sensörün örnek akışını ayrı gösterir. GPS ekranı iki konum kaynağının aynı zaman aralığındaki ölçümlerini özetler. **Yolculuk → Raporlar → Yatış** altında sensör zamanlaması ve GPS kalite gerekçeleri incelenebilir.
@@ -12,7 +18,7 @@ Yerel adayın QA kapsamı normal ekran girişleri, ölçümün durdurulması, GP
 |---|---|---|
 | Yatış kaydı | Telefonda tarifli ve tarifsiz motosiklet kaydında yatış durumunu görün, gerekirse kaydı sürüş sırasında açın. GPS kaydı bağımsız sürer. | Sürüş ekranından açma, kalibrasyon ve sensör/depolama durumları, iki sensörün aynı yolculuğa yazılması. |
 | Viraj karşılaştırması | **Yolculuk → Raporlar → GPS virajları** içinde aynı virajın aynı yöndeki uygun geçmiş geçişini seçin. Hız ve süreyi, ölçüm varsa yatışı karşılaştırın. | Eş yön ve ortak mesafe, ters yön/paralel yol/farklı kavşak kolu, GPS boşluğu ve yatış ölçümsüz eski kayıt. Eşleştirme cihazda yapılır. |
-| Garaj ve yakıt | Araç bazında sayaç, dolum, maliyet ve menzili izleyin. Yeterli veri ve uygun istasyon olduğunda telefonda veya Android Auto’da 20 saniyelik teklifi değerlendirin. | Çoklu araç seçimi ve sonradan atama, sayaçta çift sayım, tam/kısmi ve atlanmış dolumlar, Room 11 → 12 geçişi ve ZIP uyumluluğu. Telefon ve Android Auto’da kabul, ret, zaman aşımı ve teklif geçerliyken rota güncellemesi. |
+| Garaj ve yakıt | Araç bazında sayaç, dolum, maliyet ve menzili izleyin. Seçili aracın yakıt uyarısı koşulları karşılandığında ve uygun istasyon bulunduğunda telefonda veya Android Auto’da 20 saniyelik teklifi değerlendirin. | Çoklu araç seçimi ve sonradan atama, sayaçta çift sayım, tam/kısmi ve atlanmış dolumlar, Room 11 → 12 geçişi ve ZIP uyumluluğu. Telefon ve Android Auto’da kabul, ret, zaman aşımı ve teklif geçerliyken rota güncellemesi. |
 
 Garaj, araç bağlantıları ve dolumlar ZIP v13’e kaydedilir. Garaj verisi içermeyen eski yedekler boş garajla açılır.
 

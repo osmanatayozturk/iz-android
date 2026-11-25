@@ -805,7 +805,9 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     onCheck = ::checkMapNote,
                     onDelete = { draft -> deletion = Deletion("Bu kayıt yalnızca uygulamadaki katkı listenden silinecek. OSM’de yayımlanmış bildirim silinmez.") { vm.repository.deleteContribution(draft.id) } },
                 )
-                uiEntry.page == UiPage.GARAGE -> GarageScreen(application.garage, ::returnToParent)
+                uiEntry.page == UiPage.GARAGE -> browseHolder.SaveableStateProvider(uiEntry.key) {
+                    GarageScreen(application.garage, ::returnToParent)
+                }
                 journey != null -> JourneyDetail(journey, state, now, uiEntry.page,
                     onSection = { section -> navigator.open(section, journey.id) },
                     onCompare = { navigator.open(UiPage.COMPARISON) },
@@ -949,6 +951,9 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
     if (menuOpen) AlertDialog(onDismissRequest = { menuOpen = false }, title = { Text("Menü") }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             fun open(action: () -> Unit) { menuOpen = false; action() }
+            TextButton({ open { tab = 1 } }, Modifier.fillMaxWidth().testTag("menu-journeys")) { Text("Yolculuklar") }
+            TextButton({ open { navigator.open(UiPage.GARAGE) } }, Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                .testTag("menu-garage")) { Text("Garaj") }
             TextButton({ open { openDirections() } }, Modifier.fillMaxWidth().testTag("menu-route-plan")) { Text("Rota planla") }
             TextButton({ open { groupPage = true } }, Modifier.fillMaxWidth().testTag("menu-group")) { Text("Grup yolculuğu") }
             TextButton({ open { weatherPage = true } }, Modifier.fillMaxWidth().testTag("menu-weather")) { Text("Yolculuk havası") }
@@ -961,7 +966,6 @@ fun DiaryApp(incoming: Intent?, consumeIntent: () -> Unit, vm: DiaryViewModel = 
                     .testTag("menu-inspect-map-place")) { Text("Haritada yer incele") }
             }
             HorizontalDivider()
-            TextButton({ open { tab = 1 } }, Modifier.fillMaxWidth().testTag("menu-journeys")) { Text("Yolculuklar") }
             TextButton({ open { libraryOpen = true } }, Modifier.fillMaxWidth().testTag("menu-route-library")) { Text("Rotalarım") }
             TextButton({ open { collectionsOpen = true } }, Modifier.fillMaxWidth().testTag("menu-collections")) { Text("Geziler") }
             TextButton({ open { openGpx() } }, Modifier.fillMaxWidth().testTag("menu-gpx-follow")) { Text("GPX izi takip et") }

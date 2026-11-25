@@ -155,7 +155,8 @@ private fun FuelStatistics(stats: FuelStats) {
         stats.litresPer100Km?.let { Text("Tahmini tüketim ${garageNumber(it)} L/100 km") }
         stats.fullRangeKm?.let { Text("Tahmini tam depo menzili ${garageNumber(it)} km") }
         stats.remainingRangeKm?.let { Text("Tahmini depoda kalan menzil ${garageNumber(it)} km") }
-        stats.typicalIntervalKm?.let { Text("Tipik dolum aralığı ${garageNumber(it)} km") }
+        stats.typicalIntervalKm?.let { Text("Dolumlar arası ortalama ${garageNumber(it)} km") }
+        stats.typicalRefuelRangeKm?.let { Text("Dolum öncesi ortalama kalan menzil ${garageNumber(it)} km") }
         stats.untilTypicalKm?.let { Text("Tipik doluma kalan ${garageNumber(it.coerceAtLeast(0.0))} km") }
         stats.tlPerKm?.let { Text("Yaklaşık ${garageNumber(it)} TL/km") }
     }
@@ -167,23 +168,18 @@ private fun GarageVehicleEditor(garage: GarageRepository, existing: GarageVehicl
     var name by rememberSaveable { mutableStateOf(existing?.name.orEmpty()) }
     var modeName by rememberSaveable { mutableStateOf((existing?.transport ?: Transport.MOTORCYCLE).name) }
     var capacity by rememberSaveable { mutableStateOf(existing?.capacityLitres?.toString().orEmpty()) }
-    var usual by rememberSaveable { mutableStateOf((existing?.typicalThresholdKm ?: 20.0).toString()) }
-    var reserve by rememberSaveable { mutableStateOf((existing?.rangeThresholdKm ?: 40.0).toString()) }
     val originalKm = rememberSaveable { initialKm }
     var km by rememberSaveable { mutableStateOf(if (existing == null && originalKm == 0.0) "" else originalKm.toString()) }
     val mode = Transport.valueOf(modeName)
     val depot = capacity.garageDecimal()?.takeIf { it > 0 }
-    val typicalKm = usual.garageDecimal()
-    val rangeKm = reserve.garageDecimal()
     val odometer = if (existing == null && km.isBlank()) 0.0 else km.garageDecimal()
     GarageMutationDialog(if (existing == null) "Araç ekle" else "Aracı düzenle", "Kaydet",
-        canCommit = name.isNotBlank() && depot != null && typicalKm != null && rangeKm != null && odometer != null,
+        canCommit = name.isNotBlank() && depot != null && odometer != null,
         onClose = onClose, execute = {
             val editedKm = requireNotNull(odometer)
             val changed = if (existing == null) km.isNotBlank() else editedKm != originalKm
             val row = (existing ?: GarageVehicle(name = name, transport = mode, capacityLitres = requireNotNull(depot)))
                 .copy(name = name.trim(), transport = mode, capacityLitres = requireNotNull(depot),
-                    typicalThresholdKm = requireNotNull(typicalKm), rangeThresholdKm = requireNotNull(rangeKm),
                     odometerKm = if (changed) editedKm else existing?.odometerKm ?: 0.0,
                     odometerAt = if (changed) System.currentTimeMillis() else existing?.odometerAt ?: 0L)
             garage.saveVehicle(row)
@@ -197,8 +193,6 @@ private fun GarageVehicleEditor(garage: GarageRepository, existing: GarageVehicl
         } else Text(existing.transport.label())
         GarageNumberField("Depo kapasitesi (L)", capacity) { capacity = it }
         GarageNumberField(if (existing == null) "Toplam kilometre (isteğe bağlı)" else "Toplam kilometre", km) { km = it }
-        GarageNumberField("Tipik doluma kalan km eşiği", usual) { usual = it }
-        GarageNumberField("Depoda kalan km eşiği", reserve) { reserve = it }
     }
 }
 

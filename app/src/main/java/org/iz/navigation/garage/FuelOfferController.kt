@@ -54,7 +54,13 @@ class FuelOfferController internal constructor(
     private var pending: Pending? = null
     private var accepting: String? = null
     private val eligibleOwner = MutableStateFlow<Owner?>(null)
-    private val liveDistance = MutableStateFlow(0.0)
+    private data class DistanceAnchor(val drive: Drive, val vehicleId: String, val since: Long)
+    private data class LiveDistance(val anchor: DistanceAnchor, val km: Double)
+    private val liveDistance = MutableStateFlow<LiveDistance?>(null)
+
+    private fun extraDistance(choice: Selection, stats: FuelStats, distance: LiveDistance?): Double =
+        distance?.takeIf { it.anchor.drive == choice.drive && it.anchor.vehicleId == choice.vehicle.id &&
+            it.anchor.since == stats.distanceBaselineAt }?.km ?: 0.0
 
     private fun drive(state: NavigationState, display: Projection?): Drive? {
         if (state.simulation) return null
@@ -91,37 +97,39 @@ class FuelOfferController internal constructor(
             .flatMapLatest { d -> if (d == null) flowOf(null) else selection(d).onStart { emit(null) } }
             .stateIn(scope, SharingStarted.Eagerly, null)
 
+        val history = selected.flatMapLatest { choice ->
+            if (choice == null) flowOf(null)
+            else garage.offerStats(choice.vehicle).map { stats -> stats?.let { choice to it } }.onStart { emit(null) }
+        }.stateIn(scope, SharingStarted.Eagerly, null)
         scope.launch {
-            var owner: Pair<Drive, String>? = null
+            var owner: DistanceAnchor? = null
             var previous: TrackPoint? = null
-            combine(navigation.state, projection, selected) { state, display, choice ->
-                val key = choice?.takeIf { !state.recording && it.drive == drive(state, display) }?.let { it.drive to it.vehicle.id }
-                key to key?.let { usableFix(it.first, state, display) }
+            combine(navigation.state, projection, history) { state, display, data ->
+                val key = data?.takeIf { !state.recording && it.first.drive == drive(state, display) }
+                    ?.let { (choice, stats) -> DistanceAnchor(choice.drive, choice.vehicle.id, stats.distanceBaselineAt) }
+                key to key?.let { usableFix(it.drive, state, display) }
             }.collect { (key, fix) ->
                 if (key != owner) {
                     owner = key
                     previous = null
-                    liveDistance.value = 0.0
+                    liveDistance.value = null
                 }
-                if (key == null || fix == null) { previous = null; return@collect }
-                val p = TrackPoint(journeyId = key.first.id, latitude = fix.coordinate.latitude,
+                if (key == null || fix == null || fix.recordedAt < key.since) { previous = null; return@collect }
+                val p = TrackPoint(journeyId = key.drive.id, latitude = fix.coordinate.latitude,
                     longitude = fix.coordinate.longitude, accuracy = fix.accuracyMeters, recordedAt = fix.recordedAt)
                 val a = previous
                 if (a != null && p.recordedAt <= a.recordedAt) return@collect
                 previous = p
-                if (a != null) liveDistance.value += DiaryRules.distanceContributionMeters(a, p) / 1000
+                if (a != null) liveDistance.value = LiveDistance(key,
+                    (liveDistance.value?.km ?: 0.0) + DiaryRules.distanceContributionMeters(a, p) / 1000)
             }
         }
         scope.launch {
-            val history = selected.flatMapLatest { choice ->
-                if (choice == null) flowOf(null)
-                else garage.offerStats(choice.vehicle).map { stats -> stats?.let { choice to it } }.onStart { emit(null) }
-            }
             combine(history, navigation.state, projection, liveDistance, audience) { data, state, display, km, visible ->
                 if (data == null || !visible) return@combine null
                 val (choice, stats) = data
                 if (choice != selected.value || usableFix(choice.drive, state, display) == null ||
-                    !stats.needsFuel(choice.vehicle, if (state.recording) 0.0 else km)) return@combine null
+                    !stats.needsFuel(if (state.recording) 0.0 else extraDistance(choice, stats, km))) return@combine null
                 Owner(choice, state.routeRevision)
             }.distinctUntilChanged().collectLatest { owner ->
                 eligibleOwner.value = owner
@@ -229,8 +237,11 @@ class FuelOfferController internal constructor(
         accepting = id
         val choice = p.owner.selection
         val d = choice.drive
+        val extraKm = { stats: FuelStats ->
+            if (navigation.state.value.recording) 0.0 else extraDistance(choice, stats, liveDistance.value)
+        }
         try {
-            if (d.external) garage.applyForProjection(choice.vehicle, projection.value?.selectedVehicle, liveDistance.value) {
+            if (d.external) garage.applyForProjection(choice.vehicle, projection.value?.selectedVehicle, extraKm) {
                 val fix = usableFix(d, navigation.state.value, projection.value)
                 if (fix == null || !valid()) false else externalApply(p.plan, fix, ::valid).also { applied ->
                     if (applied) navigation.state.value.takeIf { !it.recording && it.journey == null }?.sessionId?.let { session ->
@@ -238,7 +249,7 @@ class FuelOfferController internal constructor(
                         garage.rememberUnrecorded(session, choice.vehicle.id)
                     }
                 }
-            } else garage.applyForOwner(d.id, d.journey, choice.vehicle.id, liveDistance.value) {
+            } else garage.applyForOwner(d.id, d.journey, choice.vehicle.id, extraKm) {
                 valid() && applyPlan(p.plan, ::valid)
             }
         } finally {

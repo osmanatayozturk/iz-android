@@ -10,9 +10,18 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 
-internal fun requireMotorcycleQaTarget(): Context {
+private const val MOTORCYCLE_QA_PACKAGE = "org.iz.navigation.qamotosiklet20261125"
+private const val GARAGE_MENU_QA_PACKAGE = "org.iz.navigation.qagarajmenu20261125"
+
+internal fun requireMotorcycleQaTarget(): Context = requireOfflineQaTarget(setOf(MOTORCYCLE_QA_PACKAGE))
+
+internal fun requireGarageMenuQaTarget(): Context = requireOfflineQaTarget(setOf(GARAGE_MENU_QA_PACKAGE))
+
+internal fun requireGarageQaTarget(): Context = requireOfflineQaTarget(setOf(MOTORCYCLE_QA_PACKAGE, GARAGE_MENU_QA_PACKAGE))
+
+private fun requireOfflineQaTarget(allowedPackages: Set<String>): Context {
     val app = InstrumentationRegistry.getInstrumentation().targetContext
-    assertEquals("org.iz.navigation.qamotosiklet20261125", app.packageName)
+    assertTrue("Unexpected QA package", app.packageName in allowedPackages)
     assertTrue(Build.HARDWARE in setOf("ranchu", "goldfish"))
     assertEquals(1, Settings.Global.getInt(app.contentResolver, Settings.Global.AIRPLANE_MODE_ON))
     assertEquals(0, Settings.Global.getInt(app.contentResolver, Settings.Global.WIFI_ON))

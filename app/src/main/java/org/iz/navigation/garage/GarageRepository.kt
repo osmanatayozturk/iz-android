@@ -110,21 +110,23 @@ class GarageRepository internal constructor(private val app: IzApplication) {
         unrecordedBinding.value = Binding(session, id)
     }
 
-    internal suspend fun applyForProjection(vehicle: GarageVehicle, selectedId: String?, km: Double,
+    internal suspend fun applyForProjection(vehicle: GarageVehicle, selectedId: String?, extraKm: (FuelStats) -> Double,
         action: suspend () -> Boolean): Boolean = changes.withLock {
         val options = dao.allVehicles().filter { it.transport == vehicle.transport }
         val current = if (selectedId == null) options.singleOrNull() else options.find { it.id == selectedId }
-        if (current != vehicle || observeStats(vehicle.id).first()?.needsFuel(vehicle, km) != true) false else action()
+        if (current != vehicle) return@withLock false
+        val stats = observeStats(vehicle.id).first() ?: return@withLock false
+        if (stats.needsFuel(extraKm(stats))) action() else false
     }
 
-    internal suspend fun applyForOwner(session: String, journey: String?, id: String, unrecordedKm: Double,
+    internal suspend fun applyForOwner(session: String, journey: String?, id: String, extraKm: (FuelStats) -> Double,
         action: suspend () -> Boolean): Boolean =
         changes.withLock {
             val assigned = if (journey != null) dao.assignment(journey).first()
                 else unrecordedBinding.value?.takeIf { it.sessionId == session }?.vehicleId
-            val vehicle = dao.vehicle(id) ?: return@withLock false
             if (assigned != id) return@withLock false
-            if (observeStats(id).first()?.needsFuel(vehicle, unrecordedKm) == true) action() else false
+            val stats = observeStats(id).first() ?: return@withLock false
+            if (stats.needsFuel(extraKm(stats))) action() else false
         }
 
     /** A drive with insufficient fuel history should never read its GPS history to evaluate a prompt. */
@@ -156,7 +158,7 @@ class GarageRepository internal constructor(private val app: IzApplication) {
                         }
                         previous = point
                     }
-                    FuelHistory.calculate(vehicle, fills, baseline + meters / 1000)
+                    FuelHistory.calculate(vehicle, fills, baseline + meters / 1000).copy(distanceBaselineAt = since)
                 }
             }.distinctUntilChanged().flowOn(Dispatchers.Default)
 }
