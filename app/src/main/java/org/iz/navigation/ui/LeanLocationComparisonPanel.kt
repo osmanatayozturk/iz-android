@@ -158,7 +158,9 @@ private fun ComparisonSourceContent(title: String, tag: String, value: Compariso
             if (field == ComparisonField.ALTITUDE) "" else " · min/ort/maks ${range(stats.values)}")
     }
 }
-private fun number(value: Double?) = value?.let { String.format(Locale.forLanguageTag("tr"), "%.2f", it) } ?: "—"
+private fun number(value: Double?) = value?.let {
+    String.format(Locale.forLanguageTag("tr"), if (it != 0.0 && kotlin.math.abs(it) < 0.01) "%.3g" else "%.2f", it)
+} ?: "—"
 private fun range(value: ComparisonValues) = "${number(value.minimum)} / ${number(value.mean)} / ${number(value.maximum)}"
 private fun fieldLabel(field: ComparisonField) = when (field) {
     ComparisonField.HORIZONTAL_ACCURACY -> "Yatay doğruluk (m)"
