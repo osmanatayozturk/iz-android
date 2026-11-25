@@ -2,9 +2,13 @@
 
 ## Geliştirme sürümü · Garaj menüsü ve yakıt öğrenmesi
 
-Telefonun **Menü** ekranından **Garaj** listesine ulaşılır. Araç ekleme ve dolum formları bu listeden açılır. Liste kapatıldığında Garaj’ı açan ekrana dönülür. Yakıt uyarısının zamanı, seçili aracın kendi dolum geçmişinden otomatik öğrenilen bilgilerle değerlendirilir.
+Telefonun **Menü** ekranından **Garaj** listesine ulaşılır. Araç ekleme ve dolum formları bu listeden açılır. Liste kapatıldığında Garaj’ı açan ekrana dönülür.
 
-Yerel QA kapsamı menüden ve Yolculuklar’dan Garaj’a giriş, form erişimi, çağıran ekrana dönüş ve araç bazlı yakıt öğrenmesi kontrolleridir. Öğrenmenin sonucu yeterli ve yetersiz dolum geçmişiyle ayrı değerlendirilir.
+Araç başına beş güvenilir tam dolum, tahminleri açmak için gereken dört geçerli aralığı oluşturur. Hesap açıldıktan sonra bütün geçerli geçmiş kullanılır. Tipik dolum aralığı (km), dolum sırasında depoda kalan yakıt tahmini (L) ve tüketim (L/100 km) birbirinden bağımsız öğrenilir. Tüketim hesabında her bileşen, ağırlıklı litre toplamını ağırlıklı kilometre toplamına böler.
+
+Her tahminin %25’i geçerli geçmişin tamamından gelir. Kalan ağırlık gözlem sırasına ve yeterli kanıt oluşursa takvim yakınlığına verilir. Yeni gerçek değer geldiğinde önceki tahmin puanlanır. Ayar ancak en az 12 puan, son üç tahminde üstünlük ve ilgili ölçüde anlamlı hata azalması varsa bir adım değişir. Yeni gözlem gelmediğinde tahmin eskimez.
+
+Yerel QA kapsamı Garaj giriş ve geri dönüş akışları, beş dolumluk açılış, araçların ayrı öğrenmesi, bütün geçmişin etkisi ve yeni gözlemle puanlama kontrolleridir.
 
 ## Geliştirme sürümü · Yatış sensörü ve GPS tanısı
 

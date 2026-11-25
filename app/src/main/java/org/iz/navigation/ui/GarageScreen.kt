@@ -152,11 +152,19 @@ private fun FuelStatistics(stats: FuelStats) {
     Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("Sayaç ${garageNumber(stats.odometerKm)} km")
         Text("${stats.learningFullCount}/5 tam dolum", Modifier.testTag("fuel-learning-progress"))
+        if (stats.learningFullCount < 5) {
+            Text("Yakıt öğrenmesi için 5 güvenilir tam dolum gerekir.",
+                style = MaterialTheme.typography.bodySmall)
+        }
         stats.litresPer100Km?.let { Text("Tahmini tüketim ${garageNumber(it)} L/100 km") }
         stats.fullRangeKm?.let { Text("Tahmini tam depo menzili ${garageNumber(it)} km") }
         stats.remainingRangeKm?.let { Text("Tahmini depoda kalan menzil ${garageNumber(it)} km") }
         stats.typicalIntervalKm?.let { Text("Dolumlar arası ortalama ${garageNumber(it)} km") }
         stats.typicalRefuelRangeKm?.let { Text("Dolum öncesi ortalama kalan menzil ${garageNumber(it)} km") }
+        if (stats.typicalIntervalKm != null && stats.typicalRefuelRangeKm != null) {
+            Text("Bu iki ortalama, tüm geçerli dolum geçmişi ağırlıklandırılarak hesaplanır.",
+                style = MaterialTheme.typography.bodySmall)
+        }
         stats.untilTypicalKm?.let { Text("Tipik doluma kalan ${garageNumber(it.coerceAtLeast(0.0))} km") }
         stats.tlPerKm?.let { Text("Yaklaşık ${garageNumber(it)} TL/km") }
     }

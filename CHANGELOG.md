@@ -3,7 +3,7 @@
 ## Geliştirme sürümü · Garaj menüsü ve yakıt öğrenmesi
 
 - Telefonun **Menü** ekranında **Garaj**, **Yolculuklar** yanında açılır. Araç ve dolum formlarına buradan ulaşabilirsiniz. Geri döndüğünüzde Garaj’ı açtığınız ekran gelir.
-- İz, her aracın yakıt uyarısı için o aracın dolum geçmişinden otomatik olarak öğrenir. Yakıt istasyonu teklifinin zamanı, seçili aracın verisine göre değerlendirilir.
+- İz, araç başına beş güvenilir tam dolumla dört geçerli aralık oluştuğunda yakıt tahminlerini açar. Sonraki hesaplara aracın tüm geçerli geçmişi katılır ve yeni gözlemler daha fazla ağırlık alır. Tipik dolum aralığı (km), dolum sırasında depoda kalan yakıt tahmini (L) ve tüketim (L/100 km) ayrı öğrenilir.
 
 ## Geliştirme sürümü · Yatış sensörü ve GPS tanısı
 

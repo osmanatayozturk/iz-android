@@ -139,8 +139,8 @@ class GarageMainMenuAcceptanceTest {
                 val tag = "garage-vehicle-${bike.id}"
                 assertGarageList(tag)
                 compose.onNodeWithTag(tag).performClick()
-                waitText("4/5 tam dolum")
-                compose.onNodeWithTag("fuel-learning-progress").assertTextContains("4/5 tam dolum")
+                waitForProgress("4/5")
+                compose.onNodeWithTag("fuel-learning-progress").assertTextContains("4/5", substring = true)
                 compose.onNode(spacing).assertDoesNotExist()
                 compose.onNode(range).assertDoesNotExist()
 
@@ -152,12 +152,12 @@ class GarageMainMenuAcceptanceTest {
                 field("Toplam kilometre").assertIsDisplayed()
                 dialogText("Vazgeç").performClick()
 
-                // Four 200 km / 8 L intervals give 200 km and 100 km. A 250 km / 10 L
-                // interval adds one 50 km before-fill observation at the same consumption.
+                // The sixth reserve is 2 L at the same 4 L/100 km consumption.
+                // It carries more order weight than the five earlier 4 L observations.
                 saveFullFill(bike.id, "1800", "8", "2025-01-05 12:00")
                 assertLearnedValues("200,00", "100,00")
                 saveFullFill(bike.id, "2050", "10", "2025-01-06 12:00")
-                assertLearnedValues("210,00", "90,00")
+                assertLearnedValues("211,82", "89,73")
                 assertEquals(6, runBlocking { garage.fills(bike.id).first().size })
             }
         } finally {
@@ -171,7 +171,7 @@ class GarageMainMenuAcceptanceTest {
         val list = compose.onNode(hasScrollToIndexAction())
         list.performScrollToNode(hasTestTag("fuel-learning-progress"))
         waitText(learned)
-        compose.onNodeWithTag("fuel-learning-progress").assertTextContains("5/5 tam dolum")
+        compose.onNodeWithTag("fuel-learning-progress").assertTextContains("5/5", substring = true)
         compose.onNodeWithText(learned).assertExists()
         compose.onNodeWithText(range).assertExists()
     }
@@ -191,6 +191,11 @@ class GarageMainMenuAcceptanceTest {
         compose.waitUntil(5_000) {
             compose.onAllNodes(hasText("Dolum ekle") and hasAnyAncestor(isDialog())).fetchSemanticsNodes().isEmpty()
         }
+    }
+
+    private fun waitForProgress(text: String) = compose.waitUntil(5_000) {
+        compose.onAllNodes(hasTestTag("fuel-learning-progress") and hasText(text, substring = true))
+            .fetchSemanticsNodes().isNotEmpty()
     }
 
     private fun waitText(text: String) =

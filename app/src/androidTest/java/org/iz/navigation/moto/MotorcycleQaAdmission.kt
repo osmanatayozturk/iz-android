@@ -12,12 +12,17 @@ import org.junit.Assert.assertTrue
 
 private const val MOTORCYCLE_QA_PACKAGE = "org.iz.navigation.qamotosiklet20261125"
 private const val GARAGE_MENU_QA_PACKAGE = "org.iz.navigation.qagarajmenu20261125"
+private const val FUEL_HISTORY_QA_PACKAGE = "org.iz.navigation.qayakitgecmis20261126"
 
 internal fun requireMotorcycleQaTarget(): Context = requireOfflineQaTarget(setOf(MOTORCYCLE_QA_PACKAGE))
 
-internal fun requireGarageMenuQaTarget(): Context = requireOfflineQaTarget(setOf(GARAGE_MENU_QA_PACKAGE))
+internal fun requireGarageMenuQaTarget(): Context =
+    requireOfflineQaTarget(setOf(GARAGE_MENU_QA_PACKAGE, FUEL_HISTORY_QA_PACKAGE))
 
-internal fun requireGarageQaTarget(): Context = requireOfflineQaTarget(setOf(MOTORCYCLE_QA_PACKAGE, GARAGE_MENU_QA_PACKAGE))
+internal fun requireFuelHistoryQaTarget(): Context = requireOfflineQaTarget(setOf(FUEL_HISTORY_QA_PACKAGE))
+
+internal fun requireGarageQaTarget(): Context =
+    requireOfflineQaTarget(setOf(MOTORCYCLE_QA_PACKAGE, GARAGE_MENU_QA_PACKAGE, FUEL_HISTORY_QA_PACKAGE))
 
 private fun requireOfflineQaTarget(allowedPackages: Set<String>): Context {
     val app = InstrumentationRegistry.getInstrumentation().targetContext

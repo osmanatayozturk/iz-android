@@ -3,6 +3,7 @@ package org.iz.navigation.garage
 import org.iz.navigation.data.Transport
 import org.junit.Assert.*
 import org.junit.Test
+import kotlin.math.pow
 
 class FuelHistoryTest {
     private val bike = GarageVehicle(id = "bike", name = "Test", transport = Transport.MOTORCYCLE,
@@ -15,6 +16,16 @@ class FuelHistoryTest {
 
     private fun steady() = (1L..5L).map { fill(it, 1_000.0 + 80 * (it - 1), 4.0) }
 
+    private fun initialEstimate(values: List<Double>) = initialRatio(values.map { it to 1.0 })
+
+    private fun initialRatio(samples: List<Pair<Double, Double>>): Double {
+        val weights = samples.indices.map { 0.5.pow((samples.lastIndex - it) / 6.0) }
+        val lifetime = samples.sumOf { it.first } / samples.sumOf { it.second }
+        val sequence = samples.indices.sumOf { weights[it] * samples[it].first } /
+            samples.indices.sumOf { weights[it] * samples[it].second }
+        return 0.25 * lifetime + 0.75 * sequence
+    }
+
     @Test fun waitsForFourMeasuredIntervalsAndRelearnsBothMeansAtEachFullFill() {
         val records = listOf(fill(1, 1000.0, 5.0), fill(2, 1100.0, 3.0), fill(3, 1250.0, 6.0),
             fill(4, 1450.0, 7.0), fill(5, 1700.0, 9.0), fill(6, 1900.0, 4.0), fill(7, 2200.0, 9.0))
@@ -24,21 +35,28 @@ class FuelHistoryTest {
         assertNull(before.typicalRefuelRangeKm)
         assertFalse(before.needsFuel(200.0))
 
-        val first = FuelHistory.calculate(bike, records.take(5), 1700.0)
-        assertEquals(5, first.learningFullCount)
-        assertEquals(25.0 / 700 * 100, first.litresPer100Km!!, 1e-9)
-        assertEquals(175.0, first.typicalIntervalKm!!, 1e-9)
-        assertEquals(168.0, first.typicalRefuelRangeKm!!, 1e-9)
+        for (count in 5..7) {
+            val history = records.take(count)
+            val stats = FuelHistory.calculate(bike, history.reversed(), history.last().odometerKm)
+            val intervals = history.zipWithNext { a, b -> b.odometerKm - a.odometerKm }
+            val rate = initialRatio(history.drop(1).map { it.litres * 100 }.zip(intervals))
+            assertEquals(5, stats.learningFullCount)
+            assertEquals(rate, stats.litresPer100Km!!, 1e-9)
+            assertEquals(initialEstimate(intervals), stats.typicalIntervalKm!!, 1e-9)
+            assertEquals(initialEstimate(history.map { 12.0 - it.litres }) / (rate / 100), stats.typicalRefuelRangeKm!!, 1e-9)
+        }
+    }
 
-        val next = FuelHistory.calculate(bike, records.take(6), 1900.0)
-        assertEquals(29.0 / 900 * 100, next.litresPer100Km!!, 1e-9)
-        assertEquals(180.0, next.typicalIntervalKm!!, 1e-9)
-        assertEquals(192.41379310344828, next.typicalRefuelRangeKm!!, 1e-9)
-
-        val rolling = FuelHistory.calculate(bike, records.reversed(), 2200.0)
-        assertEquals(35.0 / 1_100 * 100, rolling.litresPer100Km!!, 1e-9)
-        assertEquals(220.0, rolling.typicalIntervalKm!!, 1e-9)
-        assertEquals(157.14285714285714, rolling.typicalRefuelRangeKm!!, 1e-9)
+    @Test fun allThreeMetricsRetainOlderHistoryBeyondTheLastFivePurchases() {
+        val recent = (3L..10L).map { fill(it * DAY, 1_000.0 + 80 * it, 4.0) }
+        val older = listOf(fill(DAY, 1000.0, 3.0), fill(2 * DAY, 1200.0, 9.0))
+        val alternative = listOf(fill(DAY, 1090.0, 7.0), fill(2 * DAY, 1160.0, 4.5))
+        val old = FuelHistory.calculate(bike, older + recent, recent.last().odometerKm)
+        val revised = FuelHistory.calculate(bike, alternative + recent, recent.last().odometerKm)
+        assertNotEquals(old.typicalIntervalKm, revised.typicalIntervalKm)
+        assertNotEquals(old.typicalRefuelRangeKm, revised.typicalRefuelRangeKm)
+        assertNotEquals(old.litresPer100Km, revised.litresPer100Km)
+        assertEquals(old, FuelHistory.calculate(bike, (older + recent).reversed(), recent.last().odometerKm))
     }
 
     @Test fun filtersHistoryByVehicleAndIgnoresLegacyThresholdsInDecisions() {
@@ -60,23 +78,44 @@ class FuelHistoryTest {
     @Test fun partialFillCarriesMeasuredFuelAndResetsDistanceFromLastPurchase() {
         val partial = fill(6, 1_380.0, 1.0, full = false)
         val stats = FuelHistory.calculate(bike, steady() + partial, partial.odometerKm)
-        assertEquals(76.0, stats.typicalIntervalKm!!, 1e-9)
-        assertEquals(76.0, stats.untilTypicalKm!!, 1e-9)
+        val reach = initialEstimate(List(4) { 80.0 } + 60.0)
+        val reserve = initialEstimate(List(5) { 8.0 } + 9.0) / .05
+        assertEquals(reach, stats.typicalIntervalKm!!, 1e-9)
+        assertEquals(reach, stats.untilTypicalKm!!, 1e-9)
         assertEquals(200.0, stats.remainingRangeKm!!, 1e-9)
-        assertEquals(164.0, stats.typicalRefuelRangeKm!!, 1e-9)
-        assertFalse(stats.needsFuel(35.999))
-        assertTrue(stats.needsFuel(36.0))
+        assertEquals(reserve, stats.typicalRefuelRangeKm!!, 1e-9)
+        val tripDistanceAtReserve = 200.0 - stats.typicalRefuelRangeKm
+        assertFalse(stats.needsFuel(tripDistanceAtReserve - .001))
+        assertTrue(stats.needsFuel(tripDistanceAtReserve))
 
         val closed = FuelHistory.calculate(bike, steady() + partial + fill(7, 1_400.0, 3.0), 1_400.0)
         assertEquals(5.0, closed.litresPer100Km!!, 1e-9)
-        assertEquals(64.0, closed.typicalIntervalKm!!, 1e-9)
-        assertEquals(168.0, closed.typicalRefuelRangeKm!!, 1e-9)
+        assertEquals(initialEstimate(List(4) { 80.0 } + listOf(60.0, 20.0)), closed.typicalIntervalKm!!, 1e-9)
+        assertEquals(initialEstimate(List(5) { 8.0 } + listOf(9.0, 9.0)) / .05, closed.typicalRefuelRangeKm!!, 1e-9)
+    }
+
+    @Test fun anUnconfirmedPartialEntersHistoryOnlyAfterTheMeasuredClosing() {
+        val base = steady().map { it.copy(at = it.at * DAY) }
+        // 3 L after 40 km overfills at the prior 0.05 L/km rate. Closing later measures 0.075 L/km.
+        val partial = fill(6 * DAY, 1_360.0, 3.0, full = false)
+        val open = FuelHistory.calculate(bike, base + partial, 1_360.0)
+        assertEquals(80.0, open.typicalIntervalKm!!, 1e-9)
+        assertEquals(160.0, open.typicalRefuelRangeKm!!, 1e-9)
+        assertNull(open.remainingRangeKm)
+        assertFalse(open.needsFuel(0.0))
+
+        val closing = fill(15 * DAY, 1_420.0, 4.5)
+        val closed = FuelHistory.calculate(bike, base + partial + closing, 1_420.0)
+        val rate = initialRatio(List(4) { 400.0 to 80.0 } + (750.0 to 100.0))
+        assertEquals(rate, closed.litresPer100Km!!, 1e-9)
+        assertEquals(initialEstimate(List(4) { 80.0 } + listOf(40.0, 60.0)), closed.typicalIntervalKm!!, 1e-9)
+        assertEquals(initialEstimate(List(5) { 8.0 } + listOf(9.0, 7.5)) / (rate / 100), closed.typicalRefuelRangeKm!!, 1e-9)
     }
 
     @Test fun matchingTheDistanceThresholdCanQualifyWithMoreFuelThanTheLearnedReserve() {
         val fills = steady().let { listOf(it.first().copy(litres = 12.0)) + it.drop(1) }
         val stats = FuelHistory.calculate(bike, fills, 1_320.0)
-        assertEquals(128.0, stats.typicalRefuelRangeKm!!, 1e-9)
+        assertEquals(initialEstimate(listOf(0.0, 8.0, 8.0, 8.0, 8.0)) / .05, stats.typicalRefuelRangeKm!!, 1e-9)
         assertTrue(stats.remainingRangeKm!! - 80 > stats.typicalRefuelRangeKm)
         assertFalse(stats.needsFuel(79.999))
         assertTrue(stats.needsFuel(80.0))
@@ -117,6 +156,7 @@ class FuelHistoryTest {
 
     @Test fun aGapOrUnreliableTailKeepsTheVerifiedPartialPurchaseWithoutOfferingFuel() {
         val known = steady() + fill(6, 1_380.0, 1.0, full = false)
+        val baseline = FuelHistory.calculate(bike, known, 1_380.0)
         val tails = listOf(
             fill(7, 1_390.0, 1.0, full = false, missed = true),
             fill(7, 1_390.0, 13.0, full = false),
@@ -124,8 +164,8 @@ class FuelHistoryTest {
         )
         for (tail in tails) {
             val stats = FuelHistory.calculate(bike, known + tail, tail.odometerKm)
-            assertEquals("tail=$tail", 76.0, stats.typicalIntervalKm!!, 1e-9)
-            assertEquals("tail=$tail", 164.0, stats.typicalRefuelRangeKm!!, 1e-9)
+            assertEquals("tail=$tail", baseline.typicalIntervalKm, stats.typicalIntervalKm)
+            assertEquals("tail=$tail", baseline.typicalRefuelRangeKm, stats.typicalRefuelRangeKm)
             assertEquals(5.0, stats.litresPer100Km!!, 1e-9)
             assertNull(stats.remainingRangeKm)
             assertNull(stats.untilTypicalKm)
@@ -138,8 +178,8 @@ class FuelHistoryTest {
         val fills = steady() + fill(6, 1_380.0, 1.0, full = false) + fill(7, 1_500.0, 1.0)
         val stats = FuelHistory.calculate(bike, fills, 1_500.0)
         assertEquals(5.0, stats.litresPer100Km!!, 1e-9)
-        assertEquals(76.0, stats.typicalIntervalKm!!, 1e-9)
-        assertEquals(176.0, stats.typicalRefuelRangeKm!!, 1e-9)
+        assertEquals(initialEstimate(List(4) { 80.0 } + 60.0), stats.typicalIntervalKm!!, 1e-9)
+        assertEquals(initialEstimate(List(5) { 8.0 } + listOf(9.0, 11.0)) / .05, stats.typicalRefuelRangeKm!!, 1e-9)
         assertEquals(240.0, stats.remainingRangeKm!!, 1e-9)
         assertFalse(stats.needsFuel(0.0))
     }
@@ -157,4 +197,17 @@ class FuelHistoryTest {
         }
         assertTrue(calibrated.needsFuel(240.0))
     }
+
+    @Test fun aPreparedHistoryRemainsStableAcrossOdometerUpdatesAndInputListChanges() {
+        val fills = steady()
+        val mutableFills = fills.toMutableList()
+        val prepared = FuelHistory.prepare(bike, mutableFills)
+        assertEquals(5, prepared.learningFullCount)
+        mutableFills.clear()
+        for (odometer in listOf(1_320.0, 1_400.0, 1_559.0, Double.NaN)) {
+            assertEquals(FuelHistory.calculate(bike, fills, odometer), prepared.statsAt(odometer))
+        }
+    }
+
+    private companion object { const val DAY = 86_400_000L }
 }

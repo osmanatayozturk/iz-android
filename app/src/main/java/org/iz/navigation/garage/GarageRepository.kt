@@ -130,21 +130,21 @@ class GarageRepository internal constructor(private val app: IzApplication) {
         }
 
     /** A drive with insufficient fuel history should never read its GPS history to evaluate a prompt. */
-    @OptIn(ExperimentalCoroutinesApi::class)
-    internal fun offerStats(vehicle: GarageVehicle): Flow<FuelStats?> = fills(vehicle.id)
-        .map { FuelHistory.calculate(vehicle, it, vehicle.odometerKm).learningFullCount >= 5 }
-        .distinctUntilChanged().flatMapLatest { ready -> if (ready) stats(vehicle.id) else flowOf(null) }
+    internal fun offerStats(vehicle: GarageVehicle): Flow<FuelStats?> = observeStats(vehicle.id, requireLearned = true)
 
     fun stats(vehicleId: String): Flow<FuelStats> = observeStats(vehicleId).filterNotNull()
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    private fun observeStats(vehicleId: String): Flow<FuelStats?> =
+    private fun observeStats(vehicleId: String, requireLearned: Boolean = false): Flow<FuelStats?> =
         combine(dao.observeVehicle(vehicleId), dao.fills(vehicleId)) { vehicle, fills -> vehicle to fills }
+            .distinctUntilChanged()
             .flatMapLatest { (vehicle, fills) ->
                 if (vehicle == null) return@flatMapLatest flowOf(null)
                 val lastFill = fills.lastOrNull()?.takeIf { it.at >= vehicle.odometerAt }
                 val since = lastFill?.at ?: vehicle.odometerAt
                 val baseline = lastFill?.odometerKm ?: vehicle.odometerKm
+                val history = FuelHistory.prepare(vehicle, fills)
+                if (requireLearned && history.learningFullCount < 5) return@flatMapLatest flowOf(null)
                 dao.points(vehicleId, since).map { points ->
                     var meters = 0.0
                     var previous: TrackPoint? = null
@@ -158,7 +158,7 @@ class GarageRepository internal constructor(private val app: IzApplication) {
                         }
                         previous = point
                     }
-                    FuelHistory.calculate(vehicle, fills, baseline + meters / 1000).copy(distanceBaselineAt = since)
+                    history.statsAt(baseline + meters / 1000).copy(distanceBaselineAt = since)
                 }
             }.distinctUntilChanged().flowOn(Dispatchers.Default)
 }

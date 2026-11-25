@@ -14,6 +14,7 @@ import org.iz.navigation.data.Journey
 import org.iz.navigation.data.TrackPoint
 import org.iz.navigation.data.Transport
 import org.iz.navigation.garage.FuelFill
+import org.iz.navigation.garage.FuelHistory
 import org.iz.navigation.garage.GarageVehicle
 import org.iz.navigation.garage.needsFuel
 import org.junit.Assert.*
@@ -50,14 +51,23 @@ class GarageNumbersAcceptanceTest {
             garage.saveFill(firstFive.last())
             val learned = stats()
             assertEquals(5, learned.learningFullCount)
-            assertEquals(4.075, requireNotNull(learned.litresPer100Km), .00001)
-            assertEquals(294.47853, requireNotNull(learned.fullRangeKm), .0001)
-            assertEquals(200.0, requireNotNull(learned.typicalIntervalKm), .0001)
+            assertEquals(4.08070399, requireNotNull(learned.litresPer100Km), .00001)
+            assertEquals(294.06690683, requireNotNull(learned.fullRangeKm), .0001)
+            assertEquals(199.57013583, requireNotNull(learned.typicalIntervalKm), .0001)
             // The first fill supplies one reserve observation despite having no preceding odometer interval.
-            assertEquals(86.38037, requireNotNull(learned.typicalRefuelRangeKm), .0001)
+            assertEquals(87.70142576, requireNotNull(learned.typicalRefuelRangeKm), .0001)
             assertEquals(2.129, requireNotNull(learned.tlPerKm), .00001)
-            assertFalse(learned.needsFuel(199.99))
-            assertTrue(learned.needsFuel(200.0))
+            assertFalse(learned.needsFuel(199.56))
+            assertTrue(learned.needsFuel(199.58))
+            val original = garage.fills(bike.id).first()
+            val parkedHistory = original.map { it.copy(at = it.at - 180L * 86_400_000L) }
+            val fresh = FuelHistory.calculate(bike, original, learned.odometerKm)
+            val parked = FuelHistory.calculate(bike, parkedHistory, learned.odometerKm)
+            assertEquals(fresh.litresPer100Km, parked.litresPer100Km)
+            assertEquals(fresh.typicalIntervalKm, parked.typicalIntervalKm)
+            assertEquals(fresh.typicalRefuelRangeKm, parked.typicalRefuelRangeKm)
+            assertEquals(fresh.remainingRangeKm, parked.remainingRangeKm)
+            assertEquals(fresh.needsFuel(199.58), parked.needsFuel(199.58))
             assertEquals(2163.80, garage.fills(bike.id).first().sumOf { it.totalTl }, .001)
             assertTrue(garage.fills(car.id).first().isEmpty())
             assertNull(withTimeout(4_000) { garage.stats(car.id).first() }.litresPer100Km)
@@ -65,34 +75,37 @@ class GarageNumbersAcceptanceTest {
             garage.saveFill(fill(5, 2050.0, 10.0, 55.0))
             val sixth = stats()
             assertEquals(5, sixth.learningFullCount)
-            assertEquals(4.057142857, requireNotNull(sixth.litresPer100Km), .00001)
-            assertEquals(210.0, requireNotNull(sixth.typicalIntervalKm), .001)
-            assertEquals(85.77465, requireNotNull(sixth.typicalRefuelRangeKm), .0001)
+            assertEquals(4.05807354, requireNotNull(sixth.litresPer100Km), .00001)
+            assertEquals(211.50151551, requireNotNull(sixth.typicalIntervalKm), .001)
+            assertEquals(80.18369351, requireNotNull(sixth.typicalRefuelRangeKm), .0001)
 
-            // The seventh full fill shifts the five-interval window beyond the first 200 km interval.
+            // At the seventh fill, all six valid consumption intervals still contribute.
             garage.saveFill(fill(6, 2200.0, 6.0, 56.0))
             val seventh = stats()
-            assertEquals(4.06, requireNotNull(seventh.litresPer100Km), .00001)
-            assertEquals(200.0, requireNotNull(seventh.typicalIntervalKm), .001)
-            assertEquals(95.56650, requireNotNull(seventh.typicalRefuelRangeKm), .0001)
+            assertEquals(4.04906673, requireNotNull(seventh.litresPer100Km), .00001)
+            assertEquals(198.85476561, requireNotNull(seventh.typicalIntervalKm), .001)
+            assertEquals(92.79557222, requireNotNull(seventh.typicalRefuelRangeKm), .0001)
 
             val partialFill = fill(7, 2230.0, 1.0, 57.0, full = false)
             garage.saveFill(partialFill)
             val partial = stats()
-            assertEquals(162.0, requireNotNull(partial.typicalIntervalKm), .001)
-            assertEquals(133.90148, requireNotNull(partial.typicalRefuelRangeKm), .0001)
-            assertEquals(162.0, requireNotNull(partial.untilTypicalKm), .001)
+            assertEquals(167.92453086, requireNotNull(partial.typicalIntervalKm), .001)
+            assertEquals(121.73216620, requireNotNull(partial.typicalRefuelRangeKm), .0001)
+            assertEquals(167.92453086, requireNotNull(partial.untilTypicalKm), .001)
             assertFalse(partial.needsFuel(0.0))
-            assertFalse(partial.needsFuel(156.0))
-            // The reserve is reached before the 162 km between-purchases trigger.
-            assertTrue(partial.needsFuel(157.0))
+            assertFalse(partial.needsFuel(167.9))
+            assertTrue(partial.needsFuel(168.0))
 
             garage.saveFill(partialFill.copy(litres = .5))
-            assertEquals(277.88177, requireNotNull(stats().remainingRangeKm), .0001)
+            val edited = stats()
+            assertEquals(278.71311411, requireNotNull(edited.remainingRangeKm), .0001)
+            // The reserve now triggers before the 167.9 km between-purchases threshold.
+            assertFalse(edited.needsFuel(156.9))
+            assertTrue(edited.needsFuel(157.0))
             garage.deleteFill(partialFill.id)
             val restored = stats()
-            assertEquals(200.0, requireNotNull(restored.typicalIntervalKm), .001)
-            assertEquals(95.56650, requireNotNull(restored.typicalRefuelRangeKm), .0001)
+            assertEquals(198.85476561, requireNotNull(restored.typicalIntervalKm), .001)
+            assertEquals(92.79557222, requireNotNull(restored.typicalRefuelRangeKm), .0001)
 
             garage.saveFill(fill(8, 2250.0, 1.0, 58.0, full = false, missed = true))
             assertFalse("The current tank cannot be estimated after an unknown partial refill", stats().needsFuel(1000.0))
