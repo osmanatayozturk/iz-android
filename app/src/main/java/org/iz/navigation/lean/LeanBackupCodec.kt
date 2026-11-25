@@ -84,6 +84,7 @@ internal object LeanBackupCodec {
             session.result?.let { result ->
                 LeanCodec.estimateJson(result)
                 require(result.calibrationEpoch == input.calibration.epoch)
+                require(result.sensorTiming == null || result.sensorTiming.durationNanos == end - input.startedAtElapsedNanos)
                 require(input.calibration.acceptsAlgorithm(result.algorithmVersion))
                 require(result.observedMillis <= (end - input.startedAtElapsedNanos) / 1_000_000)
                 require(result.curves.all { it.startElapsedNanos >= input.startedAtElapsedNanos && it.endElapsedNanos <= end })

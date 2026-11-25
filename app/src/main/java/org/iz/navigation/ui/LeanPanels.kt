@@ -49,6 +49,8 @@ internal fun LeanSetupPanel(onMessage: (String) -> Unit) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Motosiklet montajı ve kalibrasyon", Modifier.semantics { heading() }, style = MaterialTheme.typography.titleLarge)
             Text("Kalibrasyonu park hâlinde yap. Yatış tahmini deneysel bir ölçümdür.")
+            LeanImuCheckControl()
+            LeanLocationComparisonPanel()
             Row(Modifier.heightIn(min = 48.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                 Text("Sürüş sonrası rapor için sensör verisi kaydet", Modifier.weight(1f))
                 Switch(config.enabled, { enabled -> save { settings.enabled(enabled) } },
@@ -188,7 +190,7 @@ internal fun LeanJourneyReportPanel(journey: Journey) {
     val report by flow.collectAsStateWithLifecycle(LeanJourneyReport(false, null, null, 0, 0, emptySet(), emptyList(), emptySet()))
     val handlebar = report.handlebar
     val showBody = handlebar == null || report.pending || report.observedMillis > 0 || report.partialReasons.isNotEmpty() ||
-        report.leftDegrees != null || report.rightDegrees != null
+        report.leftDegrees != null || report.rightDegrees != null || report.sessionDetails.isNotEmpty()
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Deneysel yatış raporu", style = MaterialTheme.typography.titleLarge)
@@ -238,7 +240,7 @@ private fun LeanReportSection(journey: Journey, report: LeanJourneyReport, title
         }
     }
     val completed = journey.endedAt != null && !report.pending
-    if (completed || report.partialReasons.isNotEmpty()) {
+    if (completed || report.partialReasons.isNotEmpty() || report.sessionDetails.isNotEmpty()) {
         TextButton(onClick = { coverage = !coverage }, modifier = Modifier.testTag("$reportTag-coverage")) {
             Text(if (coverage) "Ölçüm kapsamını gizle" else "Ölçüm kapsamı ve sınırlamalar")
         }
@@ -246,6 +248,7 @@ private fun LeanReportSection(journey: Journey, report: LeanJourneyReport, title
             if (completed) Text("Geçerli kapsam ${report.validMillis / 1000} sn / gözlenen ${report.observedMillis / 1000} sn",
                 style = MaterialTheme.typography.bodySmall)
             report.partialReasons.map(::leanPartialLabel).distinct().forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+            if (report.sessionDetails.isNotEmpty() || completed) LeanReportDiagnostics(report.sessionDetails, mountLabel)
         }
     }
 }

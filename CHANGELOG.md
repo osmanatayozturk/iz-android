@@ -1,5 +1,11 @@
 # Değişiklik geçmişi
 
+## Geliştirme sürümü · Yatış sensörü ve GPS tanısı
+
+- Telefonun **Motosiklet montajı ve kalibrasyon** ekranında, park hâlinde 10 saniyelik sensör sınaması yapabilirsiniz. İvmeölçer ve jiroskop örnekleri ayrı sayılır. Tanı ölçümleri yolculuk veya kalibrasyon kaydına yazılmaz.
+- Aynı ekranda birleşik konum (Fused) ve doğrudan GPS verilerini ortak bir park ölçümünde karşılaştırabilirsiniz. Ekran, her kaynağın örnek sayısını, ilk ölçüme kadar geçen süreyi ve doğruluk alanlarının ne sıklıkla bildirildiğini gösterir.
+- Yatış raporunda sensör örneklerinin sayısı ve zaman aralıkları ile yatışın hesaplanamadığı GPS bölümlerinin gerekçeleri görülebilir. Eski kayıtlarda ölçülmemiş ayrıntılar **Bilinmiyor** olarak görünür.
+
 ## Geliştirme sürümü · Motosiklet sürüşü ve Garaj
 
 - Telefonda tarifli veya tarifsiz motosiklet kaydı sırasında yatış kaydının durumunu görebilir ve kapalıysa sürüşü kesmeden açabilirsiniz. **Yatış sensörleri kaydediliyor** durumu, ivmeölçer ve jiroskop verileri o yolculuğa yazıldığında görünür. GPS kaydı ayrı devam eder.

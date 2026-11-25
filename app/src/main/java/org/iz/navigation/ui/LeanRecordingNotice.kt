@@ -50,7 +50,8 @@ internal fun ActiveLeanRecordingNotice(journeyId: String, settings: LeanCaptureS
         settings.mount == LeanMount.HANDLEBAR -> "Gidon kalibrasyonu hazır · Sensör verisi bekleniyor"
         else -> "Gövde kalibrasyonu hazır · Sensör verisi bekleniyor"
     }
-    LeanRecordingNotice(label, saving, saveFailed, onEnable = if (settings.enabled) null else {
+    val gnssHint = current?.gnssHint?.takeIf { settings.enabled && it.isNotBlank() }
+    LeanRecordingNotice(label, gnssHint, saving, saveFailed, onEnable = if (settings.enabled) null else {
         {
             if (!saving) {
                 saving = true
@@ -67,10 +68,12 @@ internal fun ActiveLeanRecordingNotice(journeyId: String, settings: LeanCaptureS
 }
 
 @Composable
-private fun LeanRecordingNotice(label: String, saving: Boolean, saveFailed: Boolean, onEnable: (() -> Unit)?) {
+private fun LeanRecordingNotice(label: String, gnssHint: String?, saving: Boolean, saveFailed: Boolean, onEnable: (() -> Unit)?) {
     Column(Modifier.fillMaxWidth().testTag("lean-recording-notice")) {
         Text(label, Modifier.semantics { liveRegion = LiveRegionMode.Polite }.testTag("lean-recording-status"),
             style = MaterialTheme.typography.bodySmall)
+        gnssHint?.let { Text(it, Modifier.semantics { liveRegion = LiveRegionMode.Polite }
+            .testTag("lean-recording-gnss-hint"), style = MaterialTheme.typography.bodySmall) }
         if (onEnable != null) {
             TextButton(onEnable, enabled = !saving, modifier = Modifier.heightIn(min = 48.dp).testTag("lean-recording-enable")) {
                 Text("Yatış kaydını aç")

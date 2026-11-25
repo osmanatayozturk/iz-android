@@ -280,6 +280,49 @@ class HandlebarLeanEstimatorTest {
         assertEquals(estimate(fixture), estimate(scrambled))
     }
 
+    @Test fun diagnosableQualityFieldsCountOncePerRejectedPair() {
+        val fixes = ride().filterIsInstance<LeanGnssRecord>().take(2).map {
+            it.copy(bearingAccuracyDegrees = null, bearingDegrees = 360.0)
+        }
+        val result = estimate(fixes)
+        assertTrue("GNSS_QUALITY" in result.partialReasons)
+        assertEquals(setOf(
+            LeanGnssIssue("GNSS_BEARING_ACCURACY_MISSING", "pair", 1, second),
+            LeanGnssIssue("GNSS_BEARING_OUT_OF_RANGE", "pair", 1, second),
+        ), requireNotNull(result.gnssDiagnostics).issues.toSet())
+        assertEquals(0L, result.validMillis)
+    }
+
+    @Test fun gapFrequencyAndClockRetainPrecedenceOverEndpointQuality() {
+        val (first, last) = ride().filterIsInstance<LeanGnssRecord>().take(2)
+        val cases = listOf(
+            Triple("GNSS_DATA_GAP", 2 * second, last.utcMillis),
+            Triple("GNSS_RATE_UNSUITABLE", second / 4, last.utcMillis),
+            Triple("CLOCK_DISCONTINUITY", second, last.utcMillis + 1_500),
+        )
+        for ((code, interval, atUtc) in cases) {
+            val result = estimate(listOf(first, last.copy(elapsedNanos = first.elapsedNanos + interval,
+                utcMillis = atUtc, speedAccuracyMps = null)))
+            assertEquals(listOf(LeanGnssIssue(code, "pair", 1, interval)),
+                requireNotNull(result.gnssDiagnostics).issues)
+        }
+    }
+
+    @Test fun warningsUseMeasuredMovementAndMountSpecificChecks() {
+        val (first, last) = ride().filterIsInstance<LeanGnssRecord>().take(2)
+        val noBearing = last.copy(bearingAccuracyDegrees = null)
+        assertEquals(leanGnssIssueLabel("GNSS_BEARING_ACCURACY_MISSING"),
+            leanMovingGnssHint(first, noBearing, LeanMount.HANDLEBAR))
+        assertNull(leanMovingGnssHint(first, noBearing, LeanMount.BODY))
+        val missingSpeedAccuracy = noBearing.copy(speedAccuracyMps = null)
+        assertEquals(leanGnssIssueLabel("GNSS_SPEED_ACCURACY_MISSING"),
+            leanMovingGnssHint(first, missingSpeedAccuracy, LeanMount.BODY))
+        assertEquals(leanGnssIssueLabel("GNSS_DUPLICATE_TIME"),
+            leanMovingGnssHint(first, last.copy(elapsedNanos = first.elapsedNanos), LeanMount.HANDLEBAR))
+        assertNull(leanMovingGnssHint(first.copy(speedMps = 0.0), missingSpeedAccuracy.copy(speedMps = 0.0), LeanMount.HANDLEBAR))
+        assertNull(leanMovingGnssHint(first, missingSpeedAccuracy, LeanMount.UNKNOWN))
+    }
+
     @Test fun conflictingFixesAtOneMeasurementTimeCannotSupportEitherAdjacentInterval() {
         val at = start + 6 * second
         val original = ride()
@@ -289,6 +332,8 @@ class HandlebarLeanEstimatorTest {
         val sequence = original.take(index) + duplicate + original.drop(index)
         val result = estimate(sequence)
         assertTrue("GNSS_DUPLICATE_TIME" in result.partialReasons)
+        assertEquals(listOf(LeanGnssIssue("GNSS_DUPLICATE_TIME", "fix", 2, 0)),
+            requireNotNull(result.gnssDiagnostics).issues)
         assertEquals(10_000L, result.validMillis)
         assertTrue(result.curves.none { it.startElapsedNanos < at && it.endElapsedNanos > at })
         assertEquals(result, estimate(sequence.chunked(70).flatMap { it.reversed() }))

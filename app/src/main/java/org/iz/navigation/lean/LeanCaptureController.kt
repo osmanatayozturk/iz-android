@@ -36,8 +36,10 @@ internal class LeanCaptureController(context: Context, private val onCaptureChan
     @Volatile private var active: Capture? = null
     @Volatile private var blockedKey: String? = null
     private class Capture(val token: LeanSessionToken, val identity: String, val calibrationEpoch: String,
-        val generation: Long, val start: Long) {
+        val generation: Long, val start: Long, val mount: LeanMount) {
         val progress = LeanSensorCommitProgress(start)
+        var lastFix: LeanGnssRecord? = null
+        var gnssHint: String? = null
         val records = Channel<LeanRecord>(512)
         val dropped = AtomicLong()
         @Volatile var accepting = true
@@ -78,7 +80,7 @@ internal class LeanCaptureController(context: Context, private val onCaptureChan
             catch (_: Exception) { /* Recover the unsealed session on the next store access. */ }
             return@withLock
         }
-        val session = Capture(token, identity, reference.epoch, generation.incrementAndGet(), elapsed)
+        val session = Capture(token, identity, reference.epoch, generation.incrementAndGet(), elapsed, config.mount)
         session.sensor = LeanSensorCapture(context, { record -> offer(session, record) }, { session.dropped.incrementAndGet() })
         session.writer = io.launch(start = CoroutineStart.LAZY) { write(session) }
         active = session
@@ -112,8 +114,11 @@ internal class LeanCaptureController(context: Context, private val onCaptureChan
 
     private fun publishProgress(session: Capture) = synchronized(statusLock) {
         if (statusOwner === owner && active === session && session.accepting) {
-            mutableStatus.value = LeanRecordingStatus(session.token.journeyId, session.calibrationEpoch,
-                session.progress.phase(SystemClock.elapsedRealtimeNanos()))
+            val now = SystemClock.elapsedRealtimeNanos()
+            val phase = session.progress.phase(now)
+            val freshFix = session.lastFix?.let { now - it.elapsedNanos in 0..2_500_000_000L } == true
+            mutableStatus.value = LeanRecordingStatus(session.token.journeyId, session.calibrationEpoch, phase,
+                gnssHint = session.gnssHint.takeIf { phase == LeanRecordingPhase.RECORDING && freshFix })
         }
     }
 
@@ -148,6 +153,13 @@ internal class LeanCaptureController(context: Context, private val onCaptureChan
                 }
                 unpersisted = emptyList()
                 session.progress.commit(committed)
+                for (record in committed.fixes) {
+                    val previous = session.lastFix
+                    session.gnssHint = if (previous != null && record.elapsedNanos > previous.elapsedNanos) {
+                        leanMovingGnssHint(previous, record, session.mount)
+                    } else null
+                    session.lastFix = record.takeIf { previous == null || it.elapsedNanos > previous.elapsedNanos }
+                }
                 publishProgress(session)
             }
         } catch (cancelled: CancellationException) { session.reason = "capture_interrupted"; throw cancelled }

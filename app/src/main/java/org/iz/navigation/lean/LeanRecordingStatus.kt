@@ -10,12 +10,14 @@ internal data class LeanRecordingStatus(
     val calibrationEpoch: String,
     val phase: LeanRecordingPhase,
     val sensorFailure: CalibrationFailure? = null,
+    val gnssHint: String? = null,
 )
 
 /** Timestamps from a committed batch. An accepted empty batch proves nothing. */
 internal data class LeanPersistedBatch(
     val accelerometerNanos: Long? = null,
     val gyroscopeNanos: Long? = null,
+    val fixes: List<LeanGnssRecord> = emptyList(),
 )
 
 internal class LeanSensorCommitProgress(private val startedAt: Long) {

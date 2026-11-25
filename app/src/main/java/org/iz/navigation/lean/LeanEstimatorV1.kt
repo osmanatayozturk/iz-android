@@ -1,5 +1,6 @@
 package org.iz.navigation.lean
 
+import org.iz.navigation.lean.LeanGnssIssueCode.*
 import kotlin.math.*
 
 /** Experimental post-trip adaptation of Stanglmayr2020 secs2.2–2.4, not a validated instrument.
@@ -13,6 +14,7 @@ class LeanEstimatorV1 : LeanEstimator {
         val result = Accumulator(session, checkAllowed)
         if (!result.validSession()) return result.finish()
         val window = ArrayList<LeanRecord>()
+        val gnssWindow = ArrayList<GnssRow>()
         var first = Long.MIN_VALUE
         var latest = Long.MIN_VALUE
         var attempts = 0
@@ -29,18 +31,23 @@ class LeanEstimatorV1 : LeanEstimator {
             latest = maxOf(latest, time)
             if (time < latest - WINDOW_NANOS) { result.reasons.add("LATE_RECORD"); continue }
             window.add(record)
+            if (record is LeanGnssRecord) gnssWindow.add(GnssRow(total, record))
             if (latest - first >= WINDOW_NANOS) {
-                result.process(window)
+                result.process(window, gnssWindow)
                 val retainFrom = latest - OVERLAP_NANOS
                 window.removeAll { it.elapsedNanos < retainFrom }
+                gnssWindow.removeAll { it.fix.elapsedNanos < retainFrom }
+                result.discardGnssDiagnosticsKeysBefore(retainFrom)
                 first = window.minOfOrNull { it.elapsedNanos } ?: latest
                 attempts = window.size
             }
         }
         checkAllowed()
-        if (window.isNotEmpty()) result.process(window)
+        if (window.isNotEmpty()) result.process(window, gnssWindow)
         return result.finish()
     }
+
+    private data class GnssRow(val ordinal: Int, val fix: LeanGnssRecord)
 
     private class Accumulator(val session: LeanInputSession, val check: () -> Unit) {
         val reasons = linkedSetOf<String>().apply { addAll(session.partialReasons.asSequence().filter { it.matches(Regex("[A-Z0-9_]{1,64}")) }.take(64).toList()) }
@@ -50,8 +57,37 @@ class LeanEstimatorV1 : LeanEstimator {
         private var validNanos = 0L
         private var lastEmitted = Long.MIN_VALUE
         private val curves = ArrayList<LeanCurveResult>()
+        private val gnssIssues = LeanGnssIssueCounter()
+        private var diagnosedFixOrdinal = 0
+        private var examinedGnss = false
+        private data class GnssPair(val code: LeanGnssIssueCode, val from: Int, val to: Int)
+        private val diagnosedPairs = mutableMapOf<GnssPair, Long>()
+        private val insufficientFixes = mutableMapOf<Int, Long>()
         private val origin = session.startedAtElapsedNanos
         private fun seconds(time: Long) = (time - origin) / 1e9
+
+        fun discardGnssDiagnosticsKeysBefore(time: Long) {
+            diagnosedPairs.entries.removeAll { it.value < time }
+            insufficientFixes.entries.removeAll { it.value < time }
+        }
+
+        private fun diagnosePairs(gps: List<GnssRow>, code: LeanGnssIssueCode, rejected: (Double) -> Boolean) {
+            gps.zipWithNext { a, b ->
+                val from = a.fix.elapsedNanos
+                val to = b.fix.elapsedNanos
+                if (rejected(seconds(to) - seconds(from)) && diagnosedPairs.putIfAbsent(GnssPair(code, a.ordinal, b.ordinal), from) == null) {
+                    gnssIssues.pair(code, to - from)
+                }
+            }
+        }
+
+        private fun diagnoseInsufficientFixes(gps: List<GnssRow>) {
+            for (row in gps) {
+                if (insufficientFixes.putIfAbsent(row.ordinal, row.fix.elapsedNanos) == null) {
+                    gnssIssues.fix(GNSS_INSUFFICIENT_FIXES)
+                }
+            }
+        }
 
         fun validSession(): Boolean {
             val c = session.calibration
@@ -68,8 +104,9 @@ class LeanEstimatorV1 : LeanEstimator {
             return valid
         }
 
-        fun process(records: List<LeanRecord>) {
+        fun process(records: List<LeanRecord>, gnssRows: List<GnssRow>) {
             check()
+            examinedGnss = true
             val cuts = ArrayList<Pair<Double, Double>>()
             fun bad(time: Long, reason: String) { reasons.add(reason); cuts.add(seconds(time) - .5 to seconds(time) + .5) }
             fun imu(kind: LeanSensorKind): List<LeanImuRecord> {
@@ -88,39 +125,57 @@ class LeanEstimatorV1 : LeanEstimator {
             }
             val accelerometer = imu(LeanSensorKind.ACCELEROMETER)
             val gyroscope = imu(LeanSensorKind.GYROSCOPE)
-            val gnss = records.filterIsInstance<LeanGnssRecord>().sortedBy { it.elapsedNanos }.filter { value ->
-                val valid = !value.mock && value.latitude.isFinite() && value.latitude in -90.0..90.0 &&
-                    value.longitude.isFinite() && value.longitude in -180.0..180.0 &&
-                    value.speedMps?.let { it.isFinite() && it in 0.0..100.0 } == true &&
-                    value.accuracyMeters?.let { it.isFinite() && it in 0.0..20.0 } == true &&
-                    value.speedAccuracyMps?.let { it.isFinite() && it in 0.0..1.5 } == true &&
-                    value.elapsedUncertaintyNanos?.let { it.isFinite() && it in 0.0..100_000_000.0 } == true
-                val expectedUtc = utc(value.elapsedNanos)
-                val clockValid = expectedUtc != null && value.utcMillis > 0 && abs(value.utcMillis.toDouble() - expectedUtc) <= 2000
-                if (!valid || !clockValid) bad(value.elapsedNanos, if (!clockValid) "CLOCK_DISCONTINUITY" else "GNSS_QUALITY")
-                valid && clockValid
-            }.distinctBy { it.elapsedNanos }
+            val acceptedTimes = hashSetOf<Long>()
+            val gnss = gnssRows.sortedBy { it.fix.elapsedNanos }.filter { row ->
+                val value = row.fix
+                val newFix = row.ordinal > diagnosedFixOrdinal
+                val clockValid = LeanGnssQuality.clockValid(value, utc(value.elapsedNanos), LeanMount.BODY)
+                val issues = if (clockValid) LeanGnssQuality.fixIssues(value, LeanMount.BODY) else setOf(CLOCK_DISCONTINUITY)
+                if (issues.isNotEmpty()) {
+                    bad(value.elapsedNanos, if (!clockValid) "CLOCK_DISCONTINUITY" else "GNSS_QUALITY")
+                    if (newFix) issues.forEach { gnssIssues.fix(it) }
+                    false
+                } else {
+                    val first = acceptedTimes.add(value.elapsedNanos)
+                    if (!first && newFix) gnssIssues.fix(GNSS_DUPLICATE_TIME)
+                    first
+                }
+            }
+            diagnosedFixOrdinal = maxOf(diagnosedFixOrdinal, gnssRows.lastOrNull()?.ordinal ?: 0)
             if (accelerometer.size < 2 || gyroscope.size < 2) { reasons.add("IMU_UNAVAILABLE"); return }
-            if (gnss.size < 12) { reasons.add("GNSS_RATE_UNSUITABLE"); return }
+            if (gnss.size < 12) {
+                reasons.add("GNSS_RATE_UNSUITABLE")
+                val sensorSpan = minOf(accelerometer.last().elapsedNanos, gyroscope.last().elapsedNanos) -
+                    maxOf(accelerometer.first().elapsedNanos, gyroscope.first().elapsedNanos)
+                if (sensorSpan >= 20_000_000_000L) diagnoseInsufficientFixes(gnss)
+                return
+            }
             val aTimes = accelerometer.map { seconds(it.elapsedNanos) }
             val wTimes = gyroscope.map { seconds(it.elapsedNanos) }
-            val gTimes = gnss.map { seconds(it.elapsedNanos) }
-            fun rate(times: List<Double>, maximumMedian: Double, reason: String): Boolean {
+            val gTimes = gnss.map { seconds(it.fix.elapsedNanos) }
+            fun rate(times: List<Double>, maximumMedian: Double, reason: String, gps: List<GnssRow>? = null): Boolean {
                 val steps = times.zipWithNext { a, b -> b - a }
                 val median = LeanSignalFilters.median(steps)
-                val valid = median > 0 && median <= maximumMedian &&
-                    steps.count { it > 1.8 * median } <= maxOf(1, steps.size / 10)
-                if (!valid) reasons.add(reason)
+                val regular = steps.count { it > 1.8 * median } <= maxOf(1, steps.size / 10)
+                val valid = median > 0 && median <= maximumMedian && regular
+                if (!valid) {
+                    reasons.add(reason)
+                    if (gps != null) diagnosePairs(gps, GNSS_RATE_UNSUITABLE) { step ->
+                        (median <= 0 && step <= 0) || (median > maximumMedian && step > maximumMedian) ||
+                            (!regular && step > 1.8 * median)
+                    }
+                }
                 return valid
             }
             if (!rate(aTimes, .04, "IMU_RATE_UNSUITABLE") || !rate(wTimes, .04, "IMU_RATE_UNSUITABLE") ||
-                !rate(gTimes, 1.25, "GNSS_RATE_UNSUITABLE")) return
+                !rate(gTimes, 1.25, "GNSS_RATE_UNSUITABLE", gnss)) return
             fun gaps(times: List<Double>, maxGap: Double) {
                 times.zipWithNext().forEach { (a, b) -> if (b - a > maxGap) {
                     cuts.add(a to b); reasons.add("DATA_GAP")
                 } }
             }
-            gaps(aTimes, .08); gaps(wTimes, .08); gaps(gTimes, 1.5)
+            gaps(aTimes, .08); gaps(wTimes, .08); gaps(gTimes, LeanGnssQuality.BODY_MAX_GAP_SECONDS)
+            diagnosePairs(gnss, GNSS_DATA_GAP) { it > LeanGnssQuality.BODY_MAX_GAP_SECONDS }
             val start = maxOf(aTimes.first(), wTimes.first(), gTimes.first())
             val end = minOf(aTimes.last(), wTimes.last(), gTimes.last())
             var cursor = start
@@ -128,7 +183,7 @@ class LeanEstimatorV1 : LeanEstimator {
                 if (until - from < 20.0) { reasons.add("SECTION_TOO_SHORT"); return }
                 val a = accelerometer.filter { seconds(it.elapsedNanos) in from..until }
                 val w = gyroscope.filter { seconds(it.elapsedNanos) in from..until }
-                val gps = gnss.filter { seconds(it.elapsedNanos) in from..until }
+                val gps = gnss.filter { seconds(it.fix.elapsedNanos) in from..until }
                 if (a.size < 2 || w.size < 2 || gps.size < 12) return
                 processSection(a, w, gps)
             }
@@ -140,7 +195,8 @@ class LeanEstimatorV1 : LeanEstimator {
             if (cursor < end) section(cursor, end)
         }
 
-        private fun processSection(a: List<LeanImuRecord>, w: List<LeanImuRecord>, gps: List<LeanGnssRecord>) {
+        private fun processSection(a: List<LeanImuRecord>, w: List<LeanImuRecord>, gnss: List<GnssRow>) {
+            val gps = gnss.map { it.fix }
             val aTimes = a.map { seconds(it.elapsedNanos) }
             val wTimes = w.map { seconds(it.elapsedNanos) }
             val gpsTimes = gps.map { seconds(it.elapsedNanos) }
@@ -171,9 +227,18 @@ class LeanEstimatorV1 : LeanEstimator {
             val gyro = filtered(w, wTimes, 5.0, session.calibration.gyroBias)
             // The speed filter uses its ACTUAL source rate, not a50Hz upsampled fiction.
             val gpsStep = LeanSignalFilters.median(gpsTimes.zipWithNext { x, y -> y - x })
-            if (gpsStep <= 0 || 1 / gpsStep <= .3 * 2.5) { reasons.add("GNSS_RATE_UNSUITABLE"); return }
+            if (gpsStep <= 0 || 1 / gpsStep <= .3 * 2.5) {
+                reasons.add("GNSS_RATE_UNSUITABLE")
+                diagnosePairs(gnss, GNSS_RATE_UNSUITABLE) { it <= 0 || 1 / it <= .3 * 2.5 }
+                return
+            }
             val speedCount = floor((gpsTimes.last() - gpsTimes.first()) / gpsStep).toInt() + 1
-            if (speedCount !in 12..1000) { reasons.add("GNSS_RATE_UNSUITABLE"); return }
+            if (speedCount !in 12..1000) {
+                reasons.add("GNSS_RATE_UNSUITABLE")
+                if (speedCount < 12) diagnoseInsufficientFixes(gnss)
+                else diagnosePairs(gnss, GNSS_RATE_UNSUITABLE) { true }
+                return
+            }
             val speedTimes = List(speedCount) { gpsTimes.first() + it * gpsStep }
             val actualSpeed = DoubleArray(speedCount) { i -> interpolate(gpsTimes, speedTimes[i]) { gps[it].speedMps!! } }
             val smoothSpeed = LeanSignalFilters.lowPassZeroPhase(actualSpeed, 1 / gpsStep, .3, check)
@@ -241,7 +306,7 @@ class LeanEstimatorV1 : LeanEstimator {
                 left?.let { round(it).takeIf { rounded -> rounded > 0 } },
                 right?.let { round(it).takeIf { rounded -> rounded > 0 } },
                 minOf(validNanos / 1_000_000, observed), observed, reasons.toSet(), curves.toList(),
-                frame?.rotation().orEmpty())
+                frame?.rotation().orEmpty(), gnssDiagnostics = gnssIssues.finish().takeIf { examinedGnss })
         }
     }
 

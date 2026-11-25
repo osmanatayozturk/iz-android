@@ -2,6 +2,7 @@ package org.iz.navigation.lean
 
 import java.util.PriorityQueue
 import kotlin.math.*
+import org.iz.navigation.lean.LeanGnssIssueCode.*
 
 /**
  * Experimental post-ride estimate for a handlebar-mounted phone.
@@ -30,7 +31,9 @@ class HandlebarLeanEstimator : LeanEstimator {
             return report.finish()
         }
 
-        val input = OrderedInput(reference, report::utc, report::cut) { a, b, degrees, kind ->
+        val gnss = LeanGnssIssueCounter()
+        report.gnss = gnss
+        val input = OrderedInput(reference, report::utc, report::cut, gnss) { a, b, degrees, kind ->
             report.validNanos += b.elapsedNanos - a.elapsedNanos
             if (abs(degrees) >= MIN_BANK_DEGREES) report.support(a, b, degrees, kind) else report.closeCurve()
         }
@@ -42,8 +45,12 @@ class HandlebarLeanEstimator : LeanEstimator {
             while (pending.peek()?.elapsedNanos?.let { it <= through } == true) {
                 val record = pending.remove()
                 if (record is LeanGnssRecord && pending.peek()?.elapsedNanos == record.elapsedNanos) {
-                    while (pending.peek()?.elapsedNanos == record.elapsedNanos) pending.remove()
-                    input.duplicateFix()
+                    var count = 1L
+                    while (pending.peek()?.elapsedNanos == record.elapsedNanos) {
+                        pending.remove()
+                        count++
+                    }
+                    input.duplicateFix(count)
                 } else {
                     input.accept(record)
                 }
@@ -104,10 +111,18 @@ class HandlebarLeanEstimator : LeanEstimator {
         FLOWING(12.0, 1.0, 8.0, 4.0, 1.5, 3_000_000_000L),
     }
 
+    private sealed interface GnssInterval {
+        data class Rejected(val reason: String, val issues: Set<LeanGnssIssueCode>) : GnssInterval
+        data class Parked(val disagreement: Boolean) : GnssInterval
+        data class Moving(val kind: SpeedClass, val speed: Double, val yaw: Double,
+            val bank: Double, val degrees: Double) : GnssInterval
+    }
+
     private class OrderedInput(
         private val reference: Reference,
         private val expectedUtc: (Long) -> Long?,
         private val cut: (String?) -> Unit,
+        private val gnss: LeanGnssIssueCounter? = null,
         private val onValid: (LeanGnssRecord, LeanGnssRecord, Double, SpeedClass) -> Unit,
     ) {
         private val acceleration = ArrayDeque<LeanImuRecord>()
@@ -133,7 +148,9 @@ class HandlebarLeanEstimator : LeanEstimator {
                 is LeanGnssRecord -> {
                     // A quality moving fix can disprove a parked session even when a gap
                     // leaves it without an adjacent fix usable for estimating a curve.
-                    if ((record.speedMps ?: 0.0) > PARKED_SPEED && validFix(record) && clockValid(record)) {
+                    if (LeanGnssQuality.movingEvidence(record, LeanMount.HANDLEBAR) &&
+                        LeanGnssQuality.fixIssues(record, LeanMount.HANDLEBAR).isEmpty() &&
+                        LeanGnssQuality.clockValid(record, expectedUtc(record.elapsedNanos), LeanMount.HANDLEBAR)) {
                         movementEvidence = true
                     }
                     previous?.let { before ->
@@ -151,57 +168,29 @@ class HandlebarLeanEstimator : LeanEstimator {
             if (haveParkedPair && !movementEvidence) report.reasons += "PARKED_STEERING_OR_STATIONARY"
         }
 
-        fun duplicateFix() {
+        fun duplicateFix(count: Long) {
             previous = null
+            gnss?.fix(LeanGnssIssueCode.GNSS_DUPLICATE_TIME, count)
             cut("GNSS_DUPLICATE_TIME")
         }
 
         private fun interval(a: LeanGnssRecord, b: LeanGnssRecord) {
             val span = b.elapsedNanos - a.elapsedNanos
-            if (span > MAX_GNSS_STEP) return cut("DATA_GAP")
-            if (span < MIN_GNSS_STEP) return cut("GNSS_RATE_UNSUITABLE")
-            if (!clockValid(a) || !clockValid(b) ||
-                abs((b.utcMillis - a.utcMillis) - span / NANOS_PER_MILLI) > 250L) {
-                return cut("CLOCK_DISCONTINUITY")
-            }
-            val va = a.speedMps
-            val vb = b.speedMps
-            if (!validFix(a) || !validFix(b) || va == null || vb == null) return cut("GNSS_QUALITY")
-            if (va <= PARKED_SPEED && vb <= PARKED_SPEED) {
-                val positionUncertainty = requireNotNull(a.accuracyMeters) + requireNotNull(b.accuracyMeters)
-                val maxParkedDisplacement = PARKED_SPEED * (span / NANOS_PER_SECOND) + positionUncertainty
-                if (distanceMeters(a, b) > maxOf(3.0, maxParkedDisplacement)) {
-                    movementEvidence = true
-                    return cut("GNSS_MOTION_DISAGREEMENT")
+            val motion = when (val evaluated = gnssInterval(a, b, expectedUtc)) {
+                is GnssInterval.Rejected -> {
+                    evaluated.issues.forEach { gnss?.pair(it, span) }
+                    return cut(evaluated.reason)
                 }
-                haveParkedPair = true
-                return cut(null)
-            }
-            if (va < MIN_MOVING_SPEED || vb < MIN_MOVING_SPEED) {
-                return cut("LOW_SPEED_UNSUPPORTED")
-            }
-            val kind = if (minOf(va, vb) >= 8.0) SpeedClass.FLOWING else SpeedClass.LOW_SPEED
-            if (!movingQuality(a, kind) || !movingQuality(b, kind)) return cut("GNSS_QUALITY")
-            val duration = span / NANOS_PER_SECOND
-            if (abs(vb - va) / duration > kind.maxLongitudinalAcceleration) return cut("SPEED_TRANSIENT")
-
-            val firstBearing = requireNotNull(a.bearingDegrees)
-            val secondBearing = requireNotNull(b.bearingDegrees)
-            val headingChange = angleDifference(secondBearing, firstBearing)
-            // A sparse pair double-backs or exceeds the time resolution for a useful peak.
-            if (abs(headingChange) > 95.0) return cut("GNSS_COURSE_UNCERTAIN")
-            val yaw = Math.toRadians(headingChange) / duration
-            val speed = (va + vb) / 2.0
-            if (!consistentMotion(a, b, speed * duration, firstBearing + headingChange / 2.0, headingChange, kind)) {
-                return cut("GNSS_MOTION_DISAGREEMENT")
-            }
-            val bank = atan(speed * yaw / LeanFrameCalibration.GRAVITY)
-            val degrees = Math.toDegrees(bank)
-            if (abs(degrees) > 60.0) return cut("MODEL_CHANNEL_UNAVAILABLE")
-            val bearingUncertainty = hypot(requireNotNull(a.bearingAccuracyDegrees), requireNotNull(b.bearingAccuracyDegrees))
-            val turn = abs(degrees) >= MIN_BANK_DEGREES
-            if (turn && abs(headingChange) < maxOf(kind.minTurnDegrees, 1.5 * bearingUncertainty)) {
-                return cut("GNSS_COURSE_UNCERTAIN")
+                is GnssInterval.Parked -> {
+                    if (evaluated.disagreement) {
+                        movementEvidence = true
+                        gnss?.pair(LeanGnssIssueCode.GNSS_MOTION_DISAGREEMENT, span)
+                        return cut("GNSS_MOTION_DISAGREEMENT")
+                    }
+                    haveParkedPair = true
+                    return cut(null)
+                }
+                is GnssInterval.Moving -> evaluated
             }
             val from = a.elapsedNanos
             val until = b.elapsedNanos
@@ -210,22 +199,18 @@ class HandlebarLeanEstimator : LeanEstimator {
             val reason = imuProblem(forceRows, acceleration.lastOrNull { it.elapsedNanos < from }, from, until, 100.0)
                 ?: imuProblem(gyroRows, rotation.lastOrNull { it.elapsedNanos < from }, from, until, 30.0)
             if (reason != null) return cut(reason)
-            val veto = sensorVeto(forceRows, gyroRows, bank, yaw, speed, reference)
+            val veto = sensorVeto(forceRows, gyroRows, motion.bank, motion.yaw, motion.speed, reference)
             if (veto != null) return cut(veto)
 
-            onValid(a, b, degrees, kind)
+            onValid(a, b, motion.degrees, motion.kind)
         }
-
-        private fun clockValid(fix: LeanGnssRecord): Boolean =
-            expectedUtc(fix.elapsedNanos)?.let { expected ->
-                fix.utcMillis > 0 && abs(fix.utcMillis.toDouble() - expected) <= 1_000.0
-            } == true
     }
 
     private class Report(private val session: LeanInputSession) {
         val reasons = linkedSetOf<String>().apply { if (session.droppedSamples > 0) add("DROPPED_INPUT") }
         private val curves = ArrayList<LeanCurveResult>()
         private var current: Curve? = null
+        var gnss: LeanGnssIssueCounter? = null
         var validNanos: Long = 0
 
         fun cut(reason: String?) {
@@ -291,7 +276,7 @@ class HandlebarLeanEstimator : LeanEstimator {
                 .filter { REASON_PATTERN.matches(it) }.sorted().take(64).toList()).take(64).toSet()
             return LeanEstimate(VERSION, session.calibration.epoch, curves.mapNotNull { it.leftDegrees }.maxOrNull(),
                 curves.mapNotNull { it.rightDegrees }.maxOrNull(), validNanos / NANOS_PER_MILLI, observed,
-                allReasons, curves.toList())
+                allReasons, curves.toList(), gnssDiagnostics = gnss?.finish())
         }
     }
 
@@ -335,7 +320,6 @@ class HandlebarLeanEstimator : LeanEstimator {
         private const val MAX_WINDOW_RECORDS = 4096
         private const val MAX_CURVES = 2000 // LeanCodec.MAX_CURVES serialized result bound.
         private const val MIN_BANK_DEGREES = 4.0
-        private const val PARKED_SPEED = 1.0
         private const val MIN_MOVING_SPEED = 2.5
         private val REASON_PATTERN = Regex("[A-Za-z0-9_.:-]{1,100}")
 
@@ -348,18 +332,60 @@ class HandlebarLeanEstimator : LeanEstimator {
                 session.inputHash.matches(Regex("[A-Fa-f0-9]{64}")) && session.droppedSamples >= 0
         }
 
-        private fun validFix(value: LeanGnssRecord): Boolean =
-            !value.mock && value.latitude in -90.0..90.0 && value.longitude in -180.0..180.0 &&
-                value.speedMps?.let { it in 0.0..70.0 } == true &&
-                value.accuracyMeters?.let { it in 0.0..20.0 } == true &&
-                value.speedAccuracyMps?.let { it in 0.0..1.5 } == true &&
-                value.elapsedUncertaintyNanos?.let { it in 0.0..100_000_000.0 } == true
+        internal fun movingGnssIssue(first: LeanGnssRecord, last: LeanGnssRecord,
+            expectedUtc: (Long) -> Long?): LeanGnssIssueCode? =
+            (gnssInterval(first, last, expectedUtc) as? GnssInterval.Rejected)?.issues?.firstOrNull()
 
-        private fun movingQuality(value: LeanGnssRecord, kind: SpeedClass): Boolean =
-            value.accuracyMeters?.let { it in 0.0..kind.positionAccuracy } == true &&
-                value.speedAccuracyMps?.let { it in 0.0..kind.speedAccuracy } == true &&
-                value.bearingDegrees?.let { it >= 0.0 && it < 360.0 } == true &&
-                value.bearingAccuracyDegrees?.let { it in 0.0..kind.bearingAccuracy } == true
+        private fun gnssInterval(a: LeanGnssRecord, b: LeanGnssRecord, expectedUtc: (Long) -> Long?): GnssInterval {
+            fun reject(code: LeanGnssIssueCode, reason: String = code.name) = GnssInterval.Rejected(reason, setOf(code))
+            val mount = LeanMount.HANDLEBAR
+            val span = b.elapsedNanos - a.elapsedNanos
+            if (span > MAX_GNSS_STEP) return reject(GNSS_DATA_GAP, "DATA_GAP")
+            if (span < MIN_GNSS_STEP) return reject(GNSS_RATE_UNSUITABLE)
+            if (!LeanGnssQuality.clockValid(a, expectedUtc(a.elapsedNanos), mount) ||
+                !LeanGnssQuality.clockValid(b, expectedUtc(b.elapsedNanos), mount) ||
+                abs((b.utcMillis - a.utcMillis) - span / NANOS_PER_MILLI) > 250L) {
+                return reject(CLOCK_DISCONTINUITY)
+            }
+            val baseIssues = LeanGnssQuality.fixIssues(a, mount) + LeanGnssQuality.fixIssues(b, mount)
+            if (baseIssues.isNotEmpty()) return GnssInterval.Rejected("GNSS_QUALITY", baseIssues)
+            val va = requireNotNull(a.speedMps)
+            val vb = requireNotNull(b.speedMps)
+            val parkedSpeed = LeanGnssQuality.HANDLEBAR_PARKED_SPEED
+            if (va <= parkedSpeed && vb <= parkedSpeed) {
+                val positionUncertainty = requireNotNull(a.accuracyMeters) + requireNotNull(b.accuracyMeters)
+                val maxParkedDisplacement = parkedSpeed * (span / NANOS_PER_SECOND) + positionUncertainty
+                return GnssInterval.Parked(distanceMeters(a, b) > maxOf(3.0, maxParkedDisplacement))
+            }
+            if (va < MIN_MOVING_SPEED || vb < MIN_MOVING_SPEED) return reject(LOW_SPEED_UNSUPPORTED)
+            val kind = if (minOf(va, vb) >= 8.0) SpeedClass.FLOWING else SpeedClass.LOW_SPEED
+            fun movingIssues(fix: LeanGnssRecord) =
+                LeanGnssQuality.movingHandlebarIssues(fix, kind.positionAccuracy, kind.speedAccuracy, kind.bearingAccuracy)
+            val movingIssues = movingIssues(a) + movingIssues(b)
+            if (movingIssues.isNotEmpty()) return GnssInterval.Rejected("GNSS_QUALITY", movingIssues)
+            val duration = span / NANOS_PER_SECOND
+            if (abs(vb - va) / duration > kind.maxLongitudinalAcceleration) return reject(SPEED_TRANSIENT)
+
+            val firstBearing = requireNotNull(a.bearingDegrees)
+            val secondBearing = requireNotNull(b.bearingDegrees)
+            val headingChange = angleDifference(secondBearing, firstBearing)
+            // A sparse pair double-backs or exceeds the time resolution for a useful peak.
+            if (abs(headingChange) > 95.0) return reject(GNSS_COURSE_UNCERTAIN)
+            val yaw = Math.toRadians(headingChange) / duration
+            val speed = (va + vb) / 2.0
+            if (!consistentMotion(a, b, speed * duration, firstBearing + headingChange / 2.0, headingChange, kind)) {
+                return reject(GNSS_MOTION_DISAGREEMENT)
+            }
+            val bank = atan(speed * yaw / LeanFrameCalibration.GRAVITY)
+            val degrees = Math.toDegrees(bank)
+            if (abs(degrees) > 60.0) return reject(MODEL_CHANNEL_UNAVAILABLE)
+            val bearingUncertainty = hypot(requireNotNull(a.bearingAccuracyDegrees), requireNotNull(b.bearingAccuracyDegrees))
+            val turn = abs(degrees) >= MIN_BANK_DEGREES
+            if (turn && abs(headingChange) < maxOf(kind.minTurnDegrees, 1.5 * bearingUncertainty)) {
+                return reject(GNSS_COURSE_UNCERTAIN)
+            }
+            return GnssInterval.Moving(kind, speed, yaw, bank, degrees)
+        }
 
         private fun angleDifference(next: Double, previous: Double) = (next - previous + 540.0) % 360.0 - 180.0
 

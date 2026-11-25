@@ -129,6 +129,44 @@ internal object LeanCodec {
         }
     }
     private fun angle(value: Double?): Double? = n(value)?.also { require(it in 0.0..90.0) }
+    private fun streamJson(stream: LeanStreamTiming, duration: Long): JSONObject {
+        val first = stream.firstOffsetNanos
+        val last = stream.lastOffsetNanos
+        val gap = stream.longestIntervalNanos
+        require(stream.count in 0..(LeanStore.MAX_CHUNKS.toLong() * MAX_RECORDS))
+        when (stream.count) {
+            0L -> require(first == null && last == null && gap == null)
+            1L -> require(first != null && first in 0..duration && last == first && gap == null)
+            else -> {
+                require(first != null && last != null && first >= 0 && last <= duration && first <= last)
+                val span = last - first
+                require(gap != null && gap in 0..span)
+                if (span > 0) require(gap >= (span - 1) / (stream.count - 1) + 1)
+            }
+        }
+        return obj("count" to stream.count, "first" to first, "last" to last, "longest" to gap)
+    }
+
+    private fun readStream(j: JSONObject): LeanStreamTiming {
+        fun optionalOffset(key: String): Long? {
+            require(j.has(key))
+            return if (j.isNull(key)) null else j.long(key)
+        }
+        return LeanStreamTiming(j.long("count"), optionalOffset("first"), optionalOffset("last"), optionalOffset("longest"))
+    }
+
+    private fun issueArray(diagnostics: LeanGnssDiagnostics): JSONArray {
+        val issues = diagnostics.issues
+        require(issues.size <= 128 && issues.distinctBy { it.code to it.unit }.size == issues.size)
+        return JSONArray().apply {
+            issues.forEach {
+                require(it.code.matches(Regex("[A-Za-z0-9_.:-]{1,100}")) && it.unit in setOf("fix", "pair"))
+                require(it.count in 1..(LeanStore.MAX_CHUNKS.toLong() * MAX_RECORDS) && it.durationNanos >= 0)
+                put(obj("code" to it.code, "unit" to it.unit, "count" to it.count, "ns" to it.durationNanos))
+            }
+        }
+    }
+
     fun estimateJson(value: LeanEstimate): String {
         require(value.algorithmVersion.matches(Regex("[A-Za-z0-9_.-]{1,120}")) &&
             value.calibrationEpoch.isNotBlank() && value.calibrationEpoch.length <= 200)
@@ -150,7 +188,15 @@ internal object LeanCodec {
         return obj("version" to 1, "algorithm" to value.algorithmVersion, "calibration" to value.calibrationEpoch,
             "left" to angle(value.leftDegrees), "right" to angle(value.rightDegrees), "valid" to value.validMillis,
             "observed" to value.observedMillis, "reasons" to JSONArray(reasonsJson(value.partialReasons)),
-            "curves" to curves, "frame" to JSONArray(value.frameRotation)).toString()
+            "curves" to curves, "frame" to JSONArray(value.frameRotation)).apply {
+            value.sensorTiming?.let {
+                require(it.durationNanos >= 0)
+                put("sensorTiming", obj("ns" to it.durationNanos,
+                    "accel" to streamJson(it.accelerometer, it.durationNanos),
+                    "gyro" to streamJson(it.gyroscope, it.durationNanos)))
+            }
+            value.gnssDiagnostics?.let { put("gnssIssues", issueArray(it)) }
+        }.toString()
     }
     fun estimate(raw: String): LeanEstimate {
         require(raw.length <= 1024 * 1024)
@@ -164,7 +210,16 @@ internal object LeanCodec {
                     it.optional("lat"), it.optional("lon"),
                     if (it.isNull("startUtc")) null else it.long("startUtc"),
                     if (it.isNull("endUtc")) null else it.long("endUtc"))
-            } }, List(f.length()) { f.getDouble(it) })
+            } }, List(f.length()) { f.getDouble(it) },
+            if (j.has("sensorTiming")) j.getJSONObject("sensorTiming").let {
+                LeanSensorTiming(it.long("ns"), readStream(it.getJSONObject("accel")), readStream(it.getJSONObject("gyro")))
+            } else null,
+            if (j.has("gnssIssues")) j.getJSONArray("gnssIssues").let { issues ->
+                require(issues.length() <= 128)
+                LeanGnssDiagnostics(List(issues.length()) { i -> issues.getJSONObject(i).let {
+                    LeanGnssIssue(it.text("code", 100), it.text("unit", 4), it.long("count"), it.long("ns"))
+                } })
+            } else null)
         estimateJson(result)
         return result
     }

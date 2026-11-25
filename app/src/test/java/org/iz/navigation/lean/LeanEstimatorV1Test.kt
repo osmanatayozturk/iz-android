@@ -47,6 +47,29 @@ class LeanEstimatorV1Test {
         assertTrue(estimate.partialReasons.contains("GNSS_RATE_UNSUITABLE"))
     }
 
+    @Test fun bodyReportCountsOnlyItsOwnRejectedGnssFieldsAndCountsOverlapOnce() {
+        val input = session().copy(endedAtElapsedNanos = 61_000_000_000L)
+        val raw = ride().map { row ->
+            if (row is LeanGnssRecord && row.elapsedNanos == 59_000_000_000L) row.copy(speedAccuracyMps = null)
+            else row
+        }
+        val result = LeanEstimatorV1().estimate(input, raw) {}
+        assertEquals(listOf(LeanGnssIssue("GNSS_SPEED_ACCURACY_MISSING", "fix", 1, 0)),
+            requireNotNull(result.gnssDiagnostics).issues)
+    }
+
+    @Test fun measuredGapsAndClockInvalidFixesUseDifferentUnits() {
+        val raw = ride().filterNot { it is LeanGnssRecord && it.elapsedNanos == 25_000_000_000L }.map { row ->
+            if (row is LeanGnssRecord && row.elapsedNanos == 26_000_000_000L) {
+                row.copy(utcMillis = row.utcMillis + 3_000, speedAccuracyMps = null)
+            } else row
+        }
+        val result = LeanEstimatorV1().estimate(session(), raw) {}
+        assertEquals(setOf(LeanGnssIssue("CLOCK_DISCONTINUITY", "fix", 1, 0),
+            LeanGnssIssue("GNSS_DATA_GAP", "pair", 1, 3_000_000_000L)),
+            requireNotNull(result.gnssDiagnostics).issues.toSet())
+    }
+
     @Test fun paperChannelsGiveSignedWholeDegreeExperimentalCurves() {
         for (direction in listOf(-1, 1)) {
             val estimate = LeanEstimatorV1().estimate(session(), ride(direction)) {}

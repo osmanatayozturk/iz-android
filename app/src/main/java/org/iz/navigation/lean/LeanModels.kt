@@ -47,6 +47,8 @@ data class LeanEstimate(
     val validMillis: Long, val observedMillis: Long,
     val partialReasons: Set<String>, val curves: List<LeanCurveResult>,
     val frameRotation: List<Double> = emptyList(),
+    val sensorTiming: LeanSensorTiming? = null,
+    val gnssDiagnostics: LeanGnssDiagnostics? = null,
 )
 
 interface LeanEstimator {
@@ -60,6 +62,7 @@ data class LeanJourneyReport(
     val partialReasons: Set<String>, val curves: List<LeanCurveResult>,
     val algorithmVersions: Set<String>,
     val handlebar: LeanJourneyReport? = null,
+    val sessionDetails: List<LeanReportSession> = emptyList(),
 )
 
 /** Metadata only; raw BLOBs are streamed under the store snapshot lease. */

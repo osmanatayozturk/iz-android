@@ -10,12 +10,13 @@ internal data class LiveLeanReading(val sessionId: String, val signedDegrees: Do
 
 internal fun Location.toLeanFix(): LeanGnssRecord? {
     if (elapsedRealtimeNanos <= 0 || latitude !in -90.0..90.0 || longitude !in -180.0..180.0) return null
-    fun measured(present: Boolean, number: Float) = number.toDouble().takeIf { present && it.isFinite() && it >= 0 }
+    // Preserve finite out-of-range readings so the estimator can distinguish them from absent metadata.
+    fun measured(present: Boolean, number: Float) = number.toDouble().takeIf { present && it.isFinite() }
     @Suppress("DEPRECATION") val mock = isFromMockProvider
     return LeanGnssRecord(elapsedRealtimeNanos, time, latitude, longitude, measured(hasAccuracy(), accuracy),
         measured(hasSpeed(), speed), measured(hasBearing(), bearing), measured(hasSpeedAccuracy(), speedAccuracyMetersPerSecond),
         measured(hasBearingAccuracy(), bearingAccuracyDegrees), elapsedRealtimeUncertaintyNanos.takeIf {
-            hasElapsedRealtimeUncertaintyNanos() && it.isFinite() && it >= 0
+            hasElapsedRealtimeUncertaintyNanos() && it.isFinite()
         }, mock, provider?.take(64))
 }
 

@@ -107,7 +107,7 @@ class LeanStore internal constructor(
                         LeanSensorKind.GYROSCOPE -> gyroscope = maxOf(gyroscope ?: record.elapsedNanos, record.elapsedNanos)
                     }
                 }
-                LeanPersistedBatch(accelerometer, gyroscope)
+                LeanPersistedBatch(accelerometer, gyroscope, accepted.filterIsInstance<LeanGnssRecord>())
             }
         }
     }
@@ -144,18 +144,31 @@ class LeanStore internal constructor(
 
     private suspend fun summarize(rows: List<LeanSessionEntity>): LeanJourneyReport {
         val reasons = linkedSetOf<String>()
+        val details = mutableListOf<LeanReportSession>()
         val results = rows.mapNotNull { row ->
             reasons += runCatching { LeanCodec.reasons(row.reasonsJson) }.getOrDefault(setOf("INVALID_METADATA"))
-            dao.result(row.id)?.let { result ->
-                runCatching { LeanCodec.estimate(result.payload) }.getOrElse { reasons += "INVALID_RESULT"; null }
+            val calibration = LeanCodec.calibration(row.calibrationJson)
+            val estimate = dao.result(row.id)?.let { result ->
+                runCatching {
+                    require(result.journeyId == row.journeyId && result.sessionId == row.id &&
+                        result.calibrationEpoch == calibration.epoch && calibration.acceptsAlgorithm(result.algorithmVersion))
+                    LeanCodec.estimate(result.payload).also {
+                        require(it.calibrationEpoch == calibration.epoch && it.algorithmVersion == result.algorithmVersion)
+                        require(it.sensorTiming == null || it.sensorTiming.durationNanos ==
+                            row.endedAtElapsedNanos?.minus(row.startedAtElapsedNanos))
+                    }
+                }.getOrElse { reasons += "INVALID_RESULT"; null }
             }
+            details += LeanReportSession(row.id, calibration.epoch, row.startedAtUtc,
+                estimate?.sensorTiming, estimate?.gnssDiagnostics)
+            estimate
         }
         results.forEach { reasons += it.partialReasons }
         return LeanJourneyReport(rows.any { it.state != "COMPLETE" },
             results.mapNotNull { it.leftDegrees }.maxOrNull(), results.mapNotNull { it.rightDegrees }.maxOrNull(),
             results.sumOf { it.validMillis }, results.sumOf { it.observedMillis }, reasons,
             results.flatMap { it.curves }.sortedBy { it.startUtcMillis ?: Long.MAX_VALUE }.take(LeanCodec.MAX_CURVES),
-            results.map { it.algorithmVersion }.toSet())
+            results.map { it.algorithmVersion }.toSet(), sessionDetails = details)
     }
 
     internal suspend fun pendingInputs(): List<LeanInputSession> = withContext(Dispatchers.IO) {
@@ -206,7 +219,12 @@ class LeanStore internal constructor(
                     }
                 }
                 val selected = if (source.calibration.bodyConfirmed) estimator else HandlebarLeanEstimator()
-                val result = selected.estimate(source, records, checkAllowed)
+                val timing = LeanSensorTimingCounter(source.startedAtElapsedNanos, requireNotNull(source.endedAtElapsedNanos))
+                val counted = records.onEach(timing::accept).iterator()
+                val estimate = selected.estimate(source, counted.asSequence(), checkAllowed)
+                // An invalid angle window can stop the estimator before the end of verified, persisted input.
+                while (counted.hasNext()) counted.next()
+                val result = estimate.copy(sensorTiming = timing.finish())
                 checkAllowed()
                 if (commitResultLocked(row.id, source.inputHash, result, checkAllowed)) cleanupCommittedRawLocked()
             }

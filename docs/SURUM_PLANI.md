@@ -1,5 +1,11 @@
 # İz sürüm değişikliği planı
 
+## Geliştirme sürümü · Yatış sensörü ve GPS tanısı
+
+**Ayarlar → Motosiklet montajı ve kalibrasyon** ekranındaki **Sensörleri sına** ve **GPS kaynaklarını karşılaştır** girişleri park hâlinde kullanılır. Sensör sınaması iki sensörün örnek akışını ayrı gösterir. GPS ekranı iki konum kaynağının aynı zaman aralığındaki ölçümlerini özetler. **Yolculuk → Raporlar → Yatış** altında sensör zamanlaması ve GPS kalite gerekçeleri incelenebilir.
+
+Yerel adayın QA kapsamı normal ekran girişleri, ölçümün durdurulması, GPS kalitesi yetersizken sensör verisinin raporlanması ve eski kayıtlarda ölçülmemiş alanların gösterimidir. Park hâlindeki fiziksel karşılaştırma için kapsam, iki kaynağın ortak ölçüm penceresindeki örnek sayıları ve bildirdiği doğruluk alanlarıdır. Sürüşte kaynak performansı ve yatış açısının doğruluğu ayrı ölçüm gerektirir.
+
 ## Geliştirme sürümü · Motosiklet sürüşü ve Garaj
 
 | Aşama | Kullanıcıya dönük değişiklik | Hedefli QA kapsamı |
