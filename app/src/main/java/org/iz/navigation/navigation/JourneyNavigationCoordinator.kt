@@ -337,6 +337,9 @@ class JourneyNavigationCoordinator(
         }
     }
 
+    // A late garage selection must see both the published recording and its completed attachment.
+    internal suspend fun withRecordingStartSettled(bind: suspend () -> Unit) = commands.withLock { bind() }
+
     suspend fun startFreeDrive(transport: Transport, recordJourney: Boolean = true,
         stillCurrent: () -> Boolean = { true }): String = commands.withLock {
         startFreeDriveLocked(transport, recordJourney, stillCurrent = stillCurrent)

@@ -73,7 +73,7 @@ internal interface GarageDao {
 
 class GarageRepository internal constructor(private val app: IzApplication) {
     private val changes = Mutex()
-    // Accessed in Room transactions for the first recording attached to a running session.
+    // Written by recording attachment and read by bindSession under the same navigation command lock.
     private var lastNewRecording: Pair<String, String>? = null
     private val db = DiaryDatabase.get(app)
     private val dao = db.garageDao()
@@ -125,21 +125,22 @@ class GarageRepository internal constructor(private val app: IzApplication) {
     suspend fun bindSession(sessionId: String, journeyId: String?, vehicleId: String?, transport: Transport,
         explicitChoice: Boolean = true) {
         if (vehicleId == null) return
-        mutate {
-            val vehicle = requireNotNull(dao.vehicle(vehicleId)) { "Araç bulunamadı." }
-            val state = app.navigation.state.value
-            check(state.sessionId == sessionId && (state.journey?.id == journeyId || journeyId == null && explicitChoice) &&
-                state.sessionTransport == transport && vehicle.transport == transport && !state.simulation) {
-                "Sürüş veya araç değişti."
-            }
-            if (journeyId == null) {
-                rememberUnrecorded(sessionId, vehicleId, explicitChoice)
-                // The first GPS fix can attach a recording while this choice waits for Room.
-                val attached = state.journey?.id
-                if (explicitChoice && attached != null && lastNewRecording == (sessionId to attached)) {
-                    insertStartChoice(attached, vehicleId)
+        changes.withLock {
+            app.navigation.withRecordingStartSettled {
+                db.withTransaction {
+                    val vehicle = requireNotNull(dao.vehicle(vehicleId)) { "Araç bulunamadı." }
+                    val state = app.navigation.state.value
+                    val attached = state.journey?.id
+                    val lateStart = journeyId == null && explicitChoice && attached != null &&
+                        lastNewRecording == (sessionId to attached)
+                    check(state.sessionId == sessionId && (attached == journeyId || lateStart) &&
+                        state.sessionTransport == transport && vehicle.transport == transport && !state.simulation) {
+                        "Sürüş veya araç değişti."
+                    }
+                    if (explicitChoice && attached != null) insertStartChoice(attached, vehicleId)
                 }
-            } else if (explicitChoice) insertStartChoice(journeyId, vehicleId)
+                if (journeyId == null) rememberUnrecorded(sessionId, vehicleId, explicitChoice)
+            }
         }
     }
 
@@ -152,14 +153,16 @@ class GarageRepository internal constructor(private val app: IzApplication) {
         }
     }
 
-    internal suspend fun carryStartChoice(sessionId: String, journeyId: String) = db.withTransaction {
+    internal suspend fun carryStartChoice(sessionId: String, journeyId: String) {
         val state = app.navigation.state.value
-        if (state.simulation || state.sessionId != sessionId || state.journey?.id != journeyId) return@withTransaction
-        lastNewRecording = sessionId to journeyId
-        val choice = unrecordedBinding.value
-        if (choice?.sessionId == sessionId && choice.explicitChoice) {
-            dao.assignStartChoiceIfUnassigned(journeyId, choice.vehicleId)
+        if (state.simulation || state.sessionId != sessionId || state.journey?.id != journeyId) return
+        db.withTransaction {
+            val choice = unrecordedBinding.value
+            if (choice?.sessionId == sessionId && choice.explicitChoice) {
+                dao.assignStartChoiceIfUnassigned(journeyId, choice.vehicleId)
+            }
         }
+        lastNewRecording = sessionId to journeyId
     }
 
     internal suspend fun applyForProjection(vehicle: GarageVehicle, selectedId: String?, extraKm: (FuelStats) -> Double,

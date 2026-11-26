@@ -15,6 +15,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
 import java.util.zip.ZipFile
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -29,11 +30,21 @@ import org.iz.navigation.data.Journey
 import org.iz.navigation.data.JourneyStatus
 import org.iz.navigation.data.TrackPoint
 import org.iz.navigation.data.Transport
+import org.iz.navigation.garage.FuelFill
 import org.iz.navigation.garage.GarageVehicle
+import org.iz.navigation.garage.needsFuel
 import org.iz.navigation.garage.JourneyVehicle
+import org.iz.navigation.tracking.TrackingController
 import org.iz.navigation.tracking.TrackingPolicy
+import org.iz.navigation.tracking.TrackingService
 import org.json.JSONObject
+import org.iz.navigation.weather.PlannedRoute
+import org.iz.navigation.weather.RouteManeuver
+import org.iz.navigation.weather.RouteStop
+import org.iz.navigation.weather.RouteVertex
+import org.iz.navigation.weather.WeatherCoordinate
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -255,6 +266,14 @@ class GarageNewRideAcceptanceTest {
         val navigator = app.navigation
         val first = vehicle("session-start-only")
         val second = vehicle("session-later-choice")
+        val rejected = vehicle("session-rejected-different-choice")
+        val start = WeatherCoordinate(.27, -140.0)
+        val end = WeatherCoordinate(.27, -139.996)
+        val guidance = PlannedRoute("qa-session-carry", listOf(RouteStop("QA start", start), RouteStop("QA finish", end)),
+            listOf(RouteVertex(start, 0.0), RouteVertex(end, 90.0)), 445.0, 90.0, System.currentTimeMillis(),
+            transport = Transport.MOTORCYCLE, maneuvers = listOf(RouteManeuver(10, "QA", "QA",
+                emptyList(), 0, 1, 0.0, 90.0)))
+        val extraKm = 205.0
         val owned = mutableSetOf<String>()
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         for (permission in listOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION,
@@ -269,10 +288,18 @@ class GarageNewRideAcceptanceTest {
                 try {
                     garage.saveVehicle(first)
                     val implicit = withContext(Dispatchers.Main) {
-                        navigator.startFreeDrive(Transport.MOTORCYCLE, recordJourney = false)
+                        navigator.startGuidance(guidance, recordJourney = false)
                     }
                     garage.bindSession(implicit, null, first.id, Transport.MOTORCYCLE, explicitChoice = false)
-                    garage.saveVehicle(second)
+                    for (vehicle in listOf(second, rejected)) {
+                        garage.saveVehicle(vehicle)
+                        repeat(5) { index ->
+                            garage.saveFill(FuelFill(vehicleId = vehicle.id, at = 1_000L + index * 1_000L,
+                                odometerKm = 1_000.0 + index * 200.0, litres = 8.0, pricePerLitre = 50.0))
+                        }
+                    }
+                    assertTrue("The rejected candidate would otherwise qualify for a fuel offer",
+                        requireNotNull(garage.offerStats(rejected).first()).needsFuel(extraKm))
                     assertEquals(implicit, withContext(Dispatchers.Main) {
                         navigator.startFreeDrive(Transport.MOTORCYCLE, recordJourney = true)
                     })
@@ -281,11 +308,57 @@ class GarageNewRideAcceptanceTest {
                     garage.bindSession(implicit, null, second.id, Transport.MOTORCYCLE, explicitChoice = true)
                     assertEquals(second.id, garage.assignedVehicleId(noChoice).first())
                     garage.assignJourney(noChoice, first.id)
+                    val remembered = requireNotNull(garage.unrecordedBinding.value)
+                    assertEquals(implicit, remembered.sessionId)
+                    assertEquals(second.id, remembered.vehicleId)
+                    assertTrue(remembered.explicitChoice)
+                    assertNotEquals(remembered.vehicleId, rejected.id)
                     val lateResult = runCatching {
-                        garage.bindSession(implicit, null, second.id, Transport.MOTORCYCLE, explicitChoice = true)
+                        garage.bindSession(implicit, null, rejected.id, Transport.MOTORCYCLE, explicitChoice = true)
                     }
                     assertTrue(lateResult.exceptionOrNull() is IllegalStateException)
-                    assertEquals(first.id, garage.assignedVehicleId(noChoice).first())
+                    assertEquals(remembered, garage.unrecordedBinding.value)
+                    assertEquals(listOf(JourneyVehicle(noChoice, first.id)), diary.snapshot().journeyVehicles)
+
+                    suspend fun verifyUnrecordedFuelChoice() {
+                        withTimeout(6_000L) { navigator.state.first {
+                            it.sessionId == implicit && it.journey == null && !it.recording && it.guidance
+                        } }
+                        val used = mutableListOf<String>()
+                        assertTrue(garage.applyForOwner(implicit, null, second.id, { extraKm }) {
+                            used.add(second.id)
+                            true
+                        })
+                        assertFalse(garage.applyForOwner(implicit, null, rejected.id, { extraKm }) {
+                            used.add(rejected.id)
+                            true
+                        })
+                        assertEquals(listOf(second.id), used)
+                    }
+
+                    withContext(Dispatchers.Main) { navigator.stopRecording(noChoice) }
+                    verifyUnrecordedFuelChoice()
+                    val external = withContext(Dispatchers.Main) {
+                        TrackingController(context).startManual(Transport.MOTORCYCLE)
+                    }.also(owned::add)
+                    assertNotEquals(noChoice, external)
+                    withTimeout(8_000L) {
+                        while (TrackingService.runningJourneyId != external) delay(50L)
+                    }
+                    // The insert can emit before the recorder is running. Refresh this same row after ACK.
+                    assertTrue(diary.updateJourneyDetails(external, "QA external recorder", "", Transport.MOTORCYCLE))
+                    withTimeout(8_000L) { navigator.state.first {
+                        it.sessionId == implicit && it.journey?.id == external && it.recording
+                    } }
+                    assertNull(garage.assignedVehicleId(external).first())
+                    val externalResult = runCatching {
+                        garage.bindSession(implicit, null, rejected.id, Transport.MOTORCYCLE, explicitChoice = true)
+                    }
+                    assertTrue(externalResult.exceptionOrNull() is IllegalStateException)
+                    assertEquals(remembered, garage.unrecordedBinding.value)
+                    assertEquals(listOf(JourneyVehicle(noChoice, first.id)), diary.snapshot().journeyVehicles)
+                    withContext(Dispatchers.Main) { navigator.stopRecording(external) }
+                    verifyUnrecordedFuelChoice()
                     withContext(Dispatchers.Main) { navigator.finishSession(implicit) }
 
                     val explicit = withContext(Dispatchers.Main) {
@@ -307,7 +380,7 @@ class GarageNewRideAcceptanceTest {
                         withContext(Dispatchers.Main) { navigator.finishSession(session) }
                     }
                     for (journey in owned) diary.deleteJourney(journey)
-                    for (value in listOf(first, second)) garage.deleteVehicle(value.id)
+                    for (value in listOf(first, second, rejected)) garage.deleteVehicle(value.id)
                 }
             }
         }
