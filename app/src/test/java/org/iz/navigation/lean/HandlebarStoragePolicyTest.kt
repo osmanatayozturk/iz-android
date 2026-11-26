@@ -21,6 +21,30 @@ class HandlebarStoragePolicyTest {
         assertTrue(leanCaptureEligible(journey, LeanCaptureSettings(true, LeanMount.BODY, body)))
     }
 
+    @Test fun curveTimingDecisionIsExplicitInV2AndAbsentInLegacyOutput() {
+        val curve = LeanCurveResult(10L, 20L, 12.0, null, null, null)
+        val normal = LeanEstimate(HandlebarLeanEstimator.VERSION, bars.epoch, 12.0, null, 0L, 0L,
+            emptySet(), listOf(curve))
+        fun encoded(result: LeanEstimate) = JSONObject(LeanCodec.estimateJson(result))
+        fun firstCurve(json: JSONObject) = json.getJSONArray("curves").getJSONObject(0)
+        val current = encoded(normal)
+        assertEquals(false, firstCurve(current).get("timingEstimated"))
+        assertEquals(normal, LeanCodec.estimate(current.toString()))
+        val estimated = normal.copy(partialReasons = setOf("HANDLEBAR_TIMING_ESTIMATED"),
+            curves = listOf(curve.copy(timingEstimated = true)))
+        assertEquals(true, firstCurve(encoded(estimated)).get("timingEstimated"))
+        assertEquals(estimated, LeanCodec.estimate(encoded(estimated).toString()))
+        firstCurve(current).remove("timingEstimated")
+        assertThrows(IllegalArgumentException::class.java) { LeanCodec.estimate(current.toString()) }
+        assertThrows(IllegalArgumentException::class.java) { encoded(normal.copy(partialReasons = estimated.partialReasons)) }
+        assertThrows(IllegalArgumentException::class.java) { encoded(estimated.copy(partialReasons = emptySet())) }
+
+        val legacy = normal.copy(algorithmVersion = HandlebarLeanEstimator.LEGACY_VERSION)
+        val old = encoded(legacy)
+        assertFalse(firstCurve(old).has("timingEstimated"))
+        assertEquals(legacy, LeanCodec.estimate(old.toString()))
+    }
+
     @Test fun legacyBodyAndVerifiedHandlebarBackupsKeepDistinctIdentity() {
         val legacy = """{"version":1,"epoch":"mount-1","createdAt":1,"gravity":[0,0,9.81],"bias":[0,0,0],"body":true}"""
         assertEquals(body, LeanCodec.calibration(legacy))

@@ -188,6 +188,10 @@ internal object LeanCodec {
         require(value.validMillis >= 0 && value.observedMillis >= value.validMillis)
         require(value.curves.size <= MAX_CURVES && (value.frameRotation.isEmpty() || value.frameRotation.size == 9) &&
             value.frameRotation.all { it.isFinite() })
+        val handlebarV2 = value.algorithmVersion == HandlebarLeanEstimator.VERSION
+        require(("HANDLEBAR_TIMING_ESTIMATED" in value.partialReasons) == value.curves.any { it.timingEstimated }) {
+            "Report and curve timing confidence disagree"
+        }
         val curves = JSONArray()
         value.curves.forEach { c ->
             require(c.startElapsedNanos >= 0 && c.endElapsedNanos >= c.startElapsedNanos)
@@ -199,11 +203,8 @@ internal object LeanCodec {
             curves.put(obj("start" to c.startElapsedNanos, "end" to c.endElapsedNanos,
                 "left" to angle(c.leftDegrees), "right" to angle(c.rightDegrees), "lat" to c.latitude,
                 "lon" to c.longitude, "startUtc" to c.startUtcMillis, "endUtc" to c.endUtcMillis).apply {
-                if (c.timingEstimated) {
-                    require(value.algorithmVersion == HandlebarLeanEstimator.VERSION &&
-                        "HANDLEBAR_TIMING_ESTIMATED" in value.partialReasons)
-                    put("timingEstimated", true)
-                }
+                if (handlebarV2) put("timingEstimated", c.timingEstimated)
+                else require(!c.timingEstimated) { "Unexpected timing estimate for legacy algorithm" }
             })
         }
         return obj("version" to 1, "algorithm" to value.algorithmVersion, "calibration" to value.calibrationEpoch,
@@ -224,9 +225,14 @@ internal object LeanCodec {
         val j = JSONObject(raw); require(j.getInt("version") == 1)
         val a = j.getJSONArray("curves"); require(a.length() <= MAX_CURVES)
         val f = j.getJSONArray("frame"); require(f.length() == 0 || f.length() == 9)
-        val result = LeanEstimate(j.text("algorithm", 120), j.text("calibration"), j.optional("left"), j.optional("right"),
+        val algorithm = j.text("algorithm", 120)
+        val result = LeanEstimate(algorithm, j.text("calibration"), j.optional("left"), j.optional("right"),
             j.long("valid"), j.long("observed"), reasons(j.getJSONArray("reasons").toString()),
             List(a.length()) { i -> a.getJSONObject(i).let {
+                // V1 predates fallback timing. For V2 an omitted decision cannot authorize comparison.
+                require(algorithm != HandlebarLeanEstimator.VERSION || it.has("timingEstimated")) {
+                    "Missing handlebar curve timing confidence"
+                }
                 LeanCurveResult(it.long("start"), it.long("end"), it.optional("left"), it.optional("right"),
                     it.optional("lat"), it.optional("lon"),
                     if (it.isNull("startUtc")) null else it.long("startUtc"),
