@@ -28,6 +28,7 @@ import kotlinx.coroutines.sync.withLock
 import org.iz.navigation.power.PostJourneyAnalysis
 import org.iz.navigation.power.PowerDiagnostics
 import org.iz.navigation.lean.LiveLeanCapture
+import org.iz.navigation.lean.singleFixReceipt
 import org.iz.navigation.lean.liveLeanLocationSession
 import org.iz.navigation.lean.LeanCaptureController
 import org.iz.navigation.lean.LeanSettingsStore
@@ -59,6 +60,9 @@ class TrackingService : Service() {
 
     private val callback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
+            // Capture delivery before launching work or waiting on the tracking mutex.
+            val received = SystemClock.elapsedRealtimeNanos()
+            val singleFixReceived = result.singleFixReceipt(received)
             PowerDiagnostics.count(PowerDiagnostics.Metric.GPS_CALLBACK)
             PowerDiagnostics.sampleIfDue()
             val id = runningJourneyId
@@ -94,7 +98,7 @@ class TrackingService : Service() {
                         return@withLock
                     }
                     for (location in result.locations.sortedBy { it.time }) {
-                        leanCapture.onLocation(journey.id, location)
+                        leanCapture.onLocation(journey.id, location, singleFixReceived)
                         if (location.time < journey.startedAt) continue
                         val nav = (applicationContext as org.iz.navigation.IzApplication).navigation.state.value
                         LiveLeanCapture.accept(nav.liveLeanLocationSession(journey.id, fromRecording = true), location)

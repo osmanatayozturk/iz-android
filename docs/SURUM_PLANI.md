@@ -1,5 +1,11 @@
 # İz sürüm değişikliği planı
 
+## Geliştirme sürümü · Gidon yatış raporu
+
+Gidon montajıyla kaydedilen yolculuklarda, GPS kaynağının zaman belirsizliği alanını boş bırakması tek başına yatış hesabını engellemez. Bildirilen zaman belirsizliği ve diğer konum ile sensör ölçümleri kalite koşullarına göre değerlendirilir.
+
+Yerel adayda eksik ve bildirilen zaman belirsizliği ayrı senaryolarda kontrol edilir. Saha koşullarındaki yatış açısı doğruluğu ayrıca ölçülür.
+
 ## Geliştirme sürümü · Garaj menüsü ve yakıt öğrenmesi
 
 Telefonun **Menü** ekranından **Garaj** listesine ulaşılır. Araç ekleme ve dolum formları bu listeden açılır. Liste kapatıldığında Garaj’ı açan ekrana dönülür.

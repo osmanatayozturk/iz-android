@@ -3,21 +3,28 @@ package org.iz.navigation.lean
 import android.content.Context
 import android.location.Location
 import android.os.SystemClock
+import com.google.android.gms.location.LocationResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 internal data class LiveLeanReading(val sessionId: String, val signedDegrees: Double, val measuredElapsedMillis: Long)
 
-internal fun Location.toLeanFix(): LeanGnssRecord? {
+/** A batch has one delivery time for multiple measurements and cannot corroborate their individual times. */
+internal fun LocationResult.singleFixReceipt(receivedElapsedNanos: Long): Long? =
+    receivedElapsedNanos.takeIf { locations.size == 1 }
+
+internal fun Location.toLeanFix(singleFixReceivedElapsedNanos: Long? = null): LeanGnssRecord? {
     if (elapsedRealtimeNanos <= 0 || latitude !in -90.0..90.0 || longitude !in -180.0..180.0) return null
     // Preserve finite out-of-range readings so the estimator can distinguish them from absent metadata.
     fun measured(present: Boolean, number: Float) = number.toDouble().takeIf { present && it.isFinite() }
     @Suppress("DEPRECATION") val mock = isFromMockProvider
+    val uncertainty = if (hasElapsedRealtimeUncertaintyNanos()) elapsedRealtimeUncertaintyNanos else null
+    val invalidUncertainty = uncertainty != null && !uncertainty.isFinite()
     return LeanGnssRecord(elapsedRealtimeNanos, time, latitude, longitude, measured(hasAccuracy(), accuracy),
         measured(hasSpeed(), speed), measured(hasBearing(), bearing), measured(hasSpeedAccuracy(), speedAccuracyMetersPerSecond),
-        measured(hasBearingAccuracy(), bearingAccuracyDegrees), elapsedRealtimeUncertaintyNanos.takeIf {
-            hasElapsedRealtimeUncertaintyNanos() && it.isFinite()
-        }, mock, provider?.take(64))
+        measured(hasBearingAccuracy(), bearingAccuracyDegrees), uncertainty?.takeIf { it.isFinite() },
+        mock, provider?.take(64), singleFixReceivedElapsedNanos?.takeIf { it >= elapsedRealtimeNanos && !invalidUncertainty },
+        invalidUncertainty)
 }
 
 /** Borrows navigation fixes for the foreground display. IMU samples stay in a bounded in-memory window. */

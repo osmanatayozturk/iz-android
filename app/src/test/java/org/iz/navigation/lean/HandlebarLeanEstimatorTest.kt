@@ -47,6 +47,160 @@ class HandlebarLeanEstimatorTest {
     private fun estimate(records: Iterable<LeanRecord>, input: LeanInputSession = session()) =
         HandlebarLeanEstimator().estimate(input, records.asSequence()) {}
 
+    private fun withSingleFixTiming(records: List<LeanRecord>, provider: String = "gps") = records.map {
+        if (it is LeanGnssRecord) it.copy(elapsedUncertaintyNanos = null, provider = provider,
+            singleFixReceivedElapsedNanos = it.elapsedNanos + 50_000_000L) else it
+    }
+
+    @Test fun reportedTurnNeedsIndependentSignedGpsAndImuWithSingleFixTiming() {
+        for (provider in listOf("fused", "gps")) for (direction in listOf(-1.0, 1.0)) {
+            val fixture = ride(yaw = .30 * direction)
+            val result = estimate(withSingleFixTiming(fixture, provider))
+            val curve = result.curves.single()
+            assertTrue(curve.timingEstimated)
+            assertTrue("HANDLEBAR_TIMING_ESTIMATED" in result.partialReasons)
+            assertTrue(result.validMillis >= 4_000L)
+            val expectedPeak = round(Math.toDegrees(atan(12.0 * .30 / g)))
+            assertEquals(expectedPeak, requireNotNull(if (direction < 0) curve.leftDegrees else curve.rightDegrees), 0.0)
+            assertNull(if (direction < 0) curve.rightDegrees else curve.leftDegrees)
+
+            val strict = estimate(fixture)
+            assertFalse(strict.curves.single().timingEstimated)
+            assertFalse("HANDLEBAR_TIMING_ESTIMATED" in strict.partialReasons)
+            assertNotEquals(strict.algorithmVersion, "handlebar-gnss-imu-v1")
+        }
+    }
+
+    @Test fun timingFallbackRejectsMissingOrTaintedArrivalAndDifferentSources() {
+        val fixture = withSingleFixTiming(ride())
+        val cases: Map<String, (LeanGnssRecord) -> LeanGnssRecord> = mapOf(
+            "no callback witness" to { it.copy(singleFixReceivedElapsedNanos = null) },
+            "same callback for a batch" to { it.copy(singleFixReceivedElapsedNanos = start + 2 * second) },
+            "stale callback" to { it.copy(singleFixReceivedElapsedNanos = it.elapsedNanos + 251_000_000L) },
+            "future measurement" to { it.copy(singleFixReceivedElapsedNanos = it.elapsedNanos - 1) },
+            "callback jitter" to { it.copy(singleFixReceivedElapsedNanos = it.elapsedNanos +
+                if (it.elapsedNanos / second % 2 == 0L) 170_000_000L else 50_000_000L) },
+            "source changes" to { it.copy(provider = if (it.elapsedNanos / second % 2 == 0L) "gps" else "fused") },
+            "unsupported source" to { it.copy(provider = "network") },
+            "non-null poor uncertainty" to { it.copy(elapsedUncertaintyNanos = 101_000_000.0) },
+            "reported invalid uncertainty" to { it.copy(invalidElapsedUncertainty = true) },
+            "mixed present and missing uncertainty" to { fix -> fix.copy(elapsedUncertaintyNanos =
+                1_000_000.0.takeIf { fix.elapsedNanos / second % 2 == 0L }) },
+            "UTC anchor" to { it.copy(utcMillis = it.utcMillis + 151L) },
+            "UTC changes during pair" to { it.copy(utcMillis = it.utcMillis +
+                if (it.elapsedNanos / second % 2 == 0L) 100L else 0L) },
+        )
+        for ((name, change) in cases) {
+            val result = estimate(fixture.map { if (it is LeanGnssRecord) change(it) else it })
+            assertTrue(name, result.curves.isEmpty())
+            assertEquals(name, 0L, result.validMillis)
+            assertFalse(name, "HANDLEBAR_TIMING_ESTIMATED" in result.partialReasons)
+        }
+    }
+
+    @Test fun timingFallbackRequiresMeasuredFieldQualityAndSignedMotion() {
+        val fixture = withSingleFixTiming(ride())
+        val poor = listOf(
+            withSingleFixTiming(ride(yaw = 0.0)),
+            withSingleFixTiming(ride(speed = 6.0)),
+            withSingleFixTiming(ride(speed = 0.0)),
+            fixture.map { if (it is LeanGnssRecord) it.copy(bearingDegrees = null) else it },
+            fixture.map { if (it is LeanGnssRecord) it.copy(bearingAccuracyDegrees = 4.1) else it },
+            fixture.map { if (it is LeanGnssRecord) it.copy(speedAccuracyMps = .66) else it },
+            fixture.map { if (it is LeanGnssRecord) it.copy(accuracyMeters = 5.1) else it },
+            fixture.map { if (it is LeanGnssRecord) it.copy(latitude = 0.0, longitude = 0.0) else it },
+            fixture.map { if (it is LeanGnssRecord) it.copy(mock = true) else it },
+            fixture.map { if (it is LeanImuRecord && it.kind == LeanSensorKind.GYROSCOPE)
+                it.copy(y = -it.y, z = .04 - it.z) else it },
+            fixture.map { if (it is LeanImuRecord && it.kind == LeanSensorKind.ACCELEROMETER) {
+                val tilt = Math.toRadians(20.0)
+                it.copy(y = it.z * sin(tilt), z = it.z * cos(tilt))
+            } else it },
+        )
+        for ((index, rows) in poor.withIndex()) {
+            val result = estimate(rows)
+            assertTrue("case=$index", result.curves.isEmpty())
+            assertEquals("case=$index", 0L, result.validMillis)
+            assertFalse("case=$index", "HANDLEBAR_TIMING_ESTIMATED" in result.partialReasons)
+        }
+    }
+
+    @Test fun chronologicalImuPresenceDoesNotReplaceSignedTurnMagnitude() {
+        val weakerGyro = ride().map {
+            if (it is LeanImuRecord && it.kind == LeanSensorKind.GYROSCOPE) it.copy(z = .02 + (it.z - .02) * .75)
+            else it
+        }
+        assertEquals(1, estimate(weakerGyro).curves.size)
+        val result = estimate(withSingleFixTiming(weakerGyro))
+        assertTrue(result.curves.isEmpty())
+        assertEquals(0L, result.validMillis)
+        assertTrue("SENSOR_DISAGREEMENT" in result.partialReasons)
+        assertFalse("HANDLEBAR_TIMING_ESTIMATED" in result.partialReasons)
+    }
+
+    @Test fun timingFallbackDoesNotJoinAcrossCutOrCountAnUnpublishedRun() {
+        val fixture = withSingleFixTiming(ride())
+        val midpoint = start + 6 * second
+        val split = estimate(fixture.filterNot { it is LeanImuRecord && abs(it.elapsedNanos - midpoint) <= 60_000_000L })
+        assertEquals(2, split.curves.size)
+        assertTrue(split.curves.all { it.timingEstimated &&
+            (it.endElapsedNanos <= midpoint || it.startElapsedNanos >= midpoint) })
+        val short = estimate(fixture.filterNot { it is LeanGnssRecord &&
+            (it.elapsedNanos - start) / second !in setOf(0L, 1L, 2L, 3L, 6L, 7L, 8L, 9L) })
+        assertTrue(short.curves.isEmpty())
+        assertEquals(0L, short.validMillis)
+        assertTrue("CURVE_TOO_SHORT" in short.partialReasons)
+        assertFalse("HANDLEBAR_TIMING_ESTIMATED" in short.partialReasons)
+
+        val lateFixture = withSingleFixTiming(ride(turnEnds = 8.0))
+        val late = estimate(lateFixture + lateFixture.first { it is LeanGnssRecord })
+        assertTrue("LATE_RECORD" in late.partialReasons)
+        assertFalse("HANDLEBAR_TIMING_ESTIMATED" in late.partialReasons)
+        assertEquals(0L, late.validMillis)
+    }
+
+    @Test fun timingFallbackRejectsSpacingThatOnlyFitsTheRegularEstimatorWindow() {
+        val fixture = withSingleFixTiming(ride())
+        for (scale in listOf(7L, 13L)) {
+            val stretched = fixture.map {
+                val offset = (it.elapsedNanos - start) * scale / 10
+                when (it) {
+                    is LeanImuRecord -> it.copy(elapsedNanos = start + offset)
+                    is LeanGnssRecord -> it.copy(elapsedNanos = start + offset, utcMillis = utc + offset / 1_000_000L,
+                        singleFixReceivedElapsedNanos = start + offset + 50_000_000L)
+                }
+            }
+            val result = estimate(stretched, session().copy(endedAtElapsedNanos = start + 16 * second))
+            assertTrue("scale=$scale", result.curves.isEmpty())
+            assertEquals(0L, result.validMillis)
+            assertTrue(requireNotNull(result.gnssDiagnostics).issues.any { it.code == "GNSS_TIME_UNCERTAINTY_MISSING" })
+        }
+    }
+
+    @Test fun measuredAndEstimatedSupportsNeverFormOneCurve() {
+        val midpoint = start + 6 * second
+        val fixture = withSingleFixTiming(ride()).map {
+            if (it is LeanGnssRecord && it.elapsedNanos < midpoint) {
+                it.copy(elapsedUncertaintyNanos = 1_000_000.0, singleFixReceivedElapsedNanos = null)
+            } else it
+        }
+        val (strict, estimated) = estimate(fixture).curves.also { assertEquals(2, it.size) }
+        assertFalse(strict.timingEstimated)
+        assertTrue(estimated.timingEstimated)
+        assertTrue(strict.endElapsedNanos < estimated.startElapsedNanos)
+    }
+
+    @Test fun singleFixTimingDoesNotEnableLiveOrBodyEstimation() {
+        val timed = withSingleFixTiming(ride())
+        val (first, last) = timed.filterIsInstance<LeanGnssRecord>().take(2)
+        val window = timed.filterIsInstance<LeanImuRecord>().filter { it.elapsedNanos in first.elapsedNanos..<last.elapsedNanos }
+        for (mount in mounts) assertNull(HandlebarLeanEstimator.liveDegrees(mount, first, last, window))
+        val body = LeanEstimatorV1().estimate(session(mounts.last()), timed.asSequence()) {}
+        assertEquals(0L, body.validMillis)
+        assertTrue("GNSS_QUALITY" in body.partialReasons)
+        assertFalse("HANDLEBAR_TIMING_ESTIMATED" in body.partialReasons)
+    }
+
     private val mounts = listOf(calibration, calibration.copy(epoch = "body", bodyConfirmed = true, steeringAxis = emptyList()))
 
     private data class LiveWindow(val first: LeanGnssRecord, val last: LeanGnssRecord, val imu: List<LeanImuRecord>) {

@@ -79,5 +79,7 @@ class CurvePassMatcherTest {
         assertNull(comparison.previous.sampledMaxSpeedKmh)
         assertTrue(comparison.samples.all { it.previousSpeedKmh == null })
         assertNull(CurvePassMatcher.compare(current, previous, report(sample, sample))?.selected?.lean)
+        val estimated = handles.copy(handlebar = report(sample.copy(timingEstimated = true)))
+        assertNull(requireNotNull(CurvePassMatcher.compare(current, previous, estimated)).selected.lean)
     }
 }

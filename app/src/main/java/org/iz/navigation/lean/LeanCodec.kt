@@ -4,8 +4,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
 
-internal fun LeanCalibration.acceptsAlgorithm(version: String): Boolean =
-    if (bodyConfirmed) version != HandlebarLeanEstimator.VERSION else version == HandlebarLeanEstimator.VERSION
+internal fun LeanCalibration.acceptsAlgorithm(version: String): Boolean {
+    val handlebar = version == HandlebarLeanEstimator.LEGACY_VERSION || version == HandlebarLeanEstimator.VERSION
+    return handlebar != bodyConfirmed
+}
 
 /** Versioned, bounded private telemetry; never forwarded to power diagnostics or sharing. */
 internal object LeanCodec {
@@ -41,6 +43,8 @@ internal object LeanCodec {
     private fun JSONObject.long(key: String): Long = get(key).let {
         require(it is Int || it is Long || it is Short || it is Byte) { "Invalid telemetry integer" }; (it as Number).toLong()
     }
+    private fun JSONObject.flag(key: String): Boolean =
+        if (!has(key)) false else get(key) as? Boolean ?: error("Invalid telemetry flag")
     private fun JSONObject.text(key: String, max: Int = 200): String = get(key).let {
         require(it is String && it.isNotBlank() && it.length <= max && it.none { c -> c.code < 32 }); it
     }
@@ -97,7 +101,16 @@ internal object LeanCodec {
                         "lon" to r.longitude, "accuracy" to n(r.accuracyMeters), "speed" to n(r.speedMps),
                         "bearing" to n(r.bearingDegrees), "speedAccuracy" to n(r.speedAccuracyMps),
                         "bearingAccuracy" to n(r.bearingAccuracyDegrees), "timeUncertainty" to n(r.elapsedUncertaintyNanos),
-                        "mock" to r.mock, "provider" to r.provider)
+                        "mock" to r.mock, "provider" to r.provider).apply {
+                        r.singleFixReceivedElapsedNanos?.let { received ->
+                            require(received >= r.elapsedNanos && !r.invalidElapsedUncertainty)
+                            put("singleFixReceivedNs", received)
+                        }
+                        if (r.invalidElapsedUncertainty) {
+                            require(r.elapsedUncertaintyNanos == null)
+                            put("invalidTimeUncertainty", true)
+                        }
+                    }
                 }
             })
         }
@@ -119,7 +132,9 @@ internal object LeanCodec {
                         LeanGnssRecord(r.long("ns"), r.long("utc"), r.number("lat"), r.number("lon"),
                             r.optional("accuracy"), r.optional("speed"), r.optional("bearing"), r.optional("speedAccuracy"),
                             r.optional("bearingAccuracy"), r.optional("timeUncertainty"), r.getBoolean("mock"),
-                            if (r.isNull("provider")) null else r.text("provider", 80))
+                            if (r.isNull("provider")) null else r.text("provider", 80),
+                            if (r.has("singleFixReceivedNs")) r.long("singleFixReceivedNs") else null,
+                            r.flag("invalidTimeUncertainty"))
                     }
                     else -> error("Unknown telemetry record")
                 }
@@ -183,7 +198,13 @@ internal object LeanCodec {
             require(c.startUtcMillis == null || c.startUtcMillis >= 0 && c.endUtcMillis!! >= c.startUtcMillis)
             curves.put(obj("start" to c.startElapsedNanos, "end" to c.endElapsedNanos,
                 "left" to angle(c.leftDegrees), "right" to angle(c.rightDegrees), "lat" to c.latitude,
-                "lon" to c.longitude, "startUtc" to c.startUtcMillis, "endUtc" to c.endUtcMillis))
+                "lon" to c.longitude, "startUtc" to c.startUtcMillis, "endUtc" to c.endUtcMillis).apply {
+                if (c.timingEstimated) {
+                    require(value.algorithmVersion == HandlebarLeanEstimator.VERSION &&
+                        "HANDLEBAR_TIMING_ESTIMATED" in value.partialReasons)
+                    put("timingEstimated", true)
+                }
+            })
         }
         return obj("version" to 1, "algorithm" to value.algorithmVersion, "calibration" to value.calibrationEpoch,
             "left" to angle(value.leftDegrees), "right" to angle(value.rightDegrees), "valid" to value.validMillis,
@@ -209,7 +230,7 @@ internal object LeanCodec {
                 LeanCurveResult(it.long("start"), it.long("end"), it.optional("left"), it.optional("right"),
                     it.optional("lat"), it.optional("lon"),
                     if (it.isNull("startUtc")) null else it.long("startUtc"),
-                    if (it.isNull("endUtc")) null else it.long("endUtc"))
+                    if (it.isNull("endUtc")) null else it.long("endUtc"), it.flag("timingEstimated"))
             } }, List(f.length()) { f.getDouble(it) },
             if (j.has("sensorTiming")) j.getJSONObject("sensorTiming").let {
                 LeanSensorTiming(it.long("ns"), readStream(it.getJSONObject("accel")), readStream(it.getJSONObject("gyro")))

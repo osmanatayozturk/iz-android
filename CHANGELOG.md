@@ -1,5 +1,9 @@
 # Değişiklik geçmişi
 
+## Geliştirme sürümü · Gidon yatış raporu
+
+- Telefon GPS ölçümünün zaman belirsizliğini bildirmediğinde, diğer kalite koşullarını karşılayan gidon kayıtları yatış raporunda değerlendirilebilir.
+
 ## Geliştirme sürümü · Garaj menüsü ve yakıt öğrenmesi
 
 - Telefonun **Menü** ekranında **Garaj**, **Yolculuklar** yanında açılır. Araç ve dolum formlarına buradan ulaşabilirsiniz. Geri döndüğünüzde Garaj’ı açtığınız ekran gelir.

@@ -129,6 +129,7 @@ internal object CurvePassMatcher {
         val groups = listOf(LeanMount.BODY to report, LeanMount.HANDLEBAR to report?.handlebar)
         return groups.flatMap { (mount, source) ->
             source?.takeUnless { it.pending || it.algorithmVersions.isEmpty() }?.curves.orEmpty().mapNotNull { result ->
+                if (result.timingEstimated) return@mapNotNull null
                 val start = result.startUtcMillis ?: return@mapNotNull null
                 val end = result.endUtcMillis ?: return@mapNotNull null
                 val lat = result.latitude ?: return@mapNotNull null

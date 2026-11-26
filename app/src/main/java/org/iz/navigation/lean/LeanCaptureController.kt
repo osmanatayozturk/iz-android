@@ -102,9 +102,9 @@ internal class LeanCaptureController(context: Context, private val onCaptureChan
     /** Preserve measurement time/optional-quality presence; callback arrival never substitutes for GNSS time.
      * Source: https://developer.android.com/reference/android/location/Location#getElapsedRealtimeNanos()
      */
-    fun onLocation(journeyId: String, location: Location) {
+    fun onLocation(journeyId: String, location: Location, singleFixReceivedElapsedNanos: Long?) {
         val session = active?.takeIf { it.token.journeyId == journeyId && it.accepting } ?: return
-        val fix = location.toLeanFix()
+        val fix = location.toLeanFix(singleFixReceivedElapsedNanos.takeIf { session.mount == LeanMount.HANDLEBAR })
         if (fix == null) session.dropped.incrementAndGet() else offer(session, fix)
     }
 

@@ -188,6 +188,11 @@ internal fun LeanJourneyReportPanel(journey: Journey) {
     val store = remember(app) { LeanStore.get(app) }
     val flow = remember(store, journey.id) { store.observeReport(journey.id) }
     val report by flow.collectAsStateWithLifecycle(LeanJourneyReport(false, null, null, 0, 0, emptySet(), emptyList(), emptySet()))
+    LeanJourneyReportContent(journey, report)
+}
+
+@Composable
+internal fun LeanJourneyReportContent(journey: Journey, report: LeanJourneyReport) {
     val handlebar = report.handlebar
     val showBody = handlebar == null || report.pending || report.observedMillis > 0 || report.partialReasons.isNotEmpty() ||
         report.leftDegrees != null || report.rightDegrees != null || report.sessionDetails.isNotEmpty()
@@ -197,14 +202,14 @@ internal fun LeanJourneyReportPanel(journey: Journey) {
             if (showBody) {
                 key(journey.id, LeanMount.BODY) {
                     LeanReportSection(journey, report, "Gövde yatışı".takeIf { handlebar != null },
-                        "Dikey dünyaya göre tahmini gövde yatışı; ölçülmüş doğruluk iddiası değildir.", "Gövde", "body-lean-report")
+                        "Dikey dünyaya göre tahmini gövde yatışı; ölçülmüş doğruluk iddiası değildir.", LeanMount.BODY, "body-lean-report")
                 }
             }
             if (handlebar != null) {
                 if (showBody) HorizontalDivider()
                 key(journey.id, LeanMount.HANDLEBAR) {
                     LeanReportSection(journey, handlebar, "Gidon bağlantısından tahmini yatış",
-                        "Gidon hareketi ayrıştırılarak yapılan deneysel sürüş sonrası tahmin.", "Gidon", "handlebar-lean-report")
+                        "Gidon hareketi ayrıştırılarak yapılan deneysel sürüş sonrası tahmin.", LeanMount.HANDLEBAR, "handlebar-lean-report")
                 }
             }
         }
@@ -213,9 +218,11 @@ internal fun LeanJourneyReportPanel(journey: Journey) {
 
 @Composable
 private fun LeanReportSection(journey: Journey, report: LeanJourneyReport, title: String?, description: String,
-    mountLabel: String, reportTag: String) {
+    mount: LeanMount, reportTag: String) {
     var curves by remember { mutableStateOf(false) }
     var coverage by remember { mutableStateOf(false) }
+    val handlebar = mount == LeanMount.HANDLEBAR
+    val mountLabel = if (handlebar) "Gidon" else "Gövde"
     if (title != null) Text(title, style = MaterialTheme.typography.titleMedium)
     Text(description, Modifier.testTag(reportTag), style = MaterialTheme.typography.bodySmall)
     if (journey.endedAt == null) Text("Rapor yolculuk bittikten sonra hazırlanır.")
@@ -223,6 +230,10 @@ private fun LeanReportSection(journey: Journey, report: LeanJourneyReport, title
     else if (report.leftDegrees == null && report.rightDegrees == null) Text("Kullanılabilir yatış tahmini yok. Önceki yolculuklara sonradan değer eklenmez.")
     else {
         fun angle(value: Double?) = value?.takeIf { it.isFinite() }?.let { "${it.roundToInt()}°" } ?: "Kullanılamıyor"
+        if (handlebar && "HANDLEBAR_TIMING_ESTIMATED" in report.partialReasons) {
+            Text("Düşük güven · GPS zaman belirsizliği bildirilmedi. İşaretli virajlarda yatış, GPS hareketi ve telefon sensörlerinin uyumundan tahmin edildi.",
+                style = MaterialTheme.typography.labelLarge)
+        }
         Text("En büyük geçerli sol tahmin: ${angle(report.leftDegrees)}")
         Text("En büyük geçerli sağ tahmin: ${angle(report.rightDegrees)}")
         if (report.curves.isNotEmpty()) {
@@ -233,6 +244,10 @@ private fun LeanReportSection(journey: Journey, report: LeanJourneyReport, title
                 items(report.curves) { curve ->
                     val time = curve.startUtcMillis?.let { SimpleDateFormat("HH:mm:ss", Locale.forLanguageTag("tr-TR")).format(Date(it)) } ?: "Saat eşlenemedi"
                     Text("$time · Sol ${angle(curve.leftDegrees)} · Sağ ${angle(curve.rightDegrees)}", style = MaterialTheme.typography.bodyMedium)
+                    if (handlebar && curve.timingEstimated) {
+                        Text("Düşük güven · GPS zaman belirsizliği bildirilmedi. Yatış, hareket ve sensör uyumundan tahmin edildi.",
+                            style = MaterialTheme.typography.bodySmall)
+                    }
                     if (curve.latitude != null && curve.longitude != null) Text(String.format(Locale.ROOT, "Rota noktası %.5f, %.5f", curve.latitude, curve.longitude), style = MaterialTheme.typography.bodySmall)
                     HorizontalDivider()
                 }
@@ -259,6 +274,7 @@ private fun leanPartialLabel(reason: String): String {
         value == "gnss_course_uncertain" -> "GPS yönü yeterince güvenilir değildi."
         value == "gnss_motion_disagreement" -> "GPS konum değişimi, hız veya yön bilgisiyle uyuşmadı."
         value == "gnss_quality" -> "GPS konum veya hız kalitesi yetersizdi."
+        value == "handlebar_timing_estimated" -> "GPS zaman belirsizliği bildirilmediğinde yatış, GPS hareketi ve telefon sensörlerinin uyumundan tahmin edildi."
         value == "parked_steering_or_stationary" -> "Motosiklet hareketsizdi. Parkta gidon çevirmek viraj olarak sayılmaz."
         value == "low_speed_unsupported" -> "Düşük hızdaki bölümler yatış tahminine katılmadı."
         value == "steering_or_motion_veto" -> "Gidon hareketi, titreşim veya ani hareket nedeniyle bazı bölümler tahmine katılmadı."

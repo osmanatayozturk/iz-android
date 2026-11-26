@@ -23,6 +23,8 @@ data class LeanGnssRecord(
     val speedMps: Double?, val bearingDegrees: Double?,
     val speedAccuracyMps: Double?, val bearingAccuracyDegrees: Double?,
     val elapsedUncertaintyNanos: Double?, val mock: Boolean, val provider: String?,
+    val singleFixReceivedElapsedNanos: Long? = null,
+    val invalidElapsedUncertainty: Boolean = false,
 ) : LeanRecord
 
 data class LeanSessionToken(val id: String, val journeyId: String, val generation: Long)
@@ -38,6 +40,7 @@ data class LeanCurveResult(
     val leftDegrees: Double?, val rightDegrees: Double?,
     val latitude: Double?, val longitude: Double?,
     val startUtcMillis: Long? = null, val endUtcMillis: Long? = null,
+    val timingEstimated: Boolean = false,
 )
 
 /** Peaks are nonnegative magnitudes, with direction carried by the field name. Missing is null. */

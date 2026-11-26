@@ -74,7 +74,8 @@ internal object LeanGnssQuality {
         check(fix.speedMps, maxSpeed(mount), Measurement.SPEED)
         check(fix.accuracyMeters, 20.0, Measurement.POSITION_ACCURACY)
         check(fix.speedAccuracyMps, 1.5, Measurement.SPEED_ACCURACY)
-        check(fix.elapsedUncertaintyNanos, 100_000_000.0, Measurement.TIME_UNCERTAINTY)
+        if (fix.invalidElapsedUncertainty) add(Measurement.TIME_UNCERTAINTY.outOfRange)
+        else check(fix.elapsedUncertaintyNanos, 100_000_000.0, Measurement.TIME_UNCERTAINTY)
     }
 
     fun movingHandlebarIssues(fix: LeanGnssRecord, positionAccuracy: Double, speedAccuracy: Double,

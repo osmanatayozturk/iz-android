@@ -33,6 +33,17 @@ class HandlebarStoragePolicyTest {
             LeanCodec.inputHash(input.copy(calibration = body), emptyList()))
         val pending = LeanBackupSession(original, "SEALED", emptyList())
         assertEquals(listOf(pending), LeanBackupCodec.decode(LeanBackupCodec.encode(listOf(pending))))
+        val closedV1 = LeanEstimate("handlebar-gnss-imu-v1", bars.epoch, null, null, 0L, 0L,
+            setOf("NO_VALID_COVERAGE"), emptyList())
+        val closed = pending.copy(state = "COMPLETE", result = closedV1)
+        assertEquals(listOf(closed), LeanBackupCodec.decode(LeanBackupCodec.encode(listOf(closed))))
+        assertFalse(body.acceptsAlgorithm(closedV1.algorithmVersion))
+        assertFalse(body.acceptsAlgorithm(HandlebarLeanEstimator.VERSION))
+        val curve = LeanCurveResult(20L, 30L, null, 12.0, null, null, timingEstimated = true)
+        val estimated = closedV1.copy(algorithmVersion = HandlebarLeanEstimator.VERSION,
+            rightDegrees = 12.0, partialReasons = setOf("HANDLEBAR_TIMING_ESTIMATED"), curves = listOf(curve))
+        val current = closed.copy(result = estimated)
+        assertEquals(listOf(current), LeanBackupCodec.decode(LeanBackupCodec.encode(listOf(current))))
         val swapped = bars.copy(steeringAxis = bars.steeringAxis.map { -it })
         assertNotEquals(original.inputHash, LeanCodec.inputHash(input.copy(calibration = swapped), emptyList()))
     }
