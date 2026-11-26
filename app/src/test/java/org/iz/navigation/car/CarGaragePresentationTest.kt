@@ -12,6 +12,20 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CarGaragePresentationTest {
+    @Test fun implicitStartNeverBackfillsARecordedOrPendingJourneyOrOverwritesAnUnrecordedChoice() {
+        val unrecorded = NavigationState(sessionId = "session")
+        assertTrue(carShouldBindStartVehicle(unrecorded, explicit = false, hasUnrecordedSelection = false))
+        assertFalse(carShouldBindStartVehicle(unrecorded, explicit = false, hasUnrecordedSelection = true))
+        assertTrue(carShouldBindStartVehicle(unrecorded, explicit = true, hasUnrecordedSelection = true))
+        for (recorded in listOf(unrecorded.copy(recording = true), unrecorded.copy(recordingPending = true),
+            unrecorded.copy(journey = Journey(transport = Transport.CAR)),
+            unrecorded.copy(journey = Journey(transport = Transport.CAR, status = JourneyStatus.TEMPORARY)))) {
+            assertFalse(carShouldBindStartVehicle(recorded, explicit = false, hasUnrecordedSelection = false))
+            assertTrue(carShouldBindStartVehicle(recorded, explicit = true, hasUnrecordedSelection = false))
+        }
+        assertFalse(carShouldBindStartVehicle(unrecorded.copy(simulation = true), explicit = true, hasUnrecordedSelection = false))
+        assertFalse(carShouldBindStartVehicle(NavigationState(), explicit = true, hasUnrecordedSelection = false))
+    }
     private fun vehicle(id: String, mode: Transport) = GarageVehicle(id = id, name = id, transport = mode, capacityLitres = 12.0)
 
     @Test fun emptyGarageAndOneMatchingVehicleCanStartButMultipleMustChooseEachTime() = runTest {

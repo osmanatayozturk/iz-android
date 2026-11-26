@@ -26,6 +26,8 @@ internal interface GarageDao {
     @Query("SELECT * FROM garage_vehicles WHERE id=:id") fun observeVehicle(id: String): Flow<GarageVehicle?>
     @Query("SELECT * FROM fuel_fills WHERE vehicleId=:id ORDER BY at,id") fun fills(id: String): Flow<List<FuelFill>>
     @Query("SELECT vehicleId FROM ($MATCHING_JOURNEY_VEHICLES) WHERE journeyId=:id") fun assignment(id: String): Flow<String?>
+    @Query("SELECT EXISTS(SELECT 1 FROM ($MATCHING_JOURNEY_VEHICLES) WHERE journeyId=:journeyId AND vehicleId=:vehicleId)")
+    suspend fun isAssigned(journeyId: String, vehicleId: String): Boolean
     @Query("SELECT * FROM fuel_fills WHERE vehicleId=:id ORDER BY at,id") suspend fun vehicleFills(id: String): List<FuelFill>
     @Query("SELECT * FROM fuel_fills WHERE id=:id") suspend fun fill(id: String): FuelFill?
     @Query("SELECT * FROM garage_vehicles ORDER BY id") suspend fun allVehicles(): List<GarageVehicle>
@@ -40,6 +42,26 @@ internal interface GarageDao {
         WHERE l.vehicleId=:vehicle
         ORDER BY journeyId,recordedAt,id""")
     fun points(vehicle: String, since: Long): Flow<List<TrackPoint>>
+    @Query("""INSERT INTO journey_start_vehicles(journeyId, transport, vehicleId)
+        SELECT :journeyId, transport, MIN(id) FROM garage_vehicles
+        WHERE transport IN ('CAR', 'MOTORCYCLE') GROUP BY transport HAVING COUNT(*) = 1""")
+    suspend fun captureStartVehicles(journeyId: String)
+
+    @Query("""INSERT OR IGNORE INTO journey_vehicles(journeyId, vehicleId)
+        SELECT j.id, v.id FROM journeys j
+        JOIN journey_start_vehicles s ON s.journeyId = j.id AND s.transport = j.transport
+        JOIN garage_vehicles v ON v.id = s.vehicleId AND v.transport = j.transport
+        WHERE j.id = :journeyId AND j.status = 'CONFIRMED'""")
+    suspend fun assignStartVehicle(journeyId: String)
+
+    @Query("""INSERT OR IGNORE INTO journey_vehicles(journeyId, vehicleId)
+        SELECT j.id, v.id FROM journeys j JOIN garage_vehicles v ON v.transport = j.transport
+        WHERE j.id = :journeyId AND j.status = 'CONFIRMED' AND j.endedAt IS NULL AND v.id = :vehicleId""")
+    suspend fun assignStartChoiceIfUnassigned(journeyId: String, vehicleId: String)
+
+    @Query("DELETE FROM journey_start_vehicles WHERE journeyId = :journeyId")
+    suspend fun forgetStartVehicles(journeyId: String)
+
     @Upsert suspend fun save(vehicle: GarageVehicle)
     @Upsert suspend fun save(fill: FuelFill)
     @Upsert suspend fun save(link: JourneyVehicle)
@@ -51,10 +73,12 @@ internal interface GarageDao {
 
 class GarageRepository internal constructor(private val app: IzApplication) {
     private val changes = Mutex()
+    // Accessed in Room transactions for the first recording attached to a running session.
+    private var lastNewRecording: Pair<String, String>? = null
     private val db = DiaryDatabase.get(app)
     private val dao = db.garageDao()
     val vehicles = dao.vehicles()
-    internal data class Binding(val sessionId: String, val vehicleId: String)
+    internal data class Binding(val sessionId: String, val vehicleId: String, val explicitChoice: Boolean)
     internal val unrecordedBinding = MutableStateFlow<Binding?>(null)
 
     fun fills(vehicleId: String) = dao.fills(vehicleId)
@@ -90,24 +114,52 @@ class GarageRepository internal constructor(private val app: IzApplication) {
         dao.save(JourneyVehicle(journeyId, vehicleId))
     }
 
-    suspend fun bindSession(sessionId: String, journeyId: String?, vehicleId: String?, transport: Transport) {
+    internal suspend fun bindStartChoice(journeyId: String, vehicleId: String) =
+        mutate { insertStartChoice(journeyId, vehicleId) }
+
+    private suspend fun insertStartChoice(journeyId: String, vehicleId: String) {
+        dao.assignStartChoiceIfUnassigned(journeyId, vehicleId)
+        check(dao.isAssigned(journeyId, vehicleId)) { "Yolculuk veya araç seçimi değişti." }
+    }
+
+    suspend fun bindSession(sessionId: String, journeyId: String?, vehicleId: String?, transport: Transport,
+        explicitChoice: Boolean = true) {
         if (vehicleId == null) return
         mutate {
             val vehicle = requireNotNull(dao.vehicle(vehicleId)) { "Araç bulunamadı." }
             val state = app.navigation.state.value
-            check(state.sessionId == sessionId && state.journey?.id == journeyId &&
+            check(state.sessionId == sessionId && (state.journey?.id == journeyId || journeyId == null && explicitChoice) &&
                 state.sessionTransport == transport && vehicle.transport == transport && !state.simulation) {
                 "Sürüş veya araç değişti."
             }
-            if (journeyId != null) assign(journeyId, vehicleId)
-            else rememberUnrecorded(sessionId, vehicleId)
+            if (journeyId == null) {
+                rememberUnrecorded(sessionId, vehicleId, explicitChoice)
+                // The first GPS fix can attach a recording while this choice waits for Room.
+                val attached = state.journey?.id
+                if (explicitChoice && attached != null && lastNewRecording == (sessionId to attached)) {
+                    insertStartChoice(attached, vehicleId)
+                }
+            } else if (explicitChoice) insertStartChoice(journeyId, vehicleId)
         }
     }
 
     private suspend fun <T> mutate(block: suspend () -> T): T = changes.withLock { db.withTransaction { block() } }
 
-    internal fun rememberUnrecorded(session: String, id: String) {
-        unrecordedBinding.value = Binding(session, id)
+    internal fun rememberUnrecorded(session: String, id: String, explicitChoice: Boolean) {
+        unrecordedBinding.update { previous ->
+            if (!explicitChoice && previous?.sessionId == session && previous.explicitChoice) previous
+            else Binding(session, id, explicitChoice)
+        }
+    }
+
+    internal suspend fun carryStartChoice(sessionId: String, journeyId: String) = db.withTransaction {
+        val state = app.navigation.state.value
+        if (state.simulation || state.sessionId != sessionId || state.journey?.id != journeyId) return@withTransaction
+        lastNewRecording = sessionId to journeyId
+        val choice = unrecordedBinding.value
+        if (choice?.sessionId == sessionId && choice.explicitChoice) {
+            dao.assignStartChoiceIfUnassigned(journeyId, choice.vehicleId)
+        }
     }
 
     internal suspend fun applyForProjection(vehicle: GarageVehicle, selectedId: String?, extraKm: (FuelStats) -> Double,

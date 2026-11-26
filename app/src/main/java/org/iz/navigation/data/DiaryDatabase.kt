@@ -105,7 +105,7 @@ internal interface DiaryDao {
     JourneyHealthSample::class, JourneyHealthSync::class, MapEditDraft::class, OsmPresetFavorite::class,
     WatchHealthSession::class, WatchHealthSample::class, SavedRoutePlanEntity::class, ImportedTrackEntity::class,
     ImportedSegmentEntity::class, ImportedCoordinateEntity::class, JourneyCollectionEntity::class, CollectionMembershipEntity::class, DestinationShortcutEntity::class, LeanSessionEntity::class, LeanChunkEntity::class, LeanResultEntity::class,
-    GarageVehicle::class, FuelFill::class, JourneyVehicle::class], version = 12, exportSchema = true)
+    GarageVehicle::class, FuelFill::class, JourneyVehicle::class, JourneyStartVehicle::class], version = 13, exportSchema = true)
 @TypeConverters(DiaryConverters::class)
 internal abstract class DiaryDatabase : RoomDatabase() {
     abstract fun diaryDao(): DiaryDao
@@ -119,6 +119,16 @@ internal abstract class DiaryDatabase : RoomDatabase() {
 
     companion object {
         // https://developer.android.com/training/data-storage/room/migrating-db-versions
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // No backfill: older journeys have no vehicle selection from their start.
+                db.execSQL("""CREATE TABLE journey_start_vehicles (journeyId TEXT NOT NULL, transport TEXT NOT NULL,
+                    vehicleId TEXT NOT NULL, PRIMARY KEY(journeyId, transport),
+                    FOREIGN KEY(journeyId) REFERENCES journeys(id) ON DELETE CASCADE,
+                    FOREIGN KEY(vehicleId) REFERENCES garage_vehicles(id) ON DELETE CASCADE)""")
+                db.execSQL("CREATE INDEX index_journey_start_vehicles_vehicleId ON journey_start_vehicles(vehicleId)")
+            }
+        }
         val MIGRATION_11_12 = object : Migration(11, 12) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("""CREATE TABLE garage_vehicles (id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL,
@@ -247,7 +257,7 @@ internal abstract class DiaryDatabase : RoomDatabase() {
         @Volatile private var instance: DiaryDatabase? = null
         fun get(context: Context): DiaryDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, DiaryDatabase::class.java, "iz-diary.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
                 .build().also { instance = it }
         }
     }

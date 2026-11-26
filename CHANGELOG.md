@@ -1,5 +1,9 @@
 # Değişiklik geçmişi
 
+## Geliştirme sürümü · Yeni sürüşlerde Garaj bağlantısı
+
+- Yeni bir sürüş kaydedildiğinde Garaj’da aynı türden tek uygun araç varsa İz sürüşü o araca bağlayabilir. Bağlanan sürüşün mesafesi aracın sayacına yansır.
+
 ## Geliştirme sürümü · Gidon yatış raporu
 
 - Telefon GPS ölçümünün zaman belirsizliğini bildirmediğinde, diğer kalite koşullarını karşılayan gidon kayıtları yatış raporunda değerlendirilebilir.

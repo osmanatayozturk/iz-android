@@ -150,7 +150,7 @@ class WearStartActivity : ComponentActivity() {
 
     private fun requestPermissionsAndBegin() {
         if (command == null || busy || finished) return
-        val selected = vehicles.firstOrNull { it.id == selectedVehicleId } ?: vehicles.singleOrNull()
+        val selected = vehicles.firstOrNull { it.id == selectedVehicleId }
         if (vehicles.size > 1 && selected == null) return
         approvedVehicleId = selected?.id
         busy = true

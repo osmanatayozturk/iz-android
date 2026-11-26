@@ -150,7 +150,7 @@ class Moto0110DeviceChecks {
         }
         migration.runMigrationsAndValidate(name, 8, true, DiaryDatabase.MIGRATION_7_8).close()
         val db = Room.databaseBuilder(context, DiaryDatabase::class.java, name)
-            .addMigrations(DiaryDatabase.MIGRATION_8_9, DiaryDatabase.MIGRATION_9_10, DiaryDatabase.MIGRATION_10_11, DiaryDatabase.MIGRATION_11_12).build()
+            .addMigrations(DiaryDatabase.MIGRATION_8_9, DiaryDatabase.MIGRATION_9_10, DiaryDatabase.MIGRATION_10_11, DiaryDatabase.MIGRATION_11_12, DiaryDatabase.MIGRATION_12_13).build()
         try {
             val dao = db.diaryDao()
             assertEquals("Keep note", dao.journey("legacy")!!.note)

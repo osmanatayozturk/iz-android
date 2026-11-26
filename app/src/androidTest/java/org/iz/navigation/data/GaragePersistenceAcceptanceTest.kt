@@ -47,7 +47,7 @@ class GaragePersistenceAcceptanceTest {
                 )
             }
             migration.runMigrationsAndValidate(databaseName, 12, true, DiaryDatabase.MIGRATION_11_12).close()
-            val migrated: DiaryDatabase = Room.databaseBuilder(context, DiaryDatabase::class.java, databaseName).build()
+            val migrated: DiaryDatabase = Room.databaseBuilder(context, DiaryDatabase::class.java, databaseName).addMigrations(DiaryDatabase.MIGRATION_12_13).build()
             try {
                 assertOldDiaryAndEmptyGarage(DiaryRepository(context, migrated).snapshot())
             } finally {

@@ -63,7 +63,7 @@ internal abstract class CarScreen(context: CarContext) : Screen(context) {
     }
     protected fun isVisibleScreen() = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) && screenManager.top === this
     protected fun selectManualVehicle(transport: Transport,
-        operation: suspend (String?, () -> Boolean) -> Unit) {
+        operation: suspend (String?, Boolean, () -> Boolean) -> Unit) {
         if (vehicleChoosing) return
         vehicleChoosing = true
         vehicleChoiceError = null
@@ -74,8 +74,8 @@ internal abstract class CarScreen(context: CarContext) : Screen(context) {
                 resolveCarStartVehicle(app.garage.vehicles, transport,
                     stillCurrent = { isVisibleScreen() &&
                         expected == carVehicleStartSnapshot(navigation.state.value, transport) },
-                    start = { id -> operation(id, ::isVisibleScreen) },
-                    choose = { showVehiclePicker(transport, expected, operation = operation) })
+                    start = { id -> operation(id, false, ::isVisibleScreen) },
+                    choose = { showVehiclePicker(transport, expected) { id, visible -> operation(id, true, visible) } })
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) { vehicleChoiceError = failure.message ?: "Araçlar okunamadı. Yeniden deneyin." }
             finally { vehicleChoosing = false; safeInvalidate() }
@@ -91,8 +91,8 @@ internal abstract class CarScreen(context: CarContext) : Screen(context) {
             home.plan(destination, vehicleChosen = true)
             return
         }
-        selectManualVehicle(home.mode) { vehicleId, visible ->
-            if (visible()) home.plan(destination, vehicleId, vehicleChosen = true)
+        selectManualVehicle(home.mode) { vehicleId, explicit, visible ->
+            if (visible()) home.plan(destination, vehicleId, vehicleChosen = true, vehicleExplicit = explicit)
         }
     }
     protected abstract fun carTemplate(): Template
@@ -279,8 +279,9 @@ internal class CarHomeScreen(context: CarContext, private val surface: CarMapSur
     fun setCameraMode(value: DriveCameraMode) { surface.cameraMode(value) }
     fun showOverview() { surface.overview() }
     fun recenter() = surface.recenter()
-    fun preview(route: PlannedRoute, vehicleId: String? = null, vehicleChosen: Boolean = false) {
+    fun preview(route: PlannedRoute, vehicleId: String? = null, vehicleChosen: Boolean = false, vehicleExplicit: Boolean = false) {
         screenManager.push(CarPreviewScreen(carContext, this, surface, route, selectedVehicleId = vehicleId,
+            selectedVehicleExplicit = vehicleExplicit,
             vehicleChoiceOwner = carVehicleStartSnapshot(navigation.state.value, route.transport).takeIf { vehicleChosen }))
     }
 
@@ -296,12 +297,14 @@ internal class CarHomeScreen(context: CarContext, private val surface: CarMapSur
         } else plan(RouteStop(target.query.ifBlank { "Hedef" }.take(300), target.coordinate))
     }
 
-    fun plan(destination: RouteStop, vehicleId: String? = null, vehicleChosen: Boolean = false) {
+    fun plan(destination: RouteStop, vehicleId: String? = null, vehicleChosen: Boolean = false, vehicleExplicit: Boolean = false) {
         screenManager.push(CarPreviewScreen(carContext, this, surface, destination = destination, selectedVehicleId = vehicleId,
+            selectedVehicleExplicit = vehicleExplicit,
             vehicleChoiceOwner = carVehicleStartSnapshot(navigation.state.value, mode).takeIf { vehicleChosen }))
     }
 
-    private suspend fun start(request: CarRecordingRequest, vehicleId: String?, stillVisible: () -> Boolean, onStarted: () -> Unit) {
+    private suspend fun start(request: CarRecordingRequest, vehicleId: String?, vehicleExplicit: Boolean,
+        stillVisible: () -> Boolean, onStarted: () -> Unit) {
         if (recordingStatus.value.starting) return
         recordingStatus.value = CarRecordingStatus(starting = true)
         var startedSession: String? = null
@@ -310,8 +313,11 @@ internal class CarHomeScreen(context: CarContext, private val surface: CarMapSur
                 request.journeyId.takeIf { request.action == CarRecordingAction.SAVE },
                 stillCurrent = { !mapClosed && stillVisible() && request == currentRecordingRequest() })
             startedSession = session
-            if (request.action == CarRecordingAction.START) app.garage.bindSession(session,
-                navigation.state.value.takeIf { it.sessionId == session }?.journey?.id, vehicleId, request.mode)
+            val current = navigation.state.value.takeIf { it.sessionId == session }
+            val remembered = app.garage.unrecordedBinding.value?.takeIf { it.sessionId == session }
+            if (request.action == CarRecordingAction.START && current != null &&
+                carShouldBindStartVehicle(current, vehicleExplicit, remembered != null))
+                app.garage.bindSession(session, current.journey?.id, vehicleId, request.mode, explicitChoice = vehicleExplicit)
             if (stillVisible()) display(onStarted)
         }
         catch (cancelled: CancellationException) { throw cancelled }
@@ -329,12 +335,12 @@ internal class CarHomeScreen(context: CarContext, private val surface: CarMapSur
         return carRecordingRequest(current, effectiveCarMode(current, selectedMode))
     }
     suspend fun changeRecording(request: CarRecordingRequest, stillVisible: () -> Boolean, onStarted: () -> Unit,
-        vehicleId: String? = null) {
+        vehicleId: String? = null, vehicleExplicit: Boolean = false) {
         if (mapClosed || !stillVisible() || request != currentRecordingRequest()) {
             recordingStatus.value = CarRecordingStatus(error = "Yolculuk değişti. Haritaya dönüp yeniden seçin.")
             return
         }
-        if (request.action != CarRecordingAction.FINISH) { start(request, vehicleId, stillVisible, onStarted); return }
+        if (request.action != CarRecordingAction.FINISH) { start(request, vehicleId, vehicleExplicit, stillVisible, onStarted); return }
         val current = navigation.state.value
         val expected = NavigationStopSnapshot.from(current)
         val journeyId = current.journey?.id
@@ -429,8 +435,8 @@ internal class CarMenuScreen(context: CarContext, private val home: CarHomeScree
                     try { home.changeRecording(request, ::isVisibleScreen, { screenManager.popToRoot() }) }
                     catch (cancelled: CancellationException) { throw cancelled }
                     catch (_: Exception) { safeInvalidate() } // The shared recording status contains the error.
-                } else if (!status.starting) selectManualVehicle(request.mode) { vehicleId, visible ->
-                    home.changeRecording(request, visible, { screenManager.popToRoot() }, vehicleId)
+                } else if (!status.starting) selectManualVehicle(request.mode) { vehicleId, explicit, visible ->
+                    home.changeRecording(request, visible, { screenManager.popToRoot() }, vehicleId, explicit)
                 }
             })
             addAll(listOf(
@@ -540,7 +546,7 @@ internal class CarRoutesScreen(context: CarContext, private val home: CarHomeScr
                 route.stops.lastOrNull()?.let { target ->
                     val expected = carVehicleStartSnapshot(navigation.state.value, route.transport)
                     val vehicles = fleet?.filter { it.transport == route.transport }
-                    fun open(id: String?) { scope.launch {
+                    fun open(id: String?, explicit: Boolean = false) { scope.launch {
                         try {
                             check(expected == carVehicleStartSnapshot(navigation.state.value, route.transport) && isVisibleScreen()) {
                                 "Yolculuk değişti. Yeniden seçin."
@@ -549,7 +555,7 @@ internal class CarRoutesScreen(context: CarContext, private val home: CarHomeScr
                                 val latest = app.garage.vehicles.first().filter { it.transport == route.transport }
                                 check(latest.map { it.id }.toSet() == vehicles.orEmpty().map { it.id }.toSet()) { "Garaj değişti. Yeniden seçin." }
                             }
-                            if (isVisibleScreen()) home.preview(route, id, vehicleChosen = true)
+                            if (isVisibleScreen()) home.preview(route, id, vehicleChosen = true, vehicleExplicit = explicit)
                         } catch (cancelled: CancellationException) { throw cancelled }
                         catch (failure: Exception) { vehicleError = failure.message; safeInvalidate() }
                     } }
@@ -558,7 +564,7 @@ internal class CarRoutesScreen(context: CarContext, private val home: CarHomeScr
                         vehicleError != null -> add(row("Yüklü rota", vehicleError.orEmpty()))
                         vehicles == null -> add(row("Yüklü rota", "Araçlar yükleniyor…"))
                         vehicles.size <= 1 -> add(row("Yüklü rota", target.label) { open(vehicles.singleOrNull()?.id) })
-                        else -> vehicles.forEach { vehicle -> add(row(vehicle.name, "Yüklü rota · ${target.label}") { open(vehicle.id) }) }
+                        else -> vehicles.forEach { vehicle -> add(row(vehicle.name, "Yüklü rota · ${target.label}") { open(vehicle.id, explicit = true) }) }
                     }
                 }
             }
@@ -706,6 +712,7 @@ internal class CarPlacesScreen(context: CarContext, private val home: CarHomeScr
 internal class CarPreviewScreen(context: CarContext, private val home: CarHomeScreen,
     private val surface: CarMapSurface, initialRoute: PlannedRoute? = null,
     private val destination: RouteStop? = null, private val selectedVehicleId: String? = null,
+    private val selectedVehicleExplicit: Boolean = false,
     private val vehicleChoiceOwner: CarVehicleStartSnapshot? = null) : CarScreen(context) {
     // Capture before this screen is pushed; the fifth step must stay a terminal type throughout.
     private val terminalPane = screenManager.screenStack.size >= 4
@@ -785,7 +792,7 @@ internal class CarPreviewScreen(context: CarContext, private val home: CarHomeSc
     private fun start(selected: PlannedRoute) {
         if (starting || vehicleChoosing) return
         error = null
-        suspend fun begin(vehicleId: String?, visible: () -> Boolean, expected: CarVehicleStartSnapshot) {
+        suspend fun begin(vehicleId: String?, explicit: Boolean, visible: () -> Boolean, expected: CarVehicleStartSnapshot) {
             starting = true
             safeInvalidate()
             var startedSession: String? = null
@@ -800,8 +807,10 @@ internal class CarPreviewScreen(context: CarContext, private val home: CarHomeSc
                 val session = navigation.startGuidance(selected, stillCurrent = { visible() &&
                     expected == carVehicleStartSnapshot(navigation.state.value, selected.transport) })
                 startedSession = session
-                app.garage.bindSession(session, navigation.state.value.takeIf { it.sessionId == session }?.journey?.id,
-                    vehicleId, selected.transport)
+                val current = navigation.state.value.takeIf { it.sessionId == session }
+                val remembered = app.garage.unrecordedBinding.value?.takeIf { it.sessionId == session }
+                if (current != null && carShouldBindStartVehicle(current, explicit, remembered != null))
+                    app.garage.bindSession(session, current.journey?.id, vehicleId, selected.transport, explicitChoice = explicit)
                 if (visible()) screenManager.popToRoot()
             }
             catch (cancelled: CancellationException) { throw cancelled }
@@ -814,11 +823,11 @@ internal class CarPreviewScreen(context: CarContext, private val home: CarHomeSc
         val existing = vehicleChoiceOwner ?: carVehicleStartSnapshot(navigation.state.value, selected.transport)
             .takeIf { it.sessionId != null }
         if (existing != null) scope.launch {
-            try { begin(selectedVehicleId, ::isVisibleScreen, existing) }
+            try { begin(selectedVehicleId, selectedVehicleExplicit, ::isVisibleScreen, existing) }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) { error = failure.message ?: "Başlatılamadı."; safeInvalidate() }
-        } else selectManualVehicle(selected.transport) { id, visible ->
-            begin(id, visible, carVehicleStartSnapshot(navigation.state.value, selected.transport))
+        } else selectManualVehicle(selected.transport) { id, explicit, visible ->
+            begin(id, explicit, visible, carVehicleStartSnapshot(navigation.state.value, selected.transport))
         }
     }
 }

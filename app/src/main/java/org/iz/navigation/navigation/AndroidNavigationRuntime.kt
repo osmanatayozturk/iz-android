@@ -39,6 +39,9 @@ internal class AndroidNavigationRuntime(private val context: Context) : Navigati
     override val journeys = repository.journeys
     override suspend fun activeJourney() = repository.activeJourney()
     override suspend fun start(transport: Transport, stillCurrent: () -> Boolean) = tracker.startManual(transport, stillCurrent)
+    override suspend fun carryStartChoice(sessionId: String, journeyId: String) {
+        (context.applicationContext as org.iz.navigation.IzApplication).garage.carryStartChoice(sessionId, journeyId)
+    }
     override suspend fun confirm(id: String, transport: Transport) { tracker.confirm(id, transport) }
     override suspend fun acquireCarRecorder(transport: Transport, candidate: String?, stillCurrent: () -> Boolean) =
         tracker.acquireCarRecorder(transport, candidate, stillCurrent)

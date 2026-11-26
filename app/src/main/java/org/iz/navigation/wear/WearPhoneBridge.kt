@@ -276,19 +276,29 @@ internal class WearPhoneBridge(private val context: Context) {
         var createdId: String? = null
         fun fresh() = WearProtocol.isFreshCommand(command, System.currentTimeMillis())
         return try {
+            val navigation = (context.applicationContext as org.iz.navigation.IzApplication).navigation
+            if (navigation.state.value.simulation) return rejected(command, "Önce telefondaki deneme sürüşünü bitir.")
             val mode = Transport.valueOf(requireNotNull(command.mode).name)
-            val selection = wearGarageSelection(mode, matchingVehicles(mode), selectedVehicleId)
+            val vehicles = matchingVehicles(mode)
+            val state = navigation.state.value
+            val remembered = garage.unrecordedBinding.value?.takeIf { choice ->
+                !state.simulation && state.journey == null && !state.recording && !state.recordingPending &&
+                    state.sessionId == choice.sessionId && state.sessionTransport == mode && choice.explicitChoice
+            }
+            val selection = wearGarageSelection(mode, vehicles, selectedVehicleId ?: remembered?.vehicleId)
             if (!fresh()) return rejected(command, "İsteğin süresi doldu. Saatten tekrar dene.")
             if (selection == WearGarageSelection.NeedsPhone) return WearResult(command.id, WearResultCode.NEEDS_PHONE,
                 "Park halinde telefonda aracı seçip Başlat'a bas.")
             if (selection == WearGarageSelection.Invalid) return WearResult(command.id, WearResultCode.NEEDS_PHONE,
                 "Araç değişti. Telefonda yeniden seçip Başlat'a bas.")
             beforeStart()
-            val id = controller.startManual(mode) { fresh() && resumed > 0 }
+            val id = controller.startManual(mode) { fresh() && resumed > 0 && !navigation.state.value.simulation }
             createdId = id
             withTimeout(8_000) { while (!TrackingService.isRunning || TrackingService.runningJourneyId != id) delay(100) }
-            val vehicle = (selection as WearGarageSelection.Ready).vehicleId
-            val assigned = vehicle == null || runCatching { garage.assignJourney(id, vehicle) }.isSuccess
+            val vehicle = wearStartChoiceForBinding(selectedVehicleId, remembered?.sessionId, mode, id,
+                navigation.state.value, garage.unrecordedBinding.value)
+            // Implicit matching happened when this journey was born; never rewrite it after service acknowledgement.
+            val assigned = vehicle == null || runCatching { garage.bindStartChoice(id, vehicle) }.isSuccess
             val message = if (assigned) "Telefonda kayıt başladı."
                 else "Telefonda kayıt başladı. Araç bağlanamadı; yolculuk ayrıntısından seçebilirsin."
             WearResult(command.id, WearResultCode.STARTED, message, id)

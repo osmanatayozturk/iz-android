@@ -14,6 +14,11 @@ internal suspend fun resolveCarStartVehicle(vehicles: Flow<List<GarageVehicle>>,
     if (matching.size <= 1) start(matching.singleOrNull()?.id) else choose()
 }
 
+/** Implicit persistent matching belongs to creation, never a screen's delayed completion. */
+internal fun carShouldBindStartVehicle(state: NavigationState, explicit: Boolean,
+    hasUnrecordedSelection: Boolean): Boolean = state.sessionId != null && !state.simulation &&
+    (explicit || state.journey == null && !state.recording && !state.recordingPending && !hasUnrecordedSelection)
+
 /** Identity for a pending manual vehicle choice; GPS/progress updates do not replace its owner. */
 internal data class CarVehicleStartSnapshot(val sessionId: String?, val journeyId: String?,
     val journeyStatus: JourneyStatus?, val sessionTransport: Transport?, val routeRevision: Long, val guidance: Boolean,

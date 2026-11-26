@@ -241,12 +241,14 @@ class FuelOfferController internal constructor(
             if (navigation.state.value.recording) 0.0 else extraDistance(choice, stats, liveDistance.value)
         }
         try {
-            if (d.external) garage.applyForProjection(choice.vehicle, projection.value?.selectedVehicle, extraKm) {
+            val selectedVehicle = projection.value?.selectedVehicle
+            if (d.external) garage.applyForProjection(choice.vehicle, selectedVehicle, extraKm) {
                 val fix = usableFix(d, navigation.state.value, projection.value)
                 if (fix == null || !valid()) false else externalApply(p.plan, fix, ::valid).also { applied ->
                     if (applied) navigation.state.value.takeIf { !it.recording && it.journey == null }?.sessionId?.let { session ->
                         markAttempt(session)
-                        garage.rememberUnrecorded(session, choice.vehicle.id)
+                        garage.rememberUnrecorded(session, choice.vehicle.id,
+                            explicitChoice = selectedVehicle == choice.vehicle.id)
                     }
                 }
             } else garage.applyForOwner(d.id, d.journey, choice.vehicle.id, extraKm) {

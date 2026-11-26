@@ -1,5 +1,11 @@
 # İz sürüm değişikliği planı
 
+## Geliştirme sürümü · Yeni sürüşlerde Garaj bağlantısı
+
+Yeni kaydedilen sürüş, aynı türden tek uygun Garaj aracı bulunduğunda o araca bağlanabilir. Yerel QA, tek araç koşulunu, bağlantının kayda geçmesini ve mesafenin araç sayacına bir kez yansımasını kapsar.
+
+Room 12 → 13 geçişi, yeni sürüşler için geçici araç adayı tablosunu boş olarak ekler. Geçiş kabulünde mevcut araç ve yolculuk kayıtlarının korunması kontrol edilir.
+
 ## Geliştirme sürümü · Gidon yatış raporu
 
 Gidon montajıyla kaydedilen yolculuklarda, GPS kaynağının zaman belirsizliği alanını boş bırakması tek başına yatış hesabını engellemez. Bildirilen zaman belirsizliği ve diğer konum ile sensör ölçümleri kalite koşullarına göre değerlendirilir.

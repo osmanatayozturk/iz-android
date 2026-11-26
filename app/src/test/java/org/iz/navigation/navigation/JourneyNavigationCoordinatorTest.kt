@@ -16,6 +16,10 @@ import org.junit.Test
 class JourneyNavigationCoordinatorTest {
     private class Runtime : NavigationRuntime {
         override val journeys = MutableStateFlow<List<Journey>>(emptyList())
+        val carriedStartChoice = CompletableDeferred<Pair<String, String>>()
+        override suspend fun carryStartChoice(sessionId: String, journeyId: String) {
+            carriedStartChoice.complete(sessionId to journeyId)
+        }
         var started = 0; var finished = 0; var confirmed = 0
         var running: String? = null
         var demand: String? = null
@@ -317,6 +321,8 @@ class JourneyNavigationCoordinatorTest {
         }
         assertEquals(session, controller.state.value.sessionId)
         assertEquals(1, runtime.started)
+        val carried = withContext(Dispatchers.Default) { withTimeout(5_000) { runtime.carriedStartChoice.await() } }
+        assertEquals(session to requireNotNull(controller.state.value.journey).id, carried)
         assertTrue(runCatching { controller.startQuickGuidance(route(), origin, true) }.isFailure)
         controller.finishSession(session)
         controller.onAcceptedLocation(session, NavigationFix(origin.fix.coordinate, now + 1, 5f))

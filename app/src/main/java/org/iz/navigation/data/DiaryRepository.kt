@@ -137,19 +137,35 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
             status = if (temporary) JourneyStatus.TEMPORARY else JourneyStatus.CONFIRMED,
             startedAt = now,
             expiresAt = if (temporary) now + DiaryRules.TEMPORARY_LIFETIME_MILLIS else null,
-        ).also { dao.save(it) }
+        ).also { insertRecording(it) }
     } }
+
+    /** Both call sites create a new recording under a Room transaction, never an edited or restored row. */
+    private suspend fun insertRecording(journey: Journey) {
+        dao.save(journey)
+        db.garageDao().captureStartVehicles(journey.id)
+        if (journey.status == JourneyStatus.CONFIRMED) applyStartVehicle(journey.id)
+    }
+
+    private suspend fun applyStartVehicle(id: String) {
+        db.garageDao().assignStartVehicle(id)
+        db.garageDao().forgetStartVehicles(id)
+    }
 
     suspend fun confirmJourney(id: String, transport: Transport) = db.withTransaction<Unit> {
         val journey = dao.journey(id) ?: return@withTransaction
         if (journey.status != JourneyStatus.TEMPORARY) return@withTransaction
         require(!DiaryRules.isExpired(journey, System.currentTimeMillis())) { "Geçici kaydın süresi doldu." }
-        confirmUnassigned(journey, transport)
+        confirmRecording(journey, transport)
     }
 
-    private suspend fun confirmUnassigned(journey: Journey, transport: Transport): Journey {
+    private suspend fun confirmRecording(journey: Journey, transport: Transport): Journey {
+        // An old invalid temporary link must never become a confirmed assignment.
         db.garageDao().clearAssignment(journey.id)
-        return DiaryRules.confirmed(journey, transport).also { dao.save(it) }
+        return DiaryRules.confirmed(journey, transport).also {
+            dao.save(it)
+            applyStartVehicle(it.id)
+        }
     }
 
     suspend fun finishJourney(id: String, now: Long = System.currentTimeMillis()) = privacyChange { analysis -> db.withTransaction {
@@ -167,12 +183,12 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
         val current = dao.journey(id) ?: return@deleteWithFiles null
         when (TrackingPolicy.automaticCandidateDecision(current, dao.journeyPoints(id), now)) {
             AutomaticCandidateDecision.KEEP -> current
-            AutomaticCandidateDecision.CONFIRM -> confirmUnassigned(current, current.transport)
+            AutomaticCandidateDecision.CONFIRM -> confirmRecording(current, current.transport)
             AutomaticCandidateDecision.RESET -> {
                 dao.deleteDirectPhotos(id)
                 dao.deleteJourney(id)
                 if (restart) Journey(transport = current.transport, status = JourneyStatus.TEMPORARY,
-                    startedAt = now, expiresAt = now + DiaryRules.TEMPORARY_LIFETIME_MILLIS).also { dao.save(it) } else null
+                    startedAt = now, expiresAt = now + DiaryRules.TEMPORARY_LIFETIME_MILLIS).also { insertRecording(it) } else null
             }
         }
     }
@@ -241,6 +257,7 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
     suspend fun updateJourneyDetails(id: String, title: String, note: String, transport: Transport): Boolean = withRawMutationLease { privacyChange { _ -> db.withTransaction {
         val current = dao.journey(id) ?: return@withTransaction false
         if (current.transport != transport) {
+            db.garageDao().forgetStartVehicles(id)
             db.garageDao().clearAssignment(id)
             db.leanDao().clearJourney(id)
         }
@@ -263,6 +280,8 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
         val steps = if (entity.transport.supportsSteps) {
             listOfNotNull(entity.stepCount, current?.takeIf { it.transport.supportsSteps }?.stepCount).maxOrNull()
         } else null
+        if (current != null && (current.transport != entity.transport || current.status != entity.status ||
+            current.startedAt != entity.startedAt)) db.garageDao().forgetStartVehicles(entity.id)
         if (current != null && (current.transport != entity.transport || current.status != entity.status ||
             entity.status != JourneyStatus.CONFIRMED)) db.garageDao().clearAssignment(entity.id)
         if (current != null && (current.transport != entity.transport || entity.status != JourneyStatus.CONFIRMED)) db.leanDao().clearJourney(entity.id)
@@ -584,7 +603,7 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
         id ?: return
         dao.journey(id)?.let {
             require(!DiaryRules.isExpired(it, System.currentTimeMillis())) { "Geçici kaydın süresi doldu." }
-            if (it.status == JourneyStatus.TEMPORARY) confirmUnassigned(it, it.transport)
+            if (it.status == JourneyStatus.TEMPORARY) confirmRecording(it, it.transport)
         }
     }
 

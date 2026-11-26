@@ -48,21 +48,28 @@ internal class PhoneGarageStart(private val app: IzApplication) {
         if (transport != Transport.CAR && transport != Transport.MOTORCYCLE || previous.simulation) return action(::current)
         val vehicles = app.garage.vehicles.first().filter { it.transport == transport }
         if (!current()) throw CancellationException("Başlatma isteği değişti.")
-        val selected = if (vehicles.size <= 1) vehicles.singleOrNull()?.id else {
+        val explicitlySelected = vehicles.size > 1
+        val selected = if (explicitlySelected) {
             val choice = Request(vehicles, CompletableDeferred())
             if (!mutableRequest.compareAndSet(null, choice)) throw CancellationException("Araç seçimi sürüyor.")
-            try { choice.result.await() }
+            val id = try { choice.result.await() }
             finally { mutableRequest.compareAndSet(choice, null) }
-        }
-        if (selected != null) check(app.garage.vehicles.first().any { it.id == selected && it.transport == transport }) {
-            "Seçilen araç artık garajda yok."
-        }
+            check(app.garage.vehicles.first().any { it.id == id && it.transport == transport }) {
+                "Seçilen araç artık garajda yok."
+            }
+            id
+        } else vehicles.singleOrNull()?.id
         if (!current()) throw CancellationException("Başlatma isteği değişti.")
         val sessionId = action(::current)
         if (selected == null) return sessionId
         val session = app.navigation.state.value.takeIf { it.sessionId == sessionId && !it.simulation }
             ?: return sessionId
-        try { app.garage.bindSession(sessionId, session.journey?.id, selected, transport) }
+        // Only the recording's creation can make an implicit persistent assignment.
+        if (!explicitlySelected && (session.journey != null || session.recording || session.recordingPending)) return sessionId
+        try {
+            app.garage.bindSession(sessionId, session.journey?.id, selected, transport,
+                explicitChoice = explicitlySelected)
+        }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) {
             Toast.makeText(app, "Sürüş başladı. Araç bağlanamadı, yolculuk ayrıntısından yeniden dene.",

@@ -41,6 +41,13 @@ data class FuelFill(
 ], indices = [Index("vehicleId")])
 data class JourneyVehicle(@PrimaryKey val journeyId: String, val vehicleId: String)
 
+/** Vehicles that were unique for their transport when this temporary recording began. Local to this journey. */
+@Entity(tableName = "journey_start_vehicles", primaryKeys = ["journeyId", "transport"], foreignKeys = [
+    ForeignKey(entity = Journey::class, parentColumns = ["id"], childColumns = ["journeyId"], onDelete = ForeignKey.CASCADE),
+    ForeignKey(entity = GarageVehicle::class, parentColumns = ["id"], childColumns = ["vehicleId"], onDelete = ForeignKey.CASCADE),
+], indices = [Index("vehicleId")])
+internal data class JourneyStartVehicle(val journeyId: String, val transport: Transport, val vehicleId: String)
+
 data class FuelStats(
     val odometerKm: Double,
     val learningFullCount: Int,

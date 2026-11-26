@@ -38,7 +38,7 @@ class TravelLibraryMigrationTest {
             }
             helper.runMigrationsAndValidate(name, 10, true, *migrations).close()
             val db = Room.databaseBuilder(context, DiaryDatabase::class.java, name)
-                .addMigrations(*migrations, DiaryDatabase.MIGRATION_10_11, DiaryDatabase.MIGRATION_11_12)
+                .addMigrations(*migrations, DiaryDatabase.MIGRATION_10_11, DiaryDatabase.MIGRATION_11_12, DiaryDatabase.MIGRATION_12_13)
                 .build()
             try {
                 val diary = db.diaryDao()

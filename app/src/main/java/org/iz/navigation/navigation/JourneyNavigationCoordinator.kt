@@ -19,6 +19,7 @@ interface NavigationRuntime : NavigationCueRuntime {
     val journeys: Flow<List<Journey>>
     suspend fun activeJourney(): Journey?
     suspend fun start(transport: Transport, stillCurrent: () -> Boolean = { true }): String
+    suspend fun carryStartChoice(sessionId: String, journeyId: String) {}
     suspend fun confirm(id: String, transport: Transport)
     /** Acquire only the recorder named by the displayed car action. Android checks under the writer mutex. */
     suspend fun acquireCarRecorder(transport: Transport, candidate: String?, stillCurrent: () -> Boolean): String {
@@ -593,6 +594,7 @@ class JourneyNavigationCoordinator(
     private suspend fun ensureRecording(transport: Transport, car: CarRecordingRequest? = null,
         startStillCurrent: () -> Boolean = { true }, quickStillCurrent: (() -> Boolean)? = null): Journey {
         val token = epoch
+        val startSession = mutableState.value.sessionId
         val stillCurrent = { token == epoch && quickStillCurrent?.invoke() != false }
         var ownTransition = false
         fun mayStart() = stillCurrent() && (ownTransition || startStillCurrent())
@@ -641,6 +643,7 @@ class JourneyNavigationCoordinator(
             check(actual?.id == id && actual.status == JourneyStatus.CONFIRMED) { "Yolculuk artık açık değil." }
             publish(mutableState.value.copy(journey = actual, recording = true,
                 fix = mutableState.value.fix.takeIf { mutableState.value.journey?.id == id }, message = null))
+            if (before == null && startSession != null) runtime.carryStartChoice(startSession, id)
             return actual
         } catch (error: TimeoutCancellationException) {
             if (before == null && quickStillCurrent == null) runtime.interrupt(id)
