@@ -4,6 +4,7 @@ import org.iz.navigation.garage.*
 
 import android.content.Context
 import android.net.Uri
+import java.io.InputStreamReader
 import java.io.File
 import java.io.InputStream
 import java.util.UUID
@@ -61,22 +62,24 @@ class DiaryBackup(context: Context, private val repository: DiaryRepository) {
                         val entry = zip.nextEntry ?: break
                         require(!entry.isDirectory) { "Yedekte beklenmeyen klasör var." }
                         val name = entry.name
-                        require(name == MANIFEST || DiaryRules.isSafePhotoPath(name) || LeanArchive.isRawName(name)) {
+                        val isPage = BackupBulkPages.isPageName(name)
+                        require(name == MANIFEST || isPage || DiaryRules.isSafePhotoPath(name) || LeanArchive.isRawName(name)) {
                             "Güvenli olmayan yedek yolu."
                         }
-                        require(names.size < MAX_FILES && names.add(name)) { "Yinelenen dosya veya çok fazla dosya." }
+                        require(names.size < BACKUP_MAX_FILES && names.add(name)) { "Yinelenen dosya veya çok fazla dosya." }
                         val isRaw = LeanArchive.isRawName(name)
                         val limit = when {
-                            name == MANIFEST -> MAX_MANIFEST_BYTES.toLong()
+                            name == MANIFEST -> BACKUP_MANIFEST_BYTES
+                            isPage -> BackupBulkPages.MAX_PAGE_BYTES.toLong()
                             isRaw -> LeanStore.MAX_RAW_BYTES + 4L * LeanStore.MAX_CHUNKS
-                            else -> MAX_PHOTO_BYTES
+                            else -> BACKUP_PHOTO_BYTES
                         }
                         var entryBytes = 0L
                         val bounded = object : InputStream() {
                             private fun count(size: Int): Int {
                                 if (size > 0) {
                                     entryBytes += size; expandedBytes += size
-                                    require(entryBytes <= limit && expandedBytes <= MAX_TOTAL_BYTES) {
+                                    require(entryBytes <= limit && expandedBytes <= BACKUP_TOTAL_BYTES) {
                                         "Yedek açıldığında izin verilen boyutu aşıyor."
                                     }
                                 }
@@ -104,13 +107,26 @@ class DiaryBackup(context: Context, private val repository: DiaryRepository) {
                     }
                 }
                 val manifest = extracted[MANIFEST] ?: error("Yedek içeriği bulunamadı.")
-                val snapshot = BackupJson.decode(JSONObject(manifest.readText(Charsets.UTF_8)))
+                val pageFiles = extracted.filterKeys(BackupBulkPages::isPageName)
+                if (pageFiles.isNotEmpty()) require(manifest.length() <= BackupBulkPages.MAX_INDEX_BYTES) {
+                    "Sayfalı yedek dizini 4 MiB sınırını aşıyor."
+                }
+                val manifestText = InputStreamReader(manifest.inputStream(), Charsets.UTF_8.newDecoder()).use { it.readText() }
+                val document = JSONObject(org.iz.navigation.offline.OfflineJsonDepth.requireSafe(manifestText.removePrefix("\uFEFF")))
+                val bulk = if (document.opt("version") == BackupBulkPages.VERSION) {
+                    require(manifest.length() <= BackupBulkPages.MAX_INDEX_BYTES) { "Sayfalı yedek dizini 4 MiB sınırını aşıyor." }
+                    StagedBackupBulkRows.open(document, pageFiles)
+                } else {
+                    require(pageFiles.isEmpty() && !document.has("bulkPages")) { "Yedek sayfaları bu sürümle uyumlu değil." }
+                    null
+                }
+                val snapshot = if (bulk == null) BackupJson.decode(document) else BackupJson.decodePagedMetadata(document, bulk)
                 DiaryRules.validate(snapshot)
                 validateMapSnapshot(snapshot)
                 LeanBackupCodec.validateSnapshot(snapshot)
                 require(snapshot.journeys.none { it.status == JourneyStatus.TEMPORARY }) { "Yedek geçici yolculuk içeriyor." }
                 val photoPaths = snapshot.photos.map { it.relativePath }.toSet()
-                LeanArchive.validateEntryNames(names, photoPaths, snapshot.leanSessions)
+                LeanArchive.validateEntryNames(names - pageFiles.keys, photoPaths, snapshot.leanSessions)
                 snapshot.leanSessions.forEach { session ->
                     LeanArchive.validate(session, rawSources[LeanArchive.rawName(session.input.token.id)].orEmpty())
                 }
@@ -126,9 +142,11 @@ class DiaryBackup(context: Context, private val repository: DiaryRepository) {
                     relativePath
                 }
                 withContext(NonCancellable) {
-                    repository.restore(snapshot.copy(photos = snapshot.photos.map {
+                    val remappedSnapshot = snapshot.copy(photos = snapshot.photos.map {
                         it.copy(relativePath = remapped.getValue(it.relativePath))
-                    }), rawSources)
+                    })
+                    if (bulk == null) repository.restore(remappedSnapshot, rawSources)
+                    else repository.restorePaged(remappedSnapshot, rawSources, bulk)
                     committed = true
                     afterReplace()
                 }
@@ -142,10 +160,6 @@ class DiaryBackup(context: Context, private val repository: DiaryRepository) {
 
     companion object {
         private const val MANIFEST = "manifest.json"
-        private const val MAX_FILES = 10_000
-        private const val MAX_MANIFEST_BYTES = 32 * 1024 * 1024
-        private const val MAX_PHOTO_BYTES = 50 * 1024 * 1024L
-        private const val MAX_TOTAL_BYTES = 512 * 1024 * 1024L
     }
 }
 internal object BackupJson {
@@ -257,17 +271,23 @@ internal object BackupJson {
         }
     }
 
-    fun decode(value: JSONObject): DiarySnapshot {
+    fun decode(value: JSONObject): DiarySnapshot = decodeMetadata(value, null)
+
+    internal fun decodePagedMetadata(value: JSONObject, pages: StagedBackupBulkRows): DiarySnapshot = decodeMetadata(value, pages)
+
+    private fun decodeMetadata(value: JSONObject, pages: StagedBackupBulkRows?): DiarySnapshot {
         val format = value.getString("format")
         require(format == FORMAT || format == LEGACY_FORMAT) { "Bu dosya bir İz yedeği değil." }
         val version = value.getInt("version")
-        require(version in 1..VERSION) { "Bu yedek sürümü desteklenmiyor." }
+        require(if (pages != null) version == BackupBulkPages.VERSION && format == FORMAT else version in 1..VERSION) { "Bu yedek sürümü desteklenmiyor." }
         fun <T> records(key: String, parse: (JSONObject) -> T): List<T> {
+            pages?.metadata(key, 500_000, parse)?.let { return it }
             val values = value.getJSONArray(key)
             require(values.length() <= 500_000) { "Yedekte çok fazla kayıt var." }
             return List(values.length()) { parse(values.getJSONObject(it)) }
         }
         fun <T> libraryRecords(key: String, limit: Int = TravelLibraryRules.MAX_ITEMS, parse: (JSONObject) -> T): List<T> {
+            pages?.metadata(key, limit, parse)?.let { return it }
             if (version < 7 || !value.has(key)) return emptyList()
             val array = value.getJSONArray(key)
             require(array.length() <= limit) { "Yedekte çok fazla kütüphane kaydı var." }
@@ -278,8 +298,7 @@ internal object BackupJson {
             journeys = records("journeys") { Journey(it.getString("id"), it.getString("title"), Transport.valueOf(it.getString("transport")),
                 JourneyStatus.valueOf(it.getString("status")), it.getLong("startedAt"), it.nullLong("endedAt"), it.nullLong("expiresAt"),
                 it.getString("note"), it.getBoolean("interrupted"), if (it.has("stepCount")) it.nullLong("stepCount") else null) },
-            points = records("points") { TrackPoint(it.getString("id"), it.getString("journeyId"), it.getDouble("latitude"), it.getDouble("longitude"),
-                it.getLong("recordedAt"), it.getDouble("accuracy").toFloat(), it.nullDouble("speed")?.toFloat(), it.nullDouble("altitude"), it.getBoolean("breakBefore")) },
+            points = records("points", ::readPoint),
             places = records("places") { Place(it.getString("id"), it.getString("name"), it.nullDouble("latitude"), it.nullDouble("longitude"), it.nullString("googlePlaceId"),
                 if (version >= 3) it.nullString("osmType")?.let(OsmType::valueOf) else null,
                 if (version >= 3) it.strictNullLong("osmId") else null,
@@ -301,13 +320,7 @@ internal object BackupJson {
                     remoteNoteId = it.strictNullLong("remoteNoteId"), remoteStatus = it.nullString("remoteStatus"), submittedAt = it.strictNullLong("submittedAt"),
                     submittedBy = it.strictNullLong("submittedBy"), error = it.nullString("error"))
             },
-            healthSamples = if (version < 4) emptyList() else records("healthSamples") {
-                JourneyHealthSample(journeyId = it.strictString("journeyId"), sourceId = it.strictString("sourceId"),
-                    originPackage = it.strictString("originPackage"), deviceType = it.strictNullInt("deviceType"),
-                    deviceManufacturer = it.nullString("deviceManufacturer"), deviceModel = it.nullString("deviceModel"),
-                    metric = HealthMetric.valueOf(it.strictString("metric")), startAt = it.strictLong("startAt"),
-                    endAt = it.strictLong("endAt"), value = it.strictDouble("value"))
-            },
+            healthSamples = if (version < 4) emptyList() else records("healthSamples", ::readHealthSample),
             mapEdits = if (version < 5) emptyList() else records("mapEdits") {
                 val targetType = it.nullString("targetType")?.let(OsmType::valueOf)
                 val targetId = it.strictNullLong("targetId")
@@ -358,15 +371,12 @@ internal object BackupJson {
                 WatchHealthSession(it.strictString("id"), it.strictString("journeyId"), it.strictString("watchId"),
                     it.strictString("deviceName"), it.strictLong("createdAt"), acceptsUploads = false)
             },
-            watchHealthSamples = if (version < 5) emptyList() else records("watchHealthSamples") {
-                WatchHealthSample(it.strictString("sessionId"), it.strictLong("sequence"), it.strictString("journeyId"),
-                    HealthMetric.valueOf(it.strictString("metric")), it.strictLong("startAt"), it.strictLong("endAt"), it.strictDouble("value"))
-            },
+            watchHealthSamples = if (version < 5) emptyList() else records("watchHealthSamples", ::readWatchSample),
             savedPlans = libraryRecords("savedPlans") { record ->
                 require(version >= 11 || record.getJSONArray("stops").length() <= 5) { "20 duraklı rota için yedek sürümü 11 gerekir." }
                 TravelLibraryJson.readPlan(record)
             },
-            importedTracks = libraryRecords("importedTracks") { record ->
+            importedTracks = pages?.libraryTracks() ?: libraryRecords("importedTracks") { record ->
                 TravelLibraryJson.readTrack(record).also { track ->
                     libraryPoints += track.segments.sumOf { it.points.size.toLong() }
                     require(libraryPoints <= TravelLibraryRules.MAX_TOTAL_POINTS) { "Yedekte çok fazla GPX noktası var." }
@@ -376,13 +386,31 @@ internal object BackupJson {
             memberships = libraryRecords("memberships", TravelLibraryRules.MAX_MEMBERSHIPS, TravelLibraryJson::readMembership),
             destinationShortcuts = if (version < 8 || !value.has("destinationShortcuts")) emptyList() else
                 libraryRecords("destinationShortcuts", 2) { DestinationShortcutRef(DestinationShortcutKind.valueOf(it.strictString("kind")), it.strictString("placeId")) },
-            leanSessions = if (version < 8 || !value.has("leanSessions")) emptyList() else LeanBackupCodec.decode(value.getJSONArray("leanSessions")),
+            leanSessions = if (version < 8 || !value.has("leanSessions")) emptyList() else
+                pages?.metadata("leanSessions", LeanStore.MAX_CHUNKS) { LeanBackupCodec.decode(JSONArray().put(it)).single() }
+                    ?: LeanBackupCodec.decode(value.getJSONArray("leanSessions")),
         ).let { snapshot ->
             if (version < 6) snapshot.copy(places = PlaceOrderRules.legacy(snapshot.places, snapshot.visits)) else snapshot
         }.also { DiaryRules.validate(it); validateMapSnapshot(it); LeanBackupCodec.validateSnapshot(it) }.let { snapshot ->
             snapshot.copy(contributions = snapshot.contributions.map { if (it.status == ContributionStatus.SENDING) it.copy(status = ContributionStatus.UNKNOWN) else it },
                 mapEdits = snapshot.mapEdits.map { if (it.status == MapEditStatus.SENDING) it.copy(status = MapEditStatus.UNKNOWN) else it })
         }
+    }
+
+    internal fun readPoint(row: JSONObject) = with(row) {
+        TrackPoint(getString("id"), getString("journeyId"), getDouble("latitude"), getDouble("longitude"),
+            getLong("recordedAt"), getDouble("accuracy").toFloat(), nullDouble("speed")?.toFloat(), nullDouble("altitude"), getBoolean("breakBefore"))
+    }
+    internal fun readHealthSample(row: JSONObject) = with(row) {
+        JourneyHealthSample(journeyId = strictString("journeyId"), sourceId = strictString("sourceId"),
+            originPackage = strictString("originPackage"), deviceType = strictNullInt("deviceType"),
+            deviceManufacturer = nullString("deviceManufacturer"), deviceModel = nullString("deviceModel"),
+            metric = HealthMetric.valueOf(strictString("metric")), startAt = strictLong("startAt"),
+            endAt = strictLong("endAt"), value = strictDouble("value"))
+    }
+    internal fun readWatchSample(row: JSONObject) = with(row) {
+        WatchHealthSample(strictString("sessionId"), strictLong("sequence"), strictString("journeyId"),
+            HealthMetric.valueOf(strictString("metric")), strictLong("startAt"), strictLong("endAt"), strictDouble("value"))
     }
 
     private fun JSONObject.nullString(key: String): String? = if (isNull(key)) null else getString(key)

@@ -90,11 +90,21 @@ internal class DiaryBackupStages(context: Context, private val repository: Diary
                     }
                 }
                 val expected = LeanStore.withSnapshotLease {
-                    ZipOutputStream(target.outputStream().buffered(8192)).use { zip ->
-                        val exporter = repository.withBackupRead { dao ->
-                            PagedBackupExporter(repository, dao, options).also { it.writeManifest(zip, includeHealth) }
+                    suspend fun writeArchive(paged: Boolean): Map<String, Long> {
+                        // A retry truncates the private stage and takes a new, complete Room snapshot.
+                        return ZipOutputStream(target.outputStream().buffered(8192)).use { zip ->
+                            val exporter = repository.withBackupRead { dao ->
+                                PagedBackupExporter(repository, dao, options).also { it.writeManifest(zip, includeHealth, paged) }
+                            }
+                            exporter.writeAttachments(zip)
                         }
-                        exporter.writeAttachments(zip)
+                    }
+                    try {
+                        writeArchive(paged = false)
+                    } catch (limit: BackupManifestLimitException) {
+                        if (options.manifestLimit != BACKUP_MANIFEST_BYTES) throw limit
+                        check()
+                        writeArchive(paged = true)
                     }
                 }
                 // Database and raw lease have both been released before validation, picker or provider copy.

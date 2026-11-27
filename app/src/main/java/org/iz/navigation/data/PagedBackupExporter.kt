@@ -57,21 +57,48 @@ internal class PagedBackupExporter(
             page.map { BackupPage(it.backupKey, it.value) }
         }, consume = consume)
 
-    suspend fun writeManifest(zip: ZipOutputStream, includeHealth: Boolean) {
+    suspend fun writeManifest(zip: ZipOutputStream, includeHealth: Boolean, paged: Boolean = false) {
         val coroutine = currentCoroutineContext()
         val check = { coroutine.ensureActive() }
-        zip.putNextEntry(ZipEntry("manifest.json"))
-        val budget = BackupByteLimitOutputStream(zip, options.manifestLimit, "Günlük verisi 32 MB sınırını aşıyor.")
-        val out = OutputStreamWriter(budget, Charsets.UTF_8).buffered(8192)
-        val header = BackupJson.header(System.currentTimeMillis())
-        out.write('{'.code)
-        var firstHeader = true
-        header.keys().forEach { key ->
-            if (!firstHeader) out.write(','.code); firstHeader = false
-            BackupJsonStream.string(out, key); out.write(':'.code); BackupJsonStream.value(out, header.get(key))
+        val encodePoint: suspend (TrackPoint) -> JSONObject = {
+            TravelLibraryRules.validId(it.id)
+            require(DiaryRules.isUsablePoint(it)) { "Geçersiz rota noktası." }
+            BackupJson.recordPoints(it)
         }
+        val encodeHealth: suspend (JourneyHealthSample) -> JSONObject = {
+            HealthRules.validateSnapshot(DiarySnapshot(journeys = listOfNotNull(journey(it.journeyId)), healthSamples = listOf(it)))
+            BackupJson.recordHealthSamples(it)
+        }
+        val encodeWatchHealth: suspend (WatchHealthSample) -> JSONObject = {
+            WatchHealthRules.validateSnapshot(listOfNotNull(journey(it.journeyId)), listOfNotNull(dao.watchSession(it.sessionId)), listOf(it))
+            BackupJson.recordWatchHealthSamples(it)
+        }
+        val bulk = mutableListOf<BackupBulkGroup>()
+        val bulkBudget = BackupBulkBudget()
+        if (!paged) zip.putNextEntry(ZipEntry("manifest.json"))
+        val manifestLimit = if (paged) minOf(options.manifestLimit, BackupBulkPages.MAX_INDEX_BYTES.toLong()) else options.manifestLimit
+        val budget = BackupByteLimitOutputStream(zip, manifestLimit, "Günlük verisi sınırı aşıldı.",
+            limitFailure = { if (paged) BackupLimitException("Sayfalı yedek dizini 4 MB sınırını aşıyor.") else BackupManifestLimitException() })
+        val out = OutputStreamWriter(budget, Charsets.UTF_8).buffered(8192)
+        val header = BackupJson.header(System.currentTimeMillis()).put("version",
+            if (paged) BackupBulkPages.VERSION else BackupBulkPages.LEGACY_VERSION)
+        fun writeHeader() {
+            out.write('{'.code)
+            var firstHeader = true
+            header.keys().forEach { key ->
+                if (!firstHeader) out.write(','.code); firstHeader = false
+                BackupJsonStream.string(out, key); out.write(':'.code); BackupJsonStream.value(out, header.get(key))
+            }
+        }
+        if (!paged) writeHeader()
         suspend fun <T> array(name: String, limit: Int = 500_000,
             load: suspend (Long, Int) -> List<BackupRecord<T>>, encode: suspend (T) -> JSONObject) {
+            if (paged) {
+                bulk += BackupBulkPages.write(zip, name, ::entry, budget = bulkBudget) { emit ->
+                    rows(name, limit, load) { emit(encode(it)) }
+                }
+                return
+            }
             out.write(','.code); BackupJsonStream.string(out, name); out.write(":[")
             var first = true
             rows(name, limit, load) { row ->
@@ -85,12 +112,7 @@ internal class PagedBackupExporter(
         array("journeys", load = dao::journeys) {
             validate(DiarySnapshot(journeys = listOf(it))); BackupJson.recordJourneys(it)
         }
-        array("points", load = dao::points) {
-            // The query includes only existing confirmed parents. Primary keys enforce global uniqueness.
-            TravelLibraryRules.validId(it.id)
-            require(DiaryRules.isUsablePoint(it)) { "Geçersiz rota noktası." }
-            BackupJson.recordPoints(it)
-        }
+        array("points", load = dao::points, encode = encodePoint)
         array("places", load = dao::places) { validate(DiarySnapshot(places = listOf(it))); BackupJson.recordPlaces(it) }
         array("visits", load = dao::visits) {
             val page = visitSnapshot(it); validate(page); BackupJson.recordVisits(page.visits.single())
@@ -128,10 +150,7 @@ internal class PagedBackupExporter(
         array("contributions", load = dao::contributions) {
             validate(DiarySnapshot(contributions = listOf(it))); BackupJson.recordContributions(it)
         }
-        array("healthSamples", load = { first, count -> if (includeHealth) dao.healthSamples(first, count) else emptyList() }) {
-            HealthRules.validateSnapshot(DiarySnapshot(journeys = listOfNotNull(journey(it.journeyId)), healthSamples = listOf(it)))
-            BackupJson.recordHealthSamples(it)
-        }
+        array("healthSamples", load = { first, count -> if (includeHealth) dao.healthSamples(first, count) else emptyList() }, encode = encodeHealth)
         array("garageVehicles", load = dao::garageVehicles) { BackupJson.recordGarageVehicle(it) }
         array("fuelFills", load = dao::fuelFills) { BackupJson.recordFuelFill(it) }
         array("journeyVehicles", load = dao::journeyVehicles) { BackupJson.recordJourneyVehicle(it) }
@@ -143,12 +162,10 @@ internal class PagedBackupExporter(
             WatchHealthRules.validateSnapshot(listOfNotNull(journey(it.journeyId)), listOf(it), emptyList())
             BackupJson.recordWatchHealthSessions(it)
         }
-        array("watchHealthSamples", load = { first, count -> if (includeHealth) dao.watchHealthSamples(first, count) else emptyList() }) {
-            WatchHealthRules.validateSnapshot(listOfNotNull(journey(it.journeyId)), listOfNotNull(dao.watchSession(it.sessionId)), listOf(it))
-            BackupJson.recordWatchHealthSamples(it)
-        }
+        array("watchHealthSamples", load = { first, count -> if (includeHealth) dao.watchHealthSamples(first, count) else emptyList() }, encode = encodeWatchHealth)
         array("savedPlans", TravelLibraryRules.MAX_ITEMS, dao::plans) { TravelLibraryJson.plan(it.model()) }
         // GPX model/JSONArray would hold every point. Write its nested arrays a page at a time instead.
+        suspend fun importedTracks() {
         out.write(",\"importedTracks\":[")
         var firstTrack = true
         rows("importedTracks", TravelLibraryRules.MAX_ITEMS, dao::tracks) { track ->
@@ -185,6 +202,8 @@ internal class PagedBackupExporter(
             out.write("]}"); out.flush()
         }
         out.write(']'.code)
+        }
+        if (!paged) importedTracks()
         array("collections", TravelLibraryRules.MAX_ITEMS, dao::collections) { TravelLibraryJson.collection(it.model()) }
         array("memberships", TravelLibraryRules.MAX_MEMBERSHIPS, dao::memberships) {
             val member = it.model()
@@ -209,6 +228,17 @@ internal class PagedBackupExporter(
                 rawSeals[row.id] = metadataDigest(encoded)
             }
             encoded
+        }
+        if (paged) {
+            bulk += BackupLibraryPages.write(zip, dao, options, ::entry)
+            val directory = BackupBulkPages.encode(bulk) // Full shared metadata budget before exposing any manifest.
+            zip.putNextEntry(ZipEntry("manifest.json"))
+            writeHeader()
+            BackupBulkPages.TYPES.forEach { name ->
+                out.write(','.code); BackupJsonStream.string(out, name); out.write(":[]")
+            }
+            out.write(",\"bulkPages\":")
+            BackupJsonStream.value(out, directory)
         }
         out.write('}'.code); out.flush(); zip.closeEntry()
         entry("manifest.json", budget.count)

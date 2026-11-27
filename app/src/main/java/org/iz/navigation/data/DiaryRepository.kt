@@ -539,26 +539,22 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
     }
 
     suspend fun restore(snapshot: DiarySnapshot, leanRaw: Map<String, List<File>> = emptyMap()) {
+        restorePaged(snapshot.copy(points = emptyList(), healthSamples = emptyList(), watchHealthSamples = emptyList()),
+            leanRaw, SnapshotBackupBulkRows(snapshot))
+    }
+
+    internal suspend fun restorePaged(snapshot: DiarySnapshot, leanRaw: Map<String, List<File>>, bulk: BackupBulkRows) {
+        require(snapshot.points.isEmpty() && snapshot.healthSamples.isEmpty() && snapshot.watchHealthSamples.isEmpty()) {
+            "Paged backup rows must come from the bulk source."
+        }
         DiaryRules.validate(snapshot)
         validateMapSnapshot(snapshot)
         require(snapshot.journeys.none { it.status == JourneyStatus.TEMPORARY }) { "Geçici yolculuklar geri yüklenemez." }
         val restoredPlaces = PlaceOrderRules.normalizeDuplicates(snapshot.places)
         val now = System.currentTimeMillis()
         val restoredJourneys = snapshot.journeys.map { DiaryRules.restored(it, now) }
-        val restoredById = restoredJourneys.associateBy { it.id }
-        // Restoring an open trip closes it now. Preserve its diary, but never retain health outside that new end.
-        val restoredHealth = snapshot.healthSamples.filter { sample ->
-            val journey = restoredById.getValue(sample.journeyId)
-            val end = requireNotNull(journey.endedAt)
-            sample.startAt >= journey.startedAt && sample.startAt < end && sample.endAt <= end
-        }
         val restoredWatchSessions = snapshot.watchHealthSessions.map { it.copy(acceptsUploads = false) }
-        val restoredWatchSamples = snapshot.watchHealthSamples.filter { sample ->
-            val journey = restoredById.getValue(sample.journeyId)
-            WatchHealthRules.belongsTo(sample, journey, now)
-        }
-        DiaryRules.validate(snapshot.copy(journeys = restoredJourneys, healthSamples = restoredHealth,
-            watchHealthSessions = restoredWatchSessions, watchHealthSamples = restoredWatchSamples))
+        DiaryRules.validate(snapshot.copy(journeys = restoredJourneys, watchHealthSessions = restoredWatchSessions))
         deleteWithFiles(replaceAll = true) {
             libraryDao.clearShortcuts(); libraryDao.clearCollections(); libraryDao.clearTracks(); libraryDao.clearPlans()
             dao.clearHealthSamples(); dao.clearHealthSyncs()
@@ -570,14 +566,12 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
             snapshot.fuelFills.forEach { db.garageDao().save(it) }
             snapshot.journeyVehicles.forEach { db.garageDao().save(it) }
             restoredPlaces.forEach { dao.save(it) }
-            snapshot.points.forEach { dao.save(it) }
             snapshot.visits.forEach { dao.save(it) }
             snapshot.photos.forEach { dao.save(it) }
             snapshot.drafts.forEach { dao.save(it) }
             snapshot.contributions.forEach { dao.save(if (it.status == ContributionStatus.SENDING) it.copy(status = ContributionStatus.UNKNOWN) else it) }
-            dao.saveHealthSamples(restoredHealth)
             watchDao.restoreSessions(restoredWatchSessions)
-            watchDao.restoreSamples(restoredWatchSamples)
+            bulk.restoreInto(snapshot.journeys, restoredWatchSessions, dao, watchDao, now)
             snapshot.mapEdits.forEach {
                 mapDao.save(it.copy(status = if (it.status == MapEditStatus.SENDING) MapEditStatus.UNKNOWN else it.status,
                     localAttemptId = null, localChangesetCreated = false))

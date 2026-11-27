@@ -17,7 +17,7 @@ internal interface WatchHealthDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertSession(value: WatchHealthSession)
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertSamples(values: List<WatchHealthSample>)
     @Insert suspend fun restoreSessions(values: List<WatchHealthSession>)
-    @Insert suspend fun restoreSamples(values: List<WatchHealthSample>)
+    @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun restoreSamples(values: List<WatchHealthSample>)
     @Query("DELETE FROM watch_health_samples") suspend fun clearSamples()
     @Query("DELETE FROM watch_health_sessions") suspend fun clearSessions()
     @Query("DELETE FROM watch_health_samples WHERE journeyId=:journeyId AND (startAt < :startedAt OR startAt >= :endedAt OR endAt > :endedAt)")

@@ -1,5 +1,11 @@
 # İz sürüm değişikliği planı
 
+## Geliştirme sürümü — Büyük günlük yedeği
+
+Yolculuk, yer, ziyaret, sağlık, yatış özeti ve rota kütüphanesi verileri eski 32 MiB günlük sınırını aştığında İz, aynı yedekleme ekranından sayfalı bir ZIP (v14) hazırlar. Küçük yedekler v13 olarak yazılır. Eski yedekler okunabilir. V14’ü geri yüklemek için hedef uygulamanın bu biçimi destekleyen sürümü gerekir.
+
+Arşivin açılmış içeriği en çok 512 MiB olabilir. V14’te her JSON sayfasında en çok 512 kayıt ve 1 MiB veri bulunur. İlişkilerini doğrulamak için bir arada tutulan tablolarda toplam sınır 64 MiB veya 200.000 kayıttır. Yolculuk GPS noktaları ve sağlık örnekleri sayfa sayfa işlenir. Kütüphane koordinatlarına ayrı sınırlar uygulanır (iz başına 100.000, kütüphanede 500.000 nokta). Bir sınır aşılırsa aktarım durur. Yedek belleğe tek bir JSON nesnesi olarak alınmaz.
+
 ## Geliştirme sürümü · Yeni sürüşlerde Garaj bağlantısı
 
 Yeni kaydedilen sürüş, aynı türden tek uygun Garaj aracı bulunduğunda o araca bağlanabilir. Yerel QA, tek araç koşulunu, bağlantının kayda geçmesini ve mesafenin araç sayacına bir kez yansımasını kapsar.

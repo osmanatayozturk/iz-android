@@ -79,6 +79,8 @@ internal interface DiaryDao {
     @Upsert suspend fun save(value: ContributionDraft)
     @Upsert suspend fun saveHealthSamples(values: List<JourneyHealthSample>)
     @Upsert suspend fun saveHealthSyncs(values: List<JourneyHealthSync>)
+    @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun restorePoints(values: List<TrackPoint>)
+    @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun restoreHealthSamples(values: List<JourneyHealthSample>)
     @Query("DELETE FROM journey_health_samples WHERE journeyId = :journeyId AND metric IN (:metrics)")
     suspend fun deleteJourneyHealth(journeyId: String, metrics: List<HealthMetric>)
     @Query("DELETE FROM journey_health_samples WHERE sourceId IN (:ids)") suspend fun deleteHealthSources(ids: List<String>)

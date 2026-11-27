@@ -49,24 +49,31 @@ internal suspend fun <T> forEachBackupPage(
     }
 }
 
-internal class BackupLimitException(message: String) : IOException(message)
+internal open class BackupLimitException(message: String) : IOException(message)
+
+/** Only the v13 manifest byte gate may request the single v14 preparation retry. */
+internal class BackupManifestLimitException(message: String = "Günlük verisi 32 MB sınırını aşıyor.") : BackupLimitException(message)
 
 /** Counts actual encoded UTF-8 bytes, before each downstream write, without a second manifest copy. */
 internal class BackupByteLimitOutputStream(
     private val output: OutputStream,
     private val limit: Long,
     private val message: String,
+    private val limitFailure: () -> BackupLimitException = { BackupLimitException(message) },
+    private val check: () -> Unit = {},
 ) : OutputStream() {
     var count: Long = 0
         private set
     init { require(limit >= 0) }
     override fun write(value: Int) {
-        if (count >= limit) throw BackupLimitException(message)
+        check()
+        if (count >= limit) throw limitFailure()
         output.write(value); count++
     }
     override fun write(bytes: ByteArray, offset: Int, length: Int) {
+        check()
         require(offset >= 0 && length >= 0 && offset <= bytes.size - length)
-        if (length.toLong() > limit - count) throw BackupLimitException(message)
+        if (length.toLong() > limit - count) throw limitFailure()
         output.write(bytes, offset, length); count += length
     }
     override fun flush() = output.flush()
