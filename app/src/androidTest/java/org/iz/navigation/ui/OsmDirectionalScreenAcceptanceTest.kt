@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Bundle
 import android.os.SystemClock
 import android.provider.Settings
 import androidx.compose.ui.semantics.getOrNull
@@ -143,18 +144,51 @@ class OsmDirectionalScreenAcceptanceTest {
 
     @Test fun largeRemoteHistoryMustBeCompleteBeforePlanAndConsentClearsWhenAccountChanges() {
         val opposite = ride("retry-opposite", 31, reverse = true)
-        val api = FixtureOsm(fixtureSession(271_260_003L, "QA before switch"))
+        val account = 281_260_003L + 2 * SystemClock.elapsedRealtime()
+        val api = FixtureOsm(fixtureSession(account, "QA before switch"))
+        val handoffEvents = CopyOnWriteArrayList<String>()
+        val firstRelease = CompletableDeferred<Unit>()
+        api.beforeList = { number ->
+            if (number <= 2) {
+                handoffEvents += "$number-start"
+                try {
+                    if (number == 1) firstRelease.await()
+                    handoffEvents += "$number-reply"
+                } catch (cancel: CancellationException) {
+                    handoffEvents += "$number-cancelled"
+                    throw cancel
+                }
+            }
+        }
         api.largeRemote(511L, latitude = 35.0)
         api.largeRemote(512L, latitude = -30.0)
         api.failData = 511L
         withSamples(listOf(opposite), api) {
-            openGps(api)
+            openHub()
+            compose.onNodeWithTag("osm-contribution-hub").assertIsDisplayed()
+            compose.waitUntil(12_000L) { "1-start" in handoffEvents }
+            compose.onNodeWithTag("osm-contribution-gps").performScrollTo().performClick()
+            compose.onNodeWithTag("osm-gps-screen").assertIsDisplayed()
+            firstRelease.complete(Unit)
             waitForTag("osm-gps-coverage-issue", timeout = 30_000L)
+            val reads = api.listReads.get()
+            if (reads == 2) compose.waitUntil(12_000L) { "1-cancelled" in handoffEvents || "1-reply" in handoffEvents }
+            val completed = handoffEvents.filter { it.endsWith("-reply") }
+            val details = "OSM QA hub-to-GPS list: starts=$reads, events=$handoffEvents"
+            InstrumentationRegistry.getInstrumentation().sendStatus(2, Bundle().apply { putString("stream", "\n$details\n") })
+            when (reads) {
+                1 -> assertEquals(details, listOf("1-reply"), completed)
+                2 -> {
+                    assertTrue(details, "1-cancelled" in handoffEvents)
+                    assertEquals(details, listOf("2-reply"), completed)
+                }
+                else -> throw AssertionError(details)
+            }
             compose.onNodeWithTag("osm-gps-coverage-issue")
                 .assertTextContains("OSM’den iz dosyası alınamadı", substring = true)
             compose.onNodeWithTag("osm-gps-journey-${opposite.journey.id}").assertDoesNotExist()
             assertTrue(api.sent.isEmpty())
-            assertEquals(setOf(511L, 512L), api.downloaded.toSet())
+            assertEquals(listOf(512L, 511L), api.downloaded.toList())
             api.failData = null
             compose.onNodeWithTag("osm-gps-refresh").assertIsEnabled().performClick()
             waitForTag("osm-gps-journey-${opposite.journey.id}", timeout = 35_000L)
@@ -163,7 +197,7 @@ class OsmDirectionalScreenAcceptanceTest {
             awaitReview().performClick()
             waitForTag("osm-gps-consent-confirm")
             val readsBeforeSwitch = api.listReads.get()
-            compose.runOnIdle { api.switchAccount(fixtureSession(271_260_004L, "QA after switch", generation = 2)) }
+            compose.runOnIdle { api.switchAccount(fixtureSession(account + 1, "QA after switch", generation = 2)) }
             compose.waitUntil(12_000) {
                 compose.onAllNodesWithTag("osm-gps-consent-confirm").fetchSemanticsNodes().isEmpty() &&
                     compose.onAllNodesWithText("QA after switch").fetchSemanticsNodes().isNotEmpty()
@@ -460,7 +494,7 @@ private class FixtureOsm(session: CommunitySession) : OsmGpxHistoryGateway {
     val metadataReads = CopyOnWriteArrayList<Long>()
     @Volatile var failData: Long? = null
     @Volatile var failUpdate: Long? = null
-    @Volatile var beforeList: suspend () -> Unit = {}
+    @Volatile var beforeList: suspend (Int) -> Unit = {}
 
     val upload = OsmGpxGateway { token, trace, visibility, canDispatch ->
         assertEquals(sessions.value?.token, token)
@@ -474,8 +508,7 @@ private class FixtureOsm(session: CommunitySession) : OsmGpxHistoryGateway {
     override suspend fun list(token: String, expectedUserId: Long): List<OsmGpxHistoryEntry> {
         assertEquals(sessions.value?.token, token)
         assertEquals(sessions.value?.userId, expectedUserId)
-        listReads.incrementAndGet()
-        beforeList()
+        beforeList(listReads.incrementAndGet())
         return entries.filter { it.first == expectedUserId }.map { it.second }
     }
 
