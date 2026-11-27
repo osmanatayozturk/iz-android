@@ -36,6 +36,7 @@ import org.iz.navigation.integration.osm.OSM_GPX_READ_SCOPE
 import org.iz.navigation.integration.osm.OSM_GPX_WRITE_SCOPE
 import org.iz.navigation.integration.osm.OsmAuthUiState
 import org.iz.navigation.integration.osm.OsmGpxController
+import org.iz.navigation.integration.osm.OsmGpxFileReceipts
 import org.iz.navigation.integration.osm.OsmGpxGateway
 import org.iz.navigation.integration.osm.OsmGpxHistoryEntry
 import org.iz.navigation.integration.osm.OsmGpxHistoryGateway
@@ -255,7 +256,8 @@ class OsmDirectionalScreenAcceptanceTest {
         val account = 271_270_000L + SystemClock.elapsedRealtime()
         val remoteTrace = 931L
         val api = FixtureOsm(fixtureSession(account, "QA lifecycle"))
-        api.remote(remoteTrace, "synthetic-visible.gpx", ride("visible-source", 41).prepared)
+        val prepared = ride("visible-source", 41).prepared
+        api.remote(remoteTrace, "synthetic-visible.gpx", prepared)
         val started = Channel<FixtureListRequest>(Channel.UNLIMITED)
         api.beforeList = {
             val request = FixtureListRequest()
@@ -297,14 +299,18 @@ class OsmDirectionalScreenAcceptanceTest {
             compose.waitUntil(12_000L) {
                 compose.onAllNodes(refresh and isEnabled()).fetchSemanticsNodes().isNotEmpty()
             }
-            hubList.performScrollToNode(hasTestTag("osm-contribution-gps-$remoteTrace"))
-            compose.onNodeWithTag("osm-contribution-gps-$remoteTrace").assertIsDisplayed()
             hubList.performScrollToNode(hasTestTag("osm-contribution-gps"))
-            compose.onNodeWithTag("osm-contribution-gps").performClick()
+            compose.onNodeWithTag("osm-contribution-gps").assertIsDisplayed().assertIsEnabled().performClick()
             waitForTag("osm-gps-list")
+            compose.onNodeWithTag("osm-gps-page-history").performClick()
+            waitForTag("osm-gps-history-list")
+            val visibleRow = "osm-gps-history-$remoteTrace"
+            compose.onNodeWithTag("osm-gps-history-list").performScrollToNode(hasTestTag(visibleRow))
+            compose.onNodeWithTag(visibleRow).assertIsDisplayed()
             assertEquals(2, api.listReads.get())
             assertEquals(listOf(remoteTrace), api.downloaded.toList())
-            assertTrue(File(coverage, "$remoteTrace.geom").isFile)
+            val cached = OsmGpxFileReceipts(root).coverageCache.inspect(account, remoteTrace)
+            assertEquals(prepared.sha256, cached?.sha256)
             assertTrue(api.metadataReads.isEmpty())
             assertTrue(api.sent.isEmpty())
             assertTrue(api.changed.isEmpty())
