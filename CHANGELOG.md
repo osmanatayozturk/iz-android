@@ -1,5 +1,11 @@
 # Değişiklik geçmişi
 
+## Telefon 0.15.0 (40)
+
+- Gidona sabitlenen telefonda GPS zaman belirsizliği bildirilmese de uygun GPS ve hareket sensörü verileriyle canlı yatış tahmini gösterilir. Ölçüm kesilirse açı temizlenir. Kaydedilen yolculuğun raporu, kadranın hangi durumlarda tahmin gösterdiğini ve hangi gerekçelerle gösteremediğini özetler.
+- Eski 32 MiB sınırını aşan desteklenen günlük yedekleri sayfalı ZIP olarak dışa aktarılabilir ve geri yüklenebilir.
+- OSM GPS izleri geçmişinde eski liste biçimleri desteklenir. GPX indirme sorunu olduğunda bağlantı ve dosya aktarımı hataları ayrı gösterilir.
+
 ## Geliştirme sürümü · Yeni sürüşlerde Garaj bağlantısı
 
 - Yeni bir sürüş kaydedildiğinde Garaj’da aynı türden tek uygun araç varsa İz sürüşü o araca bağlayabilir. Bağlanan sürüşün mesafesi aracın sayacına yansır.

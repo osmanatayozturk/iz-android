@@ -1,16 +1,22 @@
 # İz sürüm değişikliği planı
 
-## Geliştirme sürümü — Canlı gidon tahmini
+## Telefon 0.15.0 (40)
+
+### Canlı gidon tahmini
 
 Gidona sabitlenmiş ve kalibre edilmiş telefonda Android GPS ölçümünün zaman belirsizliğini bildirmediğinde, kadran dört ardışık aynı yönlü dönüş aralığını değerlendirir. Konum ve hızın yanı sıra tek tek gelen GPS ölçümlerinin geliş zamanı, yön değişimi, ivmeölçer ve jiroskop birlikte uyuştuğunda son aralığın açısı **Tahmin** etiketiyle görünür. Ölçüm kesilirse veya yeni veri koşulları karşılamazsa açı temizlenir. Bu deneysel model için fiziksel şasi doğruluğu ölçülmemiştir.
 
 Kayıtlı motosiklet yolculuğunun raporu canlı kadranın kaç ölçüm gösterdiğini ve hangi gerekçelerle gösteremediğini saklar. Canlı özet, ham sensör kaydı tercihi kapalıyken de çalışır ve yalnızca karar türlerinin sayılarını içerir. Yolculuk kaydı olmadan kullanıldığında kadran geçicidir. Önceki yolculuklara sonradan canlı sonuç eklenmez. Canlı özeti içeren ZIP dosyasını aktarmak için hedefte bu özelliği destekleyen bir sürüm kullanılır.
 
-## Geliştirme sürümü — Büyük günlük yedeği
+### Büyük günlük yedeği
 
 Yolculuk, yer, ziyaret, sağlık, yatış özeti ve rota kütüphanesi verileri eski 32 MiB günlük sınırını aştığında İz, aynı yedekleme ekranından sayfalı bir ZIP (v14) hazırlar. Küçük yedekler v13 olarak yazılır. Eski yedekler okunabilir. V14’ü geri yüklemek için hedef uygulamanın bu biçimi destekleyen sürümü gerekir.
 
 Arşivin açılmış içeriği en çok 512 MiB olabilir. V14’te her JSON sayfasında en çok 512 kayıt ve 1 MiB veri bulunur. İlişkilerini doğrulamak için bir arada tutulan tablolarda toplam sınır 64 MiB veya 200.000 kayıttır. Yolculuk GPS noktaları ve sağlık örnekleri sayfa sayfa işlenir. Kütüphane koordinatlarına ayrı sınırlar uygulanır (iz başına 100.000, kütüphanede 500.000 nokta). Bir sınır aşılırsa aktarım durur. Yedek belleğe tek bir JSON nesnesi olarak alınmaz.
+
+### OSM GPS izleri geçmişi
+
+Katkı Merkezi daha eski GPS izi listelerini okuyabilir ve indirilen GPX'i doğru izle eşleştirmek için hesap ve dosya doğrulaması yapar. İndirme başarısız olduğunda bağlantı kurulması ve dosyanın aktarılması ayrı hata aşamaları olarak gösterilir. Teknik ayrıntı kişisel iz veya hesap verisi içermez.
 
 ## Geliştirme sürümü · Yeni sürüşlerde Garaj bağlantısı
 
