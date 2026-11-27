@@ -23,7 +23,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
 import org.iz.navigation.MainActivity
 import org.iz.navigation.data.DiaryRepository
 import org.iz.navigation.data.Journey
@@ -258,16 +257,38 @@ class OsmDirectionalScreenAcceptanceTest {
         val api = FixtureOsm(fixtureSession(account, "QA lifecycle"))
         val prepared = ride("visible-source", 41).prepared
         api.remote(remoteTrace, "synthetic-visible.gpx", prepared)
-        val started = Channel<FixtureListRequest>(Channel.UNLIMITED)
+        val requests = Channel<FixtureListRequest>(Channel.UNLIMITED)
+        val cancellations = AtomicInteger()
         api.beforeList = {
             val request = FixtureListRequest()
-            started.send(request)
+            requests.send(request)
             try {
                 request.release.await()
             } catch (cancel: CancellationException) {
-                request.cancelled.complete(Unit)
+                cancellations.incrementAndGet()
                 throw cancel
             }
+        }
+        val activity = compose.activityRule.scenario
+        fun awaitCheckpoint(phase: String, condition: () -> Boolean) {
+            try {
+                compose.waitUntil(12_000L, condition)
+            } catch (timeout: ComposeTimeoutException) {
+                throw AssertionError(
+                    "$phase timed out. lifecycle=${activity.state}, GET=${api.listReads.get()}, " +
+                        "cancelled=${cancellations.get()}, data=${api.downloaded.size}, " +
+                        "metadata=${api.metadataReads.size}, POST=${api.sent.size}, PUT=${api.changed.size}",
+                    timeout,
+                )
+            }
+        }
+        fun awaitRequest(phase: String): FixtureListRequest {
+            var request: FixtureListRequest? = null
+            awaitCheckpoint(phase) {
+                request = requests.tryReceive().getOrNull()
+                request != null
+            }
+            return checkNotNull(request)
         }
         val root = requireDirectionalQa().noBackupFilesDir
         val coverage = File(root, "osm-gpx-coverage/$account")
@@ -276,10 +297,12 @@ class OsmDirectionalScreenAcceptanceTest {
         withSamples(emptyList(), api) {
             assertTrue(coverage.listFiles().orEmpty().isEmpty())
             openHub()
-            val first = runBlocking { withTimeout(12_000L) { started.receive() } }
+            compose.onNodeWithTag("osm-contribution-hub").assertIsDisplayed()
+            awaitRequest("Initial automatic GET after the hub is displayed")
             assertEquals(1, api.listReads.get())
-            compose.activityRule.scenario.moveToState(Lifecycle.State.CREATED)
-            runBlocking { withTimeout(12_000L) { first.cancelled.await() } }
+            activity.moveToState(Lifecycle.State.CREATED)
+            assertEquals(Lifecycle.State.CREATED, activity.state)
+            awaitCheckpoint("First GET cancellation after Activity STOP") { cancellations.get() == 1 }
             assertTrue(api.downloaded.isEmpty())
             assertTrue(api.metadataReads.isEmpty())
             assertTrue(api.sent.isEmpty())
@@ -288,15 +311,18 @@ class OsmDirectionalScreenAcceptanceTest {
             assertTrue(receipts.listFiles().orEmpty().isEmpty())
             assertTrue(visibility.listFiles().orEmpty().isEmpty())
 
-            compose.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
-            val second = runBlocking { withTimeout(12_000L) { started.receive() } }
+            activity.moveToState(Lifecycle.State.RESUMED)
+            assertEquals(Lifecycle.State.RESUMED, activity.state)
+            compose.onNodeWithTag("osm-contribution-hub").assertIsDisplayed()
+            val second = awaitRequest("Second automatic GET after Activity RESUME")
             assertEquals(2, api.listReads.get())
+            assertEquals(1, cancellations.get())
             assertTrue(api.downloaded.isEmpty())
             second.release.complete(Unit)
             val hubList = compose.onNodeWithTag("osm-contribution-list")
             val refresh = hasTestTag("osm-contribution-refresh")
             hubList.performScrollToNode(refresh)
-            compose.waitUntil(12_000L) {
+            awaitCheckpoint("Resumed GET completion in the hub") {
                 compose.onAllNodes(refresh and isEnabled()).fetchSemanticsNodes().isNotEmpty()
             }
             hubList.performScrollToNode(hasTestTag("osm-contribution-gps"))
@@ -385,7 +411,6 @@ class OsmDirectionalScreenAcceptanceTest {
 
 private class FixtureListRequest {
     val release = CompletableDeferred<Unit>()
-    val cancelled = CompletableDeferred<Unit>()
 }
 
 internal fun requireDirectionalQa(): Context {
