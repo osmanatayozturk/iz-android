@@ -274,7 +274,7 @@ class OsmGpxController internal constructor(
                 error is OsmGpxDataLimitException && phase == OsmHistoryPhase.LIST -> "OSM iz listesi uygulamanın okuma sınırını aşıyor."
                 error is OsmGpxDataLimitException -> "Bir GPX dosyası uygulamanın okuma sınırını aşıyor."
                 error is OsmGpxMetadataFormatException -> "OSM iz listesindeki bilgiler doğrulanamadı. Yeniden kontrol et."
-                error is OsmGpxGeometryFormatException -> "Bir GPX dosyası okunamadı. Yüklenenler bölümünden OSM’deki izleri kontrol et."
+                error is OsmListedGpxFormatException -> "Yüklenenler listesindeki ${error.rowNumber}. izin GPX dosyası okunamadı. Bu izi OSM’de kontrol et."
                 error is java.io.InterruptedIOException && phase == OsmHistoryPhase.DOWNLOAD -> "OSM’den iz dosyası indirilirken süre doldu. Yeniden kontrol et."
                 error is java.io.InterruptedIOException && phase == OsmHistoryPhase.LIST -> "OSM iz listesi beklenirken süre doldu. Yeniden kontrol et."
                 error is OsmGpxHistoryHttpException && phase == OsmHistoryPhase.LIST -> "OSM’deki iz listesi yüklenemedi (HTTP ${error.statusCode})."

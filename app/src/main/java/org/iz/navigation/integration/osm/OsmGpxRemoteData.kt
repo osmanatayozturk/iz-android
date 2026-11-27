@@ -94,6 +94,7 @@ internal class OsmGpxGeometryFormatException : IOException("Invalid or unsupport
 /** Bounded GPX 1.0/1.1 input. The coverage geometry is the nonempty track segments. */
 internal object OsmGpxRemoteXml {
     const val MAX_BYTES = 16L * 1024 * 1024
+    private const val MAX_ACTIVE_NAMESPACE_BINDINGS = 4_096
     private val geometryElements = setOf("gpx", "wpt", "rte", "rtept", "trk", "trkseg", "trkpt")
     private val legacyExtensionParents = geometryElements - "trkseg"
     private val otherGpxElements = setOf("metadata", "name", "desc", "author", "email", "link", "url", "urlname",
@@ -136,9 +137,12 @@ internal object OsmGpxRemoteXml {
         catch (_: Exception) { throw OsmGpxGeometryFormatException() }
     }
 
-    private class GeometryHandler : DefaultHandler2() {
+    internal class GeometryHandler : DefaultHandler2() {
         val segments = mutableListOf<MutableList<OsmDirectedPoint>>()
         private val stack = mutableListOf<String>()
+        private val namespacesByPrefix = mutableMapOf<String, ArrayDeque<String>>()
+        private val namedPrefixesByUri = mutableMapOf<String, Int>()
+        private var activeBindings = 0
         private var namespace = ""
         private var legacy = false
         private var extensionDepth: Int? = null
@@ -150,11 +154,49 @@ internal object OsmGpxRemoteXml {
             throw OsmGpxGeometryFormatException()
         }
 
+        override fun startPrefixMapping(prefix: String, uri: String) {
+            requireOsmGpxDataLimit(++activeBindings <= MAX_ACTIVE_NAMESPACE_BINDINGS)
+            val bindings = namespacesByPrefix.getOrPut(prefix) { ArrayDeque() }
+            changeNamedPrefixCount(prefix, bindings.lastOrNull(), -1)
+            bindings.addLast(uri)
+            changeNamedPrefixCount(prefix, uri, 1)
+        }
+
+        override fun endPrefixMapping(prefix: String) {
+            val bindings = checkNotNull(namespacesByPrefix[prefix])
+            changeNamedPrefixCount(prefix, bindings.removeLast(), -1)
+            changeNamedPrefixCount(prefix, bindings.lastOrNull(), 1)
+            if (bindings.isEmpty()) namespacesByPrefix.remove(prefix)
+            activeBindings--
+        }
+
+        private fun changeNamedPrefixCount(prefix: String, uri: String?, delta: Int) {
+            if (prefix.isEmpty() || uri == null) return
+            val count = (namedPrefixesByUri[uri] ?: 0) + delta
+            if (count == 0) namedPrefixesByUri.remove(uri) else namedPrefixesByUri[uri] = count
+        }
+
+        private fun isUnqualified(uri: String, localName: String, qName: String): Boolean {
+            if (qName.isNotEmpty()) return qName == localName
+            // Android Expat may omit qName. A default binding and a named alias
+            // for the same URI would make these two spellings indistinguishable.
+            val defaultPossible = namespacesByPrefix[""]?.lastOrNull().orEmpty() == uri
+            val prefixedPossible = uri in namedPrefixesByUri
+            require(defaultPossible != prefixedPossible)
+            return defaultPossible
+        }
+
         override fun startElement(uri: String, localName: String, qName: String, attrs: Attributes) {
             requireOsmGpxDataLimit(stack.size < 32 && ++elements <= 1_000_000)
+            if (localName == "trkseg" || localName == "trkpt") {
+                val expectedParent = if (localName == "trkseg") "trk" else "trkseg"
+                val supported = extensionDepth == null && uri == namespace && stack.lastOrNull() == expectedParent
+                // OSM imports exact, unprefixed names even outside the GPX structure.
+                require(isUnqualified(uri, localName, qName) == supported)
+            }
             if (stack.isEmpty()) {
                 require(localName == "gpx")
-                val version = attrs.getValue("version")
+                val version = attrs.getValue("", "version")
                 require(version in setOf("1.0", "1.1"))
                 require(uri == "http://www.topografix.com/GPX/${version!!.replace('.', '/')}")
                 namespace = uri
@@ -178,8 +220,8 @@ internal object OsmGpxRemoteXml {
                         "trkpt" -> {
                             require(parent == "trkseg")
                             requireOsmGpxDataLimit(++points <= 200_000)
-                            val lat = attrs.getValue("lat")?.toDoubleOrNull()
-                            val lon = attrs.getValue("lon")?.toDoubleOrNull()
+                            val lat = attrs.getValue("", "lat")?.toDoubleOrNull()
+                            val lon = attrs.getValue("", "lon")?.toDoubleOrNull()
                             require(lat != null && lat.isFinite() && lat in -90.0..90.0)
                             require(lon != null && lon.isFinite() && lon in -180.0..180.0)
                             segments.last().add(OsmDirectedPoint(lat, lon))

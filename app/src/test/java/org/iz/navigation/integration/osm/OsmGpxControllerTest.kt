@@ -2,6 +2,8 @@ package org.iz.navigation.integration.osm
 
 import java.io.File
 import java.io.IOException
+import java.nio.ByteBuffer
+import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
@@ -332,7 +334,7 @@ class OsmGpxControllerTest {
         val controller = newController(neverPost, history)
         for ((error, expected) in listOf(
             failure to "süre doldu",
-            OsmGpxGeometryFormatException() to "Bir GPX dosyası okunamadı",
+            OsmGpxGeometryFormatException() to "1. izin GPX dosyası okunamadı",
             OsmGpxHistoryHttpException(403) to "HTTP 403",
             IOException("private-endpoint") to "Bağlantıyı kontrol",
         )) {
@@ -354,6 +356,91 @@ class OsmGpxControllerTest {
         assertEquals("Cihazdaki gönderim makbuzları doğrulanamadı.", result.issue)
         assertFalse(result.coverageReady)
         assertTrue(remote.downloaded.isEmpty())
+    }
+
+    @Test fun revalidatesListedVersionThreeCacheOnceAndPreservesTheReceiptsOnFailure() = runBlocking {
+        val id = 83L
+        val receipt = OsmGpxReceipt(42, OsmGpxReceiptKey.of(first), OsmGpxReceiptStatus.UNKNOWN, null, "interrupted", 10L)
+        files.write(receipt)
+        val oldReceipt = OsmGpxReceipt(42, OsmGpxReceiptKey.of(second), OsmGpxReceiptStatus.RECEIVED, 84L, "old", 12L)
+        files.write(oldReceipt)
+        remote.add(42, id, first.fileName, first)
+        remote.add(42, 84L, second.fileName, second)
+        files.coverageCache.write(42, 84L, second.geometry(), redownloadable = true)
+        markVersionThree(File(noBackup.root, "osm-gpx-coverage/42/84.remote.geom"))
+        // Older disk caches may use either suffix for a listed trace.
+        files.coverageCache.write(42, id, first.geometry())
+        val legacyFile = File(noBackup.root, "osm-gpx-coverage/42/$id.geom")
+        markVersionThree(legacyFile)
+        var valid = false
+        var attempts = 0
+        val history = object : OsmGpxHistoryGateway by remote {
+            override suspend fun data(token: String, id: Long): OsmGpxRemoteData {
+                if (id == 83L) {
+                    attempts++
+                    if (!valid) throw OsmGpxGeometryFormatException()
+                }
+                return remote.data(token, id)
+            }
+        }
+        val neverPost = OsmGpxGateway { _, _, _, _ -> error("History must not upload") }
+        val blocked = newController(neverPost, history)
+        blocked.refreshHistory()
+        val result = blocked.history.value as OsmGpxHistoryState.Ready
+        assertEquals(listOf(84L, id), result.entries.map { it.id })
+        assertTrue(result.issue.orEmpty().contains("2. izin GPX dosyası okunamadı"))
+        assertFalse(result.coverageReady)
+        assertNull(blocked.preparePlan(listOf(third.journeyId)))
+        assertEquals(receipt, files.read(42, receipt.key))
+        assertEquals(oldReceipt, files.read(42, oldReceipt.key))
+        assertNull(files.coverageCache.inspect(42, id))
+        valid = true
+        repeat(2) {
+            val reopened = newController(neverPost, history)
+            reopened.refreshHistory()
+            assertTrue((reopened.history.value as OsmGpxHistoryState.Ready).coverageReady)
+            assertEquals(first.sha256, files.coverageCache.inspect(42, id)?.sha256)
+        }
+        assertEquals(2, attempts) // failed, validated, then disk reuse after reopening
+        assertEquals(listOf(84L, id), remote.downloaded.toList())
+        assertEquals(id, files.read(42, receipt.key)?.traceId)
+        assertEquals(oldReceipt, files.read(42, oldReceipt.key))
+    }
+
+    @Test fun unlistedProtectedLocalGeometryRequiresTheVerifiedReceiptAndExactDigest() = runBlocking {
+        val id = 89L
+        val key = OsmGpxReceiptKey.of(first)
+        files.write(OsmGpxReceipt(42, key, OsmGpxReceiptStatus.RECEIVED, id, "accepted", 1L, directPost = true))
+        sources.remove(first.journeyId)
+        files.coverageCache.write(42, id, first.geometry())
+        val protectedFile = File(noBackup.root, "osm-gpx-coverage/42/$id.geom")
+        markVersionThree(protectedFile)
+        val neverPost = OsmGpxGateway { _, _, _, _ -> error("No upload") }
+        val restored = newController(neverPost)
+        restored.refreshHistory()
+        assertTrue((restored.history.value as OsmGpxHistoryState.Ready).coverageReady)
+        val cache = files.coverageCache
+        val retained = checkNotNull(cache.inspectUnlistedSubmission(42, id, first.sha256) { true })
+        val points = mutableListOf<OsmDirectedPoint>()
+        cache.nearby(42, retained, listOf(retained.bounds)) { points.addAll(it) }
+        assertEquals(first.geometry().segments.single(), points)
+        files.coverageCache.write(42, id, second.geometry())
+        markVersionThree(protectedFile)
+        val mismatched = newController(neverPost)
+        mismatched.refreshHistory()
+        assertFalse((mismatched.history.value as OsmGpxHistoryState.Ready).coverageReady)
+        assertTrue(files.read(42, key)!!.directPost)
+        assertTrue(remote.downloaded.isEmpty())
+    }
+
+    private fun markVersionThree(file: File) {
+        val bytes = file.readBytes()
+        ByteBuffer.wrap(bytes).putInt(3)
+        val payloadSize = bytes.size - 32
+        val digest = MessageDigest.getInstance("SHA-256")
+        digest.update(bytes, 0, payloadSize)
+        digest.digest().copyInto(bytes, payloadSize)
+        file.writeBytes(bytes)
     }
 
     @Test fun perFileRejectionContinuesAndTheAcceptedReceiptIsVisibleBeforeTheNextPost() = runBlocking {

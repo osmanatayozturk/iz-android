@@ -8,6 +8,8 @@ internal fun PreparedOsmGpxTrace.geometry() = OsmGpxRemoteData(
     segments.map { segment -> segment.map { OsmDirectedPoint(it.latitude, it.longitude) } }, sha256,
 )
 
+internal class OsmListedGpxFormatException(val rowNumber: Int) : java.io.IOException()
+
 internal class OsmGpxAccountCoverage(
     private val cache: OsmGpxCoverageCache,
     private val accountId: Long,
@@ -67,6 +69,9 @@ internal class OsmGpxCoverageLoader(
             val redownloadable = remote != null && !remote.pending
             phase(OsmHistoryPhase.CACHE)
             val cached = store.coverageCache.inspect(session.userId, id, redownloadable, current)
+                ?: if (remote == null && own != null)
+                    store.coverageCache.inspectUnlistedSubmission(session.userId, id, own.sha256, current)
+                else null
             val local = if (cached == null && own?.journeyId != null &&
                 (remote == null || remote.fileName == org.iz.navigation.integration.osmGpxFileName(own.sha256))) {
                 phase(OsmHistoryPhase.LOCAL_TRACE)
@@ -77,7 +82,12 @@ internal class OsmGpxCoverageLoader(
                     check(remote != null) { "missing-verified-geometry" }
                     check(current())
                     phase(OsmHistoryPhase.DOWNLOAD)
-                    gateway.data(session.token, id)
+                    try {
+                        gateway.data(session.token, id)
+                    } catch (_: OsmGpxGeometryFormatException) {
+                        // Both screens use this immutable, newest-first account inventory.
+                        throw OsmListedGpxFormatException(entries.indexOf(remote) + 1)
+                    }
                 }
                 check(current())
                 phase(OsmHistoryPhase.CACHE)

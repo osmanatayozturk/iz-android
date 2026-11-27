@@ -2,11 +2,17 @@ package org.iz.navigation.integration.osm
 
 import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.io.StringReader
 import java.security.MessageDigest
 import java.util.zip.GZIPOutputStream
+import javax.xml.parsers.SAXParserFactory
 import org.iz.navigation.integration.OsmDirectedPoint
 import org.junit.Assert.*
 import org.junit.Test
+import org.xml.sax.Attributes
+import org.xml.sax.InputSource
+import org.xml.sax.helpers.AttributesImpl
+import org.xml.sax.helpers.XMLFilterImpl
 
 class OsmGpxRemoteDataTest {
     @Test fun preservesTrackAndSegmentBoundariesAndHashesOriginalUncompressedBytes() {
@@ -61,6 +67,37 @@ class OsmGpxRemoteDataTest {
         assertEquals(listOf(listOf(OsmDirectedPoint(1.0, 2.0)), listOf(OsmDirectedPoint(3.0, 4.0))), result.segments)
     }
 
+    @Test fun rejectsWholeFileWhenUpstreamAndLocalGeometryNamesDisagree() {
+        val misplacedRawPoint = "<extensions><trkpt xmlns=\"urn:fixture\" lat=\"3\" lon=\"4\">" +
+            "<time>2026-01-01T10:00:00Z</time></trkpt></extensions>"
+        val misplacedRawSegment = "<extensions><trkseg xmlns=\"urn:fixture\"><detail/></trkseg></extensions>"
+        val prefixedPoint = "<trkseg><p:trkpt xmlns:p=\"http://www.topografix.com/GPX/1/1\" lat=\"3\" lon=\"4\"/></trkseg>"
+        val prefixedSegment = "<p:trkseg xmlns:p=\"http://www.topografix.com/GPX/1/1\">" +
+            "<trkpt lat=\"3\" lon=\"4\"/></p:trkseg>"
+        val realSegment = "<trkseg><trkpt lat=\"1\" lon=\"2\"/></trkseg>"
+        for (extra in listOf(misplacedRawPoint, misplacedRawSegment, prefixedPoint, prefixedSegment)) {
+            assertThrows(extra, OsmGpxGeometryFormatException::class.java) {
+                OsmGpxRemoteXml.parse(remoteGpx(realSegment + extra).toByteArray(), null)
+            }
+        }
+    }
+
+    @Test fun resolvesMissingQNameOnlyWhenTheActiveNamespaceBindingsProveTheSpelling() {
+        val segment = "<trkseg><trkpt lat=\"1\" lon=\"2\"/></trkseg>"
+        val decorative = "<extensions xmlns:v=\"urn:fixture\"><v:container xmlns:v=\"urn:inner\">" +
+            "<v:trkseg/></v:container><v:trkpt/></extensions>"
+        val safe = remoteGpx(decorative + segment + segment)
+        val expected = List(2) { listOf(OsmDirectedPoint(1.0, 2.0)) }
+        assertEquals(expected, namespaceOnlyGeometry(safe))
+
+        val wrongNamespace = remoteGpx(segment + "<extensions><trkpt xmlns=\"urn:fixture\"/></extensions>")
+        assertThrows(IllegalArgumentException::class.java) { namespaceOnlyGeometry(wrongNamespace) }
+        val ambiguous = remoteGpx(segment)
+            .replace("<trkseg>", "<trkseg xmlns:p=\"http://www.topografix.com/GPX/1/1\">")
+        assertEquals(expected.take(1), OsmGpxRemoteXml.parse(ambiguous.toByteArray(), null).segments)
+        assertThrows(IllegalArgumentException::class.java) { namespaceOnlyGeometry(ambiguous) }
+    }
+
     @Test fun unsupportedOrIncompleteInputCannotBecomeEmptyCoverage() {
         val bad = listOf("", "<html/>", remoteGpx(""), remoteGpx("<trkseg/>"),
             remoteGpx("<trkpt lat=\"1\" lon=\"2\"/>"),
@@ -93,6 +130,28 @@ class OsmGpxRemoteDataTest {
         assertThrows(OsmGpxDataLimitException::class.java) { OsmGpxRemoteXml.parse(tooManySegments.toByteArray(), null) }
         val tooManyEmptySegments = remoteGpx("<trkseg/>".repeat(10_000) + "<trkseg><trkpt lat=\"1\" lon=\"2\"/></trkseg>")
         assertThrows(OsmGpxDataLimitException::class.java) { OsmGpxRemoteXml.parse(tooManyEmptySegments.toByteArray(), null) }
+        val bindings = (1..4097).joinToString(separator = "") { " xmlns:p$it=\"urn:fixture:$it\"" }
+        val tooManyBindings = remoteGpx().replace("<gpx ", "<gpx$bindings ")
+        assertThrows(OsmGpxDataLimitException::class.java) { OsmGpxRemoteXml.parse(tooManyBindings.toByteArray(), null) }
+    }
+
+    private fun namespaceOnlyGeometry(xml: String): List<List<OsmDirectedPoint>> {
+        val parser = SAXParserFactory.newInstance().apply { isNamespaceAware = true }.newSAXParser().xmlReader
+        // Model the Android Expat callback contract while retaining real SAX namespace scope events.
+        val filter = object : XMLFilterImpl(parser) {
+            override fun startElement(uri: String, localName: String, qName: String, atts: Attributes) {
+                val namespaceOnly = AttributesImpl(atts)
+                for (index in 0 until namespaceOnly.length) namespaceOnly.setQName(index, "")
+                super.startElement(uri, localName, "", namespaceOnly)
+            }
+            override fun endElement(uri: String, localName: String, qName: String) {
+                super.endElement(uri, localName, "")
+            }
+        }
+        val handler = OsmGpxRemoteXml.GeometryHandler()
+        filter.contentHandler = handler
+        filter.parse(InputSource(StringReader(xml)))
+        return handler.segments
     }
 }
 
