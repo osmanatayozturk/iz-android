@@ -31,6 +31,7 @@ internal fun interface OsmGpxHistoryGateway {
 }
 
 internal class OsmGpxHistoryHttpException(val statusCode: Int) : IOException("OpenStreetMap HTTP $statusCode")
+internal class OsmGpxMetadataFormatException : IOException("Invalid GPX history metadata")
 
 internal class OsmGpxVisibilityIneligibleException : IOException("GPX visibility change is no longer eligible")
 
@@ -65,9 +66,9 @@ internal class OsmGpxHistoryClient(baseUrl: String = "https://api.openstreetmap.
                 requireOsmGpxDataLimit(rows.length() <= MAX_HISTORY_ROWS)
                 val ids = HashSet<Long>()
                 List(rows.length()) { index ->
-                    val row = OsmGpxRemoteMetadata.parse(rows.getJSONObject(index), expectedUserId)
-                    require(ids.add(row.id))
-                    OsmGpxHistoryEntry(row.id, row.name, row.timestampMillis, row.pending, row.visibility)
+                    val entry = OsmGpxRemoteMetadata.parseHistoryEntry(rows.getJSONObject(index), expectedUserId)
+                    require(ids.add(entry.id))
+                    entry
                 }
             }
         }
@@ -82,9 +83,9 @@ internal class OsmGpxHistoryClient(baseUrl: String = "https://api.openstreetmap.
             requireSuccess(response)
             val encoding = response.header("Content-Encoding")
             if (encoding != null && !encoding.equals("identity", true) && !encoding.equals("gzip", true))
-                throw IOException("Unsupported GPX content encoding")
+                throw OsmGpxGeometryFormatException()
             val bytes = readLimited(response, OsmGpxRemoteXml.MAX_BYTES)
-            if (encoding.equals("gzip", true) && !OsmGpxRemoteXml.isGzip(bytes)) throw IOException("Invalid GPX gzip response")
+            if (encoding.equals("gzip", true) && !OsmGpxRemoteXml.isGzip(bytes)) throw OsmGpxGeometryFormatException()
             OsmGpxRemoteXml.parse(bytes, response.body?.contentType()?.toString())
         }
     }
@@ -168,13 +169,14 @@ internal class OsmGpxHistoryClient(baseUrl: String = "https://api.openstreetmap.
 
     private fun <T> metadataJson(response: Response, limit: Long, parse: (JSONObject) -> T): T {
         requireSuccess(response)
+        val bytes = readLimited(response, limit)
         try {
-            val json = OsmGpxRemoteXml.utf8(readLimited(response, limit))
+            val json = OsmGpxRemoteXml.utf8(bytes)
             val root = JSONObject(OfflineJsonDepth.requireSafe(json))
             require(!root.has("error"))
             return parse(root)
-        } catch (error: IOException) { throw error }
-        catch (_: Exception) { throw IOException("Invalid GPX history metadata") }
+        } catch (limit: OsmGpxDataLimitException) { throw limit }
+        catch (_: Exception) { throw OsmGpxMetadataFormatException() }
     }
     private fun requireSuccess(response: Response) {
         if (response.code != 200) throw OsmGpxHistoryHttpException(response.code)

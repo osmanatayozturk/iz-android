@@ -151,7 +151,7 @@ class OsmDirectionalScreenAcceptanceTest {
             openGps(api)
             waitForTag("osm-gps-coverage-issue", timeout = 30_000L)
             compose.onNodeWithTag("osm-gps-coverage-issue")
-                .assertTextContains("Hesaptaki iz verisinin tamamı güvenle okunamadı", substring = true)
+                .assertTextContains("OSM’den iz dosyası alınamadı", substring = true)
             compose.onNodeWithTag("osm-gps-journey-${opposite.journey.id}").assertDoesNotExist()
             assertTrue(api.sent.isEmpty())
             assertEquals(setOf(511L, 512L), api.downloaded.toSet())

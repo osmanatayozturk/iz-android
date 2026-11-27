@@ -11,7 +11,7 @@ import org.iz.navigation.integration.OsmDirectedPoint
 import org.xml.sax.Attributes
 import org.xml.sax.InputSource
 import org.xml.sax.SAXParseException
-import org.xml.sax.helpers.DefaultHandler
+import org.xml.sax.ext.DefaultHandler2
 import okio.Buffer
 import okio.GzipSource
 import okio.buffer
@@ -51,6 +51,17 @@ internal data class OsmGpxRemoteMetadata(val id: Long, val name: String, val tim
 
     companion object {
         fun parse(row: JSONObject, expectedUid: Long): OsmGpxRemoteMetadata {
+            val entry = parseHistoryEntry(row, expectedUid)
+            val description = text(row.get("description") as String)
+            val array = row.getJSONArray("tags")
+            requireOsmGpxDataLimit(array.length() <= 1000)
+            val tags = List(array.length()) { text(array.get(it) as String) }
+            return OsmGpxRemoteMetadata(entry.id, entry.fileName, entry.timestampMillis, entry.pending,
+                requireNotNull(entry.visibility), description, tags)
+        }
+
+        /** The index consumes no write-only metadata; a future PUT must still fetch and parse the full detail. */
+        fun parseHistoryEntry(row: JSONObject, expectedUid: Long): OsmGpxHistoryEntry {
             require(!row.has("error") && row.integral("uid") == expectedUid)
             val id = row.integral("id").also { require(it > 0) }
             val name = (row.get("name") as String).also {
@@ -62,11 +73,7 @@ internal data class OsmGpxRemoteMetadata(val id: Long, val name: String, val tim
             val visibility = (row.get("visibility") as String).also {
                 require(it in setOf("identifiable", "trackable", "private", "public"))
             }
-            val description = text(row.get("description") as String)
-            val array = row.getJSONArray("tags")
-            requireOsmGpxDataLimit(array.length() <= 1000)
-            val tags = List(array.length()) { text(array.get(it) as String) }
-            return OsmGpxRemoteMetadata(id, name, time, pending, visibility, description, tags)
+            return OsmGpxHistoryEntry(id, name, time, pending, visibility)
         }
         private fun text(value: String) = value.also {
             requireOsmGpxDataLimit(it.length <= 1024)
@@ -82,9 +89,17 @@ internal data class OsmGpxRemoteMetadata(val id: Long, val name: String, val tim
     }
 }
 
-/** Bounded, fail-closed GPX 1.0/1.1 input. Unsupported geometry/archives never mean an empty history. */
+internal class OsmGpxGeometryFormatException : IOException("Invalid or unsupported GPX geometry")
+
+/** Bounded GPX 1.0/1.1 input. The coverage geometry is the nonempty track segments. */
 internal object OsmGpxRemoteXml {
     const val MAX_BYTES = 16L * 1024 * 1024
+    private val geometryElements = setOf("gpx", "wpt", "rte", "rtept", "trk", "trkseg", "trkpt")
+    private val legacyExtensionParents = geometryElements - "trkseg"
+    private val otherGpxElements = setOf("metadata", "name", "desc", "author", "email", "link", "url", "urlname",
+        "copyright", "year", "license", "time", "keywords", "bounds", "cmt", "src", "number", "type",
+        "ele", "magvar", "geoidheight", "sym", "fix", "sat", "hdop", "vdop", "pdop", "ageofdgpsdata",
+        "dgpsid", "text", "course", "speed")
     fun utf8(bytes: ByteArray): String = Charsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(bytes)).toString().removePrefix("\uFEFF")
     fun isGzip(bytes: ByteArray) = bytes.size >= 2 && bytes[0] == 0x1f.toByte() && bytes[1] == 0x8b.toByte()
 
@@ -106,6 +121,10 @@ internal object OsmGpxRemoteXml {
             require(declared == null || declared.equals("UTF-8", true))
             val handler = GeometryHandler()
             val reader = SAXParserFactory.newInstance().apply { isNamespaceAware = true }.newSAXParser().xmlReader
+            // Both the Android Expat reader and the JDK provider accept these SAX settings.
+            reader.setFeature("http://xml.org/sax/features/external-general-entities", false)
+            reader.setFeature("http://xml.org/sax/features/external-parameter-entities", false)
+            reader.setProperty("http://xml.org/sax/properties/lexical-handler", handler)
             reader.contentHandler = handler
             reader.errorHandler = handler
             reader.setEntityResolver { _, _ -> throw IOException("External XML entities are not allowed") }
@@ -114,15 +133,23 @@ internal object OsmGpxRemoteXml {
             val hash = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
             return OsmGpxRemoteData(handler.segments.map { it.toList() }, hash)
         } catch (limit: OsmGpxDataLimitException) { throw limit }
-        catch (_: Exception) { throw IOException("Invalid or unsupported GPX geometry") }
+        catch (_: Exception) { throw OsmGpxGeometryFormatException() }
     }
 
-    private class GeometryHandler : DefaultHandler() {
+    private class GeometryHandler : DefaultHandler2() {
         val segments = mutableListOf<MutableList<OsmDirectedPoint>>()
         private val stack = mutableListOf<String>()
         private var namespace = ""
+        private var legacy = false
+        private var extensionDepth: Int? = null
+        private var segmentCount = 0
         private var points = 0
         private var elements = 0
+
+        override fun startDTD(name: String?, publicId: String?, systemId: String?) {
+            throw OsmGpxGeometryFormatException()
+        }
+
         override fun startElement(uri: String, localName: String, qName: String, attrs: Attributes) {
             requireOsmGpxDataLimit(stack.size < 32 && ++elements <= 1_000_000)
             if (stack.isEmpty()) {
@@ -131,41 +158,48 @@ internal object OsmGpxRemoteXml {
                 require(version in setOf("1.0", "1.1"))
                 require(uri == "http://www.topografix.com/GPX/${version!!.replace('.', '/')}")
                 namespace = uri
-            } else if ("extensions" !in stack) {
-                require(uri == namespace)
+                legacy = version == "1.0"
+            } else if (extensionDepth == null) {
                 val parent = stack.last()
-                when (localName) {
-                    "gpx" -> error("Nested GPX")
-                    "trk" -> require(parent == "gpx")
-                    "trkseg" -> {
-                        require(parent == "trk")
-                        requireOsmGpxDataLimit(segments.size < 10_000)
-                        segments.add(mutableListOf())
+                if (uri != namespace) {
+                    require(legacy && uri.isNotEmpty() && parent in legacyExtensionParents)
+                    extensionDepth = stack.size
+                } else {
+                    when (localName) {
+                        "gpx" -> error("Nested GPX")
+                        "trk", "wpt", "rte" -> require(parent == "gpx")
+                        "rtept" -> require(parent == "rte")
+                        "extensions" -> extensionDepth = stack.size
+                        "trkseg" -> {
+                            require(parent == "trk")
+                            requireOsmGpxDataLimit(++segmentCount <= 10_000)
+                            segments.add(mutableListOf())
+                        }
+                        "trkpt" -> {
+                            require(parent == "trkseg")
+                            requireOsmGpxDataLimit(++points <= 200_000)
+                            val lat = attrs.getValue("lat")?.toDoubleOrNull()
+                            val lon = attrs.getValue("lon")?.toDoubleOrNull()
+                            require(lat != null && lat.isFinite() && lat in -90.0..90.0)
+                            require(lon != null && lon.isFinite() && lon in -180.0..180.0)
+                            segments.last().add(OsmDirectedPoint(lat, lon))
+                        }
+                        else -> require(localName in otherGpxElements)
                     }
-                    "trkpt" -> {
-                        require(parent == "trkseg")
-                        requireOsmGpxDataLimit(++points <= 200_000)
-                        val lat = attrs.getValue("lat")?.toDoubleOrNull()
-                        val lon = attrs.getValue("lon")?.toDoubleOrNull()
-                        require(lat != null && lat.isFinite() && lat in -90.0..90.0)
-                        require(lon != null && lon.isFinite() && lon in -180.0..180.0)
-                        segments.last().add(OsmDirectedPoint(lat, lon))
-                    }
-                    "rte", "rtept", "wpt" -> error("Unsupported GPX geometry")
-                    else -> require(localName in setOf("metadata", "name", "desc", "author", "email", "link", "url", "urlname",
-                        "copyright", "year", "license", "time", "keywords", "bounds", "cmt", "src", "number", "type",
-                        "ele", "magvar", "geoidheight", "sym", "fix", "sat", "hdop", "vdop", "pdop", "ageofdgpsdata",
-                        "dgpsid", "text", "extensions", "course", "speed"))
                 }
             }
             stack.add(localName)
         }
         override fun endElement(uri: String, localName: String, qName: String) {
-            if (localName == "trkseg" && uri == namespace && "extensions" !in stack) require(segments.last().isNotEmpty())
             stack.removeAt(stack.lastIndex)
+            if (extensionDepth == stack.size) {
+                extensionDepth = null
+            } else if (extensionDepth == null && localName == "trkseg" && segments.last().isEmpty()) {
+                segments.removeAt(segments.lastIndex)
+            }
         }
         override fun characters(ch: CharArray, start: Int, length: Int) {
-            if ("extensions" !in stack && stack.lastOrNull() in setOf("gpx", "trk", "trkseg", "trkpt"))
+            if (extensionDepth == null && stack.lastOrNull() in geometryElements)
                 require((start until start + length).all { ch[it].isWhitespace() })
         }
         override fun error(e: SAXParseException) { throw e }

@@ -79,6 +79,8 @@ sealed interface OsmGpxHistoryState {
         val visibilityBlocked: Set<Long> = emptySet()) : OsmGpxHistoryState
 }
 
+internal enum class OsmHistoryPhase { LIST, VISIBILITY, RECEIPTS, CACHE, LOCAL_TRACE, DOWNLOAD }
+
 class OsmGpxPlan internal constructor(
     internal val session: CommunitySession,
     ids: List<String>,
@@ -234,12 +236,14 @@ class OsmGpxController internal constructor(
         var state: OsmGpxHistoryState = OsmGpxHistoryState.Failed("OSM iz geçmişi okunamadı.")
         var next: OsmGpxAccountCoverage? = null
         var retry: Map<Long, OsmVisibilityAttempt> = emptyMap()
+        var phase = OsmHistoryPhase.LIST
         try {
             val remote = historyGateway.list(session.token, session.userId)
             if (!current()) return null
             require(remote.size <= MAX_OSM_TRACES && remote.all { it.id > 0 } && remote.distinctBy { it.id }.size == remote.size)
             val sorted = Collections.unmodifiableList(remote.sortedWith(
                 compareByDescending<OsmGpxHistoryEntry> { it.timestampMillis }.thenByDescending { it.id }))
+            phase = OsmHistoryPhase.VISIBILITY
             val review = withContext(Dispatchers.IO) {
                 reconcileVisibility(session.userId, session.token, store.visibilityJournal, historyGateway, sorted, ::current)
             }
@@ -251,7 +255,7 @@ class OsmGpxController internal constructor(
             val ready = OsmGpxHistoryState.Ready(OsmUser(session.userId, session.displayName), checked, false,
                 visibilityNotes = review.notes, visibilityBlocked = review.blocked)
             state = ready
-            next = withContext(Dispatchers.IO) { coverageLoader.load(session, checked, acknowledgedHere, ::current) }
+            next = withContext(Dispatchers.IO) { coverageLoader.load(session, checked, acknowledgedHere, ::current) { phase = it } }
             state = ready.copy(coverageReady = true)
         } catch (cancel: CancellationException) {
             state = OsmGpxHistoryState.Idle
@@ -262,12 +266,27 @@ class OsmGpxController internal constructor(
             val issue = when {
                 error.message == "pending-trace" -> "OSM bir izi henüz işliyor."
                 error.message == "unresolved-receipt" -> "Önceki gönderinin içeriği OSM geçmişinde henüz doğrulanamadı."
+                error.message == "missing-legacy-receipt" -> "Eski gönderim kaydı, bu hesaptaki bir izle eşleştirilemedi. Yüklenenler bölümünde OSM geçmişini kontrol et."
+                error.message == "missing-verified-geometry" -> "Önceki gönderimin iz dosyası doğrulanamadı. OSM geçmişini yeniden kontrol et."
                 error.message == "geometry-space" -> "İz geçmişini doğrulamak için cihazda yeterli boş alan yok."
                 error.message == "geometry-quota" -> "Bu hesabın iz geometrisi cihazdaki OSM önbellek kotasına sığmıyor."
                 error.message == "unverified-gap" -> "Bir OSM izinde güvenle eşleştirilemeyen uzun bir konum aralığı var."
-                error is OsmGpxDataLimitException -> "OSM yanıtı bu cihazda güvenle işlenebilecek tek dosya veya liste sınırını aştı."
-                error is OsmGpxHistoryHttpException -> "OSM iz verisini vermedi (HTTP ${error.statusCode})."
-                else -> "Hesaptaki iz verisinin tamamı güvenle okunamadı. Dosya biçimi veya güvenli işleme sınırı etkili olabilir."
+                error is OsmGpxDataLimitException && phase == OsmHistoryPhase.LIST -> "OSM iz listesi uygulamanın okuma sınırını aşıyor."
+                error is OsmGpxDataLimitException -> "Bir GPX dosyası uygulamanın okuma sınırını aşıyor."
+                error is OsmGpxMetadataFormatException -> "OSM iz listesindeki bilgiler doğrulanamadı. Yeniden kontrol et."
+                error is OsmGpxGeometryFormatException -> "Bir GPX dosyası okunamadı. Yüklenenler bölümünden OSM’deki izleri kontrol et."
+                error is java.io.InterruptedIOException && phase == OsmHistoryPhase.DOWNLOAD -> "OSM’den iz dosyası indirilirken süre doldu. Yeniden kontrol et."
+                error is java.io.InterruptedIOException && phase == OsmHistoryPhase.LIST -> "OSM iz listesi beklenirken süre doldu. Yeniden kontrol et."
+                error is OsmGpxHistoryHttpException && phase == OsmHistoryPhase.LIST -> "OSM’deki iz listesi yüklenemedi (HTTP ${error.statusCode})."
+                error is OsmGpxHistoryHttpException -> "OSM’den iz dosyası alınamadı (HTTP ${error.statusCode})."
+                else -> when (phase) {
+                    OsmHistoryPhase.LIST -> "OSM’deki iz listesi yüklenemedi."
+                    OsmHistoryPhase.VISIBILITY -> "Önceki görünürlük işlemi cihazda okunamadı."
+                    OsmHistoryPhase.RECEIPTS -> "Cihazdaki gönderim makbuzları doğrulanamadı."
+                    OsmHistoryPhase.CACHE -> "İz geometrisi cihazda okunamadı veya saklanamadı."
+                    OsmHistoryPhase.LOCAL_TRACE -> "Önceki gönderimin cihazdaki yolculuk verisi okunamadı."
+                    OsmHistoryPhase.DOWNLOAD -> "OSM’den iz dosyası alınamadı. Bağlantıyı kontrol edip yeniden dene."
+                }
             }
             state = listed?.copy(issue = issue) ?: OsmGpxHistoryState.Failed(issue)
         } finally {

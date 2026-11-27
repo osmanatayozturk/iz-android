@@ -15,7 +15,7 @@ internal data class OsmGpxStoredReceipt(
 internal interface OsmGpxReceiptStore {
     val coverageCache: OsmGpxCoverageCache
     val visibilityJournal: OsmGpxVisibilityJournal
-    fun resolveUnknown(accountId: Long, record: OsmGpxStoredReceipt, id: Long)
+    fun verifyRemoteReceipt(accountId: Long, record: OsmGpxStoredReceipt, id: Long)
     fun inventory(accountId: Long): List<OsmGpxStoredReceipt>
     fun read(accountId: Long, key: OsmGpxReceiptKey): OsmGpxReceipt?
     fun write(receipt: OsmGpxReceipt)
@@ -82,14 +82,14 @@ internal class OsmGpxFileReceipts(noBackupRoot: File) : OsmGpxReceiptStore {
         persist(file, json)
     }
 
-    @Synchronized override fun resolveUnknown(accountId: Long, record: OsmGpxStoredReceipt, id: Long) {
+    @Synchronized override fun verifyRemoteReceipt(accountId: Long, record: OsmGpxStoredReceipt, id: Long) {
         require(accountId > 0 && id > 0 && RECORD_NAME.matches(record.recordName))
         val file = File(File(root, accountId.toString()), record.recordName)
-        if (Files.notExists(file.toPath())) return
         val json = readJson(file)
-        if (json.getString("status") == "UNKNOWN" && json.getString("attemptId") == record.attemptId) {
-            persist(file, json.put("status", "RECEIVED").put("traceId", id).put("matchedRemoteData", true))
-        }
+        check(json.getString("attemptId") == record.attemptId && json.getString("status") == record.status.name)
+        check(json.opt("directPost") != true && json.opt("matchedRemoteData") != true)
+        if (record.status == OsmGpxReceiptStatus.RECEIVED) check(json.getLong("traceId") == record.traceId)
+        persist(file, json.put("status", "RECEIVED").put("traceId", id).put("matchedRemoteData", true))
     }
 
     private fun persist(file: File, json: JSONObject) {

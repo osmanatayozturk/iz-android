@@ -294,6 +294,68 @@ class OsmGpxControllerTest {
         assertEquals(before.copy(accountId = 43), files.read(43, key))
     }
 
+    @Test fun missingLegacyIdNeedsOneExactFileFromTheSameAccount() = runBlocking {
+        val key = OsmGpxReceiptKey.of(first)
+        val receipt = OsmGpxReceipt(42, key, OsmGpxReceiptStatus.RECEIVED, 80L, "old-id", 10)
+        files.write(receipt)
+        files.write(receipt.copy(accountId = 43))
+        remote.add(42, 81L, first.fileName, second)
+        remote.add(43, 82L, first.fileName, first)
+        val controller = controller { error("An unresolved legacy receipt must never POST") }
+        val blocked = controller.history.value as OsmGpxHistoryState.Ready
+        assertEquals(listOf(81L), blocked.entries.map { it.id })
+        assertFalse(blocked.coverageReady)
+        assertTrue(blocked.issue.orEmpty().contains("Eski gönderim"))
+        assertNull(controller.preparePlan(listOf(first.journeyId)))
+        assertEquals(receipt, files.read(42, key))
+        remote.add(42, 83L, "renamed.gpx", first)
+        remote.add(42, 84L, "duplicate.gpx", first)
+        controller.refreshHistory()
+        assertFalse((controller.history.value as OsmGpxHistoryState.Ready).coverageReady)
+        remote.remove(84L)
+        controller.refreshHistory()
+        assertTrue((controller.history.value as OsmGpxHistoryState.Ready).coverageReady)
+        assertEquals(83L, files.read(42, key)?.traceId)
+        assertTrue(files.inventory(42).single().verified)
+        assertFalse(files.read(42, key)!!.directPost)
+        assertNull(controller.prepare(first))
+        assertEquals(receipt.copy(accountId = 43), files.read(43, key))
+    }
+
+    @Test fun readFailuresIdentifyTheStageWithoutDisplayingPrivateDetailsOrEnablingUploads() = runBlocking {
+        remote.add(42, 41L, "private-file.gpx", first)
+        var failure: IOException = java.net.SocketTimeoutException("private-endpoint")
+        val history = object : OsmGpxHistoryGateway by remote {
+            override suspend fun data(token: String, id: Long): OsmGpxRemoteData = throw failure
+        }
+        val neverPost = OsmGpxGateway { _, _, _, _ -> error("Incomplete coverage") }
+        val controller = newController(neverPost, history)
+        for ((error, expected) in listOf(
+            failure to "süre doldu",
+            OsmGpxGeometryFormatException() to "Bir GPX dosyası okunamadı",
+            OsmGpxHistoryHttpException(403) to "HTTP 403",
+            IOException("private-endpoint") to "Bağlantıyı kontrol",
+        )) {
+            failure = error
+            controller.refreshHistory()
+            val result = controller.history.value as OsmGpxHistoryState.Ready
+            assertEquals(listOf(41L), result.entries.map { it.id })
+            assertTrue(result.issue.orEmpty().contains(expected))
+            assertFalse(result.issue.orEmpty().contains("private"))
+            assertFalse(result.coverageReady)
+            assertNull(controller.preparePlan(listOf(first.journeyId)))
+        }
+        val store = object : OsmGpxReceiptStore by files {
+            override fun inventory(accountId: Long): List<OsmGpxStoredReceipt> = throw IOException("private-directory")
+        }
+        val localFailure = newController(neverPost, remote, store)
+        localFailure.refreshHistory()
+        val result = localFailure.history.value as OsmGpxHistoryState.Ready
+        assertEquals("Cihazdaki gönderim makbuzları doğrulanamadı.", result.issue)
+        assertFalse(result.coverageReady)
+        assertTrue(remote.downloaded.isEmpty())
+    }
+
     @Test fun perFileRejectionContinuesAndTheAcceptedReceiptIsVisibleBeforeTheNextPost() = runBlocking {
         val posted = mutableListOf<OsmGpxReceiptKey>()
         val keys = listOf(first, second, third).map(OsmGpxReceiptKey::of)
