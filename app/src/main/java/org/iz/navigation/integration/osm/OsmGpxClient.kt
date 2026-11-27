@@ -82,13 +82,13 @@ internal class OsmGpxClient(baseUrl: String = "https://api.openstreetmap.org/api
         visibility: OsmGpxVisibility,
         canDispatch: () -> Boolean,
     ): OsmGpxUploadResult {
-        if (!canDispatch()) return OsmGpxUploadResult.NotDispatched
+        if (visibility != OsmGpxVisibility.TRACKABLE || !canDispatch()) return OsmGpxUploadResult.NotDispatched
         require(token.isNotBlank() && token.all { it in '!'..'~' })
         val multipart = MultipartBody.Builder().setType(MultipartBody.FORM)
             .addFormDataPart("file", trace.fileName, trace.gpxBytes.toRequestBody("application/gpx+xml".toMediaType()))
             .addFormDataPart("description", "Iz GPS trace")
             .addFormDataPart("tags", "")
-            .addFormDataPart("visibility", visibility.wireValue)
+            .addFormDataPart("visibility", OsmGpxVisibility.TRACKABLE.wireValue)
             .build()
         val request = Request.Builder().url(url)
             .header("Authorization", "Bearer $token")

@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -16,7 +15,6 @@ import org.iz.navigation.data.TrackPoint
 import org.iz.navigation.integration.OsmGpxPreparation
 import org.iz.navigation.integration.osm.OsmGpxHistoryEntry
 import org.iz.navigation.integration.osm.OsmGpxReceiptKey
-import org.iz.navigation.integration.osm.OsmGpxVisibility
 import org.iz.navigation.integration.prepareOsmGpxTrace
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -64,7 +62,7 @@ class OsmGpsBatchUiTest {
         compose.onNode(second).assertIsOff()
     }
 
-    @Test fun consentShowsEachPreparedTraceAndUsesTheVisibleBatchVisibility() {
+    @Test fun consentShowsEachPreparedTraceAndFixedTrackableVisibility() {
         val traces = listOf("coast", "park").mapIndexed { index, id ->
             val start = 1_000_000L + index * 1_000_000L
             val journey = Journey(id = id, startedAt = start, endedAt = start + 300_000)
@@ -74,32 +72,29 @@ class OsmGpsBatchUiTest {
             }
             (prepareOsmGpxTrace(journey, points) as OsmGpxPreparation.Ready).trace
         }
-        val confirmations = mutableListOf<OsmGpxVisibility>()
+        val confirmations = mutableListOf<Int>()
         compose.setContent {
             var position by remember { mutableIntStateOf(0) }
-            var visibility by remember { mutableStateOf(OsmGpxVisibility.IDENTIFIABLE) }
             IzTheme {
                 OsmGpsConsentDialog(
                     username = "Fixture user",
-                    visibility = visibility,
                     preview = OsmGpsConsentPreview(traces[position], position, traces.size),
                     enabled = true,
-                    onVisibility = { visibility = it },
                     onPreview = { position = it },
-                    onConfirm = { confirmations += visibility },
+                    onConfirm = { confirmations += position },
                     onDismiss = {},
                 )
             }
         }
-        compose.onNodeWithText("GPS önizleme ve toplu onay").assertIsDisplayed()
+        compose.onNodeWithText("GPS önizleme ve onay").assertIsDisplayed()
         compose.onNodeWithText("2 GPS izini OSM'ye gönder?").assertIsDisplayed()
         compose.onNodeWithTag("osm-gps-consent-confirm").assertIsDisplayed()
-            .assertTextContains("Tanımlanabilir olarak gönder · 2 iz")
+            .assertTextContains("Takip Edilebilir", substring = true)
         compose.onNodeWithText("Fixture user", substring = true).assertExists()
-        compose.onNodeWithText("noktaları ve kayıt zamanlarını", substring = true).assertExists()
+        compose.onNodeWithText("Noktalar ve kayıt zamanları", substring = true).assertExists()
         compose.onNodeWithText("herkese açık iz listesinde", substring = true).assertExists()
-        compose.onNodeWithTag("osm-gps-visibility-identifiable").assertIsDisplayed().assertIsSelected()
-        compose.onNodeWithTag("osm-gps-visibility-trackable").assertIsDisplayed().assertIsNotSelected()
+        compose.onNodeWithTag("osm-gps-visibility-identifiable").assertDoesNotExist()
+        compose.onNodeWithTag("osm-gps-visibility-trackable").assertIsDisplayed()
         compose.onNodeWithTag("osm-gps-consent-confirm").assertIsEnabled()
         compose.onNodeWithTag("osm-gps-preview-coast")
             .assert(SemanticsMatcher.expectValue(OsmGpsPreparedSha256, traces[0].sha256))
@@ -111,18 +106,16 @@ class OsmGpsBatchUiTest {
             .assertTextContains("1970-01-01T00:19:10Z", substring = true)
         compose.onNodeWithTag("osm-gps-points-close").performClick()
         compose.onNodeWithTag("osm-gps-consent-confirm").performClick()
-        compose.runOnIdle { assertEquals(listOf(OsmGpxVisibility.IDENTIFIABLE), confirmations) }
+        compose.runOnIdle { assertEquals(listOf(0), confirmations) }
         compose.onNodeWithTag("osm-gps-preview-next").performScrollTo().performClick()
         compose.onNodeWithTag("osm-gps-preview-park")
             .assert(SemanticsMatcher.expectValue(OsmGpsPreparedSha256, traces[1].sha256))
-        compose.onNodeWithTag("osm-gps-visibility-trackable").performScrollTo().performClick().assertIsSelected()
-        compose.onNodeWithTag("osm-gps-visibility-identifiable").assertIsNotSelected()
         compose.onNodeWithTag("osm-gps-consent-confirm").assertIsDisplayed()
-            .assertTextContains("Takip Edilebilir olarak gönder · 2 iz")
-        compose.runOnIdle { assertEquals(listOf(OsmGpxVisibility.IDENTIFIABLE), confirmations) }
+            .assertTextContains("Takip Edilebilir", substring = true)
+        compose.runOnIdle { assertEquals(listOf(0), confirmations) }
         compose.onNodeWithTag("osm-gps-consent-confirm").performClick()
         compose.runOnIdle {
-            assertEquals(listOf(OsmGpxVisibility.IDENTIFIABLE, OsmGpxVisibility.TRACKABLE), confirmations)
+            assertEquals(listOf(0, 1), confirmations)
         }
     }
 

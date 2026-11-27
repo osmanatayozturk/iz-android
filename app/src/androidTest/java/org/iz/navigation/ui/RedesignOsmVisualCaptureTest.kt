@@ -45,7 +45,6 @@ import org.iz.navigation.integration.osm.OsmAuthManager
 import org.iz.navigation.integration.osm.OsmCorrectionElement
 import org.iz.navigation.integration.osm.OsmGpxHistoryEntry
 import org.iz.navigation.integration.osm.OsmGpxReceiptKey
-import org.iz.navigation.integration.osm.OsmGpxVisibility
 import org.iz.navigation.integration.osm.editorDraft
 import org.iz.navigation.integration.prepareOsmGpxTrace
 import org.iz.navigation.osmcatalog.OsmPresetCatalog
@@ -212,7 +211,7 @@ class RedesignOsmVisualCaptureTest {
         }
     }
 
-    @Test fun captureGpspreview() = frame("gpspreview", hasText("GPS önizleme ve toplu onay"), dialog = true) {
+    @Test fun captureGpspreview() = frame("gpspreview", hasText("GPS önizleme ve onay"), dialog = true) {
         val journey = Journey(id = "qa-trace", title = "Sentetik kıyı izi", startedAt = timestamp,
             endedAt = timestamp + 300_000)
         val points = (0..10).map { index ->
@@ -220,8 +219,8 @@ class RedesignOsmVisualCaptureTest {
                 recordedAt = timestamp + index * 30_000L, accuracy = 5f)
         }
         val trace = (prepareOsmGpxTrace(journey, points) as OsmGpxPreparation.Ready).trace
-        OsmGpsConsentDialog(mapper.displayName, OsmGpxVisibility.TRACKABLE, OsmGpsConsentPreview(trace, 0, 1),
-            enabled = true, onVisibility = {}, onPreview = {}, onConfirm = { unexpected() }, onDismiss = {})
+        OsmGpsConsentDialog(mapper.displayName, OsmGpsConsentPreview(trace, 0, 1),
+            enabled = true, onPreview = {}, onConfirm = { unexpected() }, onDismiss = {})
     }
 
     @Test fun captureGpshistory() = frame("gpshistory", hasText("Hesaba ait GPS izleri")) {

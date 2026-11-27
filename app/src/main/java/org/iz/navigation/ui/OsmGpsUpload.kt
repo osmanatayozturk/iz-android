@@ -5,7 +5,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
-import org.iz.navigation.integration.PreparedOsmGpxTrace
 import org.iz.navigation.integration.osm.OsmGpxBatchResult
 import org.iz.navigation.integration.osm.OsmGpxConfirmation
 import org.iz.navigation.integration.osm.OsmGpxController
@@ -45,9 +44,11 @@ internal class OsmGpsUpload(private val scope: CoroutineScope) {
     fun start(
         controller: OsmGpxController,
         confirmation: OsmGpxConfirmation,
-        prepare: suspend (OsmGpxReceiptKey) -> PreparedOsmGpxTrace?,
     ) {
-        if (running || confirmation.user.id != accountId) return
+        if (running || confirmation.user.id != accountId) {
+            confirmation.consume()
+            return
+        }
         val started = Batch(confirmation.user.id, confirmation.keys)
         val generation = accountGeneration
         val allowed = AtomicBoolean(true)
@@ -56,9 +57,9 @@ internal class OsmGpsUpload(private val scope: CoroutineScope) {
         batch = started
         scope.launch {
             try {
-                val result = controller.upload(confirmation, allowed::get, prepare) { _, position ->
+                val result = controller.upload(confirmation, allowed::get, onAttempt = { _, position ->
                     if (generation == accountGeneration) batch = started.copy(current = position)
-                }
+                })
                 if (generation == accountGeneration) batch = started.copy(result = result)
             } finally {
                 receiptRevision++

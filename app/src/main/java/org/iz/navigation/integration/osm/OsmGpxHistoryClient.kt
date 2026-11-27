@@ -1,127 +1,173 @@
 package org.iz.navigation.integration.osm
 
 import java.io.IOException
-import java.nio.ByteBuffer
-import java.time.OffsetDateTime
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.Authenticator
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
+import okio.BufferedSink
 import org.iz.navigation.offline.OfflineJsonDepth
 import org.json.JSONObject
 
 internal fun interface OsmGpxHistoryGateway {
     suspend fun list(token: String, expectedUserId: Long): List<OsmGpxHistoryEntry>
+    suspend fun data(token: String, id: Long): OsmGpxRemoteData = throw IOException("GPX data unavailable")
+    suspend fun changeToTrackable(token: String, expectedUserId: Long, id: Long,
+        canDispatch: () -> Boolean): Boolean = false
 }
 
 internal class OsmGpxHistoryHttpException(val statusCode: Int) : IOException("OpenStreetMap HTTP $statusCode")
 
-internal class OsmGpxHistoryClient(
-    baseUrl: String = "https://api.openstreetmap.org/api/0.6",
-) : OsmGpxHistoryGateway {
-    private val url = baseUrl.toHttpUrl().also { base ->
-        val official = base.isHttps && base.host == "api.openstreetmap.org" && base.port == 443
-        val local = base.scheme == "http" && base.host in setOf("localhost", "127.0.0.1", "::1")
-        require((official || local) && base.username.isEmpty() && base.password.isEmpty() &&
-            base.query == null && base.fragment == null && base.encodedPath == "/api/0.6")
-    }.newBuilder().addPathSegments("user/gpx_files.json").build()
-
+internal class OsmGpxHistoryClient(baseUrl: String = "https://api.openstreetmap.org/api/0.6") : OsmGpxHistoryGateway {
+    private val base = baseUrl.toHttpUrl().also {
+        val official = it.isHttps && it.host == "api.openstreetmap.org" && it.port == 443
+        val local = it.scheme == "http" && it.host in setOf("localhost", "127.0.0.1", "::1")
+        require((official || local) && it.username.isEmpty() && it.password.isEmpty() &&
+            it.query == null && it.fragment == null && it.encodedPath == "/api/0.6")
+    }
+    private class Exchange(val canDispatch: () -> Boolean) { val started = AtomicBoolean() }
     private val http = OkHttpClient.Builder()
-        .retryOnConnectionFailure(false)
-        .followRedirects(false)
-        .followSslRedirects(false)
-        .authenticator(Authenticator.NONE)
-        .proxyAuthenticator(Authenticator.NONE)
-        .callTimeout(30, TimeUnit.SECONDS)
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(25, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(false).followRedirects(false).followSslRedirects(false)
+        .authenticator(Authenticator.NONE).proxyAuthenticator(Authenticator.NONE)
+        .callTimeout(30, TimeUnit.SECONDS).connectTimeout(10, TimeUnit.SECONDS).readTimeout(25, TimeUnit.SECONDS)
         .addNetworkInterceptor { chain ->
-            val request = chain.request()
-            val exchanged = checkNotNull(request.tag(AtomicBoolean::class.java))
-            if (!exchanged.compareAndSet(false, true)) throw IOException("Repeated GPX history exchange")
-            val response = chain.proceed(request)
-            // OkHttp may otherwise replay a 503 with Retry-After: 0.
-            if (response.code == 503 && response.header("Retry-After")?.toLongOrNull() == 0L) {
-                response.newBuilder().header("Retry-After", "1").build()
-            } else response
+            val exchange = checkNotNull(chain.request().tag(Exchange::class.java))
+            if (!exchange.started.compareAndSet(false, true)) throw IOException("Repeated GPX exchange")
+            if (!exchange.canDispatch()) throw IOException("GPX dispatch no longer allowed")
+            val response = chain.proceed(chain.request())
+            if (response.code == 503 && response.header("Retry-After")?.toLongOrNull() == 0L)
+                response.newBuilder().header("Retry-After", "1").build() else response
         }.build()
 
     override suspend fun list(token: String, expectedUserId: Long): List<OsmGpxHistoryEntry> {
         require(expectedUserId > 0)
-        require(token.isNotBlank() && token.all { it in '!'..'~' })
-        val request = Request.Builder().url(url)
-            .header("Authorization", "Bearer $token")
-            .header("Accept", "application/json")
-            .header("User-Agent", "Iz/Android (OpenStreetMap GPX)")
-            .tag(AtomicBoolean::class.java, AtomicBoolean())
-            .get().build()
-        return suspendCancellableCoroutine { continuation ->
-            val call = http.newCall(request)
-            continuation.invokeOnCancellation { call.cancel() }
-            call.enqueue(object : Callback {
-                override fun onFailure(call: Call, e: IOException) {
-                    if (continuation.isActive) continuation.resumeWithException(e)
+        return execute(request(token, "user/gpx_files.json")) { response ->
+            metadataJson(response, 4L * 1024 * 1024) { root ->
+                val rows = root.getJSONArray("traces")
+                requireOsmGpxDataLimit(rows.length() <= MAX_HISTORY_ROWS)
+                val ids = HashSet<Long>()
+                List(rows.length()) { index ->
+                    val row = OsmGpxRemoteMetadata.parse(rows.getJSONObject(index), expectedUserId)
+                    require(ids.add(row.id))
+                    OsmGpxHistoryEntry(row.id, row.name, row.timestampMillis, row.pending, row.visibility)
                 }
-
-                override fun onResponse(call: Call, response: Response) {
-                    val result = try {
-                        response.use {
-                            if (!continuation.isActive) return
-                            readHistory(it, expectedUserId)
-                        }
-                    } catch (error: IOException) {
-                        if (continuation.isActive) continuation.resumeWithException(error)
-                        return
-                    }
-                    if (continuation.isActive) continuation.resume(result)
-                }
-            })
-        }
-    }
-
-    private fun readHistory(response: Response, expectedUserId: Long): List<OsmGpxHistoryEntry> {
-        if (response.code != 200) throw OsmGpxHistoryHttpException(response.code)
-        val body = response.body ?: throw IOException("Missing GPX history response")
-        val source = body.source()
-        if (body.contentLength() > MAX_RESPONSE_BYTES || source.request(MAX_RESPONSE_BYTES + 1L)) {
-            throw IOException("GPX history response exceeds size limit")
-        }
-        val bytes = source.readByteArray()
-        try {
-            // The OSM index serializes all of the owner's traces in one response.
-            val json = Charsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(bytes)).toString()
-            val traces = JSONObject(OfflineJsonDepth.requireSafe(json)).getJSONArray("traces")
-            val ids = HashSet<Long>()
-            return List(traces.length()) { index ->
-                val row = traces.getJSONObject(index)
-                require(row.integral("uid") == expectedUserId)
-                val id = row.integral("id")
-                require(id > 0 && ids.add(id))
-                val name = row.get("name") as String
-                require(name.isNotBlank() && name.length <= 1024 && name.none(Char::isISOControl))
-                val timestamp = OffsetDateTime.parse(row.get("timestamp") as String).toInstant().toEpochMilli()
-                OsmGpxHistoryEntry(id, name, timestamp, row.get("pending") as Boolean)
             }
-        } catch (_: Exception) {
-            throw IOException("Invalid GPX history metadata")
         }
     }
 
-    private fun JSONObject.integral(key: String): Long = when (val value = get(key)) {
-        is Int -> value.toLong()
-        is Long -> value
-        else -> error("Invalid GPX metadata integer")
+    override suspend fun data(token: String, id: Long): OsmGpxRemoteData {
+        require(id > 0)
+        // Decode explicitly so compressed and expanded bytes each have a bound.
+        val get = request(token, "gpx/$id/data.gpx", "application/gpx+xml").newBuilder()
+            .header("Accept-Encoding", "identity").build()
+        return execute(get) { response ->
+            requireSuccess(response)
+            val encoding = response.header("Content-Encoding")
+            if (encoding != null && !encoding.equals("identity", true) && !encoding.equals("gzip", true))
+                throw IOException("Unsupported GPX content encoding")
+            val bytes = readLimited(response, OsmGpxRemoteXml.MAX_BYTES)
+            if (encoding.equals("gzip", true) && !OsmGpxRemoteXml.isGzip(bytes)) throw IOException("Invalid GPX gzip response")
+            OsmGpxRemoteXml.parse(bytes, response.body?.contentType()?.toString())
+        }
     }
 
-    private companion object {
-        const val MAX_RESPONSE_BYTES = 4L * 1024 * 1024
+    override suspend fun changeToTrackable(token: String, expectedUserId: Long, id: Long,
+        canDispatch: () -> Boolean): Boolean {
+        require(expectedUserId > 0 && id > 0)
+        if (!canDispatch()) return false
+        val before = metadata(token, expectedUserId, id, canDispatch)
+        if (!canDispatch()) return false
+        if (before.visibility == "trackable") return true
+        val payload = before.trackableXml().toRequestBody("application/xml; charset=utf-8".toMediaType())
+        val put = request(token, "gpx/$id", "application/xml", canDispatch).newBuilder()
+            .put(object : RequestBody() {
+                override fun contentType() = payload.contentType()
+                override fun contentLength() = payload.contentLength()
+                override fun isOneShot() = true
+                override fun writeTo(sink: BufferedSink) = payload.writeTo(sink)
+            }).build()
+        // After dispatch, a lost reply or failed verification never permits an automatic replay.
+        return try {
+            val status = execute(put) { it.code }
+            if (status != 200 || !canDispatch()) false
+            else {
+                val after = metadata(token, expectedUserId, id, canDispatch)
+                canDispatch() && after.visibility == "trackable" && before.samePreservedFields(after)
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: IOException) { false }
     }
+
+    private suspend fun metadata(token: String, uid: Long, id: Long, current: () -> Boolean) =
+        execute(request(token, "gpx/$id.json", canDispatch = current)) { response ->
+            metadataJson(response, 256L * 1024) { root ->
+                OsmGpxRemoteMetadata.parse(root.getJSONObject("trace"), uid).also { require(it.id == id) }
+            }
+        }
+
+    private fun request(token: String, path: String, accept: String = "application/json",
+        canDispatch: () -> Boolean = { true }): Request {
+        require(token.isNotBlank() && token.all { it in '!'..'~' })
+        return Request.Builder().url(base.newBuilder().addPathSegments(path).build())
+            .header("Authorization", "Bearer $token").header("Accept", accept)
+            .header("User-Agent", "Iz/Android (OpenStreetMap GPX)")
+            .tag(Exchange::class.java, Exchange(canDispatch)).get().build()
+    }
+
+    private suspend fun <T> execute(request: Request, read: (Response) -> T): T = suspendCancellableCoroutine { continuation ->
+        val call = http.newCall(request)
+        continuation.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                if (continuation.isActive) continuation.resumeWithException(e)
+            }
+            override fun onResponse(call: Call, response: Response) {
+                try {
+                    response.use {
+                        if (continuation.isActive) {
+                            val result = read(it)
+                            if (continuation.isActive) continuation.resume(result)
+                        }
+                    }
+                } catch (error: Exception) {
+                    if (continuation.isActive) continuation.resumeWithException(
+                        if (error is IOException) error else IOException("Invalid GPX response"))
+                }
+            }
+        })
+    }
+
+    private fun <T> metadataJson(response: Response, limit: Long, parse: (JSONObject) -> T): T {
+        requireSuccess(response)
+        try {
+            val json = OsmGpxRemoteXml.utf8(readLimited(response, limit))
+            val root = JSONObject(OfflineJsonDepth.requireSafe(json))
+            require(!root.has("error"))
+            return parse(root)
+        } catch (error: IOException) { throw error }
+        catch (_: Exception) { throw IOException("Invalid GPX history metadata") }
+    }
+    private fun requireSuccess(response: Response) {
+        if (response.code != 200) throw OsmGpxHistoryHttpException(response.code)
+    }
+    private fun readLimited(response: Response, limit: Long): ByteArray {
+        val body = response.body ?: throw IOException("Missing GPX response")
+        val source = body.source()
+        requireOsmGpxDataLimit(body.contentLength() <= limit && !source.request(limit + 1))
+        return source.readByteArray()
+    }
+
+    private companion object { const val MAX_HISTORY_ROWS = 10_000 }
 }

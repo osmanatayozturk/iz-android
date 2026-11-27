@@ -34,6 +34,8 @@ class PreparedOsmGpxTrace private constructor(
     val removedStartMeters: Double,
     val removedEndMeters: Double,
     internal val gpxBytes: ByteString,
+    // Only post-trim fixes are retained. Accuracy is local and never serialized.
+    internal val coverageSegments: List<List<OsmGpxFix>>,
 ) {
     val gpxXml: String get() = gpxBytes.utf8()
     val sha256: String = gpxBytes.sha256().hex()
@@ -41,21 +43,21 @@ class PreparedOsmGpxTrace private constructor(
     val segments: List<List<OsmGpxPoint>> by lazy { readPreviewSegments(gpxBytes) }
     val pointCount: Int get() = segments.sumOf { it.size }
 
+    internal fun withCoverageSegments(segments: List<List<OsmGpxFix>>): PreparedOsmGpxTrace =
+        create(journeyId, segments, measuredDistanceMeters)
+
     companion object {
         internal fun create(
             journeyId: String,
-            segments: List<List<TrackPoint>>,
+            segments: List<List<OsmGpxFix>>,
             measuredDistanceMeters: Double,
-            distanceMeters: Double,
-            removedStartMeters: Double,
-            removedEndMeters: Double,
         ): PreparedOsmGpxTrace {
             val xml = buildString {
                 append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
                 append("<gpx version=\"1.1\" creator=\"İz\" xmlns=\"http://www.topografix.com/GPX/1/1\">\n<trk>\n")
                 segments.forEach { segment ->
                     append("<trkseg>\n")
-                    segment.forEach { point ->
+                    segment.forEach { (point) ->
                         append("<trkpt lat=\"").append(point.latitude).append("\" lon=\"")
                             .append(point.longitude).append("\"><time>")
                             .append(Instant.ofEpochMilli(point.recordedAt)).append("</time></trkpt>\n")
@@ -64,8 +66,17 @@ class PreparedOsmGpxTrace private constructor(
                 }
                 append("</trk>\n</gpx>\n")
             }
-            return PreparedOsmGpxTrace(journeyId, measuredDistanceMeters, distanceMeters,
-                removedStartMeters, removedEndMeters, xml.encodeUtf8())
+            return PreparedOsmGpxTrace(
+                journeyId = journeyId,
+                measuredDistanceMeters = measuredDistanceMeters,
+                distanceMeters = segments.sumOf { it.last().distanceFromStart - it.first().distanceFromStart },
+                removedStartMeters = segments.first().first().distanceFromStart,
+                removedEndMeters = measuredDistanceMeters - segments.last().last().distanceFromStart,
+                gpxBytes = xml.encodeUtf8(),
+                coverageSegments = Collections.unmodifiableList(segments.map {
+                    Collections.unmodifiableList(it.toList())
+                }),
+            )
         }
     }
 }
@@ -116,7 +127,11 @@ private fun readPreviewSegments(bytes: ByteString): List<List<OsmGpxPoint>> {
 
 internal fun osmGpxFileName(sha256: String): String = "iz_gps_${sha256.take(24)}.gpx"
 
-private data class MeasuredFix(val point: TrackPoint, val distanceFromStart: Double)
+internal data class OsmGpxFix(
+    val point: OsmGpxPoint,
+    val accuracy: Float,
+    val distanceFromStart: Double,
+)
 private const val ENDPOINT_TRIM_METERS = 1000.0
 private const val DISTANCE_ROUNDING_MARGIN_METERS = 0.000001
 
@@ -135,7 +150,7 @@ fun prepareOsmGpxTrace(journey: Journey, points: List<TrackPoint>): OsmGpxPrepar
         segment.map { point ->
             previous?.let { total += DiaryRules.distanceContributionMeters(it, point) }
             previous = point
-            MeasuredFix(point, total)
+            OsmGpxFix(OsmGpxPoint(point.latitude, point.longitude, point.recordedAt), point.accuracy, total)
         }
     }
     if (total <= ENDPOINT_TRIM_METERS * 2 + DISTANCE_ROUNDING_MARGIN_METERS) {
@@ -154,10 +169,7 @@ fun prepareOsmGpxTrace(journey: Journey, points: List<TrackPoint>): OsmGpxPrepar
     }
     return OsmGpxPreparation.Ready(PreparedOsmGpxTrace.create(
         journeyId = journey.id,
-        segments = retained.map { segment -> segment.map { it.point } },
+        segments = retained,
         measuredDistanceMeters = total,
-        distanceMeters = retained.sumOf { it.last().distanceFromStart - it.first().distanceFromStart },
-        removedStartMeters = retained.first().first().distanceFromStart,
-        removedEndMeters = total - retained.last().last().distanceFromStart,
     ))
 }

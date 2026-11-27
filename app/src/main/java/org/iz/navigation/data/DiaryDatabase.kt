@@ -55,6 +55,8 @@ internal interface DiaryDao {
     @Query("SELECT * FROM journeys ORDER BY startedAt DESC") suspend fun allJourneys(): List<Journey>
     @Query("SELECT * FROM track_points ORDER BY recordedAt, id") suspend fun allPoints(): List<TrackPoint>
     @Query("SELECT * FROM track_points WHERE journeyId = :id ORDER BY recordedAt") suspend fun journeyPoints(id: String): List<TrackPoint>
+    @Query("SELECT * FROM track_points WHERE journeyId = :id ORDER BY recordedAt LIMIT :limit")
+    suspend fun osmJourneyPoints(id: String, limit: Int): List<TrackPoint>
     @Query("SELECT * FROM places ORDER BY sortOrder, name COLLATE NOCASE, id") suspend fun allPlaces(): List<Place>
     @Query("SELECT * FROM places WHERE id = :id") suspend fun place(id: String): Place?
     @Query("UPDATE places SET sortOrder = :position WHERE id = :id") suspend fun setPlaceOrder(id: String, position: Long)

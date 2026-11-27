@@ -28,8 +28,8 @@ class OsmGpxHistoryClientTest {
                 ]}
             """.trimIndent()))
             assertEquals(listOf(
-                OsmGpxHistoryEntry(4321, "sample.gpx", 1794096000000L, true),
-                OsmGpxHistoryEntry(4322, "second.gpx", 1794096000000L, false),
+                OsmGpxHistoryEntry(4321, "sample.gpx", 1794096000000L, true, "identifiable"),
+                OsmGpxHistoryEntry(4322, "second.gpx", 1794096000000L, false, "trackable"),
             ), client(server).list("fixture-token", 41))
             val request = checkNotNull(server.takeRequest(3, TimeUnit.SECONDS))
             assertEquals("GET", request.method)
@@ -64,8 +64,8 @@ class OsmGpxHistoryClientTest {
             for (ownerField in badOwnerFields) {
                 server.enqueue(jsonResponse("""
                     {"traces":[
-                      {"id":4321,"name":"owned.gpx","uid":41,"timestamp":"2026-11-08T00:00:00Z","pending":false},
-                      {"id":4322,"name":"other.gpx",$ownerField"timestamp":"2026-11-08T00:00:00Z","pending":false}
+                      {"id":4321,"name":"owned.gpx","uid":41,"timestamp":"2026-11-08T00:00:00Z","pending":false,"visibility":"trackable","description":"fixture","tags":[]},
+                      {"id":4322,"name":"other.gpx",$ownerField"timestamp":"2026-11-08T00:00:00Z","pending":false,"visibility":"trackable","description":"fixture","tags":[]}
                     ]}
                 """.trimIndent()))
                 assertThrows(IOException::class.java) { runBlocking { client.list("fixture-token", 41) } }

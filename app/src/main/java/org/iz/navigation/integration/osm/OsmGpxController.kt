@@ -20,6 +20,10 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import org.iz.navigation.data.DiaryRepository
+import org.iz.navigation.integration.OsmDirectedCoverage
+import org.iz.navigation.integration.OsmGpxPreparation
+import org.iz.navigation.integration.prepareOsmGpxTrace
 import org.iz.navigation.BuildConfig
 import org.iz.navigation.integration.PreparedOsmGpxTrace
 import org.iz.navigation.integration.osmGpxFileName
@@ -42,6 +46,7 @@ data class OsmGpxReceipt internal constructor(
     val traceId: Long?,
     val attemptId: String,
     val attemptedAt: Long,
+    val directPost: Boolean = false,
 ) {
     fun traceUrl(user: OsmUser): String? {
         if (user.id != accountId || status != OsmGpxReceiptStatus.RECEIVED) return null
@@ -57,43 +62,40 @@ private fun osmTraceUrl(user: OsmUser, id: Long): String =
     osmWebsite.newBuilder().addPathSegment("user").addPathSegment(user.displayName)
         .addPathSegment("traces").addPathSegment(id.toString()).build().toString()
 
-data class OsmGpxHistoryEntry(val id: Long, val fileName: String, val timestampMillis: Long, val pending: Boolean) {
+data class OsmGpxHistoryEntry(val id: Long, val fileName: String, val timestampMillis: Long, val pending: Boolean, val visibility: String? = null) {
     fun traceUrl(user: OsmUser): String = osmTraceUrl(user, id)
 }
 
 sealed interface OsmGpxHistoryState {
     data object Idle : OsmGpxHistoryState
     data object Loading : OsmGpxHistoryState
-    data object Failed : OsmGpxHistoryState
-    data class Ready(val user: OsmUser, val entries: List<OsmGpxHistoryEntry>) : OsmGpxHistoryState {
-        // The list is newest first. A repeated filename resolves to the newest trace.
-        internal val byFileName = entries.asReversed().associateBy { it.fileName }
-    }
+    data class Failed(val issue: String) : OsmGpxHistoryState
+    data class Ready(val user: OsmUser, val entries: List<OsmGpxHistoryEntry>, val coverageReady: Boolean = true,
+        val issue: String? = null) : OsmGpxHistoryState
 }
 
-internal data class OsmGpxSelection(val key: OsmGpxReceiptKey, val prior: OsmGpxReceipt?)
-
-class OsmGpxConfirmation internal constructor(
+class OsmGpxPlan internal constructor(
     internal val session: CommunitySession,
-    selection: List<OsmGpxSelection>,
-    val visibility: OsmGpxVisibility,
+    ids: List<String>,
+    traces: List<PreparedOsmGpxTrace>,
 ) {
-    internal val selection: List<OsmGpxSelection> = Collections.unmodifiableList(selection.toList())
+    internal val journeyIds: List<String> = Collections.unmodifiableList(ids.toList())
     val user = OsmUser(session.userId, session.displayName)
-    val keys: List<OsmGpxReceiptKey> = Collections.unmodifiableList(this.selection.map { it.key })
+    val traces: List<PreparedOsmGpxTrace> = Collections.unmodifiableList(traces.toList())
+}
+
+class OsmGpxConfirmation internal constructor(internal val plan: OsmGpxPlan) {
+    val visibility = OsmGpxVisibility.TRACKABLE
+    val user = plan.user
+    val keys: List<OsmGpxReceiptKey> = Collections.unmodifiableList(plan.traces.map(OsmGpxReceiptKey::of))
     val traceCount: Int get() = keys.size
     private val used = AtomicBoolean()
     internal fun consume(): Boolean = used.compareAndSet(false, true)
-
-    internal fun replaceVisibility(visibility: OsmGpxVisibility): OsmGpxConfirmation? {
-        if (visibility == this.visibility || !consume()) return null
-        return OsmGpxConfirmation(session, selection, visibility)
-    }
 }
 
 enum class OsmGpxStop {
     COMPLETE, BUSY, ACCOUNT_CHANGED, BACKGROUND, STALE_CONFIRMATION, UNKNOWN, REJECTED,
-    RATE_LIMITED, STORAGE_ERROR, ALREADY_USED, HISTORY_REQUIRED
+    RATE_LIMITED, STORAGE_ERROR, ALREADY_USED, HISTORY_REQUIRED, CHANGED
 }
 
 data class OsmGpxBatchResult(
@@ -117,259 +119,305 @@ class OsmGpxController internal constructor(
     private val historyGateway: OsmGpxHistoryGateway,
     private val currentHistorySession: () -> CommunitySession? = currentSession,
     private val readPermissionRequest: (Activity) -> Unit = permissionRequest,
+    private val loadJourney: suspend (String) -> Pair<Long, PreparedOsmGpxTrace>? = { null },
 ) {
     private val uploadLock = Mutex()
-    private val receiptLock = Mutex()
     private val historyLock = Any()
-    private var historyOwner: CommunitySession? = null
-    private var historyRequest: Any? = null
+    private val coverageLoader = OsmGpxCoverageLoader(store, historyGateway, loadJourney)
+    private var owner: CommunitySession? = null
+    private var request: Any? = null
+    private var coverage: OsmGpxAccountCoverage? = null
     private val mutableHistory = MutableStateFlow<OsmGpxHistoryState>(OsmGpxHistoryState.Idle)
     val history: StateFlow<OsmGpxHistoryState> = mutableHistory.asStateFlow()
 
     fun requestPermission(activity: Activity) = permissionRequest(activity)
     fun requestReadPermission(activity: Activity) = readPermissionRequest(activity)
-
-    private fun usableSession() = receiptSession()?.takeIf { OSM_GPX_WRITE_SCOPE in it.scopes }
-    private fun readableSession() = currentHistorySession()?.takeIf {
-        OSM_GPX_READ_SCOPE in it.scopes && it.isUnexpired()
-    }
+    private fun CommunitySession.isUnexpired() = expiresAt == null || expiresAt > System.currentTimeMillis()
     private fun receiptSession() = currentSession()?.takeIf { it.isUnexpired() }
-
-    private fun CommunitySession.isUnexpired(): Boolean =
-        expiresAt == null || expiresAt > System.currentTimeMillis()
-
+    private fun usableSession() = receiptSession()?.takeIf { OSM_GPX_WRITE_SCOPE in it.scopes && readableSession() === it }
+    private fun readableSession() = currentHistorySession()?.takeIf { OSM_GPX_READ_SCOPE in it.scopes && it.isUnexpired() }
     private fun watchSession(scope: CoroutineScope) {
-        scope.launch {
-            combine(sessions, authState) { _, _ -> Unit }.collect { clearStaleHistory() }
-        }
+        scope.launch { combine(sessions, authState) { _, _ -> Unit }.collect { clearStaleHistory() } }
     }
 
     private fun clearStaleHistory() = synchronized(historyLock) {
-        if (historyOwner !== readableSession()) {
-            historyOwner = null
-            historyRequest = null
+        if (owner !== readableSession()) {
+            owner = null
+            request = null
+            coverage = null
             mutableHistory.value = OsmGpxHistoryState.Idle
         }
     }
 
-    private fun readyHistory(session: CommunitySession) = synchronized(historyLock) {
-        if (historyOwner === session && readableSession() === session) {
-            mutableHistory.value as? OsmGpxHistoryState.Ready
-        } else null
+    private fun verified(session: CommunitySession) = synchronized(historyLock) {
+        coverage.takeIf { owner === session && readableSession() === session }
     }
 
     suspend fun refreshHistory() {
-        val session = readableSession() ?: run {
-            clearStaleHistory()
-            return
+        val session = readableSession() ?: return clearStaleHistory()
+        synchronizeHistory(session, true)
+    }
+
+    private suspend fun synchronizeHistory(session: CommunitySession, showLoading: Boolean,
+        acknowledgedHere: Set<Long> = emptySet()): OsmGpxAccountCoverage? {
+        val task = Any()
+        synchronized(historyLock) {
+            if (readableSession() !== session) return null
+            owner = session
+            request = task
+            coverage = null
+            if (showLoading) mutableHistory.value = OsmGpxHistoryState.Loading
         }
-        val request = Any()
-        // Keep the verified snapshot stable for a running upload. Do not hold the upload lock over GET.
-        uploadLock.withLock {
-            synchronized(historyLock) {
-                if (readableSession() !== session) return
-                historyOwner = session
-                historyRequest = request
-                mutableHistory.value = OsmGpxHistoryState.Loading
-            }
-        }
+        fun current() = synchronized(historyLock) { request === task && readableSession() === session }
+        var state: OsmGpxHistoryState = OsmGpxHistoryState.Failed("OSM iz geçmişi okunamadı.")
+        var next: OsmGpxAccountCoverage? = null
         try {
-            val entries = historyGateway.list(session.token, session.userId)
-            finishHistory(session, request, ready(session, entries))
+            val remote = historyGateway.list(session.token, session.userId)
+            if (!current()) return null
+            require(remote.size <= MAX_OSM_TRACES && remote.all { it.id > 0 } && remote.distinctBy { it.id }.size == remote.size)
+            val sorted = Collections.unmodifiableList(remote.sortedWith(
+                compareByDescending<OsmGpxHistoryEntry> { it.timestampMillis }.thenByDescending { it.id }))
+            val ready = OsmGpxHistoryState.Ready(OsmUser(session.userId, session.displayName), sorted, false)
+            state = ready
+            next = withContext(Dispatchers.IO) { coverageLoader.load(session, sorted, acknowledgedHere, ::current) }
+            state = ready.copy(coverageReady = true)
         } catch (cancel: CancellationException) {
-            finishHistory(session, request, OsmGpxHistoryState.Idle)
+            state = OsmGpxHistoryState.Idle
             throw cancel
         } catch (error: Exception) {
-            if (finishHistory(session, request, OsmGpxHistoryState.Failed) &&
-                error is OsmGpxHistoryHttpException && error.statusCode == 401
-            ) rejectSession(session)
-        }
-    }
-
-    private fun finishHistory(session: CommunitySession, request: Any, state: OsmGpxHistoryState): Boolean =
-        synchronized(historyLock) {
-            clearStaleHistory()
-            if (historyRequest !== request || historyOwner !== session) return@synchronized false
-            historyRequest = null
-            mutableHistory.value = state
-            true
-        }
-
-    private fun ready(session: CommunitySession, entries: List<OsmGpxHistoryEntry>) = OsmGpxHistoryState.Ready(
-        OsmUser(session.userId, session.displayName),
-        Collections.unmodifiableList(entries.sortedWith(
-            compareByDescending<OsmGpxHistoryEntry> { it.timestampMillis }.thenByDescending { it.id }
-        )),
-    )
-
-    private fun appendHistory(session: CommunitySession, entry: OsmGpxHistoryEntry) = synchronized(historyLock) {
-        val current = readyHistory(session) ?: return@synchronized
-        mutableHistory.value = ready(session, current.entries.filterNot { it.id == entry.id } + entry)
-    }
-
-    private suspend fun <T> withReceipts(block: () -> T): T =
-        receiptLock.withLock { withContext(Dispatchers.IO) { block() } }
-
-    /** Caller holds the receipt lock. Only resolution of a durable UNKNOWN is persisted. */
-    private fun receiptFor(
-        accountId: Long,
-        key: OsmGpxReceiptKey,
-        match: OsmGpxHistoryEntry?,
-    ): OsmGpxReceipt? {
-        val local = store.read(accountId, key)
-        if (match == null || local?.status == OsmGpxReceiptStatus.RECEIVED) return local
-        return if (local != null) {
-            local.copy(status = OsmGpxReceiptStatus.RECEIVED, traceId = match.id).also(store::write)
-        } else {
-            OsmGpxReceipt(accountId, key, OsmGpxReceiptStatus.RECEIVED, match.id,
-                "history:${match.id}", match.timestampMillis)
-        }
-    }
-
-    /** Only the signed-in account's receipts or exact filenames. May fail on local I/O. */
-    suspend fun receiptsForKeys(keys: List<OsmGpxReceiptKey>): Map<OsmGpxReceiptKey, OsmGpxReceipt> {
-        val session = receiptSession() ?: return emptyMap()
-        val found = withReceipts {
-            val matches = readyHistory(session)?.byFileName.orEmpty()
-            buildMap {
-                for (key in keys) {
-                    receiptFor(session.userId, key, matches[key.fileName])?.let { put(key, it) }
-                }
+            if (current() && error is OsmGpxHistoryHttpException && error.statusCode == 401) rejectSession(session)
+            val listed = state as? OsmGpxHistoryState.Ready
+            val issue = when {
+                error.message == "pending-trace" -> "OSM bir izi henüz işliyor."
+                error.message == "unresolved-receipt" -> "Önceki gönderinin içeriği OSM geçmişinde henüz doğrulanamadı."
+                error.message == "geometry-space" -> "İz geçmişini doğrulamak için cihazda yeterli boş alan yok."
+                error.message == "unverified-gap" -> "Bir OSM izinde güvenle eşleştirilemeyen uzun bir konum aralığı var."
+                error is OsmGpxDataLimitException -> "OSM yanıtı bu cihazda güvenle işlenebilecek tek dosya veya liste sınırını aştı."
+                error is OsmGpxHistoryHttpException -> "OSM iz verisini vermedi (HTTP ${error.statusCode})."
+                else -> "Hesaptaki iz verisinin tamamı güvenle okunamadı. Dosya biçimi veya güvenli işleme sınırı etkili olabilir."
+            }
+            state = listed?.copy(issue = issue) ?: OsmGpxHistoryState.Failed(issue)
+        } finally {
+            synchronized(historyLock) {
+                if (current()) {
+                    coverage = next
+                    mutableHistory.value = state
+                } else clearStaleHistory()
             }
         }
-        return if (receiptSession() === session) found else emptyMap()
+        return next.takeIf { current() }
     }
 
-    /**
-     * Call before showing consent. Review must identify the exact UNKNOWN receipt shown to the user.
-     * Received traces and UNKNOWN attempts without manual review are excluded from the consent count.
-     */
-    suspend fun prepareConfirmationForKeys(
-        keys: List<OsmGpxReceiptKey>,
-        reviewedUnknown: Set<OsmGpxReceipt> = emptySet(),
-        visibility: OsmGpxVisibility = OsmGpxVisibility.IDENTIFIABLE,
-    ): OsmGpxConfirmation? {
-        val session = usableSession() ?: return null
-        val verified = readyHistory(session) ?: return null
-        val selection = withReceipts {
-            keys.distinctBy { it.journeyId }.mapNotNull { key ->
-                val prior = receiptFor(session.userId, key, verified.byFileName[key.fileName])
-                if (prior == null || (prior.status == OsmGpxReceiptStatus.UNKNOWN && prior in reviewedUnknown)) {
-                    OsmGpxSelection(key, prior)
-                } else null
-            }.distinctBy { it.key.fileName }
+    private fun blockCoverage(session: CommunitySession) = synchronized(historyLock) {
+        if (owner === session) {
+            request = null
+            coverage = null
+            val ready = mutableHistory.value as? OsmGpxHistoryState.Ready
+            if (ready != null) mutableHistory.value = ready.copy(coverageReady = false)
         }
-        return if (selection.isNotEmpty() && usableSession() === session && readyHistory(session) === verified) {
-            OsmGpxConfirmation(session, selection, visibility)
-        } else null
     }
 
-    /**
-     * Call only from explicit consent. The thread-safe foreground predicate must stay false after
-     * this screen leaves the foreground, including when an upload overlaps a later resume.
-     */
-    suspend fun upload(
-        confirmation: OsmGpxConfirmation,
-        stillForeground: () -> Boolean,
-        prepare: suspend (OsmGpxReceiptKey) -> PreparedOsmGpxTrace?,
-        onAttempt: (OsmGpxReceiptKey, Int) -> Unit = { _, _ -> },
-    ): OsmGpxBatchResult {
-        val session = confirmation.session
+    suspend fun receiptsForKeys(keys: List<OsmGpxReceiptKey>): Map<OsmGpxReceiptKey, OsmGpxReceipt> {
+        val session = receiptSession() ?: return emptyMap()
+        val snapshot = verified(session)
+        val results = withContext(Dispatchers.IO) {
+            keys.mapNotNull { key ->
+                val local = store.read(session.userId, key)
+                val id = snapshot?.byDigest?.get(key.sha256)
+                val receipt = when {
+                    id != null -> OsmGpxReceipt(session.userId, key, OsmGpxReceiptStatus.RECEIVED, id,
+                        local?.attemptId ?: "verified:$id", local?.attemptedAt ?: 0)
+                    local?.directPost == true || local?.status == OsmGpxReceiptStatus.UNKNOWN -> local
+                    else -> null
+                }
+                receipt?.let { key to it }
+            }.toMap()
+        }
+        return results.takeIf { receiptSession() === session }.orEmpty()
+    }
+
+    suspend fun unknownReceipts(): List<OsmGpxReceipt> {
+        val session = readableSession() ?: return emptyList()
+        val records = withContext(Dispatchers.IO) {
+            store.inventory(session.userId).filter { it.status == OsmGpxReceiptStatus.UNKNOWN }.map {
+                OsmGpxReceipt(session.userId, OsmGpxReceiptKey(it.journeyId ?: it.recordName, it.sha256),
+                    it.status, null, it.attemptId, it.attemptedAt)
+            }
+        }
+        return records.takeIf { readableSession() === session }.orEmpty()
+    }
+
+    suspend fun preparePlan(journeyIds: List<String>): OsmGpxPlan? {
+        val session = readableSession() ?: return null
+        val snapshot = verified(session) ?: return null
+        return buildPlan(session, journeyIds, snapshot)?.takeIf { verified(session) === snapshot }
+    }
+
+    private suspend fun buildPlan(session: CommunitySession, ids: List<String>, snapshot: OsmGpxAccountCoverage): OsmGpxPlan? =
+        withContext(Dispatchers.IO) {
+            try {
+                require(ids.size <= MAX_OSM_TRACES)
+                val distinct = ids.distinct()
+                var points = 0L
+                val originals = distinct.mapNotNull { id ->
+                    check(readableSession() === session)
+                    loadJourney(id)?.also { (_, trace) ->
+                        require(trace.journeyId == id)
+                        points += trace.pointCount
+                        require(points <= MAX_OSM_POINTS)
+                    }
+                }.filterNot { it.second.sha256 in snapshot.submittedDigests }
+                    .sortedWith(compareBy<Pair<Long, PreparedOsmGpxTrace>> { it.first }.thenBy { it.second.journeyId })
+                val used = OsmDirectedCoverage(snapshot.nearby(originals))
+                val traces = used.filterChronologically(originals.map { it.second })
+                    .filterNot { it.sha256 in snapshot.submittedDigests }
+                check(readableSession() === session)
+                OsmGpxPlan(session, distinct, traces)
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (_: Exception) { null }
+        }
+
+    suspend fun prepareConfirmation(plan: OsmGpxPlan): OsmGpxConfirmation? {
+        if (plan.traces.isEmpty() || usableSession() !== plan.session) return null
+        val latest = preparePlan(plan.journeyIds) ?: return null
+        return if (latest.session === plan.session && samePayload(plan.traces, latest.traces)) OsmGpxConfirmation(plan) else null
+    }
+
+    private fun samePayload(left: List<PreparedOsmGpxTrace>, right: List<PreparedOsmGpxTrace>) =
+        left.size == right.size && left.indices.all { i ->
+            left[i].journeyId == right[i].journeyId && left[i].gpxBytes == right[i].gpxBytes
+        }
+
+    suspend fun upload(confirmation: OsmGpxConfirmation, stillForeground: () -> Boolean,
+        onAttempt: (OsmGpxReceiptKey, Int) -> Unit = { _, _ -> }): OsmGpxBatchResult {
+        val plan = confirmation.plan
+        val session = plan.session
         val results = mutableListOf<OsmGpxReceipt>()
-        val rejectedKeys = linkedMapOf<OsmGpxReceiptKey, Int>()
-        var unattempted = confirmation.traceCount
-        fun result(stop: OsmGpxStop, rejected: OsmGpxUploadResult.Rejected? = null) =
-            OsmGpxBatchResult(stop, results.toList(), unattempted, rejected?.retryAfterMillis,
-                rejected?.statusCode, rejectedKeys.toMap())
-        fun stopped(): OsmGpxStop? = when {
+        val rejected = mutableMapOf<OsmGpxReceiptKey, Int>()
+        val finished = mutableSetOf<String>()
+        val acceptedIds = mutableSetOf<Long>()
+        var remaining = plan.traces.size
+        fun result(stop: OsmGpxStop, error: OsmGpxUploadResult.Rejected? = null) =
+            OsmGpxBatchResult(stop, results.toList(), remaining, error?.retryAfterMillis, error?.statusCode, rejected.toMap())
+        fun interrupted() = when {
             usableSession() !== session -> OsmGpxStop.ACCOUNT_CHANGED
             !stillForeground() -> OsmGpxStop.BACKGROUND
-            readyHistory(session) == null -> OsmGpxStop.HISTORY_REQUIRED
             else -> null
         }
-
         if (!uploadLock.tryLock()) return result(OsmGpxStop.BUSY)
         try {
             if (!confirmation.consume()) return result(OsmGpxStop.ALREADY_USED)
-            for ((index, item) in confirmation.selection.withIndex()) {
-                val (key, prior) = item
-                stopped()?.let { return result(it) }
-                val trace = prepare(key)
-                stopped()?.let { return result(it) }
-                if (trace == null || OsmGpxReceiptKey.of(trace) != key) {
-                    return result(OsmGpxStop.STALE_CONFIRMATION)
-                }
+            for ((index, trace) in plan.traces.withIndex()) {
+                interrupted()?.let { return result(it) }
+                val snapshot = synchronizeHistory(session, false, acceptedIds)
+                    ?: return result(interrupted() ?: OsmGpxStop.HISTORY_REQUIRED)
+                val next = buildPlan(session, plan.journeyIds.filterNot(finished::contains), snapshot)
+                interrupted()?.let { return result(it) }
+                if (next == null || !samePayload(plan.traces.drop(index), next.traces)) return result(OsmGpxStop.CHANGED)
+                val key = OsmGpxReceiptKey.of(trace)
                 val attempt = OsmGpxReceipt(session.userId, key, OsmGpxReceiptStatus.UNKNOWN, null,
                     UUID.randomUUID().toString(), System.currentTimeMillis())
-                val reserved = withReceipts {
-                    if (stopped() != null || readyHistory(session)?.byFileName?.containsKey(key.fileName) == true ||
-                        store.read(session.userId, key) != prior
-                    ) false
-                    else {
-                        // An interrupted process leaves a durable UNKNOWN before any bytes can be sent.
-                        store.write(attempt)
-                        true
-                    }
+                var previous: OsmGpxReceipt? = null
+                val reserved = withContext(Dispatchers.IO) {
+                    previous = store.read(session.userId, key)
+                    if (previous?.directPost == true || previous?.status == OsmGpxReceiptStatus.UNKNOWN ||
+                        verified(session) !== snapshot || interrupted() != null) false
+                    else { store.write(attempt); true }
                 }
-                if (!reserved) return result(stopped() ?: OsmGpxStop.STALE_CONFIRMATION)
-
-                if (stopped() == null) onAttempt(key, index + 1)
+                if (!reserved) return result(interrupted() ?: OsmGpxStop.CHANGED)
+                fun canDispatch() = interrupted() == null && verified(session) === snapshot
                 val response = try {
-                    if (stopped() != null) OsmGpxUploadResult.NotDispatched
-                    else gateway.upload(session.token, trace, confirmation.visibility) { stopped() == null }
+                    if (canDispatch()) onAttempt(key, index + 1)
+                    if (canDispatch()) gateway.upload(session.token, trace, OsmGpxVisibility.TRACKABLE, ::canDispatch)
+                    else OsmGpxUploadResult.NotDispatched
                 } catch (cancel: CancellationException) {
+                    blockCoverage(session)
                     throw cancel
-                } catch (_: Exception) {
-                    OsmGpxUploadResult.Unknown
-                }
-                if (response != OsmGpxUploadResult.NotDispatched) unattempted--
+                } catch (_: Exception) { OsmGpxUploadResult.Unknown }
+                if (response != OsmGpxUploadResult.NotDispatched) remaining--
                 when (response) {
                     is OsmGpxUploadResult.Received -> {
-                        val receipt = attempt.copy(status = OsmGpxReceiptStatus.RECEIVED, traceId = response.traceId)
-                        results += attempt
-                        withContext(NonCancellable) {
-                            withReceipts { store.write(receipt) }
-                            appendHistory(session, OsmGpxHistoryEntry(response.traceId, key.fileName,
-                                receipt.attemptedAt, pending = true))
+                        val receipt = attempt.copy(status = OsmGpxReceiptStatus.RECEIVED, traceId = response.traceId, directPost = true)
+                        withContext(NonCancellable + Dispatchers.IO) {
+                            require(response.traceId > 0)
+                            // Persist geometry before releasing UNKNOWN, even when the server list lags the POST.
+                            store.coverageCache.write(session.userId, response.traceId, trace.geometry())
+                            store.write(receipt)
                         }
-                        results[results.lastIndex] = receipt
+                        results += receipt
+                        acceptedIds += response.traceId
+                        finished += trace.journeyId
+                        blockCoverage(session)
                     }
                     OsmGpxUploadResult.Unknown -> {
                         results += attempt
+                        blockCoverage(session)
                         return result(OsmGpxStop.UNKNOWN)
                     }
                     is OsmGpxUploadResult.Rejected, OsmGpxUploadResult.NotDispatched -> {
-                        // A definitive failed retry cannot erase uncertainty about the earlier attempt.
-                        withContext(NonCancellable) {
-                            withReceipts {
-                                if (prior == null) store.remove(session.userId, key) else store.write(prior)
-                            }
+                        withContext(NonCancellable + Dispatchers.IO) {
+                            previous?.let(store::write) ?: store.remove(session.userId, key)
                         }
                         if (response is OsmGpxUploadResult.Rejected) {
-                            rejectedKeys[key] = response.statusCode
+                            rejected[key] = response.statusCode
+                            finished += trace.journeyId
                             if (response.statusCode in FILE_REJECTION_STATUSES) continue
                             if (response.statusCode == 401) rejectSession(session)
-                            val stop = if (response.statusCode == 429) OsmGpxStop.RATE_LIMITED else OsmGpxStop.REJECTED
-                            return result(stop, response)
+                            return result(if (response.statusCode == 429) OsmGpxStop.RATE_LIMITED else OsmGpxStop.REJECTED, response)
                         }
-                        return result(stopped() ?: OsmGpxStop.STALE_CONFIRMATION)
+                        return result(interrupted() ?: OsmGpxStop.CHANGED)
                     }
                 }
             }
-            return result(OsmGpxStop.COMPLETE)
-        } catch (cancel: CancellationException) {
-            throw cancel
-        } catch (_: Exception) {
-            return result(OsmGpxStop.STORAGE_ERROR)
+            return result(interrupted() ?: OsmGpxStop.COMPLETE)
+        } catch (cancel: CancellationException) { throw cancel }
+        catch (_: Exception) { blockCoverage(session); return result(OsmGpxStop.STORAGE_ERROR) }
+        finally { uploadLock.unlock() }
+    }
+
+    suspend fun changeToTrackable(userId: Long, ids: List<Long>, canContinue: () -> Boolean = { true }): Map<Long, String> {
+        val session = usableSession()?.takeIf { it.userId == userId } ?: return emptyMap()
+        val shown = synchronized(historyLock) {
+            (mutableHistory.value as? OsmGpxHistoryState.Ready)?.takeIf { owner === session }
+        } ?: return emptyMap()
+        require(ids.size <= MAX_OSM_TRACES)
+        val selected = ids.distinct()
+        val eligible = shown.entries.filter { it.visibility.equals("identifiable", true) && !it.pending }.map { it.id }.toSet()
+        if (!uploadLock.tryLock()) return selected.associateWith { "Başka bir işlem sürüyor." }
+        val result = linkedMapOf<Long, String>()
+        try {
+            for (id in selected) {
+                fun current() = usableSession() === session && canContinue()
+                if (!current()) break
+                result[id] = if (id !in eligible) "Bu iz dönüştürmeye uygun değil."
+                else try {
+                    if (historyGateway.changeToTrackable(session.token, userId, id, ::current)) "Trackable olarak doğrulandı."
+                    else "Sonuç doğrulanamadı. Yeniden kontrol et."
+                } catch (cancel: CancellationException) { throw cancel }
+                catch (_: Exception) { "Sonuç doğrulanamadı. Yeniden kontrol et." }
+            }
         } finally {
+            blockCoverage(session)
             uploadLock.unlock()
         }
+        return result.takeIf { usableSession() === session }.orEmpty()
     }
 
     companion object {
         private val FILE_REJECTION_STATUSES = setOf(400, 413, 422)
         @Volatile private var testing: OsmGpxController? = null
         @Volatile private var instance: OsmGpxController? = null
+
+        private fun journeyLoader(context: Context): suspend (String) -> Pair<Long, PreparedOsmGpxTrace>? {
+            val diary = DiaryRepository(context.applicationContext)
+            return loader@{ id ->
+                val journey = diary.getJourney(id) ?: return@loader null
+                val points = diary.osmJourneyPoints(id, MAX_OSM_POINTS + 1)
+                require(points.size <= MAX_OSM_POINTS)
+                val trace = (prepareOsmGpxTrace(journey, points) as? OsmGpxPreparation.Ready)?.trace
+                trace?.let { journey.startedAt to it }
+            }
+        }
 
         fun get(context: Context): OsmGpxController = testing ?: instance ?: synchronized(this) {
             testing ?: instance ?: run {
@@ -378,7 +426,7 @@ class OsmGpxController internal constructor(
                     OsmGpxFileReceipts(context.noBackupFilesDir), auth.state,
                     auth.communitySessionSource.sessions, auth::requestGpxPermission,
                     auth.communitySessionSource::rejectSession, OsmGpxHistoryClient(),
-                    auth::currentGpxHistorySession, auth::requestGpxReadPermission).also {
+                    auth::currentGpxHistorySession, auth::requestGpxReadPermission, journeyLoader(context)).also {
                     it.watchSession(CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate))
                     instance = it
                 }
@@ -395,12 +443,13 @@ class OsmGpxController internal constructor(
             historyGateway: OsmGpxHistoryGateway = OsmGpxHistoryGateway { _, _ -> emptyList() },
             requestReadPermission: (Activity) -> Unit = requestPermission,
         ): AutoCloseable = synchronized(this) {
-            check(BuildConfig.DEBUG && context.applicationContext.packageName == "org.iz.navigation.osmgpxqa")
+            check(BuildConfig.DEBUG && context.applicationContext.packageName in
+                setOf("org.iz.navigation.osmgpxqa", "org.iz.navigation.qaosmyon20261127"))
             check(testing == null)
             val override = OsmGpxController(
                 { sessions.value.takeUnless { authState.value.busy } }, gateway,
                 OsmGpxFileReceipts(context.noBackupFilesDir), authState, sessions, requestPermission,
-                historyGateway = historyGateway, readPermissionRequest = requestReadPermission,
+                historyGateway = historyGateway, readPermissionRequest = requestReadPermission, loadJourney = journeyLoader(context),
             )
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
             override.watchSession(scope)

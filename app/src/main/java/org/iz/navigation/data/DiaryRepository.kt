@@ -88,6 +88,7 @@ class DiaryRepository internal constructor(context: Context, private val db: Dia
     suspend fun activeJourney(): Journey? = dao.activeJourney(System.currentTimeMillis())
     suspend fun getJourney(id: String): Journey? = dao.journey(id)
     suspend fun journeyPoints(id: String): List<TrackPoint> = dao.journeyPoints(id)
+    internal suspend fun osmJourneyPoints(id: String, limit: Int) = dao.osmJourneyPoints(id, limit)
     fun observeJourneyPoints(id: String): Flow<List<TrackPoint>> = dao.observeJourneyPoints(id)
     suspend fun allHealthJourneys(): List<Journey> = dao.allJourneys().filter { it.status == JourneyStatus.CONFIRMED }
 

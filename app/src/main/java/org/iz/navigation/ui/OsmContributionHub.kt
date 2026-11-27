@@ -81,16 +81,16 @@ internal fun OsmContributionHub(
     val historyReader = remember(auth) {
         OsmContributionHubHistory(auth::currentGpxHistorySession, OsmGpxHistoryClient(), source::rejectSession)
     }
-    var refreshRevision by remember { mutableIntStateOf(0) }
+    var refreshRevision by remember(historySession) { mutableIntStateOf(0) }
     // Key the visible snapshot on the exact session so composition drops old rows before loading.
     var history by remember(historySession, refreshRevision) { mutableStateOf<OsmContributionHubHistoryResult?>(null) }
     LaunchedEffect(historyReader, historySession, refreshRevision) {
-        if (historySession != null) history = historyReader.load(historySession)
+        if (historySession != null && refreshRevision > 0) history = historyReader.load(historySession)
     }
 
     val gps = (history as? OsmContributionHubHistoryResult.Ready)?.entries.orEmpty()
     val rows = remember(notes, places, session, gps) { osmContributionHubRows(notes, places, session?.userId, gps) }
-    OsmContributionHubContent(rows, history, canRefresh = historySession != null,
+    OsmContributionHubContent(rows, history, canRefresh = historySession != null, historyRequested = refreshRevision > 0,
         onClose = onClose, onNewNote = onNewNote, onNewPlace = onNewPlace,
         onPickExistingPlace = onPickExistingPlace, onGps = onGps, onGpsHistory = onGpsHistory,
         onRefresh = { refreshRevision++ }, onManageNotes = onManageNotes, onSurvey = onSurvey,
@@ -127,6 +127,7 @@ internal fun OsmContributionHubContent(
     onSurvey: () -> Unit = {},
     onCommunity: (() -> Unit)? = null,
     onManagePlaces: (() -> Unit)? = null,
+    historyRequested: Boolean = true,
 ) {
     var activities by rememberSaveable { mutableStateOf(false) }
     val hubList = rememberLazyListState()
@@ -164,12 +165,15 @@ internal fun OsmContributionHubContent(
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(if (activities) "Tüm etkinlikler" else "Son etkinlikler",
                         Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.titleMedium)
-                    if (canRefresh) TextButton(onClick = onRefresh, enabled = history != null,
+                    if (canRefresh) TextButton(onClick = onRefresh, enabled = !historyRequested || history != null,
                         modifier = Modifier.heightIn(min = 48.dp).testTag("osm-contribution-refresh")) { Text("Yenile") }
                 }
             }
-            if (canRefresh && history == null) item {
+            if (canRefresh && historyRequested && history == null) item {
                 LinearProgressIndicator(Modifier.fillMaxWidth().testTag("osm-contribution-history-loading"))
+            }
+            if (canRefresh && !historyRequested) item {
+                Text("Yüklenen GPS izlerini görmek için Yenile’ye dokun.", style = MaterialTheme.typography.bodySmall)
             }
             if (history == OsmContributionHubHistoryResult.Failed) item {
                 Text("OSM iz geçmişi yüklenemedi.", Modifier.testTag("osm-contribution-history-error"),

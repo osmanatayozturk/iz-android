@@ -19,18 +19,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OsmGpxClientTest {
-    @Test fun sendsExactPreviewCoordinatesAndTimesWithEitherVisibilityAndGenericMetadata() = runBlocking {
+    @Test fun sendsExactPreviewCoordinatesAndTimesOnlyAsTrackableWithGenericMetadata() = runBlocking {
         MockWebServer().use { server ->
             val trace = osmGpxTestTrace("private-fixture-journey")
             val client = client(server)
-            for ((visibility, wireValue) in listOf(
-                OsmGpxVisibility.IDENTIFIABLE to "identifiable",
-                OsmGpxVisibility.TRACKABLE to "trackable",
-            )) {
-                server.enqueue(MockResponse().setBody("4321\n"))
-                assertEquals(OsmGpxUploadResult.Received(4321), client.upload("fixture-token", trace, visibility) { true })
-                assertMultipart(server, trace, wireValue)
-            }
+            assertEquals(OsmGpxUploadResult.NotDispatched,
+                client.upload("fixture-token", trace, OsmGpxVisibility.IDENTIFIABLE) { true })
+            assertEquals(0, server.requestCount)
+            server.enqueue(MockResponse().setBody("4321\n"))
+            assertEquals(OsmGpxUploadResult.Received(4321), client.upload("fixture-token", trace, OsmGpxVisibility.TRACKABLE) { true })
+            assertMultipart(server, trace, "trackable")
         }
     }
 
@@ -86,7 +84,7 @@ class OsmGpxClientTest {
             server.enqueue(MockResponse().setBody("not a trace ID"))
             val client = client(server)
             val trace = osmGpxTestTrace()
-            assertEquals(OsmGpxUploadResult.Unknown, client.upload("fixture-token", trace, OsmGpxVisibility.IDENTIFIABLE) { true })
+            assertEquals(OsmGpxUploadResult.Unknown, client.upload("fixture-token", trace, OsmGpxVisibility.TRACKABLE) { true })
             assertEquals(OsmGpxUploadResult.Unknown, client.upload("fixture-token", trace, OsmGpxVisibility.TRACKABLE) { true })
             assertEquals(2, server.requestCount)
         }
