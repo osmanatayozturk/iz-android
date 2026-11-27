@@ -9,8 +9,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import org.iz.navigation.lean.LeanGnssDiagnostics
+import org.iz.navigation.lean.LeanLiveDecisionCode
+import org.iz.navigation.lean.LeanLiveDecisionSummary
 import org.iz.navigation.lean.LeanReportSession
 import org.iz.navigation.lean.LeanStreamTiming
 import org.iz.navigation.lean.leanGnssIssueLabel
@@ -19,32 +23,105 @@ import java.util.Date
 import java.util.Locale
 
 @Composable
-internal fun LeanReportDiagnostics(sessions: List<LeanReportSession>, mountLabel: String) {
+internal fun LeanReportDiagnostics(
+    sessions: List<LeanReportSession>,
+    mountLabel: String,
+    showLiveDecisions: Boolean = false,
+) {
     if (sessions.isEmpty()) {
+        if (showLiveDecisions) LeanLiveDecisionReadout(null)
         Text("Sensör ve GPS ayrıntıları bilinmiyor.", style = MaterialTheme.typography.bodySmall)
         return
     }
+    val (liveSummaries, sensorSessions) = sessions.partition { it.liveOnly }
+    if (sensorSessions.isNotEmpty()) {
+        Text("İlk ve son örnek oturum başına göre gösterilir. En uzun aralık iki ardışık örnek arasındadır. Başlangıç ve bitiş boşlukları ayrıca gösterilir.",
+            style = MaterialTheme.typography.bodySmall)
+    }
     val locale = Locale.forLanguageTag("tr-TR")
-    Text("İlk ve son örnek oturum başına göre gösterilir. En uzun aralık iki ardışık örnek arasındadır. Başlangıç ve bitiş boşlukları ayrıca gösterilir.",
-        style = MaterialTheme.typography.bodySmall)
-    sessions.sortedBy { it.startedAtUtc }.forEach { session ->
+    val orderedSessions = sensorSessions.sortedBy { it.startedAtUtc } + liveSummaries.sortedBy { it.startedAtUtc }
+    orderedSessions.forEach { session ->
         key(session.sessionId) {
             HorizontalDivider()
             Column(Modifier.testTag("lean-report-session-${session.sessionId}"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                val time = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.MEDIUM, locale)
-                    .format(Date(session.startedAtUtc))
-                Text("$mountLabel · $time", style = MaterialTheme.typography.titleSmall)
-                val timing = session.sensorTiming
-                if (timing == null) Text("Sensör ayrıntıları bilinmiyor.", style = MaterialTheme.typography.bodySmall)
-                else {
-                    Text("Oturum süresi ${leanDiagnosticDuration(timing.durationNanos)}", style = MaterialTheme.typography.bodySmall)
-                    LeanSensorTimingReadout("İvmeölçer", timing.durationNanos, timing.accelerometer)
-                    LeanSensorTimingReadout("Jiroskop", timing.durationNanos, timing.gyroscope)
+                if (session.liveOnly) {
+                    LeanLiveDecisionReadout(session.liveDecisions)
+                } else {
+                    val time = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.MEDIUM, locale)
+                        .format(Date(session.startedAtUtc))
+                    Text("$mountLabel · $time", style = MaterialTheme.typography.titleSmall)
+                    if (showLiveDecisions && (session.liveDecisions != null || liveSummaries.isEmpty())) {
+                        LeanLiveDecisionReadout(session.liveDecisions)
+                    }
+                    val timing = session.sensorTiming
+                    if (timing == null) Text("Sensör ayrıntıları bilinmiyor.", style = MaterialTheme.typography.bodySmall)
+                    else {
+                        Text("Oturum süresi ${leanDiagnosticDuration(timing.durationNanos)}", style = MaterialTheme.typography.bodySmall)
+                        LeanSensorTimingReadout("İvmeölçer", timing.durationNanos, timing.accelerometer)
+                        LeanSensorTimingReadout("Jiroskop", timing.durationNanos, timing.gyroscope)
+                    }
+                    LeanGnssDiagnosticReadout(session.gnssDiagnostics)
                 }
-                LeanGnssDiagnosticReadout(session.gnssDiagnostics)
             }
         }
     }
+}
+
+@Composable
+private fun LeanLiveDecisionReadout(summary: LeanLiveDecisionSummary?) {
+    Text("Canlı yatış kadranı", Modifier.semantics { heading() }, style = MaterialTheme.typography.labelLarge)
+    if (summary == null) {
+        Text("Canlı kadran bilgisi bilinmiyor.", style = MaterialTheme.typography.bodySmall)
+        return
+    }
+    val counts = summary.counts
+    if (counts.isEmpty()) {
+        val status = if (summary.dialOpened) "Kadran açıldı, karar kaydı yok." else "Kadran açılmadı."
+        Text(status, style = MaterialTheme.typography.bodySmall)
+        return
+    }
+    val accepted = listOf(LeanLiveDecisionCode.ACCEPTED_MEASURED, LeanLiveDecisionCode.ACCEPTED_ESTIMATED)
+    accepted.forEach { code ->
+        Text("${liveDecisionLabel(code)} · ${summary.count(code)}", style = MaterialTheme.typography.bodySmall)
+    }
+    val rejected = counts.entries.filterNot { it.key in accepted }.sortedByDescending { it.value }
+    if (rejected.isEmpty()) {
+        Text("Açının hesaplanamadığı bir durum kaydedilmedi.", style = MaterialTheme.typography.bodySmall)
+    } else {
+        Text("Açının hesaplanamadığı durumlar", style = MaterialTheme.typography.labelLarge)
+        rejected.forEach { (code, count) ->
+            Text("${liveDecisionLabel(code)} · $count kez", style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+private fun liveDecisionLabel(code: LeanLiveDecisionCode): String = when (code) {
+    LeanLiveDecisionCode.ACCEPTED_MEASURED -> "Geçerli ölçüm"
+    LeanLiveDecisionCode.ACCEPTED_ESTIMATED -> "Geçerli tahmin"
+    LeanLiveDecisionCode.GNSS_NEVER_RECEIVED -> "GPS konumu hiç alınmadı"
+    LeanLiveDecisionCode.GNSS_STALE -> "GPS konumu güncellenmedi"
+    LeanLiveDecisionCode.SENSOR_UNAVAILABLE -> "Telefonun hareket sensörleri kullanılamadı"
+    LeanLiveDecisionCode.SENSOR_STREAM_GAP -> "Hareket sensörü verisi kesildi"
+    LeanLiveDecisionCode.INVALID_FIX -> "GPS konumu geçersizdi"
+    LeanLiveDecisionCode.WAITING_FOR_PAIR -> "İkinci uygun GPS konumu bekleniyordu"
+    LeanLiveDecisionCode.INVALID_CALIBRATION -> "Gidon kalibrasyonu geçerli değildi"
+    LeanLiveDecisionCode.GNSS_BATCH -> "Birden fazla GPS konumu birlikte geldi"
+    LeanLiveDecisionCode.GNSS_NO_SINGLE_FIX_RECEIPT -> "GPS konumunun alınış zamanı doğrulanamadı"
+    LeanLiveDecisionCode.GNSS_RECEIPT_STALE -> "GPS konumu gecikmeli geldi"
+    LeanLiveDecisionCode.GNSS_RECEIPT_CLOCK -> "GPS konumlarının alınış zamanı tutarsızdı"
+    LeanLiveDecisionCode.GNSS_RECEIPT_JITTER -> "GPS konumlarının alınış aralıkları çok değişkendi"
+    LeanLiveDecisionCode.GNSS_SOURCE_UNSUPPORTED -> "GPS konum kaynağı desteklenmedi"
+    LeanLiveDecisionCode.GNSS_SOURCE_CHANGED -> "GPS konum kaynağı değişti"
+    LeanLiveDecisionCode.GNSS_CLOCK -> "GPS konum zamanları birbiriyle uyuşmadı"
+    LeanLiveDecisionCode.GNSS_TIME_UNCERTAIN -> "GPS konum zamanının kesinliği doğrulanamadı"
+    LeanLiveDecisionCode.GNSS_FIX_CONTINUITY -> "Ardışık GPS konumlarının zamanları tutarsızdı"
+    LeanLiveDecisionCode.GNSS_QUALITY -> "GPS verisi yeterince güvenilir değildi"
+    LeanLiveDecisionCode.GNSS_MOTION -> "GPS hareket verisi yatışı hesaplamak için yeterli değildi"
+    LeanLiveDecisionCode.SENSOR_QUALITY -> "Hareket sensörü verisi yeterince güvenilir değildi"
+    LeanLiveDecisionCode.SENSOR_DISAGREEMENT -> "Hareket sensörleri GPS hareketiyle uyuşmadı"
+    LeanLiveDecisionCode.TURN_SUPPORT -> "Dönüş için yeterli veri oluşmadı"
+    LeanLiveDecisionCode.TURN_DIRECTION_CHANGED -> "Dönüş yönü değişti"
+    else -> leanGnssIssueLabel(code.name)
 }
 
 @Composable

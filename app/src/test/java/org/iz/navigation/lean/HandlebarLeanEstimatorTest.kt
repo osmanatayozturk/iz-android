@@ -19,14 +19,14 @@ class HandlebarLeanEstimatorTest {
     /** Local synthetic arc with independent headings and coordinates, not measured chassis truth. */
     private fun ride(speed: Double = 12.0, yaw: Double = .30, steeringRate: Double = 0.0,
         turnStarts: Double = 0.0, turnEnds: Double = 12.0, stationaryUntil: Double = 0.0,
-        sensorHz: Int = 50): List<LeanRecord> = buildList {
+        sensorHz: Int = 50, yawAt: ((Double) -> Double)? = null): List<LeanRecord> = buildList {
         var north = 0.0
         var east = 0.0
         var course = 350.0
         for (i in 0..12 * sensorHz) {
             val t = i.toDouble() / sensorHz
             val sampleSpeed = if (t < stationaryUntil) 0.0 else speed
-            val turn = if (t in turnStarts..<turnEnds) yaw else 0.0
+            val turn = yawAt?.invoke(t) ?: if (t in turnStarts..<turnEnds) yaw else 0.0
             val bank = atan(sampleSpeed * turn / g)
             val ns = start + i * second / sensorHz
             // Right-positive course rotates clockwise around world up. Lean changes its projection in device coordinates.
@@ -51,6 +51,139 @@ class HandlebarLeanEstimatorTest {
         if (it is LeanGnssRecord) it.copy(elapsedUncertaintyNanos = null, provider = provider,
             singleFixReceivedElapsedNanos = it.elapsedNanos + 50_000_000L) else it
     }
+
+    @Test fun liveTrackerRequiresFourSameDirectionPairsAndPublishesTheLatestMeasurement() {
+        for (direction in listOf(-1.0, 1.0)) {
+            val records = withSingleFixTiming(ride(yawAt = { if (it < 4.0) direction * .30 else direction * .24 }))
+            val fixes = records.filterIsInstance<LeanGnssRecord>()
+            val imu = records.filterIsInstance<LeanImuRecord>() // Includes future timestamps by design.
+            val tracker = LiveHandlebarTracker()
+            fun decide(index: Int) = tracker.evaluate(calibration, fixes[index], imu, fixes[index].elapsedNanos + 60_000_000)
+            assertEquals(LiveHandlebarReason.WAITING_FOR_PAIR, decide(0).reason())
+            for (index in 1..3) assertEquals(LiveHandlebarReason.TURN_SUPPORT, decide(index).reason())
+            val first = decide(4) as LiveHandlebarDecision.Accepted
+            assertEquals(LiveHandlebarSource.ESTIMATED, first.source)
+            assertEquals(direction * 20.158, first.signedDegrees, .01)
+            assertEquals(fixes[4].elapsedNanos, first.measuredElapsedNanos)
+            val latest = decide(5) as LiveHandlebarDecision.Accepted
+            assertEquals(fixes[5].elapsedNanos, latest.measuredElapsedNanos)
+            assertTrue(abs(latest.signedDegrees) < abs(first.signedDegrees))
+            assertEquals(LiveHandlebarReason.WAITING_FOR_PAIR, tracker.evaluate(calibration.copy(epoch = "new-epoch"),
+                fixes[6], imu, fixes[6].elapsedNanos + 60_000_000).reason())
+            tracker.reset()
+            assertEquals(LiveHandlebarReason.WAITING_FOR_PAIR, decide(7).reason())
+        }
+    }
+
+    @Test fun liveTrackerClearsOnBatchMissingReceiptOrStaleFixAndRebuildsSupport() {
+        val records = withSingleFixTiming(ride())
+        val fixes = records.filterIsInstance<LeanGnssRecord>()
+        val imu = records.filterIsInstance<LeanImuRecord>()
+        val tracker = LiveHandlebarTracker()
+        fun decide(index: Int, batch: Boolean = false) =
+            tracker.evaluate(calibration, fixes[index], imu, fixes[index].elapsedNanos + 60_000_000, batch)
+        repeat(4) { decide(it) }
+        assertTrue(decide(4) is LiveHandlebarDecision.Accepted)
+        assertEquals(LiveHandlebarReason.GNSS_BATCH, decide(5, batch = true).reason())
+        assertEquals(LiveHandlebarReason.WAITING_FOR_PAIR, decide(6).reason())
+        for (index in 7..9) assertEquals(LiveHandlebarReason.TURN_SUPPORT, decide(index).reason())
+        assertTrue(decide(10) is LiveHandlebarDecision.Accepted)
+        assertEquals(LiveHandlebarReason.GNSS_NO_SINGLE_FIX_RECEIPT, tracker.evaluate(calibration,
+            fixes[11].copy(singleFixReceivedElapsedNanos = null), imu, fixes[11].elapsedNanos + 60_000_000).reason())
+        assertEquals(LiveHandlebarReason.WAITING_FOR_PAIR, decide(12).reason())
+        assertEquals(LiveHandlebarReason.GNSS_STALE, tracker.evaluate(calibration, fixes[12], imu,
+            fixes[12].elapsedNanos + 1_500_000_000L).reason())
+    }
+
+    @Test fun liveTrackerSeparatesClockSourceAndReceiptEvidenceFromReportedUncertainty() {
+        val records = withSingleFixTiming(ride())
+        val fixes = records.filterIsInstance<LeanGnssRecord>()
+        val imu = records.filterIsInstance<LeanImuRecord>()
+        fun evaluate(tracker: LiveHandlebarTracker, fix: LeanGnssRecord) =
+            tracker.evaluate(calibration, fix, imu, fix.elapsedNanos + 500_000_000)
+        for ((reason, fix) in listOf(
+            LiveHandlebarReason.GNSS_SOURCE_CHANGED to fixes[1].copy(provider = "fused"),
+            LiveHandlebarReason.GNSS_SOURCE_UNSUPPORTED to fixes[1].copy(provider = "network"),
+            LiveHandlebarReason.GNSS_RECEIPT_CLOCK to fixes[1].copy(singleFixReceivedElapsedNanos = fixes[1].elapsedNanos - 1),
+            LiveHandlebarReason.GNSS_RECEIPT_CLOCK to fixes[1].copy(singleFixReceivedElapsedNanos = fixes[1].elapsedNanos + 500_000_001),
+            LiveHandlebarReason.GNSS_RECEIPT_STALE to fixes[1].copy(singleFixReceivedElapsedNanos = fixes[1].elapsedNanos + 251_000_000),
+            LiveHandlebarReason.GNSS_TIME_UNCERTAIN to fixes[1].copy(elapsedUncertaintyNanos = 101_000_000.0),
+            LiveHandlebarReason.GNSS_TIME_UNCERTAIN to fixes[1].copy(invalidElapsedUncertainty = true),
+            LiveHandlebarReason.GNSS_TIME_UNCERTAIN to fixes[1].copy(elapsedUncertaintyNanos = 1_000_000.0),
+            LiveHandlebarReason.GNSS_CLOCK to fixes[1].copy(utcMillis = fixes[1].utcMillis + 81L),
+            LiveHandlebarReason.GNSS_FIX_CONTINUITY to fixes[0],
+            LiveHandlebarReason.GNSS_FIX_CONTINUITY to fixes[2],
+        )) {
+            val tracker = LiveHandlebarTracker()
+            evaluate(tracker, fixes[0])
+            assertEquals(reason.name, reason, evaluate(tracker, fix).reason())
+        }
+        val drifting = LiveHandlebarTracker()
+        for (i in 0..2) evaluate(drifting, fixes[i].copy(
+            singleFixReceivedElapsedNanos = fixes[i].elapsedNanos + 50_000_000 + i * 30_000_000))
+        assertEquals(LiveHandlebarReason.GNSS_RECEIPT_JITTER,
+            evaluate(drifting, fixes[3].copy(singleFixReceivedElapsedNanos = fixes[3].elapsedNanos + 140_000_000)).reason())
+        val utcDrift = LiveHandlebarTracker()
+        for (i in 0..2) evaluate(utcDrift, fixes[i].copy(utcMillis = fixes[i].utcMillis + i * 60L))
+        assertEquals(LiveHandlebarReason.GNSS_CLOCK,
+            evaluate(utcDrift, fixes[3].copy(utcMillis = fixes[3].utcMillis + 180L)).reason())
+    }
+
+    @Test fun liveTrackerRejectsBrokenOrDisagreeingImuAndDoesNotBorrowFutureRows() {
+        val records = withSingleFixTiming(ride())
+        val fixes = records.filterIsInstance<LeanGnssRecord>()
+        val imu = records.filterIsInstance<LeanImuRecord>()
+        val end = fixes[5].elapsedNanos
+        val from = fixes[4].elapsedNanos
+        for ((reason, rows) in listOf(
+            LiveHandlebarReason.SENSOR_STREAM_GAP to imu.filterNot { it.elapsedNanos in from..<end },
+            LiveHandlebarReason.SENSOR_QUALITY to imu.map {
+                if (it.elapsedNanos in from..<end) it.copy(accuracy = 0) else it
+            },
+            LiveHandlebarReason.SENSOR_DISAGREEMENT to imu.map {
+                if (it.elapsedNanos in from..<end && it.kind == LeanSensorKind.GYROSCOPE) it.copy(z = .04 - it.z) else it
+            },
+        )) {
+            val tracker = LiveHandlebarTracker()
+            fun decide(index: Int) =
+                tracker.evaluate(calibration, fixes[index], imu, fixes[index].elapsedNanos + 60_000_000)
+            repeat(4) { decide(it) }
+            assertTrue(decide(4) is LiveHandlebarDecision.Accepted)
+            assertEquals(reason, tracker.evaluate(calibration, fixes[5], rows, end + 60_000_000).reason())
+            for (index in 6..8) assertEquals(LiveHandlebarReason.TURN_SUPPORT, decide(index).reason())
+            assertTrue(decide(9) is LiveHandlebarDecision.Accepted)
+        }
+    }
+
+    @Test fun liveTrackerRebuildsTheChainOnTurnReversalAndKeepsMeasuredStraightZero() {
+        val records = withSingleFixTiming(ride(yawAt = { if (it < 4.0) .30 else -.30 }))
+        val fixes = records.filterIsInstance<LeanGnssRecord>()
+        val imu = records.filterIsInstance<LeanImuRecord>()
+        val tracker = LiveHandlebarTracker()
+        fun decide(i: Int) = tracker.evaluate(calibration, fixes[i], imu, fixes[i].elapsedNanos + 60_000_000)
+        repeat(4) { decide(it) }
+        assertTrue((decide(4) as LiveHandlebarDecision.Accepted).signedDegrees > 0)
+        assertEquals(LiveHandlebarReason.TURN_DIRECTION_CHANGED, decide(5).reason())
+        for (index in 6..8) assertEquals(LiveHandlebarReason.TURN_SUPPORT, decide(index).reason())
+        assertTrue((decide(9) as LiveHandlebarDecision.Accepted).signedDegrees < 0)
+
+        val straight = ride(yaw = 0.0)
+        val (first, last) = straight.filterIsInstance<LeanGnssRecord>()
+        val rows = straight.filterIsInstance<LeanImuRecord>()
+        tracker.reset()
+        tracker.evaluate(calibration, first, rows, first.elapsedNanos)
+        val measured = tracker.evaluate(calibration, last, rows, last.elapsedNanos) as LiveHandlebarDecision.Accepted
+        assertEquals(LiveHandlebarSource.MEASURED, measured.source)
+        assertEquals(0.0, measured.signedDegrees, 0.0)
+
+        val withoutUncertainty = withSingleFixTiming(straight).filterIsInstance<LeanGnssRecord>()
+        tracker.reset()
+        tracker.evaluate(calibration, withoutUncertainty[0], rows, first.elapsedNanos + 60_000_000)
+        assertEquals(LiveHandlebarReason.GNSS_MOTION,
+            tracker.evaluate(calibration, withoutUncertainty[1], rows, last.elapsedNanos + 60_000_000).reason())
+    }
+
+    private fun LiveHandlebarDecision.reason() = (this as LiveHandlebarDecision.Rejected).reason
 
     @Test fun reportedTurnNeedsIndependentSignedGpsAndImuWithSingleFixTiming() {
         for (provider in listOf("fused", "gps")) for (direction in listOf(-1.0, 1.0)) {

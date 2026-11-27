@@ -14,6 +14,9 @@ import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.iz.navigation.data.Journey
+import org.iz.navigation.data.JourneyStatus
+import org.iz.navigation.data.Transport
+import org.iz.navigation.tracking.TrackerSettings
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 
@@ -34,6 +37,7 @@ internal class LeanCaptureController(context: Context, private val onCaptureChan
     }
     @Volatile private var closed = false
     @Volatile private var active: Capture? = null
+    @Volatile private var liveOwner: LiveDecisionRecorder? = null
     @Volatile private var blockedKey: String? = null
     private class Capture(val token: LeanSessionToken, val identity: String, val calibrationEpoch: String,
         val generation: Long, val start: Long, val mount: LeanMount) {
@@ -53,6 +57,7 @@ internal class LeanCaptureController(context: Context, private val onCaptureChan
 
     suspend fun sync(journey: Journey?) = mutex.withLock {
         val config = settings.state.value
+        syncLiveDecisions(journey, config)
         if (closed || !leanCaptureEligible(journey, config)) {
             stopLocked(if (journey?.endedAt == null && active != null) "capture_disabled" else null)
             blockedKey = null
@@ -185,7 +190,43 @@ internal class LeanCaptureController(context: Context, private val onCaptureChan
             onCaptureChanged()
         }
     }
-    suspend fun stop(reason: String? = null) = mutex.withLock { stopLocked(reason) }
+    private suspend fun syncLiveDecisions(journey: Journey?, config: LeanCaptureSettings) {
+        val reference = config.liveReference()?.takeIf { config.mount == LeanMount.HANDLEBAR }
+        val trip = journey?.takeIf { !closed && it.transport == Transport.MOTORCYCLE &&
+            it.status == JourneyStatus.CONFIRMED && it.endedAt == null && !it.interrupted }
+        val previous = liveOwner
+        if (previous != null && previous.token.journeyId == trip?.id && previous.calibration == reference) return
+        closeLiveOwner()
+        if (trip == null || reference == null) return
+        val owner = try {
+            store.openLiveDecisions(trip.id, reference, UUID.randomUUID().toString(), System.currentTimeMillis(),
+                SystemClock.elapsedRealtimeNanos(), dialOpened = false)
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { reportLiveStorageFailure(); null } ?: return
+        val recorder = LiveDecisionRecorder(owner, reference, io, store)
+        liveOwner = recorder
+        if (closed) closeLiveOwner()
+        else LiveLeanCapture.bindRecorder(recorder.token, reference.epoch, recorder::event)
+    }
+
+    private suspend fun closeLiveOwner() {
+        val recorder = liveOwner ?: return
+        liveOwner = null
+        LiveLeanCapture.unbindRecorder(recorder.token)
+        withContext(NonCancellable) {
+            try { recorder.finish(SystemClock.elapsedRealtimeNanos()) }
+            catch (_: Exception) { reportLiveStorageFailure() }
+        }
+    }
+
+    private fun reportLiveStorageFailure() {
+        TrackerSettings(context).lastError = "Canlı gidon karar özeti kaydedilemedi."
+    }
+
+    suspend fun stop(reason: String? = null) = mutex.withLock {
+        closeLiveOwner()
+        stopLocked(reason)
+    }
     private suspend fun stopLocked(reason: String?) {
         val session = active ?: return
         session.accepting = false
@@ -205,6 +246,7 @@ internal class LeanCaptureController(context: Context, private val onCaptureChan
     /** Android onDestroy cannot suspend. Stop producer now; independent IO owner drains/seals once. */
     fun close() {
         closed = true
+        liveOwner?.let { LiveLeanCapture.unbindRecorder(it.token) }
         synchronized(statusLock) {
             if (statusOwner === owner) {
                 statusOwner = null
@@ -219,7 +261,10 @@ internal class LeanCaptureController(context: Context, private val onCaptureChan
             it.sensor.stop(); it.records.close()
         }
         io.launch {
-            mutex.withLock { stopLocked("capture_interrupted") }
+            mutex.withLock {
+                closeLiveOwner()
+                stopLocked("capture_interrupted")
+            }
             io.cancel()
         }
     }

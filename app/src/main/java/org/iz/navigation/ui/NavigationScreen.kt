@@ -415,6 +415,7 @@ internal fun NavigationScreen(
     }
     val leanSession = nav.liveLeanSessionId()?.takeIf { liveLeanEnabled }
     val leanReference = leanSettings.liveReference()
+    val leanMeasurementAllowed = !nav.paused && nav.plannedBreak == null && nav.approximateOrigin == null
     val routeEdits by vm.navigation.edits.collectAsStateWithLifecycle()
     // Live recording and simulation intentionally publish position only, never a colored trail.
     val points = emptyList<TrackPoint>()
@@ -875,7 +876,10 @@ internal fun NavigationScreen(
         placeInformationIdentity = entryId,
         idleNavigationBar = idleNavigationBar,
         leanInstrument = if (leanSession != null && leanReference != null) {
-            { LiveRideLeanDial(leanSession, leanReference, nav.hasLiveLeanFix()) }
+            {
+                LiveRideLeanDial(leanSession, leanReference, journeyId = leanRecordingJourney?.id,
+                    fixAvailable = nav.hasLiveLeanFix(), measurementAllowed = leanMeasurementAllowed)
+            }
         } else null,
         leanRecordingNotice = leanRecordingJourney?.let { journey ->
             { ActiveLeanRecordingNotice(journey.id, leanSettings, leanRecordingStatus, leanSettingsStore) }

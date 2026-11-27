@@ -70,6 +70,83 @@ class LeanStore internal constructor(
     suspend fun append(token: LeanSessionToken, records: List<LeanRecord>): Boolean =
         appendCaptureBatch(token, records) != null
 
+    /** Dedicated summary ownership, independent of raw preference, raw capacity and sensor startup. */
+    internal suspend fun openLiveDecisions(journeyId: String, calibration: LeanCalibration, ownerId: String,
+        utcMillis: Long, elapsedNanos: Long, dialOpened: Boolean = true): LeanLiveDecisionOwner? = withContext(Dispatchers.IO) {
+        require(!calibration.bodyConfirmed && validHandlebarReference(calibration))
+        require(utcMillis >= 0 && elapsedNanos >= 0 && ownerId.matches(Regex("[A-Za-z0-9_-]{1,128}")))
+        val encodedCalibration = LeanCodec.calibrationJson(calibration)
+        val identity = "live-only:$ownerId"
+        withSnapshotLease {
+            recoverLocked()
+            db.withTransaction {
+                val trip = db.diaryDao().journey(journeyId) ?: return@withTransaction null
+                if (trip.status != JourneyStatus.CONFIRMED || trip.transport != Transport.MOTORCYCLE ||
+                    trip.endedAt != null || trip.interrupted) return@withTransaction null
+                val previous = dao.activeLiveOnlySession(journeyId)
+                if (previous != null && previous.bootId == identity && previous.calibrationJson == encodedCalibration) {
+                    val summary = requireNotNull(previous.liveDecisionsJson).let(LeanCodec::liveDecisions)
+                    val opened = if (dialOpened && !summary.dialOpened) LeanLiveDecisionSummary(true, summary.counts) else summary
+                    if (opened != summary) dao.update(previous.copy(liveDecisionsJson = LeanCodec.liveDecisionsJson(opened)))
+                    return@withTransaction LeanLiveDecisionOwner(previous.token(), opened)
+                }
+                previous?.let { dao.update(it.copy(endedAtElapsedNanos = maxOf(it.startedAtElapsedNanos, elapsedNanos))) }
+                if (dao.sessionCount() >= MAX_CHUNKS) return@withTransaction null
+                val summary = LeanLiveDecisionSummary(dialOpened)
+                val row = LeanSessionEntity(UUID.randomUUID().toString(), journeyId, generations.incrementAndGet(),
+                    encodedCalibration, identity, utcMillis, elapsedNanos, null, "LIVE_ONLY", "[]", 0,
+                    LeanCodec.liveDecisionsJson(summary))
+                dao.insert(row)
+                LeanLiveDecisionOwner(row.token(), summary)
+            }
+        }
+    }
+
+    /** Awaited cumulative checkpoint; only the current open LIVE_ONLY owner can write. */
+    internal suspend fun checkpointLiveDecisions(token: LeanSessionToken, calibrationEpoch: String,
+        summary: LeanLiveDecisionSummary): Boolean = withContext(Dispatchers.IO) {
+        val encoded = LeanCodec.liveDecisionsJson(summary)
+        withSnapshotLease {
+            recoverLocked()
+            db.withTransaction {
+                val row = dao.session(token.id) ?: return@withTransaction false
+                if (!row.matches(token) || row.state != "LIVE_ONLY" || row.endedAtElapsedNanos != null) return@withTransaction false
+                val calibration = LeanCodec.calibration(row.calibrationJson)
+                if (calibration.bodyConfirmed || calibration.epoch != calibrationEpoch) return@withTransaction false
+                val trip = db.diaryDao().journey(row.journeyId) ?: return@withTransaction false
+                if (trip.status != JourneyStatus.CONFIRMED || trip.transport != Transport.MOTORCYCLE ||
+                    trip.endedAt != null || trip.interrupted) return@withTransaction false
+                val previous = row.liveDecisionsJson?.let(LeanCodec::liveDecisions)
+                if (previous != null && !summary.follows(previous)) return@withTransaction false
+                if (previous != summary) dao.update(row.copy(liveDecisionsJson = encoded))
+                true
+            }
+        }
+    }
+
+    internal suspend fun closeLiveDecisions(token: LeanSessionToken, calibrationEpoch: String,
+        endElapsedNanos: Long, finalSummary: LeanLiveDecisionSummary? = null): Boolean = withContext(Dispatchers.IO) {
+        withSnapshotLease {
+            recoverLocked()
+            db.withTransaction {
+                val row = dao.session(token.id) ?: return@withTransaction false
+                if (!row.matches(token) || row.state != "LIVE_ONLY" ||
+                    LeanCodec.calibration(row.calibrationJson).epoch != calibrationEpoch) return@withTransaction false
+                val trip = db.diaryDao().journey(row.journeyId) ?: return@withTransaction false
+                if (trip.status != JourneyStatus.CONFIRMED || trip.transport != Transport.MOTORCYCLE) return@withTransaction false
+                val previous = row.liveDecisionsJson?.let(LeanCodec::liveDecisions)
+                if (row.endedAtElapsedNanos != null) return@withTransaction finalSummary == null || finalSummary == previous
+                if (finalSummary != null && previous != null && !finalSummary.follows(previous)) return@withTransaction false
+                if (row.endedAtElapsedNanos == null) {
+                    require(endElapsedNanos >= row.startedAtElapsedNanos)
+                    dao.update(row.copy(endedAtElapsedNanos = endElapsedNanos,
+                        liveDecisionsJson = finalSummary?.let(LeanCodec::liveDecisionsJson) ?: row.liveDecisionsJson))
+                }
+                true
+            }
+        }
+    }
+
     internal suspend fun appendCaptureBatch(token: LeanSessionToken, records: List<LeanRecord>): LeanPersistedBatch? = withContext(Dispatchers.IO) {
         if (records.isEmpty()) return@withContext LeanPersistedBatch()
         require(records.size <= LeanCodec.MAX_RECORDS)
@@ -148,7 +225,7 @@ class LeanStore internal constructor(
         val results = rows.mapNotNull { row ->
             reasons += runCatching { LeanCodec.reasons(row.reasonsJson) }.getOrDefault(setOf("INVALID_METADATA"))
             val calibration = LeanCodec.calibration(row.calibrationJson)
-            val estimate = dao.result(row.id)?.let { result ->
+            val estimate = if (row.state == "LIVE_ONLY") null else dao.result(row.id)?.let { result ->
                 runCatching {
                     require(result.journeyId == row.journeyId && result.sessionId == row.id &&
                         result.calibrationEpoch == calibration.epoch && calibration.acceptsAlgorithm(result.algorithmVersion))
@@ -159,12 +236,15 @@ class LeanStore internal constructor(
                     }
                 }.getOrElse { reasons += "INVALID_RESULT"; null }
             }
+            val live = row.liveDecisionsJson?.let { payload ->
+                runCatching { LeanCodec.liveDecisions(payload) }.getOrElse { reasons += "INVALID_LIVE_DECISIONS"; null }
+            }
             details += LeanReportSession(row.id, calibration.epoch, row.startedAtUtc,
-                estimate?.sensorTiming, estimate?.gnssDiagnostics)
+                estimate?.sensorTiming, estimate?.gnssDiagnostics, live, row.state == "LIVE_ONLY")
             estimate
         }
         results.forEach { reasons += it.partialReasons }
-        return LeanJourneyReport(rows.any { it.state != "COMPLETE" },
+        return LeanJourneyReport(rows.any { it.state !in setOf("COMPLETE", "LIVE_ONLY") },
             results.mapNotNull { it.leftDegrees }.maxOrNull(), results.mapNotNull { it.rightDegrees }.maxOrNull(),
             results.sumOf { it.validMillis }, results.sumOf { it.observedMillis }, reasons,
             results.flatMap { it.curves }.sortedBy { it.startUtcMillis ?: Long.MAX_VALUE }.take(LeanCodec.MAX_CURVES),
@@ -190,6 +270,9 @@ class LeanStore internal constructor(
                 val end = row.endedAtElapsedNanos ?: dao.chunkInfos(row.id).maxOfOrNull { it.lastElapsedNanos } ?: row.startedAtElapsedNanos
                 dao.update(row.copy(state = "PARTIAL", endedAtElapsedNanos = end,
                     reasonsJson = LeanCodec.reasonsJson(LeanCodec.reasons(row.reasonsJson) + "PROCESS_INTERRUPTED")))
+            }
+            dao.allSessions().filter { it.state == "LIVE_ONLY" && it.endedAtElapsedNanos == null }.forEach { row ->
+                dao.update(row.copy(endedAtElapsedNanos = row.startedAtElapsedNanos))
             }
         }
         cleanupCommittedRawLocked()
@@ -274,16 +357,20 @@ class LeanStore internal constructor(
     internal suspend fun snapshot(): List<LeanBackupSession> = dao.allSessions().map { row ->
         val parts = dao.chunkInfos(row.id)
         val result = dao.result(row.id)
-        val source = input(row, parts).let { if (result == null) it else it.copy(inputHash = result.inputHash) }
-        LeanBackupSession(source, row.state, parts.map { it.manifest() }, result?.let { LeanCodec.estimate(it.payload) })
+        val backupRow = if (row.state == "LIVE_ONLY" && row.endedAtElapsedNanos == null) row.copy(endedAtElapsedNanos = row.startedAtElapsedNanos) else row
+        val source = input(backupRow, parts).let { if (result == null) it else it.copy(inputHash = result.inputHash) }
+        LeanBackupSession(source, row.state, parts.map { it.manifest() }, result?.let { LeanCodec.estimate(it.payload) },
+            row.liveDecisionsJson?.let(LeanCodec::liveDecisions))
     }
 
     /** Export supplies bounded metadata from the same Room transaction. No raw BLOB list. */
     internal suspend fun backupSession(row: LeanSessionEntity, parts: List<LeanChunkInfo>): LeanBackupSession {
         require(parts.size <= MAX_CHUNKS)
         val result = dao.result(row.id)
-        val source = input(row, parts).let { if (result == null) it else it.copy(inputHash = result.inputHash) }
-        return LeanBackupSession(source, row.state, parts.map { it.manifest() }, result?.let { LeanCodec.estimate(it.payload) })
+        val backupRow = if (row.state == "LIVE_ONLY" && row.endedAtElapsedNanos == null) row.copy(endedAtElapsedNanos = row.startedAtElapsedNanos) else row
+        val source = input(backupRow, parts).let { if (result == null) it else it.copy(inputHash = result.inputHash) }
+        return LeanBackupSession(source, row.state, parts.map { it.manifest() }, result?.let { LeanCodec.estimate(it.payload) },
+            row.liveDecisionsJson?.let(LeanCodec::liveDecisions))
     }
 
     /** Caller holds the snapshot lease; no cache or external filename is trusted as input. */
@@ -314,12 +401,13 @@ class LeanStore internal constructor(
         val cacheRoot = appContext.cacheDir.canonicalFile.path + File.separator
         for (session in sessions) {
             val source = session.input
-            require(session.state in setOf("SEALED", "PARTIAL", "COMPLETE")) { "Açık sensör kaydı geri yüklenemez." }
+            require(session.state in setOf("SEALED", "PARTIAL", "COMPLETE", "LIVE_ONLY")) { "Açık sensör kaydı geri yüklenemez." }
             require(db.diaryDao().journey(source.token.journeyId) != null)
             val row = LeanSessionEntity(source.token.id, source.token.journeyId, source.token.generation,
                 LeanCodec.calibrationJson(source.calibration), source.bootId, source.startedAtUtc,
                 source.startedAtElapsedNanos, source.endedAtElapsedNanos, session.state,
-                LeanCodec.reasonsJson(source.partialReasons), source.droppedSamples)
+                LeanCodec.reasonsJson(source.partialReasons), source.droppedSamples,
+                session.liveDecisions?.let(LeanCodec::liveDecisionsJson))
             dao.insert(row)
             val paths = rawSources["lean/" + source.token.id + ".raw"].orEmpty()
             require(paths.size == session.chunks.size)

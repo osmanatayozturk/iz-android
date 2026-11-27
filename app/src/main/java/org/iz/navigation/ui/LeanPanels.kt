@@ -223,33 +223,39 @@ private fun LeanReportSection(journey: Journey, report: LeanJourneyReport, title
     var coverage by remember { mutableStateOf(false) }
     val handlebar = mount == LeanMount.HANDLEBAR
     val mountLabel = if (handlebar) "Gidon" else "Gövde"
-    if (title != null) Text(title, style = MaterialTheme.typography.titleMedium)
-    Text(description, Modifier.testTag(reportTag), style = MaterialTheme.typography.bodySmall)
-    if (journey.endedAt == null) Text("Rapor yolculuk bittikten sonra hazırlanır.")
-    else if (report.pending) Text("Hazırlanacak · Kayıt ve navigasyon bitmeli, pil en az %20 olmalı.")
-    else if (report.leftDegrees == null && report.rightDegrees == null) Text("Kullanılabilir yatış tahmini yok. Önceki yolculuklara sonradan değer eklenmez.")
-    else {
-        fun angle(value: Double?) = value?.takeIf { it.isFinite() }?.let { "${it.roundToInt()}°" } ?: "Kullanılamıyor"
-        if (handlebar && "HANDLEBAR_TIMING_ESTIMATED" in report.partialReasons) {
-            Text("Düşük güven · GPS zaman belirsizliği bildirilmedi. İşaretli virajlarda yatış, GPS hareketi ve telefon sensörlerinin uyumundan tahmin edildi.",
-                style = MaterialTheme.typography.labelLarge)
-        }
-        Text("En büyük geçerli sol tahmin: ${angle(report.leftDegrees)}")
-        Text("En büyük geçerli sağ tahmin: ${angle(report.rightDegrees)}")
-        if (report.curves.isNotEmpty()) {
-            TextButton(onClick = { curves = !curves }, modifier = Modifier.testTag("$reportTag-curves")) {
-                Text(if (curves) "$mountLabel virajlarını gizle" else "$mountLabel virajlarını göster (${report.curves.size})")
+    val liveOnly = handlebar && report.sessionDetails.isNotEmpty() && report.sessionDetails.all { it.liveOnly }
+    if (liveOnly) {
+        Text("Gidonda canlı yatış", Modifier.testTag(reportTag).semantics { heading() },
+            style = MaterialTheme.typography.titleMedium)
+    } else {
+        if (title != null) Text(title, style = MaterialTheme.typography.titleMedium)
+        Text(description, Modifier.testTag(reportTag), style = MaterialTheme.typography.bodySmall)
+        if (journey.endedAt == null) Text("Rapor yolculuk bittikten sonra hazırlanır.")
+        else if (report.pending) Text("Hazırlanacak · Kayıt ve navigasyon bitmeli, pil en az %20 olmalı.")
+        else if (report.leftDegrees == null && report.rightDegrees == null) Text("Kullanılabilir yatış tahmini yok. Önceki yolculuklara sonradan değer eklenmez.")
+        else {
+            fun angle(value: Double?) = value?.takeIf { it.isFinite() }?.let { "${it.roundToInt()}°" } ?: "Kullanılamıyor"
+            if (handlebar && "HANDLEBAR_TIMING_ESTIMATED" in report.partialReasons) {
+                Text("Düşük güven · GPS zaman belirsizliği bildirilmedi. İşaretli virajlarda yatış, GPS hareketi ve telefon sensörlerinin uyumundan tahmin edildi.",
+                    style = MaterialTheme.typography.labelLarge)
             }
-            if (curves) LazyColumn(Modifier.fillMaxWidth().heightIn(max = 260.dp)) {
-                items(report.curves) { curve ->
-                    val time = curve.startUtcMillis?.let { SimpleDateFormat("HH:mm:ss", Locale.forLanguageTag("tr-TR")).format(Date(it)) } ?: "Saat eşlenemedi"
-                    Text("$time · Sol ${angle(curve.leftDegrees)} · Sağ ${angle(curve.rightDegrees)}", style = MaterialTheme.typography.bodyMedium)
-                    if (handlebar && curve.timingEstimated) {
-                        Text("Düşük güven · GPS zaman belirsizliği bildirilmedi. Yatış, hareket ve sensör uyumundan tahmin edildi.",
-                            style = MaterialTheme.typography.bodySmall)
+            Text("En büyük geçerli sol tahmin: ${angle(report.leftDegrees)}")
+            Text("En büyük geçerli sağ tahmin: ${angle(report.rightDegrees)}")
+            if (report.curves.isNotEmpty()) {
+                TextButton(onClick = { curves = !curves }, modifier = Modifier.testTag("$reportTag-curves")) {
+                    Text(if (curves) "$mountLabel virajlarını gizle" else "$mountLabel virajlarını göster (${report.curves.size})")
+                }
+                if (curves) LazyColumn(Modifier.fillMaxWidth().heightIn(max = 260.dp)) {
+                    items(report.curves) { curve ->
+                        val time = curve.startUtcMillis?.let { SimpleDateFormat("HH:mm:ss", Locale.forLanguageTag("tr-TR")).format(Date(it)) } ?: "Saat eşlenemedi"
+                        Text("$time · Sol ${angle(curve.leftDegrees)} · Sağ ${angle(curve.rightDegrees)}", style = MaterialTheme.typography.bodyMedium)
+                        if (handlebar && curve.timingEstimated) {
+                            Text("Düşük güven · GPS zaman belirsizliği bildirilmedi. Yatış, hareket ve sensör uyumundan tahmin edildi.",
+                                style = MaterialTheme.typography.bodySmall)
+                        }
+                        if (curve.latitude != null && curve.longitude != null) Text(String.format(Locale.ROOT, "Rota noktası %.5f, %.5f", curve.latitude, curve.longitude), style = MaterialTheme.typography.bodySmall)
+                        HorizontalDivider()
                     }
-                    if (curve.latitude != null && curve.longitude != null) Text(String.format(Locale.ROOT, "Rota noktası %.5f, %.5f", curve.latitude, curve.longitude), style = MaterialTheme.typography.bodySmall)
-                    HorizontalDivider()
                 }
             }
         }
@@ -257,13 +263,21 @@ private fun LeanReportSection(journey: Journey, report: LeanJourneyReport, title
     val completed = journey.endedAt != null && !report.pending
     if (completed || report.partialReasons.isNotEmpty() || report.sessionDetails.isNotEmpty()) {
         TextButton(onClick = { coverage = !coverage }, modifier = Modifier.testTag("$reportTag-coverage")) {
-            Text(if (coverage) "Ölçüm kapsamını gizle" else "Ölçüm kapsamı ve sınırlamalar")
+            Text(if (liveOnly) {
+                if (coverage) "Canlı kadran özetini gizle" else "Canlı kadran özetini göster"
+            } else {
+                if (coverage) "Ölçüm kapsamını gizle" else "Ölçüm kapsamı ve sınırlamalar"
+            })
         }
         if (coverage) {
-            if (completed) Text("Geçerli kapsam ${report.validMillis / 1000} sn / gözlenen ${report.observedMillis / 1000} sn",
-                style = MaterialTheme.typography.bodySmall)
-            report.partialReasons.map(::leanPartialLabel).distinct().forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
-            if (report.sessionDetails.isNotEmpty() || completed) LeanReportDiagnostics(report.sessionDetails, mountLabel)
+            if (!liveOnly) {
+                if (completed) Text("Geçerli kapsam ${report.validMillis / 1000} sn / gözlenen ${report.observedMillis / 1000} sn",
+                    style = MaterialTheme.typography.bodySmall)
+                report.partialReasons.map(::leanPartialLabel).distinct().forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+            }
+            if (report.sessionDetails.isNotEmpty() || completed) {
+                LeanReportDiagnostics(report.sessionDetails, mountLabel, showLiveDecisions = handlebar)
+            }
         }
     }
 }
@@ -275,6 +289,7 @@ private fun leanPartialLabel(reason: String): String {
         value == "gnss_motion_disagreement" -> "GPS konum değişimi, hız veya yön bilgisiyle uyuşmadı."
         value == "gnss_quality" -> "GPS konum veya hız kalitesi yetersizdi."
         value == "handlebar_timing_estimated" -> "GPS zaman belirsizliği bildirilmediğinde yatış, GPS hareketi ve telefon sensörlerinin uyumundan tahmin edildi."
+        value == "invalid_live_decisions" -> "Canlı kadran özeti okunamadı."
         value == "parked_steering_or_stationary" -> "Motosiklet hareketsizdi. Parkta gidon çevirmek viraj olarak sayılmaz."
         value == "low_speed_unsupported" -> "Düşük hızdaki bölümler yatış tahminine katılmadı."
         value == "steering_or_motion_veto" -> "Gidon hareketi, titreşim veya ani hareket nedeniyle bazı bölümler tahmine katılmadı."

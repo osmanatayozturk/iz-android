@@ -109,7 +109,7 @@ internal interface DiaryDao {
     JourneyHealthSample::class, JourneyHealthSync::class, MapEditDraft::class, OsmPresetFavorite::class,
     WatchHealthSession::class, WatchHealthSample::class, SavedRoutePlanEntity::class, ImportedTrackEntity::class,
     ImportedSegmentEntity::class, ImportedCoordinateEntity::class, JourneyCollectionEntity::class, CollectionMembershipEntity::class, DestinationShortcutEntity::class, LeanSessionEntity::class, LeanChunkEntity::class, LeanResultEntity::class,
-    GarageVehicle::class, FuelFill::class, JourneyVehicle::class, JourneyStartVehicle::class], version = 13, exportSchema = true)
+    GarageVehicle::class, FuelFill::class, JourneyVehicle::class, JourneyStartVehicle::class], version = 14, exportSchema = true)
 @TypeConverters(DiaryConverters::class)
 internal abstract class DiaryDatabase : RoomDatabase() {
     abstract fun diaryDao(): DiaryDao
@@ -122,6 +122,11 @@ internal abstract class DiaryDatabase : RoomDatabase() {
     abstract fun leanDao(): LeanDao
 
     companion object {
+        val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE lean_sessions ADD COLUMN liveDecisionsJson TEXT DEFAULT NULL")
+            }
+        }
         // https://developer.android.com/training/data-storage/room/migrating-db-versions
         val MIGRATION_12_13 = object : Migration(12, 13) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -261,7 +266,7 @@ internal abstract class DiaryDatabase : RoomDatabase() {
         @Volatile private var instance: DiaryDatabase? = null
         fun get(context: Context): DiaryDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, DiaryDatabase::class.java, "iz-diary.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
                 .build().also { instance = it }
         }
     }

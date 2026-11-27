@@ -64,7 +64,7 @@ class GarageRideMigrationAcceptanceTest {
                         assertEquals(0, cursor.getInt(0))
                     }
                 }
-                val db: DiaryDatabase = Room.databaseBuilder(context, DiaryDatabase::class.java, name).build()
+                val db: DiaryDatabase = Room.databaseBuilder(context, DiaryDatabase::class.java, name).addMigrations(DiaryDatabase.MIGRATION_13_14).build()
                 try {
                     val diary = DiaryRepository(context, db)
                     val garage = db.garageDao()

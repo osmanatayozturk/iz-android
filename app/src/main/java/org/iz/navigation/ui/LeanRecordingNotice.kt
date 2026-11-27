@@ -18,6 +18,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -27,6 +28,7 @@ import org.iz.navigation.lean.LeanMount
 import org.iz.navigation.lean.LeanRecordingPhase
 import org.iz.navigation.lean.LeanRecordingStatus
 import org.iz.navigation.lean.LeanSettingsStore
+import org.iz.navigation.lean.LiveLeanCapture
 import org.iz.navigation.lean.liveReference
 
 @Composable
@@ -50,7 +52,11 @@ internal fun ActiveLeanRecordingNotice(journeyId: String, settings: LeanCaptureS
         settings.mount == LeanMount.HANDLEBAR -> "Gidon kalibrasyonu hazır · Sensör verisi bekleniyor"
         else -> "Gövde kalibrasyonu hazır · Sensör verisi bekleniyor"
     }
-    val gnssHint = current?.gnssHint?.takeIf { settings.enabled && it.isNotBlank() }
+    val liveTarget by LiveLeanCapture.recordingTarget.collectAsStateWithLifecycle()
+    val hideGnssHint = liveTarget?.let { (targetJourneyId, calibrationEpoch) ->
+        targetJourneyId == journeyId && calibrationEpoch == reference?.epoch
+    } == true
+    val gnssHint = current?.gnssHint?.takeIf { settings.enabled && !hideGnssHint && it.isNotBlank() }
     LeanRecordingNotice(label, gnssHint, saving, saveFailed, onEnable = if (settings.enabled) null else {
         {
             if (!saving) {

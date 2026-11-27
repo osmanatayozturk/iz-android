@@ -29,7 +29,8 @@ import org.iz.navigation.power.PostJourneyAnalysis
 import org.iz.navigation.power.PowerDiagnostics
 import org.iz.navigation.lean.LiveLeanCapture
 import org.iz.navigation.lean.singleFixReceipt
-import org.iz.navigation.lean.liveLeanLocationSession
+import org.iz.navigation.lean.hasLiveLeanFix
+import org.iz.navigation.lean.liveLeanCallbackSession
 import org.iz.navigation.lean.LeanCaptureController
 import org.iz.navigation.lean.LeanSettingsStore
 import kotlinx.coroutines.flow.combine
@@ -76,7 +77,8 @@ class TrackingService : Service() {
                         for (location in result.locations.sortedBy { it.time }) {
                             if (location.time < session.startedAt) continue
                             val nav = (applicationContext as org.iz.navigation.IzApplication).navigation.state.value
-                            LiveLeanCapture.accept(nav.liveLeanLocationSession(session.id, fromRecording = false), location)
+                            LiveLeanCapture.accept(nav.liveLeanCallbackSession(session.id, fromRecording = false), null,
+                                location, singleFixReceived, batched = result.locations.size > 1, navigationFixAvailable = nav.hasLiveLeanFix())
                             val accepted = sessionFilter.accept(PositionSample(location.latitude, location.longitude, location.time,
                                 if (location.hasAccuracy()) location.accuracy else Float.POSITIVE_INFINITY,
                                 if (location.hasSpeed()) location.speed else null), now) ?: continue
@@ -101,7 +103,8 @@ class TrackingService : Service() {
                         leanCapture.onLocation(journey.id, location, singleFixReceived)
                         if (location.time < journey.startedAt) continue
                         val nav = (applicationContext as org.iz.navigation.IzApplication).navigation.state.value
-                        LiveLeanCapture.accept(nav.liveLeanLocationSession(journey.id, fromRecording = true), location)
+                        LiveLeanCapture.accept(nav.liveLeanCallbackSession(journey.id, fromRecording = true), journey.id,
+                            location, singleFixReceived, batched = result.locations.size > 1, navigationFixAvailable = nav.hasLiveLeanFix())
                         if (TrackingPolicy.automaticCandidateDeadline(journey)?.let { location.time >= it } == true) continue
                         val sample = PositionSample(
                             location.latitude, location.longitude, location.time,

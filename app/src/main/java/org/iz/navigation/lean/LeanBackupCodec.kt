@@ -35,7 +35,9 @@ internal object LeanBackupCodec {
                     "partIndex" to part.partIndex, "byteCount" to part.byteCount, "sha256" to part.sha256,
                     "recordCount" to part.recordCount, "firstElapsedNanos" to part.firstElapsedNanos,
                     "lastElapsedNanos" to part.lastElapsedNanos)) } },
-                "result" to session.result?.let { JSONObject(LeanCodec.estimateJson(it)) }))
+                "result" to session.result?.let { JSONObject(LeanCodec.estimateJson(it)) }).apply {
+                    session.liveDecisions?.let { put("liveDecisions", JSONObject(LeanCodec.liveDecisionsJson(it))) }
+                })
         } }
     }
 
@@ -59,7 +61,8 @@ internal object LeanBackupCodec {
                     LeanChunkManifest(it.int("partIndex"), it.int("byteCount"), it.text("sha256"),
                         it.int("recordCount"), it.long("firstElapsedNanos"), it.long("lastElapsedNanos"))
                 } },
-                if (json.isNull("result")) null else LeanCodec.estimate(json.getJSONObject("result").toString()))
+                if (json.isNull("result")) null else LeanCodec.estimate(json.getJSONObject("result").toString()),
+                if (!json.has("liveDecisions") || json.isNull("liveDecisions")) null else LeanCodec.liveDecisions(json.getJSONObject("liveDecisions").toString()))
         }.also(::validate)
     }
 
@@ -79,7 +82,11 @@ internal object LeanBackupCodec {
                 input.droppedSamples >= 0 && digest.matches(input.inputHash))
             LeanCodec.calibration(LeanCodec.calibrationJson(input.calibration))
             LeanCodec.reasonsJson(input.partialReasons)
-            require(session.state in setOf("SEALED", "PARTIAL", "COMPLETE")) { "Active lean capture cannot be backed up" }
+            require(session.state in setOf("SEALED", "PARTIAL", "COMPLETE", "LIVE_ONLY")) { "Active lean capture cannot be backed up" }
+            if (session.state == "LIVE_ONLY") {
+                require(session.chunks.isEmpty() && session.result == null && session.liveDecisions != null && !input.calibration.bodyConfirmed)
+            } else require(session.liveDecisions == null) { "Live decisions require their independent summary owner" }
+            session.liveDecisions?.let(LeanCodec::liveDecisionsJson)
             require((session.state == "COMPLETE") == (session.result != null))
             session.result?.let { result ->
                 LeanCodec.estimateJson(result)

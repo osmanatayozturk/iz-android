@@ -82,6 +82,21 @@ internal object LeanCodec {
         return (0 until a.length()).map { a.get(it).also { v -> require(v is String) } as String }.toSet()
             .also { reasonsJson(it) }
     }
+    fun liveDecisionsJson(value: LeanLiveDecisionSummary): String = obj("version" to 1,
+        "dialOpened" to value.dialOpened, "counts" to JSONObject().apply {
+            value.counts.forEach { (code, count) -> put(code.name, count) }
+        }).toString()
+
+    fun liveDecisions(raw: String): LeanLiveDecisionSummary {
+        require(raw.length <= 16_384)
+        val json = JSONObject(org.iz.navigation.offline.OfflineJsonDepth.requireSafe(raw))
+        require(json.keys().asSequence().toSet() == setOf("version", "dialOpened", "counts"))
+        require(json.long("version") == 1L)
+        val counts = json.getJSONObject("counts")
+        require(counts.length() <= LeanLiveDecisionSummary.allowedCodes.size)
+        return LeanLiveDecisionSummary(json.get("dialOpened") as Boolean,
+            counts.keys().asSequence().associate { code -> LeanLiveDecisionCode.valueOf(code) to counts.long(code) })
+    }
     fun encodeRecords(records: List<LeanRecord>): ByteArray {
         require(records.size in 1..MAX_RECORDS)
         val rows = JSONArray()

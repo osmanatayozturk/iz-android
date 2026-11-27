@@ -25,6 +25,8 @@ data class LeanReportSession(
     val startedAtUtc: Long,
     val sensorTiming: LeanSensorTiming?,
     val gnssDiagnostics: LeanGnssDiagnostics?,
+    val liveDecisions: LeanLiveDecisionSummary? = null,
+    val liveOnly: Boolean = false,
 )
 
 /** Only compact measurement times are retained, never vectors or locations. Raw input is size-bounded by LeanStore. */

@@ -19,6 +19,11 @@ internal fun NavigationState.hasLiveLeanFix() =
 
 /** A recorder may attach to an existing navigation session with a different ID. */
 internal fun NavigationState.liveLeanLocationSession(sourceId: String, fromRecording: Boolean): String? =
+    liveLeanCallbackSession(sourceId, fromRecording)?.takeIf { hasLiveLeanFix() }
+
+/** A new callback precedes the navigation filter. The handlebar decision validates that actual fix. */
+internal fun NavigationState.liveLeanCallbackSession(sourceId: String, fromRecording: Boolean): String? =
     liveLeanSessionId()?.takeIf { session ->
-        hasLiveLeanFix() && if (fromRecording) recording && journey?.id == sourceId else !recording && session == sourceId
+        !paused && plannedBreak == null && approximateOrigin == null &&
+            if (fromRecording) recording && journey?.id == sourceId else !recording && session == sourceId
     }

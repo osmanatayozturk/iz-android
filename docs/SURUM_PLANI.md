@@ -1,5 +1,11 @@
 # İz sürüm değişikliği planı
 
+## Geliştirme sürümü — Canlı gidon tahmini
+
+Gidona sabitlenmiş ve kalibre edilmiş telefonda Android GPS ölçümünün zaman belirsizliğini bildirmediğinde, kadran dört ardışık aynı yönlü dönüş aralığını değerlendirir. Konum ve hızın yanı sıra tek tek gelen GPS ölçümlerinin geliş zamanı, yön değişimi, ivmeölçer ve jiroskop birlikte uyuştuğunda son aralığın açısı **Tahmin** etiketiyle görünür. Ölçüm kesilirse veya yeni veri koşulları karşılamazsa açı temizlenir. Bu deneysel model için fiziksel şasi doğruluğu ölçülmemiştir.
+
+Kayıtlı motosiklet yolculuğunun raporu canlı kadranın kaç ölçüm gösterdiğini ve hangi gerekçelerle gösteremediğini saklar. Canlı özet, ham sensör kaydı tercihi kapalıyken de çalışır ve yalnızca karar türlerinin sayılarını içerir. Yolculuk kaydı olmadan kullanıldığında kadran geçicidir. Önceki yolculuklara sonradan canlı sonuç eklenmez. Canlı özeti içeren ZIP dosyasını aktarmak için hedefte bu özelliği destekleyen bir sürüm kullanılır.
+
 ## Geliştirme sürümü — Büyük günlük yedeği
 
 Yolculuk, yer, ziyaret, sağlık, yatış özeti ve rota kütüphanesi verileri eski 32 MiB günlük sınırını aştığında İz, aynı yedekleme ekranından sayfalı bir ZIP (v14) hazırlar. Küçük yedekler v13 olarak yazılır. Eski yedekler okunabilir. V14’ü geri yüklemek için hedef uygulamanın bu biçimi destekleyen sürümü gerekir.

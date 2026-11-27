@@ -195,19 +195,9 @@ class HandlebarLeanEstimator : LeanEstimator {
             }
             val from = a.elapsedNanos
             val until = b.elapsedNanos
-            val forceRows = acceleration.filter { it.elapsedNanos in from..<until }
-            val gyroRows = rotation.filter { it.elapsedNanos in from..<until }
-            val reason = imuProblem(forceRows, acceleration.lastOrNull { it.elapsedNanos < from },
-                from, until, 100.0, motion.timingEstimated) ?:
-                imuProblem(gyroRows, rotation.lastOrNull { it.elapsedNanos < from }, from, until, 30.0, motion.timingEstimated)
+            val reason = imuIntervalProblem(acceleration, rotation, from, until, motion, reference)
             if (reason != null) return cut(reason)
-            val veto = sensorVeto(forceRows, gyroRows, motion.bank, motion.yaw, motion.speed, reference)
-            if (veto != null) return cut(veto)
-
-            if (motion.timingEstimated) {
-                if (!signedImuTurnAgrees(forceRows, gyroRows, motion, reference)) return cut("SENSOR_DISAGREEMENT")
-                movementEvidence = true
-            }
+            if (motion.timingEstimated) movementEvidence = true
             onValid(a, b, motion)
         }
     }
@@ -322,6 +312,56 @@ class HandlebarLeanEstimator : LeanEstimator {
             return result
         }
 
+        internal fun validLiveHandlebarCalibration(calibration: LeanCalibration): Boolean =
+            Reference.from(calibration) != null
+
+        internal fun liveHandlebarPair(
+            calibration: LeanCalibration,
+            first: LeanGnssRecord,
+            last: LeanGnssRecord,
+            imu: List<LeanImuRecord>,
+            estimated: Boolean,
+        ): LiveHandlebarDecision {
+            fun reject(reason: LiveHandlebarReason, issue: LeanGnssIssueCode? = null) =
+                LiveHandlebarDecision.Rejected(reason, issue)
+            val reference = Reference.from(calibration) ?: return reject(LiveHandlebarReason.INVALID_CALIBRATION)
+            val span = last.elapsedNanos - first.elapsedNanos
+            if (span !in MIN_GNSS_STEP..MAX_GNSS_STEP) return reject(LiveHandlebarReason.GNSS_FIX_CONTINUITY,
+                if (span > MAX_GNSS_STEP) GNSS_DATA_GAP else GNSS_RATE_UNSUITABLE)
+            val expectedUtc: (Long) -> Long? = { time ->
+                val delta = (time - first.elapsedNanos) / NANOS_PER_MILLI
+                first.utcMillis.takeIf { it > 0 && it <= Long.MAX_VALUE - delta }?.plus(delta)
+            }
+            if (estimated) singleFixTimingIssue(first, last, span, expectedUtc)?.let { return reject(it) }
+            val motion = when (val pair = gnssInterval(first, last, expectedUtc, allowEstimatedTiming = estimated)) {
+                is GnssInterval.Moving -> pair
+                is GnssInterval.Parked -> return reject(LiveHandlebarReason.GNSS_MOTION,
+                    if (pair.disagreement) GNSS_MOTION_DISAGREEMENT else LOW_SPEED_UNSUPPORTED)
+                is GnssInterval.Rejected -> return reject(when (pair.reason) {
+                    "CLOCK_DISCONTINUITY" -> LiveHandlebarReason.GNSS_CLOCK
+                    "GNSS_QUALITY" -> LiveHandlebarReason.GNSS_QUALITY
+                    else -> LiveHandlebarReason.GNSS_MOTION
+                }, pair.issues.firstOrNull())
+            }
+            val acceleration = mutableListOf<LeanImuRecord>()
+            val rotation = mutableListOf<LeanImuRecord>()
+            for (row in imu) {
+                // Even a sample already delivered cannot support an earlier fix.
+                if (row.elapsedNanos !in first.elapsedNanos - 80_000_000L..<last.elapsedNanos) continue
+                if (acceleration.size + rotation.size >= LiveLeanSampleWindow.MAX_RECORDS)
+                    return reject(LiveHandlebarReason.SENSOR_QUALITY)
+                if (row.kind == LeanSensorKind.ACCELEROMETER) acceleration.add(row) else rotation.add(row)
+            }
+            val problem = imuIntervalProblem(acceleration, rotation, first.elapsedNanos, last.elapsedNanos, motion, reference)
+            if (problem != null) return reject(when (problem) {
+                "IMU_UNAVAILABLE", "IMU_ALIGNMENT", "IMU_SEQUENCE_GAP", "DATA_GAP" -> LiveHandlebarReason.SENSOR_STREAM_GAP
+                "IMU_QUALITY", "IMU_RATE_UNSUITABLE" -> LiveHandlebarReason.SENSOR_QUALITY
+                else -> LiveHandlebarReason.SENSOR_DISAGREEMENT
+            })
+            return LiveHandlebarDecision.Accepted(motion.degrees,
+                if (estimated) LiveHandlebarSource.ESTIMATED else LiveHandlebarSource.MEASURED, last.elapsedNanos)
+        }
+
         const val LEGACY_VERSION = "handlebar-gnss-imu-v1"
         const val VERSION = "handlebar-gnss-imu-v2"
         private const val TIMING_ESTIMATED_REASON = "HANDLEBAR_TIMING_ESTIMATED"
@@ -419,23 +459,40 @@ class HandlebarLeanEstimator : LeanEstimator {
 
         /** Callback times are a bounded corroborating witness. GNSS and IMU stay in measurement time. */
         private fun singleFixTimingAgrees(a: LeanGnssRecord, b: LeanGnssRecord, span: Long,
-            expectedUtc: (Long) -> Long?): Boolean {
-            if (span !in ESTIMATED_MIN_STEP..ESTIMATED_MAX_STEP || a.elapsedNanos <= 0L ||
-                a.elapsedUncertaintyNanos != null || b.elapsedUncertaintyNanos != null ||
-                a.invalidElapsedUncertainty || b.invalidElapsedUncertainty ||
-                a.provider != b.provider || (a.provider != "gps" && a.provider != "fused")) return false
-            val firstReceived = a.singleFixReceivedElapsedNanos ?: return false
-            val lastReceived = b.singleFixReceivedElapsedNanos ?: return false
-            if (firstReceived < a.elapsedNanos || lastReceived < b.elapsedNanos || firstReceived >= lastReceived) return false
+            expectedUtc: (Long) -> Long?): Boolean = singleFixTimingIssue(a, b, span, expectedUtc) == null
+
+        private fun singleFixTimingIssue(a: LeanGnssRecord, b: LeanGnssRecord, span: Long,
+            expectedUtc: (Long) -> Long?): LiveHandlebarReason? {
+            if (span !in ESTIMATED_MIN_STEP..ESTIMATED_MAX_STEP || a.elapsedNanos <= 0L)
+                return LiveHandlebarReason.GNSS_FIX_CONTINUITY
+            if (a.elapsedUncertaintyNanos != null || b.elapsedUncertaintyNanos != null ||
+                a.invalidElapsedUncertainty || b.invalidElapsedUncertainty) return LiveHandlebarReason.GNSS_TIME_UNCERTAIN
+            if (a.provider != b.provider) return LiveHandlebarReason.GNSS_SOURCE_CHANGED
+            if (!validSingleFixProvider(a.provider)) return LiveHandlebarReason.GNSS_SOURCE_UNSUPPORTED
+            val firstReceived = a.singleFixReceivedElapsedNanos ?: return LiveHandlebarReason.GNSS_NO_SINGLE_FIX_RECEIPT
+            val lastReceived = b.singleFixReceivedElapsedNanos ?: return LiveHandlebarReason.GNSS_NO_SINGLE_FIX_RECEIPT
+            if (firstReceived < a.elapsedNanos || lastReceived < b.elapsedNanos || firstReceived >= lastReceived)
+                return LiveHandlebarReason.GNSS_RECEIPT_CLOCK
             val firstAge = firstReceived - a.elapsedNanos
             val lastAge = lastReceived - b.elapsedNanos
-            if (firstAge > MAX_SINGLE_FIX_AGE || lastAge > MAX_SINGLE_FIX_AGE ||
-                abs(lastAge - firstAge) > MAX_SINGLE_FIX_JITTER) return false
-            val firstUtc = expectedUtc(a.elapsedNanos) ?: return false
-            val lastUtc = expectedUtc(b.elapsedNanos) ?: return false
-            return abs(a.utcMillis - firstUtc) <= 150L && abs(b.utcMillis - lastUtc) <= 150L &&
-                abs((b.utcMillis - a.utcMillis) - span / NANOS_PER_MILLI) <= 80L
+            if (firstAge > MAX_SINGLE_FIX_AGE || lastAge > MAX_SINGLE_FIX_AGE) return LiveHandlebarReason.GNSS_RECEIPT_STALE
+            if (abs(lastAge - firstAge) > MAX_SINGLE_FIX_JITTER) return LiveHandlebarReason.GNSS_RECEIPT_JITTER
+            val firstUtc = expectedUtc(a.elapsedNanos) ?: return LiveHandlebarReason.GNSS_CLOCK
+            val lastUtc = expectedUtc(b.elapsedNanos) ?: return LiveHandlebarReason.GNSS_CLOCK
+            if (abs(a.utcMillis - firstUtc) > 150L || abs(b.utcMillis - lastUtc) > 150L ||
+                abs((b.utcMillis - a.utcMillis) - span / NANOS_PER_MILLI) > 80L) return LiveHandlebarReason.GNSS_CLOCK
+            return null
         }
+
+        internal fun liveSingleFixIssue(fix: LeanGnssRecord, nowElapsedNanos: Long): LiveHandlebarReason? {
+            if (!validSingleFixProvider(fix.provider)) return LiveHandlebarReason.GNSS_SOURCE_UNSUPPORTED
+            val received = fix.singleFixReceivedElapsedNanos ?: return LiveHandlebarReason.GNSS_NO_SINGLE_FIX_RECEIPT
+            if (received !in fix.elapsedNanos..nowElapsedNanos) return LiveHandlebarReason.GNSS_RECEIPT_CLOCK
+            if (received - fix.elapsedNanos > MAX_SINGLE_FIX_AGE) return LiveHandlebarReason.GNSS_RECEIPT_STALE
+            return null
+        }
+
+        private fun validSingleFixProvider(provider: String?): Boolean = provider == "gps" || provider == "fused"
 
         private fun angleDifference(next: Double, previous: Double) = (next - previous + 540.0) % 360.0 - 180.0
 
@@ -495,6 +552,27 @@ class HandlebarLeanEstimator : LeanEstimator {
             }
             if (rows.size < (until - from) / 40_000_000L) return "IMU_RATE_UNSUITABLE"
             return null
+        }
+
+        private fun imuIntervalProblem(
+            acceleration: List<LeanImuRecord>,
+            rotation: List<LeanImuRecord>,
+            from: Long,
+            until: Long,
+            motion: GnssInterval.Moving,
+            reference: Reference,
+        ): String? {
+            val forceRows = acceleration.filter { it.elapsedNanos in from..<until }
+            val gyroRows = rotation.filter { it.elapsedNanos in from..<until }
+            val reason = imuProblem(forceRows, acceleration.lastOrNull { it.elapsedNanos < from },
+                from, until, 100.0, motion.timingEstimated) ?:
+                imuProblem(gyroRows, rotation.lastOrNull { it.elapsedNanos < from }, from, until, 30.0, motion.timingEstimated)
+            if (reason != null) return reason
+            val veto = sensorVeto(forceRows, gyroRows, motion.bank, motion.yaw, motion.speed, reference)
+            if (veto != null) return veto
+            return "SENSOR_DISAGREEMENT".takeIf {
+                motion.timingEstimated && !signedImuTurnAgrees(forceRows, gyroRows, motion, reference)
+            }
         }
 
         private fun average(rows: List<LeanVector>) =

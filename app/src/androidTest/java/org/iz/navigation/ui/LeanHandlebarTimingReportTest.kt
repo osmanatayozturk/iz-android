@@ -19,6 +19,9 @@ import org.iz.navigation.data.Journey
 import org.iz.navigation.data.Transport
 import org.iz.navigation.lean.LeanCurveResult
 import org.iz.navigation.lean.LeanJourneyReport
+import org.iz.navigation.lean.LeanLiveDecisionCode
+import org.iz.navigation.lean.LeanLiveDecisionSummary
+import org.iz.navigation.lean.LeanReportSession
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -84,5 +87,63 @@ class LeanHandlebarTimingReportTest {
         compose.runOnIdle { report = body }
         summaryWarning.assertDoesNotExist()
         compose.onNodeWithText("En büyük geçerli sol tahmin: 15°").assertExists()
+    }
+
+    @Test fun separatesLiveSummariesFromSensorSessionsAndKeepsLegacyStatus() {
+        val journey = Journey(transport = Transport.MOTORCYCLE, startedAt = 1_000L, endedAt = 20_000L)
+        val emptyReport = LeanJourneyReport(false, null, null, 0, 0, emptySet(), emptyList(), emptySet())
+        val recorded = LeanLiveDecisionSummary(dialOpened = true, counts = mapOf(
+            LeanLiveDecisionCode.ACCEPTED_MEASURED to 2L,
+            LeanLiveDecisionCode.ACCEPTED_ESTIMATED to 3L,
+            LeanLiveDecisionCode.GNSS_NEVER_RECEIVED to 1L,
+            LeanLiveDecisionCode.GNSS_STALE to 4L,
+            LeanLiveDecisionCode.GNSS_BEARING_MISSING to 2L,
+        ))
+        val liveSessions = listOf(
+            LeanLiveDecisionSummary(dialOpened = false),
+            LeanLiveDecisionSummary(dialOpened = true),
+            recorded,
+        ).mapIndexed { index, summary ->
+            LeanReportSession("live-$index", "reference", 2_000L + index * 1_000L, null, null,
+                liveDecisions = summary, liveOnly = true)
+        }
+        val sensorSession = LeanReportSession("old-sensor", "reference", 1_000L, null, null)
+        val sensorReport = emptyReport.copy(validMillis = 4_000L, observedMillis = 8_000L,
+            sessionDetails = listOf(sensorSession))
+        var report by mutableStateOf(emptyReport.copy(handlebar = emptyReport.copy(sessionDetails = liveSessions)))
+        compose.setContent {
+            IzTheme {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    LeanJourneyReportContent(journey, report)
+                }
+            }
+        }
+
+        compose.onNodeWithText("Gidonda canlı yatış").assertIsDisplayed()
+        compose.onNodeWithText("Canlı kadran özetini göster").performScrollTo().performClick()
+        compose.onNodeWithText("Geçerli kapsam", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Gidon · ", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Sensör ayrıntıları bilinmiyor.").assertDoesNotExist()
+        compose.onNodeWithText("GPS ölçüm ayrıntıları").assertDoesNotExist()
+        compose.onNodeWithText("Kadran açılmadı.").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Kadran açıldı, karar kaydı yok.").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Geçerli ölçüm · 2").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Geçerli tahmin · 3").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("GPS konumu hiç alınmadı · 1 kez").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("GPS konumu güncellenmedi · 4 kez").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("GPS yön bilgisi eksik · 2 kez").performScrollTo().assertIsDisplayed()
+
+        compose.runOnIdle {
+            report = emptyReport.copy(handlebar = sensorReport.copy(sessionDetails = listOf(sensorSession) + liveSessions))
+        }
+        compose.onNodeWithText("Geçerli kapsam 4 sn / gözlenen 8 sn").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Gidon · ", substring = true).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Sensör ayrıntıları bilinmiyor.").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Geçerli tahmin · 3").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Canlı kadran bilgisi bilinmiyor.").assertDoesNotExist()
+
+        compose.runOnIdle { report = emptyReport.copy(handlebar = sensorReport) }
+        compose.onNodeWithText("Canlı kadran bilgisi bilinmiyor.").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Geçerli tahmin · 3").assertDoesNotExist()
     }
 }

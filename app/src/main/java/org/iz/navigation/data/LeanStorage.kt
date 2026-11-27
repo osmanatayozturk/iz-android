@@ -18,6 +18,7 @@ internal data class LeanSessionEntity(
     val calibrationJson: String, val bootId: String, val startedAtUtc: Long,
     val startedAtElapsedNanos: Long, val endedAtElapsedNanos: Long?,
     val state: String, val reasonsJson: String, val droppedSamples: Long,
+    @ColumnInfo(defaultValue = "NULL") val liveDecisionsJson: String? = null,
 )
 
 @Entity(tableName = "lean_chunks", primaryKeys = ["sessionId", "partIndex"],
@@ -50,6 +51,9 @@ internal interface LeanDao {
     @Query("SELECT COUNT(*) FROM lean_chunks") suspend fun chunkCount(): Int
 
     @Query("SELECT * FROM lean_sessions WHERE id = :id") suspend fun session(id: String): LeanSessionEntity?
+    @Query("SELECT * FROM lean_sessions WHERE journeyId = :journeyId AND state = 'LIVE_ONLY' AND endedAtElapsedNanos IS NULL ORDER BY generation DESC LIMIT 1")
+    suspend fun activeLiveOnlySession(journeyId: String): LeanSessionEntity?
+    @Query("SELECT COUNT(*) FROM lean_sessions") suspend fun sessionCount(): Int
     @Query("SELECT * FROM lean_sessions ORDER BY startedAtUtc, id") suspend fun allSessions(): List<LeanSessionEntity>
     @Query("SELECT s.* FROM lean_sessions s INNER JOIN journeys j ON j.id = s.journeyId WHERE s.journeyId = :journeyId AND j.transport = 'MOTORCYCLE' ORDER BY s.startedAtUtc, s.id") fun sessions(journeyId: String): Flow<List<LeanSessionEntity>>
     @Query("SELECT * FROM lean_sessions WHERE state IN ('SEALED', 'PARTIAL') AND id NOT IN (SELECT sessionId FROM lean_results) ORDER BY startedAtUtc, id") suspend fun pending(): List<LeanSessionEntity>

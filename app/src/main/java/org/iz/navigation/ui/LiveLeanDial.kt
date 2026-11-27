@@ -39,6 +39,7 @@ internal fun LiveLeanDial(sessionId: String, reading: LiveLeanReading?, modifier
         }
     }
     val value = degrees?.let { abs(it).roundToInt() }
+    val estimated = value != null && reading?.estimated == true
     val side = when {
         value == null -> null
         value == 0 -> "Dik"
@@ -48,7 +49,11 @@ internal fun LiveLeanDial(sessionId: String, reading: LiveLeanReading?, modifier
     val primary = MaterialTheme.colorScheme.primary
     val scale = MaterialTheme.colorScheme.outline
     Surface(modifier.sizeIn(minWidth = 114.dp, minHeight = 51.dp).testTag("live-lean-dial").clearAndSetSemantics {
-        contentDescription = if (value == null) "Tahmini yatış, ölçüm yok" else "Tahmini yatış, $side $value derece"
+        contentDescription = when {
+            value == null -> "Tahmini yatış, ölçüm yok"
+            estimated -> "Yatış tahmini, $side $value derece"
+            else -> "Tahmini yatış, $side $value derece"
+        }
     }, shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface, shadowElevation = 3.dp) {
         Row(Modifier.padding(horizontal = 7.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -80,7 +85,12 @@ internal fun LiveLeanDial(sessionId: String, reading: LiveLeanReading?, modifier
                 if (value != null) {
                     Text("≈$value°", Modifier.testTag("live-lean-value"), style = MaterialTheme.typography.titleMedium,
                         fontSize = 20.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold)
-                    Text(if (value == 0) "Dik" else "$side yatış", style = MaterialTheme.typography.labelSmall)
+                    val label = when {
+                        estimated -> "Tahmin · $side"
+                        value == 0 -> "Dik"
+                        else -> "$side yatış"
+                    }
+                    Text(label, style = MaterialTheme.typography.labelSmall)
                 } else Text("Ölçüm yok", Modifier.testTag("live-lean-unavailable"), style = MaterialTheme.typography.labelSmall)
             }
         }
