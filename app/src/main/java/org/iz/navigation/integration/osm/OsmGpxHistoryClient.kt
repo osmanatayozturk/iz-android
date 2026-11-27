@@ -79,12 +79,20 @@ internal class OsmGpxHistoryClient(baseUrl: String = "https://api.openstreetmap.
         // Decode explicitly so compressed and expanded bytes each have a bound.
         val get = request(token, "gpx/$id/data.gpx", "application/gpx+xml").newBuilder()
             .header("Accept-Encoding", "identity").build()
-        return execute(get) { response ->
+        return execute(get, beforeResponseError = { classifyGpxTransfer(it, readingBody = false) }) { response ->
             requireSuccess(response)
             val encoding = response.header("Content-Encoding")
             if (encoding != null && !encoding.equals("identity", true) && !encoding.equals("gzip", true))
                 throw OsmGpxGeometryFormatException()
-            val bytes = readLimited(response, OsmGpxRemoteXml.MAX_BYTES)
+            val bytes = try {
+                readLimited(response, OsmGpxRemoteXml.MAX_BYTES)
+            } catch (limit: OsmGpxDataLimitException) {
+                throw limit
+            } catch (error: IOException) {
+                throw classifyGpxTransfer(error, readingBody = true)
+            }
+            val length = response.body?.contentLength() ?: -1L
+            if (length >= 0 && length != bytes.size.toLong()) throw OsmGpxTransferException(OsmGpxTransferReason.BODY_LENGTH)
             if (encoding.equals("gzip", true) && !OsmGpxRemoteXml.isGzip(bytes)) throw OsmGpxGeometryFormatException()
             OsmGpxRemoteXml.parse(bytes, response.body?.contentType()?.toString())
         }
@@ -144,12 +152,13 @@ internal class OsmGpxHistoryClient(baseUrl: String = "https://api.openstreetmap.
             .tag(Exchange::class.java, Exchange(canDispatch)).get().build()
     }
 
-    private suspend fun <T> execute(request: Request, read: (Response) -> T): T = suspendCancellableCoroutine { continuation ->
+    private suspend fun <T> execute(request: Request, beforeResponseError: (IOException) -> IOException = { it },
+                                    read: (Response) -> T): T = suspendCancellableCoroutine { continuation ->
         val call = http.newCall(request)
         continuation.invokeOnCancellation { call.cancel() }
         call.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                if (continuation.isActive) continuation.resumeWithException(e)
+                if (continuation.isActive) continuation.resumeWithException(beforeResponseError(e))
             }
             override fun onResponse(call: Call, response: Response) {
                 try {

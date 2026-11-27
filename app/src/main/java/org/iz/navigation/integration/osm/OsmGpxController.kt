@@ -275,6 +275,11 @@ class OsmGpxController internal constructor(
                 error is OsmGpxDataLimitException -> "Bir GPX dosyası uygulamanın okuma sınırını aşıyor."
                 error is OsmGpxMetadataFormatException -> "OSM iz listesindeki bilgiler doğrulanamadı. Yeniden kontrol et."
                 error is OsmListedGpxFormatException -> "Yüklenenler listesindeki ${error.rowNumber}. izin GPX dosyası okunamadı. Bu izi OSM’de kontrol et."
+                error is OsmGpxTransferException -> when (error.reason) {
+                    OsmGpxTransferReason.HEAD_TIMEOUT, OsmGpxTransferReason.BODY_TIMEOUT ->
+                        "OSM’den iz dosyası indirilirken süre doldu. Yeniden kontrol et. (${error.reason.code})"
+                    else -> "OSM’den iz dosyası alınamadı. Yeniden kontrol et. (${error.reason.code})"
+                }
                 error is java.io.InterruptedIOException && phase == OsmHistoryPhase.DOWNLOAD -> "OSM’den iz dosyası indirilirken süre doldu. Yeniden kontrol et."
                 error is java.io.InterruptedIOException && phase == OsmHistoryPhase.LIST -> "OSM iz listesi beklenirken süre doldu. Yeniden kontrol et."
                 error is OsmGpxHistoryHttpException && phase == OsmHistoryPhase.LIST -> "OSM’deki iz listesi yüklenemedi (HTTP ${error.statusCode})."
@@ -285,7 +290,7 @@ class OsmGpxController internal constructor(
                     OsmHistoryPhase.RECEIPTS -> "Cihazdaki gönderim makbuzları doğrulanamadı."
                     OsmHistoryPhase.CACHE -> "İz geometrisi cihazda okunamadı veya saklanamadı."
                     OsmHistoryPhase.LOCAL_TRACE -> "Önceki gönderimin cihazdaki yolculuk verisi okunamadı."
-                    OsmHistoryPhase.DOWNLOAD -> "OSM’den iz dosyası alınamadı. Bağlantıyı kontrol edip yeniden dene."
+                    OsmHistoryPhase.DOWNLOAD -> "OSM’den iz dosyası alınamadı. Bağlantıyı kontrol edip yeniden dene. (GPX-DATA)"
                 }
             }
             state = listed?.copy(issue = issue) ?: OsmGpxHistoryState.Failed(issue)

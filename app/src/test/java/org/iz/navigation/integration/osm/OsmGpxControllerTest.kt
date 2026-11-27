@@ -334,9 +334,15 @@ class OsmGpxControllerTest {
         val controller = newController(neverPost, history)
         for ((error, expected) in listOf(
             failure to "süre doldu",
+            classifyGpxTransfer(java.net.UnknownHostException("private-endpoint"), false) to "(GPX-DNS)",
+            classifyGpxTransfer(javax.net.ssl.SSLHandshakeException("private-endpoint"), false) to "(GPX-TLS)",
+            classifyGpxTransfer(java.net.ConnectException("private-endpoint"), false) to "(GPX-CONNECT)",
+            classifyGpxTransfer(IOException("private-endpoint", java.io.EOFException()), true) to "(GPX-BODY-INCOMPLETE)",
+            classifyGpxTransfer(java.net.SocketTimeoutException("private-endpoint"), false) to "(GPX-HEAD-TIMEOUT)",
+            classifyGpxTransfer(java.net.SocketTimeoutException("private-endpoint"), true) to "(GPX-BODY-TIMEOUT)",
             OsmGpxGeometryFormatException() to "1. izin GPX dosyası okunamadı",
             OsmGpxHistoryHttpException(403) to "HTTP 403",
-            IOException("private-endpoint") to "Bağlantıyı kontrol",
+            IOException("private-endpoint") to "(GPX-DATA)",
         )) {
             failure = error
             controller.refreshHistory()
