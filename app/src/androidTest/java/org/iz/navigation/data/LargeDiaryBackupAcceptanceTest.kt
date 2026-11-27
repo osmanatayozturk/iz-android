@@ -249,15 +249,18 @@ class LargeDiaryBackupAcceptanceTest {
             assertArrayEquals(photo, target.repo.photoFile(installedPhoto).readBytes())
             val small = target.archive()
             target.backup.exportTo(target.uri(small), includeHealth = true)
-            ZipFile(small).use { zip ->
+            val smallManifest = ZipFile(small).use { zip ->
                 val manifest = checkNotNull(zip.getEntry("manifest.json"))
                 val json = zip.getInputStream(manifest).bufferedReader(Charsets.UTF_8).use { JSONObject(it.readText()) }
                 assertEquals(13, json.getInt("version"))
                 assertTrue(!json.has("bulkPages"))
+                json
             }
 
             val duplicate = target.archive()
-            val corrupt = LegacyBackupFixture.manifest().put("format", "org.iz.navigation.backup").put("version", 14)
+            // Use valid current metadata before introducing the deliberate cross-page duplicate.
+            val corrupt = smallManifest.put("version", 14)
+            corrupt.getJSONArray("photos").getJSONObject(0).put("relativePath", "photos/old.jpg")
             corrupt.getJSONArray("journeys").getJSONObject(0).put("title", "Replacement that must roll back")
             val template = corrupt.getJSONArray("points").getJSONObject(0).toString()
             val firstPage = JSONArray()
