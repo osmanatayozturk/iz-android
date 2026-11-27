@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -131,7 +132,9 @@ class OsmGpxController internal constructor(
     private var owner: CommunitySession? = null
     private var request: Any? = null
     private val historyScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var visibleRead: Pair<CommunitySession, Deferred<Unit>>? = null
+    private class VisibleRead(val session: CommunitySession, val token: Any, val work: Deferred<Unit>)
+    private var visibleRead: VisibleRead? = null
+    private val readers = java.util.IdentityHashMap<CommunitySession, Int>()
     private var coverage: OsmGpxAccountCoverage? = null
     private var visibilityRetry: Map<Long, OsmVisibilityAttempt> = emptyMap()
     private val mutableHistory = MutableStateFlow<OsmGpxHistoryState>(OsmGpxHistoryState.Idle)
@@ -148,9 +151,9 @@ class OsmGpxController internal constructor(
     }
 
     private fun clearStaleHistory() = synchronized(historyLock) {
-        visibleRead?.takeIf { it.first !== readableSession() }?.let {
+        visibleRead?.takeIf { it.session !== readableSession() }?.let {
             visibleRead = null
-            it.second.cancel()
+            it.work.cancel()
         }
         if (owner !== readableSession()) {
             owner = null
@@ -167,36 +170,60 @@ class OsmGpxController internal constructor(
 
     suspend fun ensureHistory() = readVisibleHistory(force = false)
     suspend fun refreshHistory() = readVisibleHistory(force = true)
+    suspend fun observeVisibleHistory() = readVisibleHistory(force = false, stayVisible = true)
 
-    private suspend fun readVisibleHistory(force: Boolean) {
+    private suspend fun readVisibleHistory(force: Boolean, stayVisible: Boolean = false) {
         val session = readableSession() ?: return clearStaleHistory()
         val active = synchronized(historyLock) {
-            val existing = visibleRead
-            if (existing != null && existing.first === session && !existing.second.isCompleted) return@synchronized existing.second
-            if (!force && owner === session && mutableHistory.value != OsmGpxHistoryState.Idle) return
-            existing?.second?.cancel()
-            // Navigation between the contribution hub and the GPS screen shares this read.
-            val work = historyScope.async(start = CoroutineStart.LAZY) {
-                synchronizeHistory(session, true)
-                Unit
-            }
-            visibleRead = session to work
-            work.invokeOnCompletion {
-                synchronized(historyLock) {
-                    if (visibleRead?.second === work) visibleRead = null
+            if (readableSession() !== session) return
+            readers[session] = (readers[session] ?: 0) + 1
+            visibleRead?.takeIf { it.session === session && !it.work.isCompleted }?.work
+                ?: if (force || owner !== session || mutableHistory.value == OsmGpxHistoryState.Idle)
+                    startVisibleRead(session) else null
+        }
+        try {
+            active?.await()
+            if (stayVisible) awaitCancellation()
+        } finally {
+            synchronized(historyLock) {
+                val remaining = readers.getValue(session) - 1
+                if (remaining > 0) readers[session] = remaining
+                else {
+                    readers.remove(session)
+                    visibleRead?.takeIf { it.session === session }?.let { last ->
+                        visibleRead = null
+                        if (request === last.token && mutableHistory.value == OsmGpxHistoryState.Loading) {
+                            request = null
+                            mutableHistory.value = OsmGpxHistoryState.Idle
+                        }
+                        last.work.cancel()
+                    }
                 }
             }
-            work.start()
-            work
         }
-        active.await()
+    }
+
+    private fun startVisibleRead(session: CommunitySession): Deferred<Unit> {
+        visibleRead?.work?.cancel()
+        val token = Any()
+        val work = historyScope.async(start = CoroutineStart.LAZY) {
+            synchronizeHistory(session, true, task = token)
+            Unit
+        }
+        visibleRead = VisibleRead(session, token, work)
+        work.invokeOnCompletion {
+            synchronized(historyLock) {
+                if (visibleRead?.token === token) visibleRead = null
+            }
+        }
+        work.start()
+        return work
     }
 
     private suspend fun synchronizeHistory(session: CommunitySession, showLoading: Boolean,
-        acknowledgedHere: Set<Long> = emptySet()): OsmGpxAccountCoverage? {
-        val task = Any()
+        acknowledgedHere: Set<Long> = emptySet(), task: Any = Any()): OsmGpxAccountCoverage? {
         synchronized(historyLock) {
-            if (readableSession() !== session) return null
+            if (readableSession() !== session || (showLoading && visibleRead?.token !== task)) return null
             owner = session
             request = task
             coverage = null

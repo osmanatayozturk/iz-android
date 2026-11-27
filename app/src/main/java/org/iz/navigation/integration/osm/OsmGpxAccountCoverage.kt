@@ -53,7 +53,7 @@ internal class OsmGpxCoverageLoader(
         val ids = listed.keys + confirmed.keys
         require(ids.size <= MAX_OSM_TRACES)
         check(current())
-        store.coverageCache.prepareAccount(session.userId, ids)
+        store.coverageCache.prepareAccount(session.userId, ids, current)
         val geometry = mutableListOf<OsmCachedTrace>()
         val matches = mutableMapOf<String, Long>()
         val ambiguous = mutableSetOf<String>()
@@ -63,7 +63,7 @@ internal class OsmGpxCoverageLoader(
             check(remote?.pending != true || id in acknowledgedHere && id in confirmed) { "pending-trace" }
             val own = confirmed[id]
             val redownloadable = remote != null && !remote.pending
-            val cached = store.coverageCache.inspect(session.userId, id, redownloadable)
+            val cached = store.coverageCache.inspect(session.userId, id, redownloadable, current)
             val local = if (cached == null && own?.journeyId != null &&
                 (remote == null || remote.fileName == org.iz.navigation.integration.osmGpxFileName(own.sha256))) {
                 loadJourney(own.journeyId)?.second?.takeIf { it.sha256 == own.sha256 }?.geometry()
@@ -74,7 +74,7 @@ internal class OsmGpxCoverageLoader(
                     gateway.data(session.token, id)
                 }
                 check(current())
-                store.coverageCache.write(session.userId, id, data, redownloadable)
+                store.coverageCache.write(session.userId, id, data, redownloadable, current)
             }
             geometry += geometryFile
             if (remote != null && matches.put(geometryFile.sha256, id) != null) ambiguous += geometryFile.sha256
@@ -83,8 +83,11 @@ internal class OsmGpxCoverageLoader(
         val unknowns = records.filter { it.status == OsmGpxReceiptStatus.UNKNOWN }
         check(unknowns.all { it.sha256 in matches }) { "unresolved-receipt" }
         check(current())
-        for (record in unknowns) store.resolveUnknown(session.userId, record, matches.getValue(record.sha256))
-        store.coverageCache.prune(session.userId, ids)
+        for (record in unknowns) {
+            check(current())
+            store.resolveUnknown(session.userId, record, matches.getValue(record.sha256))
+        }
+        store.coverageCache.prune(session.userId, ids, current)
         return OsmGpxAccountCoverage(store.coverageCache, session.userId, geometry, matches)
     }
 }

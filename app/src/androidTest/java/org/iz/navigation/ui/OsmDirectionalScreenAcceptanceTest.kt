@@ -4,19 +4,26 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.SystemClock
 import android.provider.Settings
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.lifecycle.Lifecycle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import java.io.File
 import java.io.IOException
 import java.time.Instant
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.iz.navigation.MainActivity
 import org.iz.navigation.data.DiaryRepository
 import org.iz.navigation.data.Journey
@@ -244,13 +251,79 @@ class OsmDirectionalScreenAcceptanceTest {
         }
     }
 
+    @Test fun visibleHistoryCancelsOnStopAndResumesWithExactlyOneNewGet() {
+        val account = 271_270_000L + SystemClock.elapsedRealtime()
+        val remoteTrace = 931L
+        val api = FixtureOsm(fixtureSession(account, "QA lifecycle"))
+        api.remote(remoteTrace, "synthetic-visible.gpx", ride("visible-source", 41).prepared)
+        val started = Channel<FixtureListRequest>(Channel.UNLIMITED)
+        api.beforeList = {
+            val request = FixtureListRequest()
+            started.send(request)
+            try {
+                request.release.await()
+            } catch (cancel: CancellationException) {
+                request.cancelled.complete(Unit)
+                throw cancel
+            }
+        }
+        val root = requireDirectionalQa().noBackupFilesDir
+        val coverage = File(root, "osm-gpx-coverage/$account")
+        val receipts = File(root, "osm-gpx-receipts/$account")
+        val visibility = File(root, "osm-gpx-visibility/$account")
+        withSamples(emptyList(), api) {
+            assertTrue(coverage.listFiles().orEmpty().isEmpty())
+            openHub()
+            val first = runBlocking { withTimeout(12_000L) { started.receive() } }
+            assertEquals(1, api.listReads.get())
+            compose.activityRule.scenario.moveToState(Lifecycle.State.CREATED)
+            runBlocking { withTimeout(12_000L) { first.cancelled.await() } }
+            assertTrue(api.downloaded.isEmpty())
+            assertTrue(api.metadataReads.isEmpty())
+            assertTrue(api.sent.isEmpty())
+            assertTrue(api.changed.isEmpty())
+            assertTrue(coverage.listFiles().orEmpty().isEmpty())
+            assertTrue(receipts.listFiles().orEmpty().isEmpty())
+            assertTrue(visibility.listFiles().orEmpty().isEmpty())
+
+            compose.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
+            val second = runBlocking { withTimeout(12_000L) { started.receive() } }
+            assertEquals(2, api.listReads.get())
+            assertTrue(api.downloaded.isEmpty())
+            second.release.complete(Unit)
+            val hubList = compose.onNodeWithTag("osm-contribution-list")
+            val refresh = hasTestTag("osm-contribution-refresh")
+            hubList.performScrollToNode(refresh)
+            compose.waitUntil(12_000L) {
+                compose.onAllNodes(refresh and isEnabled()).fetchSemanticsNodes().isNotEmpty()
+            }
+            hubList.performScrollToNode(hasTestTag("osm-contribution-gps-$remoteTrace"))
+            compose.onNodeWithTag("osm-contribution-gps-$remoteTrace").assertIsDisplayed()
+            hubList.performScrollToNode(hasTestTag("osm-contribution-gps"))
+            compose.onNodeWithTag("osm-contribution-gps").performClick()
+            waitForTag("osm-gps-list")
+            assertEquals(2, api.listReads.get())
+            assertEquals(listOf(remoteTrace), api.downloaded.toList())
+            assertTrue(File(coverage, "$remoteTrace.geom").isFile)
+            assertTrue(api.metadataReads.isEmpty())
+            assertTrue(api.sent.isEmpty())
+            assertTrue(api.changed.isEmpty())
+            assertTrue(receipts.listFiles().orEmpty().isEmpty())
+            assertTrue(visibility.listFiles().orEmpty().isEmpty())
+        }
+    }
+
     private fun previewHash(sample: FixtureRide) =
         compose.onNodeWithTag("osm-gps-preview-${sample.journey.id}").fetchSemanticsNode().config[OsmGpsPreparedSha256]
 
-    private fun openGps(api: FixtureOsm) {
-        val readsBefore = api.listReads.get()
+    private fun openHub() {
         compose.onNodeWithTag("home-menu").performClick()
         compose.onNodeWithTag("menu-osm").performScrollTo().performClick()
+    }
+
+    private fun openGps(api: FixtureOsm) {
+        val readsBefore = api.listReads.get()
+        openHub()
         compose.onNodeWithTag("osm-contribution-gps").performScrollTo().performClick()
         compose.onNodeWithTag("osm-gps-screen").assertIsDisplayed()
         awaitFirstHistory(api, readsBefore)
@@ -304,6 +377,11 @@ class OsmDirectionalScreenAcceptanceTest {
     }
 }
 
+private class FixtureListRequest {
+    val release = CompletableDeferred<Unit>()
+    val cancelled = CompletableDeferred<Unit>()
+}
+
 internal fun requireDirectionalQa(): Context {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     assertEquals("org.iz.navigation.qaosmyon20261127", context.packageName)
@@ -351,6 +429,7 @@ private class FixtureOsm(session: CommunitySession) : OsmGpxHistoryGateway {
     val metadataReads = CopyOnWriteArrayList<Long>()
     @Volatile var failData: Long? = null
     @Volatile var failUpdate: Long? = null
+    @Volatile var beforeList: suspend () -> Unit = {}
 
     val upload = OsmGpxGateway { token, trace, visibility, canDispatch ->
         assertEquals(sessions.value?.token, token)
@@ -365,6 +444,7 @@ private class FixtureOsm(session: CommunitySession) : OsmGpxHistoryGateway {
         assertEquals(sessions.value?.token, token)
         assertEquals(sessions.value?.userId, expectedUserId)
         listReads.incrementAndGet()
+        beforeList()
         return entries.filter { it.first == expectedUserId }.map { it.second }
     }
 

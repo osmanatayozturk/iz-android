@@ -24,7 +24,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,8 +41,12 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import org.iz.navigation.data.ContributionDraft
 import org.iz.navigation.data.ContributionStatus
@@ -77,8 +81,6 @@ internal fun OsmContributionHub(
     val auth = remember(context) { OsmAuthManager.get(context) }
     val controller = remember(context) { OsmGpxController.get(context) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    val lifecycleState by lifecycle.currentStateFlow.collectAsState()
-    val started = lifecycleState.isAtLeast(Lifecycle.State.STARTED)
     val scope = rememberCoroutineScope()
     val authState by auth.state.collectAsStateWithLifecycle()
     val observedSession by auth.communitySessionSource.sessions.collectAsStateWithLifecycle()
@@ -94,15 +96,28 @@ internal fun OsmContributionHub(
         !gpsAuth.busy && it.userId == gpsAuth.user?.id && OSM_GPX_READ_SCOPE in it.scopes &&
             it.expiresAt?.let { expiresAt -> expiresAt > System.currentTimeMillis() } != false
     }
-    var refreshing by remember(historySession) { mutableStateOf(false) }
+    var refreshJob by remember(historySession) { mutableStateOf<Job?>(null) }
     fun ownsHistory(): Boolean = historySession != null &&
         lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) && controller.sessions.value === historySession &&
         controller.authState.value.let { !it.busy && it.user?.id == historySession.userId }
 
-    LaunchedEffect(controller, historySession, started) {
-        if (started && ownsHistory()) controller.ensureHistory()
+    LaunchedEffect(controller, historySession, lifecycle) {
+        if (historySession == null) return@LaunchedEffect
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            if (ownsHistory()) controller.observeVisibleHistory()
+        }
     }
-    val history = if (historySession == null || refreshing) null else when (val current = historyState) {
+    DisposableEffect(lifecycle, historySession) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) refreshJob?.cancel()
+        }
+        lifecycle.addObserver(observer)
+        onDispose {
+            lifecycle.removeObserver(observer)
+            refreshJob?.cancel()
+        }
+    }
+    val history = if (historySession == null || refreshJob != null) null else when (val current = historyState) {
         is OsmGpxHistoryState.Ready -> current.takeIf { it.user.id == historySession.userId }
             ?.let { OsmContributionHubHistoryResult.Ready(it.entries) }
         is OsmGpxHistoryState.Failed -> OsmContributionHubHistoryResult.Failed
@@ -115,15 +130,16 @@ internal fun OsmContributionHub(
         onClose = onClose, onNewNote = onNewNote, onNewPlace = onNewPlace,
         onPickExistingPlace = onPickExistingPlace, onGps = onGps, onGpsHistory = onGpsHistory,
         onRefresh = {
-            if (!refreshing && history != null && ownsHistory()) {
-                refreshing = true
-                scope.launch {
+            if (refreshJob == null && history != null && ownsHistory()) {
+                val job = scope.launch(start = CoroutineStart.LAZY) {
                     try {
                         controller.refreshHistory()
                     } finally {
-                        refreshing = false
+                        refreshJob = null
                     }
                 }
+                refreshJob = job
+                job.start()
             }
         }, onManageNotes = onManageNotes, onSurvey = onSurvey,
         onCommunity = onCommunity, onManagePlaces = onManagePlaces, onOpen = { row ->

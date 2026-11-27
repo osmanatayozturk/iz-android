@@ -17,6 +17,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -307,7 +308,7 @@ internal fun OsmGpsScreen(
             upload.stopDispatching()
         }
     }
-    DisposableEffect(session, page) {
+    DisposableEffect(session, page, lifecycle) {
         onDispose {
             work?.cancel()
             upload.stopDispatching()
@@ -317,8 +318,11 @@ internal fun OsmGpsScreen(
         selection.bind(auth.user?.id)
         upload.bind(auth.user?.id)
     }
-    LaunchedEffect(controller, session, canRead, started) {
-        if (started && canRead && owns(foregroundGeneration)) controller.ensureHistory()
+    LaunchedEffect(controller, session, canRead, lifecycle) {
+        if (!canRead) return@LaunchedEffect
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            if (owns(foregroundGeneration)) controller.observeVisibleHistory()
+        }
     }
     LaunchedEffect(session, coverage, eligible, scanRevision, upload.receiptRevision, page) {
         if (coverage == null || page != OsmGpsPage.AVAILABLE) return@LaunchedEffect
