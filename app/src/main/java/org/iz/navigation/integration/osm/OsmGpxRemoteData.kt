@@ -29,6 +29,22 @@ internal data class OsmGpxRemoteMetadata(val id: Long, val name: String, val tim
     fun samePreservedFields(other: OsmGpxRemoteMetadata) = id == other.id && name == other.name &&
         timestampMillis == other.timestampMillis && description == other.description && tags.sorted() == other.tags.sorted()
 
+    /** Canonical preserved fields: UTF-8 byte lengths, fixed field order and sorted tags with duplicates. */
+    fun digest(): String {
+        val canonical = Buffer()
+        fun field(value: String) {
+            val bytes = value.encodeToByteArray(throwOnInvalidSequence = true)
+            canonical.writeInt(bytes.size).write(bytes)
+        }
+        field(id.toString())
+        field(name)
+        field(timestampMillis.toString())
+        field(description)
+        canonical.writeInt(tags.size)
+        tags.sorted().forEach(::field)
+        return canonical.readByteString().sha256().hex()
+    }
+
     // Trace.update_from_xml_node requires description and replaces every tag, even for visibility-only changes.
     fun trackableXml() = "<osm><gpx_file id=\"$id\" visibility=\"trackable\"><description>" +
         escape(description) + "</description>" + tags.joinToString("") { "<tag>${escape(it)}</tag>" } + "</gpx_file></osm>"

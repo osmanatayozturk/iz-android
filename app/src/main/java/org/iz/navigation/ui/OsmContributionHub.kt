@@ -24,11 +24,12 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -39,7 +40,10 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
 import org.iz.navigation.data.ContributionDraft
 import org.iz.navigation.data.ContributionStatus
 import org.iz.navigation.data.DiaryRepository
@@ -47,7 +51,9 @@ import org.iz.navigation.data.MapEditDraft
 import org.iz.navigation.data.MapEditStatus
 import org.iz.navigation.data.displayLabel
 import org.iz.navigation.integration.osm.OsmAuthManager
-import org.iz.navigation.integration.osm.OsmGpxHistoryClient
+import org.iz.navigation.integration.osm.OSM_GPX_READ_SCOPE
+import org.iz.navigation.integration.osm.OsmGpxController
+import org.iz.navigation.integration.osm.OsmGpxHistoryState
 
 @Composable
 internal fun OsmContributionHub(
@@ -69,31 +75,57 @@ internal fun OsmContributionHub(
 ) {
     val context = LocalContext.current
     val auth = remember(context) { OsmAuthManager.get(context) }
-    val source = auth.communitySessionSource
+    val controller = remember(context) { OsmGpxController.get(context) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val lifecycleState by lifecycle.currentStateFlow.collectAsState()
+    val started = lifecycleState.isAtLeast(Lifecycle.State.STARTED)
+    val scope = rememberCoroutineScope()
     val authState by auth.state.collectAsStateWithLifecycle()
-    val observedSession by source.sessions.collectAsStateWithLifecycle()
+    val observedSession by auth.communitySessionSource.sessions.collectAsStateWithLifecycle()
+    val gpsAuth by controller.authState.collectAsStateWithLifecycle()
+    val observedGpsSession by controller.sessions.collectAsStateWithLifecycle()
+    val historyState by controller.history.collectAsStateWithLifecycle()
     val notes by repository.contributions.collectAsStateWithLifecycle(initialValue = emptyList())
     val places by repository.mapEdits.collectAsStateWithLifecycle(initialValue = emptyList())
     val session = observedSession?.takeIf {
         !authState.busy && it.userId == authState.user?.id && it === auth.currentGpxSession()
     }
-    val historySession = session?.takeIf { it === auth.currentGpxHistorySession() }
-    val historyReader = remember(auth) {
-        OsmContributionHubHistory(auth::currentGpxHistorySession, OsmGpxHistoryClient(), source::rejectSession)
+    val historySession = observedGpsSession?.takeIf {
+        !gpsAuth.busy && it.userId == gpsAuth.user?.id && OSM_GPX_READ_SCOPE in it.scopes &&
+            it.expiresAt?.let { expiresAt -> expiresAt > System.currentTimeMillis() } != false
     }
-    var refreshRevision by remember(historySession) { mutableIntStateOf(0) }
-    // Key the visible snapshot on the exact session so composition drops old rows before loading.
-    var history by remember(historySession, refreshRevision) { mutableStateOf<OsmContributionHubHistoryResult?>(null) }
-    LaunchedEffect(historyReader, historySession, refreshRevision) {
-        if (historySession != null && refreshRevision > 0) history = historyReader.load(historySession)
+    var refreshing by remember(historySession) { mutableStateOf(false) }
+    fun ownsHistory(): Boolean = historySession != null &&
+        lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) && controller.sessions.value === historySession &&
+        controller.authState.value.let { !it.busy && it.user?.id == historySession.userId }
+
+    LaunchedEffect(controller, historySession, started) {
+        if (started && ownsHistory()) controller.ensureHistory()
+    }
+    val history = if (historySession == null || refreshing) null else when (val current = historyState) {
+        is OsmGpxHistoryState.Ready -> current.takeIf { it.user.id == historySession.userId }
+            ?.let { OsmContributionHubHistoryResult.Ready(it.entries) }
+        is OsmGpxHistoryState.Failed -> OsmContributionHubHistoryResult.Failed
+        else -> null
     }
 
     val gps = (history as? OsmContributionHubHistoryResult.Ready)?.entries.orEmpty()
     val rows = remember(notes, places, session, gps) { osmContributionHubRows(notes, places, session?.userId, gps) }
-    OsmContributionHubContent(rows, history, canRefresh = historySession != null, historyRequested = refreshRevision > 0,
+    OsmContributionHubContent(rows, history, canRefresh = historySession != null,
         onClose = onClose, onNewNote = onNewNote, onNewPlace = onNewPlace,
         onPickExistingPlace = onPickExistingPlace, onGps = onGps, onGpsHistory = onGpsHistory,
-        onRefresh = { refreshRevision++ }, onManageNotes = onManageNotes, onSurvey = onSurvey,
+        onRefresh = {
+            if (!refreshing && history != null && ownsHistory()) {
+                refreshing = true
+                scope.launch {
+                    try {
+                        controller.refreshHistory()
+                    } finally {
+                        refreshing = false
+                    }
+                }
+            }
+        }, onManageNotes = onManageNotes, onSurvey = onSurvey,
         onCommunity = onCommunity, onManagePlaces = onManagePlaces, onOpen = { row ->
             val current = session != null && auth.currentGpxSession() === session
             when (row) {
@@ -103,9 +135,7 @@ internal fun OsmContributionHub(
                 is OsmContributionHubRow.Place -> if (row.draft.status == MapEditStatus.DRAFT || current) {
                     if (row.editable) onResumePlace(row.draft) else onPlaceResult(row.draft)
                 }
-                is OsmContributionHubRow.Gps -> if (historySession != null && auth.currentGpxHistorySession() === historySession) {
-                    onGpsHistory()
-                }
+                is OsmContributionHubRow.Gps -> if (ownsHistory()) onGpsHistory()
             }
         })
 }
@@ -127,7 +157,6 @@ internal fun OsmContributionHubContent(
     onSurvey: () -> Unit = {},
     onCommunity: (() -> Unit)? = null,
     onManagePlaces: (() -> Unit)? = null,
-    historyRequested: Boolean = true,
 ) {
     var activities by rememberSaveable { mutableStateOf(false) }
     val hubList = rememberLazyListState()
@@ -165,15 +194,12 @@ internal fun OsmContributionHubContent(
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(if (activities) "Tüm etkinlikler" else "Son etkinlikler",
                         Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.titleMedium)
-                    if (canRefresh) TextButton(onClick = onRefresh, enabled = !historyRequested || history != null,
+                    if (canRefresh) TextButton(onClick = onRefresh, enabled = history != null,
                         modifier = Modifier.heightIn(min = 48.dp).testTag("osm-contribution-refresh")) { Text("Yenile") }
                 }
             }
-            if (canRefresh && historyRequested && history == null) item {
+            if (canRefresh && history == null) item {
                 LinearProgressIndicator(Modifier.fillMaxWidth().testTag("osm-contribution-history-loading"))
-            }
-            if (canRefresh && !historyRequested) item {
-                Text("Yüklenen GPS izlerini görmek için Yenile’ye dokun.", style = MaterialTheme.typography.bodySmall)
             }
             if (history == OsmContributionHubHistoryResult.Failed) item {
                 Text("OSM iz geçmişi yüklenemedi.", Modifier.testTag("osm-contribution-history-error"),

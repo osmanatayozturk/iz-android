@@ -52,6 +52,8 @@ internal class OsmGpxCoverageLoader(
         check(records.none { it.status == OsmGpxReceiptStatus.RECEIVED && !it.verified && it.traceId !in listed })
         val ids = listed.keys + confirmed.keys
         require(ids.size <= MAX_OSM_TRACES)
+        check(current())
+        store.coverageCache.prepareAccount(session.userId, ids)
         val geometry = mutableListOf<OsmCachedTrace>()
         val matches = mutableMapOf<String, Long>()
         val ambiguous = mutableSetOf<String>()
@@ -60,7 +62,8 @@ internal class OsmGpxCoverageLoader(
             val remote = listed[id]
             check(remote?.pending != true || id in acknowledgedHere && id in confirmed) { "pending-trace" }
             val own = confirmed[id]
-            val cached = store.coverageCache.inspect(session.userId, id)
+            val redownloadable = remote != null && !remote.pending
+            val cached = store.coverageCache.inspect(session.userId, id, redownloadable)
             val local = if (cached == null && own?.journeyId != null &&
                 (remote == null || remote.fileName == org.iz.navigation.integration.osmGpxFileName(own.sha256))) {
                 loadJourney(own.journeyId)?.second?.takeIf { it.sha256 == own.sha256 }?.geometry()
@@ -71,7 +74,7 @@ internal class OsmGpxCoverageLoader(
                     gateway.data(session.token, id)
                 }
                 check(current())
-                store.coverageCache.write(session.userId, id, data)
+                store.coverageCache.write(session.userId, id, data, redownloadable)
             }
             geometry += geometryFile
             if (remote != null && matches.put(geometryFile.sha256, id) != null) ambiguous += geometryFile.sha256

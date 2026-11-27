@@ -27,6 +27,7 @@ internal fun ColumnScope.OsmGpsHistoryList(
     selected: Set<Long> = emptySet(),
     editingEnabled: Boolean = false,
     results: Map<Long, String> = emptyMap(),
+    blocked: Set<Long> = emptySet(),
     onToggle: (Long) -> Unit = {},
     onOpen: (OsmGpxHistoryEntry) -> Unit,
 ) {
@@ -57,7 +58,8 @@ internal fun ColumnScope.OsmGpsHistoryList(
             val result = results[trace.id]
             if (result != null) {
                 Text(result, Modifier.testTag("osm-gps-visibility-result-${trace.id}"), style = MaterialTheme.typography.bodySmall)
-            } else if (trace.canChangeToTrackable && editingEnabled) {
+            }
+            if (trace.canChangeToTrackable && editingEnabled && trace.id !in blocked) {
                 val checked = trace.id in selected
                 Row(
                     Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("osm-gps-visibility-select-${trace.id}")

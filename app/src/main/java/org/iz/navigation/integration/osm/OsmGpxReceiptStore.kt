@@ -14,6 +14,7 @@ internal data class OsmGpxStoredReceipt(
 
 internal interface OsmGpxReceiptStore {
     val coverageCache: OsmGpxCoverageCache
+    val visibilityJournal: OsmGpxVisibilityJournal
     fun resolveUnknown(accountId: Long, record: OsmGpxStoredReceipt, id: Long)
     fun inventory(accountId: Long): List<OsmGpxStoredReceipt>
     fun read(accountId: Long, key: OsmGpxReceiptKey): OsmGpxReceipt?
@@ -26,6 +27,7 @@ internal class OsmGpxFileReceipts(noBackupRoot: File) : OsmGpxReceiptStore {
     private val root = File(noBackupRoot, "osm-gpx-receipts")
 
     override val coverageCache = OsmGpxCoverageCache(File(noBackupRoot, "osm-gpx-coverage"))
+    override val visibilityJournal = OsmGpxVisibilityJournal(File(noBackupRoot, "osm-gpx-visibility"))
 
     override fun inventory(accountId: Long): List<OsmGpxStoredReceipt> {
         require(accountId > 0)

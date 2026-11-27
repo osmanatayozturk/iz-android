@@ -7,9 +7,12 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -71,7 +74,8 @@ sealed interface OsmGpxHistoryState {
     data object Loading : OsmGpxHistoryState
     data class Failed(val issue: String) : OsmGpxHistoryState
     data class Ready(val user: OsmUser, val entries: List<OsmGpxHistoryEntry>, val coverageReady: Boolean = true,
-        val issue: String? = null) : OsmGpxHistoryState
+        val issue: String? = null, val visibilityNotes: Map<Long, String> = emptyMap(),
+        val visibilityBlocked: Set<Long> = emptySet()) : OsmGpxHistoryState
 }
 
 class OsmGpxPlan internal constructor(
@@ -126,7 +130,10 @@ class OsmGpxController internal constructor(
     private val coverageLoader = OsmGpxCoverageLoader(store, historyGateway, loadJourney)
     private var owner: CommunitySession? = null
     private var request: Any? = null
+    private val historyScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var visibleRead: Pair<CommunitySession, Deferred<Unit>>? = null
     private var coverage: OsmGpxAccountCoverage? = null
+    private var visibilityRetry: Map<Long, OsmVisibilityAttempt> = emptyMap()
     private val mutableHistory = MutableStateFlow<OsmGpxHistoryState>(OsmGpxHistoryState.Idle)
     val history: StateFlow<OsmGpxHistoryState> = mutableHistory.asStateFlow()
 
@@ -141,10 +148,15 @@ class OsmGpxController internal constructor(
     }
 
     private fun clearStaleHistory() = synchronized(historyLock) {
+        visibleRead?.takeIf { it.first !== readableSession() }?.let {
+            visibleRead = null
+            it.second.cancel()
+        }
         if (owner !== readableSession()) {
             owner = null
             request = null
             coverage = null
+            visibilityRetry = emptyMap()
             mutableHistory.value = OsmGpxHistoryState.Idle
         }
     }
@@ -153,9 +165,31 @@ class OsmGpxController internal constructor(
         coverage.takeIf { owner === session && readableSession() === session }
     }
 
-    suspend fun refreshHistory() {
+    suspend fun ensureHistory() = readVisibleHistory(force = false)
+    suspend fun refreshHistory() = readVisibleHistory(force = true)
+
+    private suspend fun readVisibleHistory(force: Boolean) {
         val session = readableSession() ?: return clearStaleHistory()
-        synchronizeHistory(session, true)
+        val active = synchronized(historyLock) {
+            val existing = visibleRead
+            if (existing != null && existing.first === session && !existing.second.isCompleted) return@synchronized existing.second
+            if (!force && owner === session && mutableHistory.value != OsmGpxHistoryState.Idle) return
+            existing?.second?.cancel()
+            // Navigation between the contribution hub and the GPS screen shares this read.
+            val work = historyScope.async(start = CoroutineStart.LAZY) {
+                synchronizeHistory(session, true)
+                Unit
+            }
+            visibleRead = session to work
+            work.invokeOnCompletion {
+                synchronized(historyLock) {
+                    if (visibleRead?.second === work) visibleRead = null
+                }
+            }
+            work.start()
+            work
+        }
+        active.await()
     }
 
     private suspend fun synchronizeHistory(session: CommunitySession, showLoading: Boolean,
@@ -166,20 +200,31 @@ class OsmGpxController internal constructor(
             owner = session
             request = task
             coverage = null
+            visibilityRetry = emptyMap()
             if (showLoading) mutableHistory.value = OsmGpxHistoryState.Loading
         }
         fun current() = synchronized(historyLock) { request === task && readableSession() === session }
         var state: OsmGpxHistoryState = OsmGpxHistoryState.Failed("OSM iz geçmişi okunamadı.")
         var next: OsmGpxAccountCoverage? = null
+        var retry: Map<Long, OsmVisibilityAttempt> = emptyMap()
         try {
             val remote = historyGateway.list(session.token, session.userId)
             if (!current()) return null
             require(remote.size <= MAX_OSM_TRACES && remote.all { it.id > 0 } && remote.distinctBy { it.id }.size == remote.size)
             val sorted = Collections.unmodifiableList(remote.sortedWith(
                 compareByDescending<OsmGpxHistoryEntry> { it.timestampMillis }.thenByDescending { it.id }))
-            val ready = OsmGpxHistoryState.Ready(OsmUser(session.userId, session.displayName), sorted, false)
+            val review = withContext(Dispatchers.IO) {
+                reconcileVisibility(session.userId, session.token, store.visibilityJournal, historyGateway, sorted, ::current)
+            }
+            if (!current()) return null
+            if (showLoading) retry = review.retry
+            val checked = sorted.map { entry -> review.updates[entry.id]?.let {
+                entry.copy(visibility = it.visibility, pending = it.pending)
+            } ?: entry }
+            val ready = OsmGpxHistoryState.Ready(OsmUser(session.userId, session.displayName), checked, false,
+                visibilityNotes = review.notes, visibilityBlocked = review.blocked)
             state = ready
-            next = withContext(Dispatchers.IO) { coverageLoader.load(session, sorted, acknowledgedHere, ::current) }
+            next = withContext(Dispatchers.IO) { coverageLoader.load(session, checked, acknowledgedHere, ::current) }
             state = ready.copy(coverageReady = true)
         } catch (cancel: CancellationException) {
             state = OsmGpxHistoryState.Idle
@@ -191,6 +236,7 @@ class OsmGpxController internal constructor(
                 error.message == "pending-trace" -> "OSM bir izi henüz işliyor."
                 error.message == "unresolved-receipt" -> "Önceki gönderinin içeriği OSM geçmişinde henüz doğrulanamadı."
                 error.message == "geometry-space" -> "İz geçmişini doğrulamak için cihazda yeterli boş alan yok."
+                error.message == "geometry-quota" -> "Bu hesabın iz geometrisi cihazdaki OSM önbellek kotasına sığmıyor."
                 error.message == "unverified-gap" -> "Bir OSM izinde güvenle eşleştirilemeyen uzun bir konum aralığı var."
                 error is OsmGpxDataLimitException -> "OSM yanıtı bu cihazda güvenle işlenebilecek tek dosya veya liste sınırını aştı."
                 error is OsmGpxHistoryHttpException -> "OSM iz verisini vermedi (HTTP ${error.statusCode})."
@@ -201,6 +247,7 @@ class OsmGpxController internal constructor(
             synchronized(historyLock) {
                 if (current()) {
                     coverage = next
+                    visibilityRetry = retry
                     mutableHistory.value = state
                 } else clearStaleHistory()
             }
@@ -340,11 +387,11 @@ class OsmGpxController internal constructor(
                         val receipt = attempt.copy(status = OsmGpxReceiptStatus.RECEIVED, traceId = response.traceId, directPost = true)
                         withContext(NonCancellable + Dispatchers.IO) {
                             require(response.traceId > 0)
-                            // Persist geometry before releasing UNKNOWN, even when the server list lags the POST.
-                            store.coverageCache.write(session.userId, response.traceId, trace.geometry())
+                            // A confirmed OSM ID must survive even if the geometry cache is full.
                             store.write(receipt)
+                            results += receipt
+                            store.coverageCache.write(session.userId, response.traceId, trace.geometry())
                         }
-                        results += receipt
                         acceptedIds += response.traceId
                         finished += trace.journeyId
                         blockCoverage(session)
@@ -377,30 +424,74 @@ class OsmGpxController internal constructor(
 
     suspend fun changeToTrackable(userId: Long, ids: List<Long>, canContinue: () -> Boolean = { true }): Map<Long, String> {
         val session = usableSession()?.takeIf { it.userId == userId } ?: return emptyMap()
-        val shown = synchronized(historyLock) {
-            (mutableHistory.value as? OsmGpxHistoryState.Ready)?.takeIf { owner === session }
-        } ?: return emptyMap()
+        val (shown, retry) = synchronized(historyLock) {
+            val ready = mutableHistory.value as? OsmGpxHistoryState.Ready
+            if (owner !== session || ready == null) return emptyMap()
+            ready to visibilityRetry
+        }
         require(ids.size <= MAX_OSM_TRACES)
         val selected = ids.distinct()
-        val eligible = shown.entries.filter { it.visibility.equals("identifiable", true) && !it.pending }.map { it.id }.toSet()
+        val eligible = shown.entries.filter { it.visibility == "identifiable" && !it.pending }.map { it.id }.toSet()
         if (!uploadLock.tryLock()) return selected.associateWith { "Başka bir işlem sürüyor." }
-        val result = linkedMapOf<Long, String>()
+        val results = linkedMapOf<Long, String>()
+        val touched = mutableSetOf<Long>()
+        fun current() = usableSession() === session && canContinue() && mutableHistory.value === shown
         try {
             for (id in selected) {
-                fun current() = usableSession() === session && canContinue()
                 if (!current()) break
-                result[id] = if (id !in eligible) "Bu iz dönüştürmeye uygun değil."
-                else try {
-                    if (historyGateway.changeToTrackable(session.token, userId, id, ::current)) "Trackable olarak doğrulandı."
-                    else "Sonuç doğrulanamadı. Yeniden kontrol et."
+                if (id !in eligible || id in shown.visibilityBlocked) {
+                    results[id] = "Gönderilmedi. Bu iz dönüştürmeye uygun değil."
+                    continue
+                }
+                var reservation: OsmVisibilityAttempt? = null
+                touched += id
+                try {
+                    val confirmed = withContext(Dispatchers.IO) {
+                        historyGateway.changeToTrackable(session.token, userId, id, canDispatch = ::current,
+                            beforePut = { metadata ->
+                                if (!current() || metadata.id != id || metadata.pending || metadata.visibility != "identifiable") false
+                                else {
+                                    reservation = store.visibilityJournal.reserve(userId, id, retry[id], metadata.digest())
+                                    reservation != null
+                                }
+                            })
+                    }
+                    if (confirmed) {
+                        reservation?.let { withContext(NonCancellable + Dispatchers.IO) {
+                            store.visibilityJournal.complete(userId, id, it)
+                        } }
+                        results[id] = "Trackable olarak doğrulandı."
+                    } else results[id] = if (reservation == null) "Gönderilmedi. İzi yeniden kontrol et."
+                        else "Sonuç doğrulanamadı. Yeniden kontrol et."
                 } catch (cancel: CancellationException) { throw cancel }
-                catch (_: Exception) { "Sonuç doğrulanamadı. Yeniden kontrol et." }
+                catch (_: OsmGpxVisibilityIneligibleException) { results[id] = "Gönderilmedi. İz artık bu değişikliğe uygun değil." }
+                catch (_: OsmGpxVisibilityDeniedException) {
+                    reservation?.let { withContext(NonCancellable + Dispatchers.IO) {
+                        store.visibilityJournal.complete(userId, id, it)
+                    } }
+                    results[id] = "OSM görünürlük değişikliğine izin vermedi."
+                }
+                catch (_: Exception) {
+                    results[id] = if (reservation == null) "Gönderilmedi. İzin veya iz bilgisi doğrulanamadı."
+                        else "Sonuç doğrulanamadı. Yeniden kontrol et."
+                }
             }
         } finally {
-            blockCoverage(session)
+            synchronized(historyLock) {
+                if (owner === session && mutableHistory.value === shown) {
+                    visibilityRetry = visibilityRetry - touched
+                    val ready = mutableHistory.value as? OsmGpxHistoryState.Ready
+                    if (ready != null) mutableHistory.value = ready.copy(
+                        visibilityNotes = ready.visibilityNotes + touched.associateWith {
+                            results[it] ?: "Önceki işlem kontrol bekliyor."
+                        },
+                        visibilityBlocked = ready.visibilityBlocked + touched,
+                    )
+                }
+            }
             uploadLock.unlock()
         }
-        return result.takeIf { usableSession() === session }.orEmpty()
+        return results.takeIf { usableSession() === session }.orEmpty()
     }
 
     companion object {
@@ -456,6 +547,7 @@ class OsmGpxController internal constructor(
             testing = override
             AutoCloseable {
                 scope.cancel()
+                override.historyScope.cancel()
                 synchronized(this) { if (testing === override) testing = null }
             }
         }

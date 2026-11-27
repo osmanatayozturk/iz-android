@@ -39,6 +39,36 @@ class OsmGpxControllerTest {
     private val sources = ConcurrentHashMap(listOf(first, second, third).associateBy { it.journeyId })
     private val remote = SyntheticHistory()
 
+    @Test fun visibleScreensShareOneInitialReadAndOnlyManualRefreshRetriesAFailure() = runBlocking {
+        val entered = CompletableDeferred<Unit>()
+        val finish = CompletableDeferred<Unit>()
+        var reads = 0
+        val service = object : OsmGpxHistoryGateway by remote {
+            override suspend fun list(token: String, expectedUserId: Long): List<OsmGpxHistoryEntry> {
+                if (++reads == 1) {
+                    entered.complete(Unit)
+                    finish.await()
+                    throw IOException("offline")
+                }
+                return emptyList()
+            }
+        }
+        val controller = newController(OsmGpxGateway { _, _, _, _ -> error("Unexpected upload") }, service)
+        val firstScreen = launch { controller.ensureHistory() }
+        entered.await()
+        val secondScreen = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { controller.refreshHistory() }
+        finish.complete(Unit)
+        firstScreen.join()
+        secondScreen.join()
+        controller.ensureHistory()
+        assertTrue(controller.history.value is OsmGpxHistoryState.Failed)
+        assertEquals(1, reads)
+        controller.refreshHistory()
+        controller.ensureHistory()
+        assertTrue((controller.history.value as OsmGpxHistoryState.Ready).coverageReady)
+        assertEquals(2, reads)
+    }
+
     @Test fun trackableConsentIsSingleUseEvenWhenCalledTwice() = runBlocking {
         val submitted = mutableListOf<OsmGpxVisibility>()
         val controller = controller(OsmGpxGateway { _, _, visibility, dispatch ->

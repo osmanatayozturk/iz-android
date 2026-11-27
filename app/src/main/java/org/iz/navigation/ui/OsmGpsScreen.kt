@@ -117,6 +117,7 @@ internal fun OsmGpsScreen(
     val batch = upload.batch?.takeIf { it.accountId == user?.id }
     val canAct = started && !auth.busy && !upload.running && work == null
     val canEditVisibility = canAct && auth.canWriteGpx && readyHistory != null
+    val visibilityNotes = readyHistory?.visibilityNotes.orEmpty() + visibilityResults
 
     fun owns(generation: Int): Boolean =
         session != null && generation == foregroundGeneration &&
@@ -127,6 +128,9 @@ internal fun OsmGpsScreen(
 
     fun ownsHistory(expected: OsmGpxHistoryState.Ready, generation: Int): Boolean =
         owns(generation) && controller.history.value === expected
+
+    fun canSelectVisibility(entry: OsmGpxHistoryEntry, snapshot: OsmGpxHistoryState.Ready): Boolean =
+        entry.canChangeToTrackable && entry.id !in snapshot.visibilityBlocked
 
     fun launchWork(block: suspend CoroutineScope.() -> Unit) {
         if (work != null) return
@@ -148,12 +152,20 @@ internal fun OsmGpsScreen(
     fun refreshHistory() {
         val generation = foregroundGeneration
         if (!canAct || !canRead || !owns(generation)) return
+        val previous = controller.history.value
+        if (previous !is OsmGpxHistoryState.Failed && previous !== readyHistory) return
         consent = null
         preview = null
         visibilityReview = null
         visibilitySelection = emptySet()
         message = null
-        launchWork { controller.refreshHistory() }
+        launchWork {
+            controller.refreshHistory()
+            val refreshed = controller.history.value as? OsmGpxHistoryState.Ready
+            if (refreshed != null && refreshed !== previous && refreshed.user == user && ownsHistory(refreshed, generation)) {
+                visibilityResults = visibilityResults + refreshed.visibilityNotes
+            }
+        }
     }
 
     suspend fun decodePreview(trace: PreparedOsmGpxTrace): Boolean =
@@ -246,11 +258,11 @@ internal fun OsmGpsScreen(
         if (!canEditVisibility || !ownsHistory(snapshot, generation) || !controller.authState.value.canWriteGpx ||
             visibilityReview !== entries ||
             ids.toSet() != visibilitySelection || entries.isEmpty() ||
-            entries.any { !it.canChangeToTrackable || it !in snapshot.entries }
+            entries.any { !canSelectVisibility(it, snapshot) || it !in snapshot.entries }
         ) return
         visibilityReview = null
         visibilitySelection = emptySet()
-        visibilityResults = visibilityResults + ids.associateWith { "Görünürlük sonucu kontrol bekliyor." }
+        visibilityResults = visibilityResults - ids.toSet()
         changingVisibility = true
         message = null
         launchWork {
@@ -304,6 +316,9 @@ internal fun OsmGpsScreen(
     LaunchedEffect(auth.user?.id) {
         selection.bind(auth.user?.id)
         upload.bind(auth.user?.id)
+    }
+    LaunchedEffect(controller, session, canRead, started) {
+        if (started && canRead && owns(foregroundGeneration)) controller.ensureHistory()
     }
     LaunchedEffect(session, coverage, eligible, scanRevision, upload.receiptRevision, page) {
         if (coverage == null || page != OsmGpsPage.AVAILABLE) return@LaunchedEffect
@@ -366,8 +381,8 @@ internal fun OsmGpsScreen(
         if (auth.busy || history == OsmGpxHistoryState.Loading || upload.running || work != null) {
             LinearProgressIndicator(Modifier.fillMaxWidth())
         }
-        if (canRead) {
-            TextButton(onClick = ::refreshHistory, enabled = canAct && history != OsmGpxHistoryState.Loading,
+        if (canRead && (readyHistory != null || history is OsmGpxHistoryState.Failed)) {
+            TextButton(onClick = ::refreshHistory, enabled = canAct,
                 modifier = Modifier.padding(horizontal = 12.dp).heightIn(min = 48.dp).testTag("osm-gps-refresh")) {
                 Text("Yeniden kontrol et")
             }
@@ -384,10 +399,9 @@ internal fun OsmGpsScreen(
             user == null || !canRead -> Text("İzleri görmek için bağlı OSM hesabına okuma izni ver.", listModifier)
             page == OsmGpsPage.HISTORY && readyHistory != null -> OsmGpsHistoryList(
                 readyHistory.entries, selected = visibilitySelection, editingEnabled = canEditVisibility,
-                results = visibilityResults, onToggle = { id ->
+                results = visibilityNotes, blocked = readyHistory.visibilityBlocked, onToggle = { id ->
                     if (canEditVisibility && ownsHistory(readyHistory, foregroundGeneration) &&
-                        readyHistory.entries.any { it.id == id && it.canChangeToTrackable } &&
-                        id !in visibilityResults
+                        readyHistory.entries.any { it.id == id && canSelectVisibility(it, readyHistory) }
                     ) visibilitySelection = if (id in visibilitySelection) visibilitySelection - id else visibilitySelection + id
                 },
                 onOpen = { entry -> if (owns(foregroundGeneration)) openLink(entry.traceUrl(readyHistory.user)) },
@@ -400,7 +414,7 @@ internal fun OsmGpsScreen(
             history == OsmGpxHistoryState.Loading -> Text("OSM iz geçmişi kontrol ediliyor…", listModifier)
             history is OsmGpxHistoryState.Failed -> Text((history as OsmGpxHistoryState.Failed).issue,
                 listModifier.testTag("osm-gps-history-issue"))
-            readyHistory == null -> Text("İz geçmişini yüklemek için Yeniden kontrol et’e dokun.", listModifier)
+            readyHistory == null -> Text("OSM iz geçmişi hazırlanıyor…", listModifier)
             page == OsmGpsPage.UNKNOWN -> Text("Belirsiz yüklemeler okunuyor…", listModifier)
             !readyHistory.coverageReady -> Spacer(listModifier)
             available == null -> Text("Paylaşılabilecek izler hesaplanıyor…", listModifier)
@@ -454,7 +468,7 @@ internal fun OsmGpsScreen(
                     Button(enabled = canEditVisibility, modifier = action.testTag("osm-gps-visibility-review"), onClick = {
                         if (ownsHistory(readyHistory, foregroundGeneration)) {
                             val chosen = readyHistory.entries.filter {
-                                it.id in visibilitySelection && it.canChangeToTrackable && it.id !in visibilityResults
+                                it.id in visibilitySelection && canSelectVisibility(it, readyHistory)
                             }
                             if (chosen.size == visibilitySelection.size) visibilityReview = chosen
                         }

@@ -33,6 +33,7 @@ import org.iz.navigation.integration.osm.OsmGpxGateway
 import org.iz.navigation.integration.osm.OsmGpxHistoryEntry
 import org.iz.navigation.integration.osm.OsmGpxHistoryGateway
 import org.iz.navigation.integration.osm.OsmGpxRemoteData
+import org.iz.navigation.integration.osm.OsmGpxRemoteMetadata
 import org.iz.navigation.integration.osm.OsmGpxUploadResult
 import org.iz.navigation.integration.osm.OsmGpxVisibility
 import org.iz.navigation.integration.osm.OsmUser
@@ -57,7 +58,7 @@ class OsmDirectionalScreenAcceptanceTest {
         val api = FixtureOsm(session)
         api.remote(301L, "from-another-app.gpx", base.prepared)
         withSamples(repeats + opposite, api) {
-            openGps()
+            openGps(api)
             val list = compose.onNodeWithTag("osm-gps-list")
             waitForTag("osm-gps-journey-${opposite.journey.id}")
             for (ride in repeats) {
@@ -91,7 +92,7 @@ class OsmDirectionalScreenAcceptanceTest {
         val detour = ride("batch-detour", 21, detour = true)
         val api = FixtureOsm(fixtureSession(271_260_002L, "QA batch"))
         withSamples(listOf(first, detour), api) {
-            openGps()
+            openGps(api)
             waitForTag("osm-gps-journey-${first.journey.id}")
             compose.onNodeWithTag("osm-gps-select-all").performClick()
             awaitReview().performClick()
@@ -140,7 +141,7 @@ class OsmDirectionalScreenAcceptanceTest {
         api.largeRemote(512L, latitude = -30.0)
         api.failData = 511L
         withSamples(listOf(opposite), api) {
-            openGps()
+            openGps(api)
             waitForTag("osm-gps-coverage-issue", timeout = 30_000L)
             compose.onNodeWithTag("osm-gps-coverage-issue")
                 .assertTextContains("Hesaptaki iz verisinin tamamı güvenle okunamadı", substring = true)
@@ -154,11 +155,13 @@ class OsmDirectionalScreenAcceptanceTest {
             compose.onNodeWithTag("osm-gps-journey-${opposite.journey.id}").performClick()
             awaitReview().performClick()
             waitForTag("osm-gps-consent-confirm")
+            val readsBeforeSwitch = api.listReads.get()
             compose.runOnIdle { api.switchAccount(fixtureSession(271_260_004L, "QA after switch", generation = 2)) }
             compose.waitUntil(12_000) {
                 compose.onAllNodesWithTag("osm-gps-consent-confirm").fetchSemanticsNodes().isEmpty() &&
                     compose.onAllNodesWithText("QA after switch").fetchSemanticsNodes().isNotEmpty()
             }
+            awaitFirstHistory(api, readsBeforeSwitch)
             waitForTag("osm-gps-journey-${opposite.journey.id}")
             compose.onNodeWithTag("osm-gps-journey-${opposite.journey.id}").assertIsOff()
             compose.onNodeWithTag("osm-gps-review").assertIsNotEnabled()
@@ -175,7 +178,7 @@ class OsmDirectionalScreenAcceptanceTest {
         api.remote(590L, "unselected-legacy.gpx", base.prepared, OsmGpxVisibility.IDENTIFIABLE)
         api.failUpdate = 610L
         withSamples(emptyList(), api) {
-            openGps()
+            openGps(api)
             compose.onNodeWithTag("osm-gps-page-history").performClick()
             waitForTag("osm-gps-history-list")
             val list = compose.onNodeWithTag("osm-gps-history-list")
@@ -206,17 +209,61 @@ class OsmDirectionalScreenAcceptanceTest {
             assertEquals(OsmGpxVisibility.TRACKABLE.wireValue, api.visibility(600L))
             assertEquals(OsmGpxVisibility.IDENTIFIABLE.wireValue, api.visibility(590L))
             assertTrue(api.sent.isEmpty())
+
+            list.performScrollToNode(hasTestTag("osm-gps-history-610"))
+            compose.onNodeWithTag("osm-gps-visibility-select-610").assertDoesNotExist()
+            compose.onNodeWithTag("osm-gps-visibility-review").assertDoesNotExist()
+            compose.onNodeWithTag("osm-gps-refresh").assertIsEnabled().performClick()
+            compose.waitUntil(12_000L) {
+                api.metadataReads.size == 1 &&
+                    compose.onAllNodes(hasTestTag("osm-gps-refresh") and isEnabled()).fetchSemanticsNodes().isNotEmpty()
+            }
+            val retryTag = "osm-gps-visibility-select-610"
+            list.performScrollToNode(hasTestTag(retryTag))
+            compose.onNodeWithTag(retryTag).assertIsOff()
+            assertEquals(listOf(610L), api.metadataReads.toList())
+            assertEquals(listOf(620L, 610L), api.changed.toList())
+            list.performScrollToNode(hasTestTag("osm-gps-visibility-result-610"))
+            compose.onNodeWithTag("osm-gps-visibility-result-610")
+                .assertTextContains("yeniden seçip onayla", substring = true)
+            list.performScrollToNode(hasTestTag("osm-gps-history-620"))
+            compose.onNodeWithTag("osm-gps-visibility-select-620").assertDoesNotExist()
+            list.performScrollToNode(hasTestTag("osm-gps-visibility-select-590"))
+            compose.onNodeWithTag("osm-gps-visibility-select-590").assertIsOff()
+            list.performScrollToNode(hasTestTag(retryTag))
+            api.failUpdate = null
+            compose.onNodeWithTag(retryTag).performClick().assertIsOn()
+            compose.onNodeWithTag("osm-gps-visibility-review").assertIsEnabled().performClick()
+            waitForTag("osm-gps-visibility-consent")
+            assertEquals(listOf(620L, 610L), api.changed.toList())
+            compose.onNodeWithTag("osm-gps-visibility-confirm").performClick()
+            compose.waitUntil(12_000L) { api.changed.size == 3 && api.visibility(610L) == "trackable" }
+            assertEquals(listOf(620L, 610L, 610L), api.changed.toList())
+            assertEquals(OsmGpxVisibility.TRACKABLE.wireValue, api.visibility(610L))
+            assertEquals(OsmGpxVisibility.IDENTIFIABLE.wireValue, api.visibility(590L))
         }
     }
 
     private fun previewHash(sample: FixtureRide) =
         compose.onNodeWithTag("osm-gps-preview-${sample.journey.id}").fetchSemanticsNode().config[OsmGpsPreparedSha256]
 
-    private fun openGps() {
+    private fun openGps(api: FixtureOsm) {
+        val readsBefore = api.listReads.get()
         compose.onNodeWithTag("home-menu").performClick()
         compose.onNodeWithTag("menu-osm").performScrollTo().performClick()
         compose.onNodeWithTag("osm-contribution-gps").performScrollTo().performClick()
         compose.onNodeWithTag("osm-gps-screen").assertIsDisplayed()
+        awaitFirstHistory(api, readsBefore)
+    }
+
+    private fun awaitFirstHistory(api: FixtureOsm, readsBefore: Int) {
+        val refresh = hasTestTag("osm-gps-refresh") and isEnabled()
+        compose.waitUntil(30_000L) {
+            api.listReads.get() > readsBefore && compose.onAllNodes(refresh).fetchSemanticsNodes().isNotEmpty()
+        }
+        assertEquals("Visible account must start one automatic history GET", readsBefore + 1, api.listReads.get())
+        assertTrue(api.sent.isEmpty())
+        assertTrue(api.changed.isEmpty())
     }
 
     private fun awaitReview(): SemanticsNodeInteraction {
@@ -301,6 +348,7 @@ private class FixtureOsm(session: CommunitySession) : OsmGpxHistoryGateway {
     val remotePointCounts = java.util.concurrent.ConcurrentHashMap<Long, Int>()
     private val nextId = AtomicInteger(800)
     val changed = CopyOnWriteArrayList<Long>()
+    val metadataReads = CopyOnWriteArrayList<Long>()
     @Volatile var failData: Long? = null
     @Volatile var failUpdate: Long? = null
 
@@ -348,12 +396,22 @@ private class FixtureOsm(session: CommunitySession) : OsmGpxHistoryGateway {
         entries += requireNotNull(sessions.value).userId to OsmGpxHistoryEntry(id, name, 1_740_000_000_000L + id, false, visibility = visibility.wireValue)
     }
 
-    override suspend fun changeToTrackable(token: String, expectedUserId: Long, id: Long,
-        canDispatch: () -> Boolean): Boolean {
+    override suspend fun readMetadata(token: String, expectedUserId: Long, id: Long,
+        canDispatch: () -> Boolean): OsmGpxRemoteMetadata {
         assertEquals(sessions.value?.token, token)
         assertEquals(sessions.value?.userId, expectedUserId)
         assertTrue(canDispatch())
-        assertEquals(OsmGpxVisibility.IDENTIFIABLE.wireValue, visibility(id))
+        metadataReads += id
+        return metadata(expectedUserId, id)
+    }
+
+    override suspend fun changeToTrackable(token: String, expectedUserId: Long, id: Long,
+        canDispatch: () -> Boolean, beforePut: (OsmGpxRemoteMetadata) -> Boolean): Boolean {
+        assertEquals(sessions.value?.token, token)
+        assertEquals(sessions.value?.userId, expectedUserId)
+        val before = metadata(expectedUserId, id)
+        assertEquals(OsmGpxVisibility.IDENTIFIABLE.wireValue, before.visibility)
+        if (!canDispatch() || !beforePut(before) || !canDispatch()) return false
         changed += id
         if (id == failUpdate) return false
         entries.replaceAll { (owner, trace) ->
@@ -365,6 +423,12 @@ private class FixtureOsm(session: CommunitySession) : OsmGpxHistoryGateway {
     fun visibility(id: Long) = entries.single { (owner, trace) ->
         owner == sessions.value?.userId && trace.id == id
     }.second.visibility
+
+    private fun metadata(accountId: Long, id: Long): OsmGpxRemoteMetadata {
+        val row = entries.single { (owner, trace) -> owner == accountId && trace.id == id }.second
+        return OsmGpxRemoteMetadata(row.id, row.fileName, row.timestampMillis, row.pending,
+            checkNotNull(row.visibility), "synthetic description for ${row.id}", listOf("qa", "synthetic"))
+    }
 
     fun switchAccount(next: CommunitySession) {
         sessions.value = next

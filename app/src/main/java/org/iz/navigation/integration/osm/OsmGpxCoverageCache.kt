@@ -5,11 +5,12 @@ import java.io.DataOutput
 import java.io.DataOutputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.io.RandomAccessFile
 import java.nio.file.Files
+import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
-import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
@@ -19,6 +20,10 @@ internal const val MAX_OSM_TRACES = 10_000
 internal const val MAX_OSM_POINTS = 300_000
 private const val BLOCK_POINTS = 256
 private const val RADIUS = 6_371_000.0
+private const val DEFAULT_GEOMETRY_QUOTA = 128L * 1024 * 1024
+private const val MIN_USABLE_SPACE = 32L * 1024 * 1024
+private const val REDOWNLOADABLE_SUFFIX = ".remote.geom"
+private val TEMP_GEOMETRY_NAME = Regex("geometry-[0-9]+\\.tmp")
 
 /** Cartesian bounds remain conservative across the date line and near the poles. */
 internal class OsmCoverageBounds {
@@ -63,8 +68,15 @@ internal class OsmCoverageBounds {
 internal data class OsmCachedTrace(val id: Long, val sha256: String, val bounds: OsmCoverageBounds)
 
 /** Per-trace geometry in private, non-backed-up storage. Every block has its own spatial bounds. */
-internal class OsmGpxCoverageCache(private val root: File) {
-    private val verifiedFiles = ConcurrentHashMap<File, Pair<Long, Long>>()
+internal class OsmGpxCoverageCache(
+    private val root: File,
+    private val quotaBytes: Long = DEFAULT_GEOMETRY_QUOTA,
+) {
+    init { require(quotaBytes > 0L) }
+
+    private val verifiedFiles = mutableMapOf<File, Pair<Long, Long>>()
+    private var inventory: DiskInventory? = null
+    private var observedRevision = -1L
 
     private fun checksum(file: RandomAccessFile, length: Long): ByteArray {
         val digest = MessageDigest.getInstance("SHA-256")
@@ -80,9 +92,104 @@ internal class OsmGpxCoverageCache(private val root: File) {
         return digest.digest()
     }
 
-    private fun path(account: Long, id: Long): File {
-        require(account > 0 && id > 0)
-        return File(File(root, account.toString()), "$id.geom")
+    private fun directory(account: Long): File {
+        require(account > 0)
+        return File(root, account.toString())
+    }
+
+    private fun geometryFile(dir: File, id: Long): File {
+        require(id > 0)
+        val remote = File(dir, "$id$REDOWNLOADABLE_SUFFIX")
+        return if (Files.exists(remote.toPath(), NOFOLLOW_LINKS)) remote else File(dir, "$id.geom")
+    }
+
+    private fun traceId(name: String): Long? = when {
+        name.endsWith(REDOWNLOADABLE_SUFFIX) -> positiveId(name.removeSuffix(REDOWNLOADABLE_SUFFIX))
+        name.endsWith(".geom") -> positiveId(name.removeSuffix(".geom"))
+        else -> null
+    }
+
+    private fun positiveId(text: String): Long? =
+        text.toLongOrNull()?.takeIf { it > 0L && it.toString() == text }
+
+    private fun files(dir: File, clearTemps: Boolean): List<File> {
+        if (Files.notExists(dir.toPath(), NOFOLLOW_LINKS)) return emptyList()
+        check(Files.isDirectory(dir.toPath(), NOFOLLOW_LINKS))
+        return Files.newDirectoryStream(dir.toPath()).use { paths ->
+            paths.mapNotNull { path ->
+                val file = path.toFile()
+                when {
+                    !Files.isRegularFile(path, NOFOLLOW_LINKS) -> null
+                    clearTemps && TEMP_GEOMETRY_NAME.matches(file.name) -> {
+                        Files.deleteIfExists(path)
+                        null
+                    }
+                    traceId(file.name) != null -> file
+                    else -> null
+                }
+            }
+        }
+    }
+
+    /** The verified account inventory is known before any cache miss triggers a download. */
+    fun prepareAccount(account: Long, keep: Set<Long>) = synchronized(diskLock) {
+        val dir = directory(account)
+        // Unknown uploads and legacy entries stay protected until a full reconciliation.
+        pruneFiles(dir, keep, onlyRedownloadable = true)
+        inventory = null // Refresh the ledger and recover temp files left by a stopped process.
+        reserve(dir, 0)
+    }
+
+    private fun reserve(active: File, extraBytes: Long) {
+        if (extraBytes > quotaBytes) throw IOException("geometry-quota")
+        val current = diskInventory()
+        val needed = current.bytes - (quotaBytes - extraBytes)
+        if (needed <= 0L) return
+        val others = current.files.entries.filter { (file, _) ->
+            file.parentFile != active && file.name.endsWith(REDOWNLOADABLE_SUFFIX)
+        }
+        if (others.sumOf { it.value } < needed) throw IOException("geometry-quota")
+        var freed = 0L
+        for ((file, bytes) in others.sortedWith(compareBy({ it.key.lastModified() }, { it.key.path }))) {
+            if (freed >= needed) break
+            deleteGeometry(file)
+            freed += bytes
+        }
+    }
+
+    private fun diskInventory(): DiskInventory {
+        val cached = inventory
+        if (cached != null && observedRevision == diskRevision) return cached
+        val current = DiskInventory()
+        if (!Files.notExists(root.toPath(), NOFOLLOW_LINKS)) {
+            check(Files.isDirectory(root.toPath(), NOFOLLOW_LINKS))
+            Files.newDirectoryStream(root.toPath()).use { accounts ->
+                for (account in accounts) {
+                    if (positiveId(account.fileName.toString()) == null || !Files.isDirectory(account, NOFOLLOW_LINKS)) continue
+                    for (file in files(account.toFile(), clearTemps = true)) current.put(file, Files.size(file.toPath()))
+                }
+            }
+        }
+        inventory = current
+        observedRevision = diskRevision
+        return current
+    }
+
+    private fun recordChange(previous: File?, installed: File?, size: Long = 0) {
+        if (observedRevision == diskRevision) {
+            val current = inventory
+            if (previous != null) current?.remove(previous)
+            if (installed != null) current?.put(installed, size)
+        } else {
+            inventory = null
+        }
+        observedRevision = ++diskRevision
+    }
+
+    private fun deleteGeometry(file: File) {
+        Files.delete(file.toPath())
+        verifiedFiles.remove(file)
+        recordChange(file, null)
     }
 
     private fun header(file: RandomAccessFile, id: Long): OsmCachedTrace {
@@ -92,9 +199,23 @@ internal class OsmGpxCoverageCache(private val root: File) {
         return OsmCachedTrace(id, sha, OsmCoverageBounds.read(file))
     }
 
-    fun inspect(account: Long, id: Long): OsmCachedTrace? {
-        val file = path(account, id)
-        if (Files.notExists(file.toPath())) return null
+    fun inspect(account: Long, id: Long, redownloadable: Boolean = false): OsmCachedTrace? = synchronized(diskLock) {
+        val dir = directory(account)
+        val file = geometryFile(dir, id)
+        val trace = inspectFile(file, id) ?: return@synchronized null
+        if (redownloadable && !file.name.endsWith(REDOWNLOADABLE_SUFFIX)) {
+            val remote = File(dir, "$id$REDOWNLOADABLE_SUFFIX")
+            val size = Files.size(file.toPath())
+            Files.move(file.toPath(), remote.toPath(), StandardCopyOption.ATOMIC_MOVE)
+            verifiedFiles.remove(file)?.let { verifiedFiles[remote] = it }
+            recordChange(file, remote, size)
+        }
+        trace
+    }
+
+    private fun inspectFile(file: File, id: Long): OsmCachedTrace? {
+        if (Files.notExists(file.toPath(), NOFOLLOW_LINKS)) return null
+        check(Files.isRegularFile(file.toPath(), NOFOLLOW_LINKS))
         return try { RandomAccessFile(file, "r").use { input ->
             val stamp = file.lastModified() to input.length()
             require(stamp.second in 128L..(MAX_OSM_POINTS * 80L + 256L))
@@ -111,10 +232,13 @@ internal class OsmGpxCoverageCache(private val root: File) {
         catch (_: IllegalArgumentException) { null }
     }
 
-    fun nearby(account: Long, trace: OsmCachedTrace, areas: List<OsmCoverageBounds>, accept: (List<OsmDirectedPoint>) -> Unit) {
+    fun nearby(account: Long, trace: OsmCachedTrace, areas: List<OsmCoverageBounds>,
+               accept: (List<OsmDirectedPoint>) -> Unit) = synchronized(diskLock) {
         val relevant = areas.filter(trace.bounds::overlaps)
-        if (relevant.isEmpty()) return
-        RandomAccessFile(path(account, trace.id), "r").use { file ->
+        if (relevant.isEmpty()) return@synchronized
+        val stored = geometryFile(directory(account), trace.id)
+        if (inspectFile(stored, trace.id)?.sha256 != trace.sha256) throw IOException("geometry-missing")
+        RandomAccessFile(stored, "r").use { file ->
             check(header(file, trace.id).sha256 == trace.sha256)
             val dataEnd = file.length() - 32
             while (file.filePointer < dataEnd) {
@@ -129,16 +253,17 @@ internal class OsmGpxCoverageCache(private val root: File) {
         }
     }
 
-    fun write(account: Long, id: Long, data: OsmGpxRemoteData): OsmCachedTrace {
-        val file = path(account, id)
-        val dir = checkNotNull(file.parentFile)
-        check(dir.isDirectory || dir.mkdirs())
+    fun write(account: Long, id: Long, data: OsmGpxRemoteData,
+              redownloadable: Boolean = false): OsmCachedTrace = synchronized(diskLock) {
+        val dir = directory(account)
+        val previousFile = geometryFile(dir, id)
         require(data.sha256.matches(Regex("[a-f0-9]{64}")))
         require(data.segments.isNotEmpty() && data.segments.none { it.isEmpty() })
         val points = data.segments.sumOf { it.size.toLong() }
         require(data.segments.size <= MAX_OSM_POINTS && points <= MAX_OSM_POINTS)
-        val estimate = 512L + points * 16 + (data.segments.size + points / (BLOCK_POINTS - 1)) * 70
-        if (dir.usableSpace < estimate + 32L * 1024 * 1024) throw java.io.IOException("geometry-space")
+        val bytes = encodedSize(data.segments)
+        val file = if (redownloadable || previousFile.name.endsWith(REDOWNLOADABLE_SUFFIX))
+            File(dir, "$id$REDOWNLOADABLE_SUFFIX") else previousFile
         val bounds = OsmCoverageBounds()
         for (segment in data.segments) {
             var previous: OsmDirectedPoint? = null
@@ -156,6 +281,10 @@ internal class OsmGpxCoverageCache(private val root: File) {
                 previous = p
             }
         }
+        reserve(dir, bytes)
+        Files.createDirectories(dir.toPath())
+        check(Files.isDirectory(dir.toPath(), NOFOLLOW_LINKS))
+        if (dir.usableSpace < bytes + MIN_USABLE_SPACE) throw IOException("geometry-space")
         val temp = File.createTempFile("geometry-", ".tmp", dir)
         try {
             FileOutputStream(temp).use { stream ->
@@ -189,23 +318,61 @@ internal class OsmGpxCoverageCache(private val root: File) {
                 output.write(checksum(output, length))
                 output.fd.sync()
             }
+            check(Files.size(temp.toPath()) == bytes)
+            // Replacing an existing version never counts the target as free while the temp exists.
+            if (file != previousFile && Files.exists(previousFile.toPath(), NOFOLLOW_LINKS)) {
+                Files.move(temp.toPath(), previousFile.toPath(), StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING)
+                verifiedFiles.remove(previousFile)
+                recordChange(previousFile, previousFile, bytes)
+                Files.move(previousFile.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE)
+            } else {
+                Files.move(temp.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING)
+            }
+            verifiedFiles.remove(previousFile)
             verifiedFiles.remove(file)
-            Files.move(temp.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
-        } finally { temp.delete() }
-        return OsmCachedTrace(id, data.sha256, bounds)
+            recordChange(previousFile, file, bytes)
+        } finally { Files.deleteIfExists(temp.toPath()) }
+        OsmCachedTrace(id, data.sha256, bounds)
     }
 
-    fun prune(account: Long, keep: Set<Long>) {
-        val directory = File(root, account.toString())
-        if (Files.notExists(directory.toPath())) return
-        Files.newDirectoryStream(directory.toPath(), "*.geom").use { files ->
-            for (path in files) {
-                val id = path.fileName.toString().removeSuffix(".geom").toLongOrNull()
-                if (id !in keep) {
-                    Files.deleteIfExists(path)
-                    verifiedFiles.remove(path.toFile())
-                }
-            }
+    private fun encodedSize(segments: List<List<OsmDirectedPoint>>): Long {
+        val headerAndChecksum = 4L + 8 + 2 + 64 + 48 + 32
+        return headerAndChecksum + segments.sumOf { segment ->
+            val blocks = maxOf(1L, (segment.size - 1L + BLOCK_POINTS - 2) / (BLOCK_POINTS - 1))
+            blocks * (2 + 48) + (segment.size + blocks - 1) * 16
         }
+    }
+
+    fun prune(account: Long, keep: Set<Long>) = synchronized(diskLock) {
+        pruneFiles(directory(account), keep, onlyRedownloadable = false)
+    }
+
+    private fun pruneFiles(directory: File, keep: Set<Long>, onlyRedownloadable: Boolean) {
+        for (file in files(directory, clearTemps = true)) {
+            if (traceId(file.name) in keep || (onlyRedownloadable && !file.name.endsWith(REDOWNLOADABLE_SUFFIX))) continue
+            deleteGeometry(file)
+        }
+    }
+
+    private class DiskInventory {
+        val files = mutableMapOf<File, Long>()
+        var bytes = 0L
+            private set
+
+        fun put(file: File, size: Long) {
+            bytes += size - (files.put(file, size) ?: 0L)
+        }
+
+        fun remove(file: File) {
+            bytes -= files.remove(file) ?: 0L
+        }
+    }
+
+    private companion object {
+        // Instances share a filesystem lock and invalidate stale quota ledgers on writes.
+        val diskLock = Any()
+        var diskRevision = 0L
     }
 }

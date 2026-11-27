@@ -24,11 +24,17 @@ import org.json.JSONObject
 internal fun interface OsmGpxHistoryGateway {
     suspend fun list(token: String, expectedUserId: Long): List<OsmGpxHistoryEntry>
     suspend fun data(token: String, id: Long): OsmGpxRemoteData = throw IOException("GPX data unavailable")
+    suspend fun readMetadata(token: String, expectedUserId: Long, id: Long,
+        canDispatch: () -> Boolean): OsmGpxRemoteMetadata = throw IOException("GPX metadata unavailable")
     suspend fun changeToTrackable(token: String, expectedUserId: Long, id: Long,
-        canDispatch: () -> Boolean): Boolean = false
+        canDispatch: () -> Boolean, beforePut: (OsmGpxRemoteMetadata) -> Boolean = { true }): Boolean = false
 }
 
 internal class OsmGpxHistoryHttpException(val statusCode: Int) : IOException("OpenStreetMap HTTP $statusCode")
+
+internal class OsmGpxVisibilityIneligibleException : IOException("GPX visibility change is no longer eligible")
+
+internal class OsmGpxVisibilityDeniedException(val statusCode: Int) : IOException("OpenStreetMap GPX visibility HTTP $statusCode")
 
 internal class OsmGpxHistoryClient(baseUrl: String = "https://api.openstreetmap.org/api/0.6") : OsmGpxHistoryGateway {
     private val base = baseUrl.toHttpUrl().also {
@@ -84,11 +90,13 @@ internal class OsmGpxHistoryClient(baseUrl: String = "https://api.openstreetmap.
     }
 
     override suspend fun changeToTrackable(token: String, expectedUserId: Long, id: Long,
-        canDispatch: () -> Boolean): Boolean {
+        canDispatch: () -> Boolean, beforePut: (OsmGpxRemoteMetadata) -> Boolean): Boolean {
         require(expectedUserId > 0 && id > 0)
         if (!canDispatch()) return false
-        val before = metadata(token, expectedUserId, id, canDispatch)
+        val before = readMetadata(token, expectedUserId, id, canDispatch)
         if (!canDispatch()) return false
+        if (before.pending || before.visibility !in setOf("identifiable", "trackable"))
+            throw OsmGpxVisibilityIneligibleException()
         if (before.visibility == "trackable") return true
         val payload = before.trackableXml().toRequestBody("application/xml; charset=utf-8".toMediaType())
         val put = request(token, "gpx/$id", "application/xml", canDispatch).newBuilder()
@@ -98,24 +106,33 @@ internal class OsmGpxHistoryClient(baseUrl: String = "https://api.openstreetmap.
                 override fun isOneShot() = true
                 override fun writeTo(sink: BufferedSink) = payload.writeTo(sink)
             }).build()
+        if (!canDispatch() || !beforePut(before)) return false
         // After dispatch, a lost reply or failed verification never permits an automatic replay.
         return try {
             val status = execute(put) { it.code }
+            if (status == 401 || status == 403) throw OsmGpxVisibilityDeniedException(status)
             if (status != 200 || !canDispatch()) false
             else {
-                val after = metadata(token, expectedUserId, id, canDispatch)
-                canDispatch() && after.visibility == "trackable" && before.samePreservedFields(after)
+                val after = readMetadata(token, expectedUserId, id, canDispatch)
+                canDispatch() && !after.pending && after.visibility == "trackable" && before.samePreservedFields(after)
             }
         } catch (cancelled: CancellationException) { throw cancelled }
+        catch (denied: OsmGpxVisibilityDeniedException) { throw denied }
         catch (_: IOException) { false }
     }
 
-    private suspend fun metadata(token: String, uid: Long, id: Long, current: () -> Boolean) =
-        execute(request(token, "gpx/$id.json", canDispatch = current)) { response ->
+    override suspend fun readMetadata(token: String, expectedUserId: Long, id: Long,
+        canDispatch: () -> Boolean): OsmGpxRemoteMetadata {
+        require(expectedUserId > 0 && id > 0)
+        if (!canDispatch()) throw IOException("GPX metadata authorization changed")
+        val result = execute(request(token, "gpx/$id.json", canDispatch = canDispatch)) { response ->
             metadataJson(response, 256L * 1024) { root ->
-                OsmGpxRemoteMetadata.parse(root.getJSONObject("trace"), uid).also { require(it.id == id) }
+                OsmGpxRemoteMetadata.parse(root.getJSONObject("trace"), expectedUserId).also { require(it.id == id) }
             }
         }
+        if (!canDispatch()) throw IOException("GPX metadata authorization changed")
+        return result
+    }
 
     private fun request(token: String, path: String, accept: String = "application/json",
         canDispatch: () -> Boolean = { true }): Request {
